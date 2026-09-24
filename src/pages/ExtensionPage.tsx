@@ -58,9 +58,9 @@ const faqItemsData = [
   { questionKey: 'extension.faq5Q', answerKey: 'extension.faq5A' },
 ];
 
-const USERSCRIPT_URL = 'https://github.com/movixcorp/MovixOpenSource/tree/main/userscript';
-const USERSCRIPT_INSTALL_URL = 'https://github.com/movixcorp/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js';
-const MOVIX_OPEN_SOURCE_GITHUB_URL = 'https://github.com/movixcorp/MovixOpenSource';
+const USERSCRIPT_URL = 'https://github.com/movixstream/MovixOpenSource/tree/main/userscript';
+const USERSCRIPT_INSTALL_URL = 'https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js';
+const MOVIX_OPEN_SOURCE_GITHUB_URL = 'https://github.com/movixstream/MovixOpenSource';
 const TAMPERMONKEY_URL = 'https://www.tampermonkey.net/';
 
 const installTutorial = {

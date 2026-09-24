@@ -23,7 +23,7 @@ const Footer: React.FC = () => {
               {t('footer.disclaimerText')}
             </p>
             <a
-              href="https://github.com/movixcorp/MovixOpenSource"
+              href="https://github.com/movixstream/MovixOpenSource"
               target="_blank"
               rel="noopener noreferrer"
               className="mt-4 inline-flex items-center gap-2 text-sm text-gray-50 font-medium opacity-75 transition-all hover:opacity-100"

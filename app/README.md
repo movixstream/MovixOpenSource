@@ -106,7 +106,7 @@ Le téléchargement contient `Movix-unsigned.ipa` et `Movix-unsigned.ipa.sha256`
 Sur un tag `ios-v*`, le job de publication commite en plus l'archive dans le dépôt sous `app/movix-ios-unsigner.ipa`, à côté de `app/movix-android.apk`. Elle y est donc téléchargeable en direct, sans passer par `gh` :
 
 ```bash
-curl -LO https://raw.githubusercontent.com/movixcorp/MovixOpenSource/main/app/movix-ios-unsigner.ipa
+curl -LO https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app/movix-ios-unsigner.ipa
 ```
 
 C'est le même fichier que celui attaché à la release, vérifié par son empreinte SHA-256 avant d'être indexé.
@@ -116,13 +116,13 @@ C'est le même fichier que celui attaché à la release, vérifié par son empre
 Le job de publication régénère aussi la source AltStore/SideStore (`app/movix-ios-source.json`, même format pour les deux stores) dans le même commit que l'IPA — version, taille et URL restent donc toujours cohérentes. URL de la source :
 
 ```
-https://raw.githubusercontent.com/movixcorp/MovixOpenSource/main/app/movix-ios-source.json
+https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app/movix-ios-source.json
 ```
 
 Dans SideStore ou AltStore : **Sources → + → coller cette URL**. Movix apparaît dans le store, s'installe et se met à jour comme n'importe quelle app : le store signe l'IPA avec l'identifiant Apple de l'utilisateur au moment de l'installation (compte gratuit : 3 apps maximum, re-signature automatique tous les 7 jours). Liens à mettre sur une page web pour ajouter la source en un tap :
 
-- `sidestore://source?url=https://raw.githubusercontent.com/movixcorp/MovixOpenSource/main/app/movix-ios-source.json`
-- `altstore://source?url=https://raw.githubusercontent.com/movixcorp/MovixOpenSource/main/app/movix-ios-source.json`
+- `sidestore://source?url=https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app/movix-ios-source.json`
+- `altstore://source?url=https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app/movix-ios-source.json`
 
 L'identifiant de la source (`com.movix.source`) et celui de l'app (`com.movix.app`) ne doivent jamais changer : les stores s'en servent comme clés primaires.
 
@@ -131,7 +131,7 @@ L'identifiant de la source (`com.movix.source`) et celui de l'app (`com.movix.ap
 Scarlet a son propre format ; le même job génère `app/movix-scarlet-source.json`, qui pointe vers la même IPA :
 
 ```
-https://raw.githubusercontent.com/movixcorp/MovixOpenSource/main/app/movix-scarlet-source.json
+https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app/movix-scarlet-source.json
 ```
 
 Différence importante : Scarlet signe avec un **certificat d'entreprise partagé**, pas avec le compte Apple de l'utilisateur. Rien à installer sur un ordinateur, aucune limite de 3 apps, aucune re-signature hebdomadaire — mais quand Apple révoque ce certificat, toutes les apps installées via Scarlet cessent de s'ouvrir d'un coup, jusqu'à ce que Scarlet en obtienne un nouveau. SideStore/AltStore reste donc la voie recommandée.

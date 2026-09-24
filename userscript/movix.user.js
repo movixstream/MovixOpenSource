@@ -4,8 +4,8 @@
 // @version      1.6.1
 // @description  Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus - version userscript Tampermonkey
 // @author       Movix
-// @updateURL    https://github.com/movixcorp/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
-// @downloadURL  https://github.com/movixcorp/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
+// @updateURL    https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
+// @downloadURL  https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
 // @match        http://localhost/*
 // @match        http://127.0.0.1/*
 // @match        https://localhost/*

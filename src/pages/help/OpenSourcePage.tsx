@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Github, AlertTriangle } from 'lucide-react';
 import TutoLayout, { TutoSection } from '../../components/TutoLayout';
 
-const MOVIX_OPEN_SOURCE_GITHUB_URL = 'https://github.com/movixcorp/MovixOpenSource';
+const MOVIX_OPEN_SOURCE_GITHUB_URL = 'https://github.com/movixstream/MovixOpenSource';
 const MOVIX_LICENSE_URL = 'https://creativecommons.org/licenses/by-nc/4.0/';
 
 const OpenSourcePage: React.FC = () => {

@@ -1,7 +1,7 @@
 {
   "version": "2.6.1",
   "buildNumber": 38,
-  "apkUrl": "https://raw.githubusercontent.com/movixcorp/MovixOpenSource/main/app/movix-android.apk",
+  "apkUrl": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app/movix-android.apk",
   "apkSizeBytes": 72592577,
   "apkSha256": "371b3d701dfb03a70a84ac4cd1d8891f3fe4f7d06037d2350c1decf3862ae91b",
   "mandatory": false,
