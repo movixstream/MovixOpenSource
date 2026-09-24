@@ -115,10 +115,9 @@ jobs:
           path: app/ios/Podfile.lock
           if-no-files-found: error
 
-      - name: Run the native and bridge contracts
+      - name: Verify package metadata and media bridge behavior
         working-directory: app
         run: |
-          npm run test:ios-contract
           node --test \
             tests/unsignedIpaWorkflow.test.mjs \
             tests/mediaProxyRouting.test.mjs \

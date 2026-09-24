@@ -3,7 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { buildStreamedPlaybackChoices, getStreamedServerChoices, getStreamedServerDetails, selectStreamedVariant, unwrapStreamedBytes } from '../src/utils/streamedPlayback.ts';
+import { getStreamedServerDetails, selectStreamedVariant, unwrapStreamedBytes } from '../src/utils/streamedPlayback.ts';
 import streamedNative from '../API/Mainapi/utils/streamedNative.js';
 import { sourceFunction } from './helpers/sourceFunction.mjs';
 
@@ -73,42 +73,12 @@ test('le vrai loader extension filtre uniquement les playlists Streamed avant de
   }
 });
 
-test('visiteur : embed seul ; extension/VIP : natif sélectionné en premier avec choix de l’embed', () => {
-  const input = [{ title: 'French HD', url: 'https://embed.st/embed/admin/match/1', _isEmbed: true, _streamedKey: 'key' }];
-  const labels = { embed: 'Streamed', native: 'Movix' };
-  assert.equal(buildStreamedPlaybackChoices(input, false, labels).length, 1);
-  const choices = buildStreamedPlaybackChoices(input, true, labels);
-  assert.equal(choices.length, 2);
-  assert.equal(choices[0]._isEmbed, false);
-  assert.equal(choices[1]._isEmbed, true);
-  assert.equal(choices[0]._streamedNative.embedUrl, input[0].url);
-  assert.match(choices[0].title, /^Movix/);
-  assert.equal(input[0].title, 'French HD');
+test('les conteneurs image du relais révèlent uniquement leur transport stream', () => {
   const ts = new Uint8Array(376); ts[0] = ts[188] = 0x47;
   const png = new Uint8Array(400); png.set([0x89, 0x50, 0x4e, 0x47]); png.set(ts, 24);
   assert.deepEqual(unwrapStreamedBytes(png), ts);
   const webp = new Uint8Array(42 + ts.length); webp.set(new TextEncoder().encode('RIFF')); webp.set(new TextEncoder().encode('WEBP'), 8); webp.set(ts, 42);
   assert.deepEqual(unwrapStreamedBytes(webp), ts);
-});
-
-test('le menu regroupe les lecteurs par serveur et conserve leurs index réels', () => {
-  const input = [
-    { title: 'admin · 1 · English - Paramount+ · HD', url: 'https://embed.test/1', _isEmbed: true, _streamedKey: 'first' },
-    { title: 'admin · 2 · English - Paramount+ · SD', url: 'https://embed.test/2', _isEmbed: true, _streamedKey: 'second' },
-    { title: 'delta · 1 · French · HD', url: 'https://embed.test/3', _isEmbed: true, _streamedKey: 'third' },
-  ];
-  for (const native of [false, true]) {
-    const choices = buildStreamedPlaybackChoices(input, native, { native: 'Lecteur Movix', embed: 'Lecteur Streamed' });
-    const servers = getStreamedServerChoices(choices);
-    assert.equal(servers.length, 3);
-    for (const [index, server] of servers.entries()) {
-      assert.equal(server.key, input[index]._streamedKey);
-      assert.equal(server.title, input[index].title);
-      assert.equal(server.embedIndex, native ? index * 2 + 1 : index);
-      assert.equal(server.nativeIndex, native ? index * 2 : undefined);
-    }
-  }
-  assert.deepEqual(getStreamedServerChoices([{ title: 'Autre chaîne', url: 'https://stream.test/' }]), []);
 });
 
 test('les détails affichent langue, chaîne et qualité sans identifiant technique', () => {

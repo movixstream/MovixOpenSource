@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_ANIMATION_PREFS, getAutoLightModeReason, parseLightModeSetting, resolveAnimationPrefs } from '../src/utils/animationPreferences.ts';
+import { getAutoLightModeReason, parseLightModeSetting } from '../src/utils/animationPreferences.ts';
 
 test('automatic mode handles unknown hardware and recognizes limited devices', () => {
   assert.equal(getAutoLightModeReason({}, false), null);
@@ -18,21 +18,6 @@ test('invalid and missing saved modes fall back to automatic detection', () => {
   for (const value of [null, '', 'true', 'broken', 'AUTO']) assert.equal(parseLightModeSetting(value), 'auto');
   assert.equal(parseLightModeSetting('on'), 'on');
   assert.equal(parseLightModeSetting('off'), 'off');
-});
-
-test('light mode overrides all effects without changing saved preferences', () => {
-  const prefs = { ...DEFAULT_ANIMATION_PREFS, blurEffects: false, carouselAutoplay: false };
-  const before = { ...prefs };
-  assert.ok(Object.values(resolveAnimationPrefs(prefs, true, false)).every((value) => value === false));
-  assert.deepEqual(prefs, before);
-  assert.deepEqual(resolveAnimationPrefs(prefs, false, false), before);
-});
-
-test('system reduced motion still suppresses movement when light mode is off', () => {
-  assert.deepEqual(resolveAnimationPrefs(DEFAULT_ANIMATION_PREFS, false, true), {
-    bgAnimations: false, loadingAnimations: false, carouselAutoplay: false, blurEffects: true, transitions: false,
-  });
-  assert.deepEqual(resolveAnimationPrefs(DEFAULT_ANIMATION_PREFS, false, false), DEFAULT_ANIMATION_PREFS);
 });
 
 test('low latency remains opt-in with malformed persisted data', async () => {

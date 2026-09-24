@@ -124,14 +124,3 @@ test('Turnstile frames stay internal without revoking the main-page capabilities
   } });
   assert.equal(browser.clearedCapabilities, 1);
 });
-
-test('Turnstile retains JavaScript, persistent storage, and iframe isolation', () => {
-  const { props } = renderWebView();
-  assert.equal(props.javaScriptEnabled, true);
-  assert.equal(props.domStorageEnabled, true);
-  assert.equal(props.cacheEnabled, true);
-  assert.equal(props.sharedCookiesEnabled, true);
-  assert.notEqual(props.incognito, true);
-  assert.equal(props.injectedJavaScriptBeforeContentLoaded, 'MOVIX_INJECTION');
-  assert.equal(props.injectedJavaScriptBeforeContentLoadedForMainFrameOnly, true);
-});

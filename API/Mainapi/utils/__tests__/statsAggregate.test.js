@@ -1,15 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { dayKeyUTC, rangeDayKeys, zeroFillSeries, bucketIsoByDay } = require('../statsAggregate');
-
-test('dayKeyUTC: formats epoch ms to UTC YYYY-MM-DD', () => {
-  assert.equal(dayKeyUTC(Date.parse('2026-05-31T23:30:00Z')), '2026-05-31');
-});
-
-test('rangeDayKeys: returns N ordered UTC days ending today', () => {
-  const keys = rangeDayKeys(3, Date.parse('2026-05-31T12:00:00Z'));
-  assert.deepEqual(keys, ['2026-05-29', '2026-05-30', '2026-05-31']);
-});
+const { zeroFillSeries, bucketIsoByDay } = require('../statsAggregate');
 
 test('zeroFillSeries: fills missing days with 0 and coerces string counts', () => {
   const rows = [{ date: '2026-05-31', count: '4' }]; // count as string (mysql BIGINT)

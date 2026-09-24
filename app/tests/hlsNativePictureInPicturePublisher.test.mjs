@@ -87,30 +87,3 @@ test('HLSPlayer publisher helper calls the injected facade only for canonical lo
     ['clear', video, generation],
   ]);
 });
-
-test('HLSPlayer publishes immediately before every main MP4/HLS/native assignment and clears captured generations', () => {
-  assert.match(
-    source,
-    /(?:publishNativeMediaSource|publishMovixNativeMediaSource)\(\s*video,\s*normalizedSrc,\s*'mp4',?\s*\);\s*videoRef\.current\.src = normalizedSrc/,
-  );
-  assert.match(
-    source,
-    /(?:publishNativeMediaSource|publishMovixNativeMediaSource)\(\s*video,\s*normalizedSrc,\s*'hls',?\s*\);\s*hls\.loadSource\(normalizedSrc\);\s*hls\.attachMedia\(video\)/,
-  );
-  assert.match(
-    source,
-    /(?:publishNativeMediaSource|publishMovixNativeMediaSource)\(\s*video,\s*normalizedSrc,\s*'hls',?\s*\);\s*video\.src = normalizedSrc/,
-  );
-  assert.match(
-    source,
-    /clearNativeMediaSource\(video, \w+Generation\)/,
-  );
-  assert.match(
-    source,
-    /(?:publishNativeMediaSource|publishMovixNativeMediaSource)\(\s*videoRef\.current,\s*normalizedSrc,\s*'hls',?\s*\);\s*hls\.loadSource\(normalizedSrc\);\s*hls\.attachMedia\(videoRef\.current\)/,
-  );
-  assert.match(
-    source,
-    /publishNativeMediaSource\(\s*video,\s*airPlayUrl,\s*(?:isMP4Source\(airPlayUrl\) \? 'mp4' : 'hls'|'hls'),?\s*\);\s*video\.src = airPlayUrl/,
-  );
-});

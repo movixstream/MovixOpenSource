@@ -42,8 +42,3 @@ Le faisceau auxiliaire [projector-beam.svg](projector-beam.svg), créé pour Mov
 reste sous la licence générale du dépôt. Son origine suit la lentille MingCute
 en **(16, 14)** dans le viewBox 24 × 24, soit `[16 / 24, 14 / 24]` dans le catalogue.
 Il conserve la transformation du projecteur et son atténuation près des textes.
-
-## Vérification
-
-`python tests/cinemaSvgAssets.test.py` vérifie la collection, le XML, les
-proportions, les références locales et les versions approuvées des icônes.

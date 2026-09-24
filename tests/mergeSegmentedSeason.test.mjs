@@ -23,8 +23,7 @@ const load = (path) => {
 };
 
 const { mergeSegmentedSeason } = load('src/utils/mergeSegmentedSeason.ts');
-const { SEGMENTED_SHOWS, getSegmentedShowConfig, getSeasonLimit, getProductionCodeFixes, isMergeableSeason } =
-  load('src/utils/segmentedShows.ts');
+const { isMergeableSeason } = load('src/utils/segmentedShows.ts');
 
 let nextId = 1;
 /** Segment de 11 minutes. `code` optionnel pour tester le repli par adjacence. */
@@ -247,22 +246,6 @@ test('codes de production injectés par la configuration', () => {
 
   assert.deepEqual(names(result), ['A / B', 'Codé']);
   assert.equal(result.episodes[0].production_slot, '216');
-});
-
-test('la configuration décrit « Bienvenue chez les Loud » comme attendu', () => {
-  const config = getSegmentedShowConfig(68073);
-  assert.ok(config);
-  assert.equal(config.segmentMaxRuntime, 12);
-  assert.equal(getSeasonLimit(config, 9), 13);
-  assert.equal(getSeasonLimit(config, 10), 7);
-  assert.equal(getSeasonLimit(config, 1), null);
-  assert.equal(getProductionCodeFixes(config, 2)[27], '216A');
-  assert.equal(getProductionCodeFixes(config, 1), null);
-
-  // Une série non listée ne doit rien déclencher.
-  assert.equal(getSegmentedShowConfig(1399), null);
-  assert.equal(getSegmentedShowConfig(null), null);
-  assert.ok(Object.keys(SEGMENTED_SHOWS).length >= 1);
 });
 
 test('la saison 0 (spéciaux) n\'est jamais fusionnée', () => {

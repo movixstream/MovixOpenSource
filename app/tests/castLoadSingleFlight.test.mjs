@@ -316,19 +316,3 @@ test('different logical media are not coalesced after a successful load', async 
   assert.equal(different.coalesced, false);
   assert.equal(await different.promise, 'second');
 });
-
-test('bridge creates a helper per WebView after resolution and clears it with capabilities', async () => {
-  const bridge = await readFile(
-    new URL('../src/services/bridge.ts', import.meta.url),
-    'utf8',
-  );
-  assert.match(bridge, /new WeakMap<object,\s*CastLoadSingleFlight>/);
-  assert.match(
-    bridge,
-    /resolvePreparedCastSourceForNative\(parsedSource\)[\s\S]*?getCastLoadSingleFlight\(webViewRef\)/,
-  );
-  assert.match(
-    bridge,
-    /function clearBridgeCapabilities[\s\S]*?castLoadSingleFlights\.delete\(webViewRef\)/,
-  );
-});

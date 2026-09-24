@@ -43,16 +43,24 @@ Consulter l’index du [README principal](README.md), puis seulement les section
 - Service worker personnalisé : `public/sw.js`, enregistré dans `src/main.tsx`. Le repli de domaine concerne aussi `src/services/blockDetection.ts` ; vérifier la configuration actuelle, sans reprendre d’anciens domaines ou TTL.
 - Hébergement : `build:cf`, `build:coolify` et `server/index.js` couvrent plusieurs cibles. Vérifier celle du déploiement demandé.
 
-## Vérification proportionnée
+## Tests et vérification
 
-Il n’y a pas de script `npm test` à la racine, mais des tests ciblés existent dans `tests/`, les backends et l’app. Les README des modules indiquent les commandes utiles.
+- Ne jamais écrire de tests unitaires après avoir écrit le code qu’ils vérifient.
+- Privilégier fortement les tests de bout en bout (E2E) comme seul mécanisme de test. Les utiliser pour vérifier le fonctionnement des fonctionnalités complexes.
+- Terminer chaque exécution E2E par un artefact vérifiable et reproductible : rapport accompagné des traces, captures ou sorties pertinentes, avec la commande de relance, les prérequis, les données utilisées et les résultats attendus et observés. Ne pas y inclure de secrets.
+- Si un système doit être testé en isolation, commencer par consigner tous ses modes de défaillance identifiés et expliquer lesquels échappent aux E2E existants. Écrire ensuite les tests nécessaires à partir de cette analyse, avant le code testé, avec des assertions indépendantes de l’implémentation.
+- Supprimer les tests unitaires sans protection supplémentaire contre un bug réel : doublons des E2E, assertions sur le texte ou la structure du code, constantes triviales, snapshots de détails internes, mocks qui ne vérifient qu’eux-mêmes ou logique de production recopiée dans le test.
+
+Il n’y a pas de script `npm test` à la racine. Les scénarios navigateur sont dans `tests/*.browser.*` ; des tests isolés et d’intégration subsistent dans les modules pour leurs défaillances spécifiques. Les README des modules indiquent les commandes utiles.
+
+Les contrôles ci-dessous sont des repères à utiliser lorsqu’une vérification est explicitement demandée. Sinon, se limiter à la lecture ciblée du code et du diff.
 
 | Modification | Contrôle adapté |
 | --- | --- |
 | Documentation | Diff, liens et cohérence avec les scripts/code cités |
-| Frontend | Lint ou tests ciblés ; `npm run build` si nécessaire |
+| Frontend | Scénario E2E ciblé avec artefact ; lint ou build selon la demande |
 | Types frontend | TypeScript local avec la configuration du package ; le build Vite seul ne contrôle pas les types |
-| Main API | `node --check <fichier>` et tests du module, sans démarrer tout le service |
-| Rust/WASM | `npm run wasm:watchparty-sync:build` après modification du moteur |
+| Main API | Scénario E2E ciblé ; `node --check <fichier>` pour une vérification de syntaxe |
+| Rust/WASM | `npm run wasm:watchparty-sync:build` pour vérifier la compilation du moteur |
 
 Ne pas lancer de suite générale sans rapport. Distinguer les problèmes préexistants des régressions et indiquer uniquement les contrôles réellement exécutés.

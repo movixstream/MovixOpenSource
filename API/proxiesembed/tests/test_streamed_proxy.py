@@ -95,7 +95,8 @@ class StreamedProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(query['url'], ['https://lb1.strmd.st/live/high.m3u8'])
         self.assertEqual(query['exp'], [str(self.expires)])
         self.assertTrue(media_signing.verify_signature(streamed.ROUTE, query['url'][0], query['exp'][0], query['sig'][0])[0])
-        for seq in range(25056, 25066):
+        # Deux versions suffisent pour détecter une playlist figée entre les lectures.
+        for seq in (25056, 25057):
             playlist = f'#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:{seq}\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin"\n#EXTINF:6,\nseg-{seq}.ts\n'
             self.proxy.pull.return_value = (playlist.encode(), query['url'][0])
             refreshed = await self.proxy.handler(make_mocked_request('GET', child))

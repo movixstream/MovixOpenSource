@@ -484,31 +484,3 @@ test('the global deadline includes a slow breaker read and starts no late candid
   assert.equal(candidateCalls, 0);
   assert.equal(reservationCalls, 0);
 });
-
-test('proxyManager exposes a distinct rotated snapshot and atomic KissKH reservation API', () => {
-  const source = fs.readFileSync(path.resolve(__dirname, '../../../utils/proxyManager.js'), 'utf8');
-  assert.match(source, /function getKisskhProxyCandidates\(options = \{\}\)/);
-  assert.match(source, /function reserveKisskhProxy\(proxy, options = \{\}\)/);
-  assert.match(source, /function pickNextKisskhProxy\(options = \{\}\)/);
-  assert.match(source, /poolName:\s*["']KISSKH_METADATA["']/);
-  assert.match(source, /minIntervalMs:\s*1000/);
-  assert.match(source, /digestIdentity:\s*true/);
-  assert.match(source, /getKisskhProxyCandidates,/);
-  assert.match(source, /reserveKisskhProxy,/);
-  assert.match(source, /pickNextKisskhProxy,/);
-  const snapshot = source.match(/async function getKisskhProxyCandidates[\s\S]*?\n\}/)?.[0] || '';
-  assert.match(snapshot, /reserveProxyWindow/);
-  assert.match(snapshot, /new Set\(\)/);
-  assert.doesNotMatch(snapshot, /reserveRateLimitedProxy/);
-  const reservation = source.match(/function reserveKisskhProxy[\s\S]*?\n\}/)?.[0] || '';
-  assert.match(reservation, /reserveRateLimitedProxy/);
-});
-
-test('ProxyScrape account refresh requests authenticated online proxy lines', () => {
-  const source = fs.readFileSync(path.resolve(__dirname, '../../../utils/proxyManager.js'), 'utf8');
-  const accountRequest = source.match(/function buildProxyScrapeCandidates[\s\S]*?\n\}/)?.[0] || '';
-  assert.match(accountRequest, /format:\s*["']credentials["']/);
-  assert.match(accountRequest, /credential_format:\s*2/);
-  assert.match(accountRequest, /status:\s*["']online["']/);
-  assert.doesNotMatch(accountRequest, /format:\s*["']normal["']/);
-});

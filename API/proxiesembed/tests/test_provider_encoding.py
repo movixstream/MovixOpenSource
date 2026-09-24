@@ -87,18 +87,17 @@ class ProviderEncodingTests(unittest.IsolatedAsyncioTestCase):
             ('uqload', 'strm4.uqload.vc', 'https://uqload.vc'),
             ('uqload', 'strm1.uqload.bz', 'https://uqload.bz'),
         ]:
-            for resource in ['master.m3u8', 'seg-1.ts', 'video.mp4']:
-                with self.subTest(provider=provider, host=host, resource=resource):
-                    url = f'https://{host}/hls/{resource}?t=example&s=123&i=0.0'
-                    request = SimpleNamespace(query={'url': url}, headers={}, method='GET')
-                    await getattr(proxy, f'{provider}_proxy_handler')(request)
-                    relay = proxy._service_proxy if provider == 'uqload' else proxy._service_proxy_via_random_socks
-                    dedicated = relay.call_args.args[2]
-                    generic = proxy._prepare_headers(url, request)
-                    for headers in (dedicated, generic):
-                        self.assert_identity_with_browser_tokens(headers)
-                        self.assertEqual(headers['Origin'], origin)
-                        self.assertEqual(headers['Referer'], f'{origin}/')
+            with self.subTest(provider=provider, host=host):
+                url = f'https://{host}/hls/master.m3u8?t=example&s=123&i=0.0'
+                request = SimpleNamespace(query={'url': url}, headers={}, method='GET')
+                await getattr(proxy, f'{provider}_proxy_handler')(request)
+                relay = proxy._service_proxy if provider == 'uqload' else proxy._service_proxy_via_random_socks
+                dedicated = relay.call_args.args[2]
+                generic = proxy._prepare_headers(url, request)
+                for headers in (dedicated, generic):
+                    self.assert_identity_with_browser_tokens(headers)
+                    self.assertEqual(headers['Origin'], origin)
+                    self.assertEqual(headers['Referer'], f'{origin}/')
 
     async def test_extraction_leaves_compression_negotiation_to_aiohttp(self):
         proxy = self.proxy

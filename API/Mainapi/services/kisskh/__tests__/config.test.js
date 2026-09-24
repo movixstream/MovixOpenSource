@@ -27,15 +27,6 @@ function enabledEnv(overrides = {}) {
   };
 }
 
-test('canonical fallback policy has the exact strict shape', () => {
-  const { loadFallbackPolicy } = require('../config');
-  const policy = loadFallbackPolicy();
-  assert.deepEqual(Object.keys(policy), ['version', 'subtitleHosts', 'maxSubtitleBytes']);
-  assert.equal(policy.version, 1);
-  assert.deepEqual(policy.subtitleHosts, ['auto.cdnvideo11.shop', 'sub.cdnvideo11.shop']);
-  assert.equal(policy.maxSubtitleBytes, 2097152);
-});
-
 test('config ignores removed browser fallback and subtitle byte environment settings', () => {
   const { fromEnv } = require('../config');
   for (const value of ['0', '-1', '1.5', '1e3', ' 2097152', '2097152 ', '9007199254740992']) {

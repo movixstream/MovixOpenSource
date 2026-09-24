@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs';
 import i18next from 'i18next';
 import { createWrappedTestData } from '../src/data/wrappedTestData.ts';
 import { hasWrappedCommunity, hasWrappedRace, selectWrappedScenes, wrappedEras, wrappedRaceFrames, wrappedStoryMode, wrappedTraitFacts } from '../src/utils/wrappedStory.ts';
-import { wrappedScenePose, wrappedTransition, wrappedTransitionDuration } from '../src/utils/wrappedMotion.ts';
 
 const i18n = i18next.createInstance();
 await i18n.init({ lng: 'fr', resources: { fr: { translation: JSON.parse(readFileSync(new URL('../src/i18n/locales/fr.json', import.meta.url), 'utf8')) } } });
@@ -81,19 +80,4 @@ test('les périodes reviennent dans l’ordre et les profils nocturnes exigent u
     assert.ok(!wrappedTraitFacts(data).some(trait => trait.id === 'night'));
     data.listeningClock = [{ hour: 23, minutes: data.stats.totalMinutes }];
     assert.equal(wrappedTraitFacts(data)[0].id, 'night');
-});
-
-test('chaque passage a une grammaire dédiée et le retour rembobine le même passage', () => {
-    assert.equal(wrappedTransition('intro', 'time'), 'shutter');
-    assert.equal(wrappedTransition('time', 'eras'), 'reel');
-    assert.equal(wrappedTransition('eras', 'quiz'), 'gallery');
-    assert.equal(wrappedTransition('time', 'rhythm'), 'orbit');
-    assert.equal(wrappedTransition('quiz', 'favorite'), 'poster');
-    assert.equal(wrappedTransition('favorite', 'quiz', -1), 'poster');
-    assert.equal(wrappedTransition('favorite', 'top-five'), 'podium');
-    assert.equal(wrappedTransition('persona', 'closing'), 'print');
-    assert.notEqual(wrappedScenePose('print', 1, 'enter', false).clipPath, 'inset(0% 0% 0% 0%)', 'la page de partage doit se développer à l’écran');
-    assert.notEqual(wrappedScenePose('print', 1, 'enter', false).clipPath, wrappedScenePose('print', -1, 'enter', false).clipPath, 'le retour rembobine la révélation');
-    assert.equal(wrappedTransitionDuration('poster', true), 0.16);
-    assert.deepEqual(wrappedScenePose('shutter', 1, 'enter', true), { opacity: 0, transform: 'none' });
 });

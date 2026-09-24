@@ -23,7 +23,7 @@ import {
   normalizeLangCode,
   opensubtitlesLegacyProvider,
 } from '../src/services/subtitles/opensubtitlesLegacy.ts';
-import { searchAll, SUBTITLE_PROVIDERS } from '../src/services/subtitles/index.ts';
+import { searchAll } from '../src/services/subtitles/index.ts';
 
 function track(over: Partial<SubtitleTrack> & { id: string }): SubtitleTrack {
   return {
@@ -362,10 +362,6 @@ test('opensubtitlesLegacyProvider.search returns [] without an imdb id', async (
   } finally {
     globalThis.fetch = originalFetch;
   }
-});
-
-test('SUBTITLE_PROVIDERS registers shegu and opensubtitles', () => {
-  assert.deepEqual(SUBTITLE_PROVIDERS.map(p => p.id), ['shegu', 'opensubtitles']);
 });
 
 test('searchAll keeps a healthy provider when another one throws', async () => {
