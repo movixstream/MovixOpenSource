@@ -2,6 +2,85 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer utilities {
+  /* Les anciens WebKit ignorent `dvh`. Ces classes gardent `vh` comme valeur
+     de repli, tandis que les variantes responsive Tailwind restent libres de
+     les remplacer aux breakpoints suivants. */
+  .h-dynamic-screen {
+    height: 100vh;
+  }
+
+  .h-dynamic-40 {
+    height: 40vh;
+  }
+
+  .min-h-dynamic-40 {
+    min-height: 40vh;
+  }
+
+  .max-h-dynamic-40 {
+    max-height: 40vh;
+  }
+
+  .mb-dynamic-40 {
+    margin-bottom: 40vh;
+  }
+
+  @supports (height: 100dvh) {
+    .h-dynamic-screen {
+      height: 100dvh;
+    }
+
+    .h-dynamic-40 {
+      height: 40dvh;
+    }
+
+    .min-h-dynamic-40 {
+      min-height: 40dvh;
+    }
+
+    .max-h-dynamic-40 {
+      max-height: 40dvh;
+    }
+
+    .mb-dynamic-40 {
+      margin-bottom: 40dvh;
+    }
+  }
+
+  /* Les enfants de ces conteneurs sont positionnés en absolu. Le pseudo-
+     élément réserve donc la hauteur sur les moteurs sans `aspect-ratio`, sans
+     ajouter de hauteur aux images ou aux blocs qui restent dans le flux. */
+  .media-aspect-poster::before,
+  .media-aspect-video::before {
+    content: "";
+    display: block;
+  }
+
+  .media-aspect-poster::before {
+    padding-bottom: 150%;
+  }
+
+  .media-aspect-video::before {
+    padding-bottom: 56.25%;
+  }
+
+  @supports (aspect-ratio: 1 / 1) {
+    .media-aspect-poster {
+      aspect-ratio: 2 / 3;
+    }
+
+    .media-aspect-video {
+      aspect-ratio: 16 / 9;
+    }
+
+    .media-aspect-poster::before,
+    .media-aspect-video::before {
+      content: none;
+    }
+  }
+}
+
 google-cast-launcher {
   display: inline-flex !important;
   max-width: 24px;

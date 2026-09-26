@@ -102,6 +102,18 @@ Les contexts à connaître en premier :
 
 ## Notes de contribution
 
+### Bundles moderne et legacy
+
+Les builds de production (`build`, `build:cf`, `build:coolify`) produisent deux variantes du JavaScript à partir du même code. `@vitejs/plugin-legacy` choisit les modules natifs sur les moteurs modernes et charge SystemJS avec les chunks legacy sur les moteurs plus anciens. La cible legacy comprend Chrome 53, Edge 79, Firefox 67 et Safari/iOS 15. Le serveur doit publier tout `dist/`, y compris les fichiers `*-legacy-*.js` et les polyfills ; voir le [déploiement Docker](../docs/deployment-docker.md).
+
+Les polyfills JavaScript sont calculés par le plugin. `compat/legacy-dom-polyfills.js` complète les API DOM nécessaires avec AbortController/fetch, IntersectionObserver et ResizeObserver, uniquement dans la variante legacy. L'annulation de fetch émulée rejette la promesse mais ne peut pas interrompre physiquement la connexion réseau. Les scripts classiques intégrés à `index.html` restent écrits en ES5, car Vite ne les transpile pas.
+
+Le worker de Sync Pro est compilé séparément avec une cible de syntaxe Chrome 68 et ne reçoit pas les polyfills de la page. S'il échoue ou ne confirme pas son démarrage sous cinq secondes, WatchParty utilise localement la synchronisation classique. Le service worker `public/sw.js` est une autre sortie : il conserve son traitement existant, sans transpilation. Les hauteurs de WatchParty ont un repli `vh`, et les cartes de personnages et Live TV réservent leur ratio sans dépendre de `aspect-ratio`.
+
+Ces cibles de compilation ne garantissent pas à elles seules le fonctionnement complet sur une TV. La lecture dépend aussi des codecs, des API multimédias et des lecteurs tiers. La validation d'une ancienne version doit utiliser les fichiers du build de production sur le moteur concerné ; le serveur de développement Vite ne sert pas de bundle legacy.
+
+### Conventions
+
 - Les imports inutilisés cassent le lint.
 - Certaines features de lecture combinent plusieurs players et plusieurs proxies ; évite les simplifications rapides.
 - Si tu touches une feature transversale, regarde aussi le backend correspondant dans `API/Mainapi/` ou `API/watchpartyAPI/`.

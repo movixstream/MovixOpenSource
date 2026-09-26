@@ -63,6 +63,7 @@ Ce n'est pas un simple duo "frontend + backend". Une feature peut très vite tra
 | Zone | Rôle | Documentation |
 | --- | --- | --- |
 | `src/` | Frontend Vite + React + TypeScript | [Frontend](src/README.md) |
+| `Dockerfile` + `server/` | Build et hébergement du frontend avec Hono | [Déploiement Docker](docs/deployment-docker.md) |
 | `API/Mainapi/` | Backend principal clusterisé | [Main API](API/Mainapi/README.md) |
 | `API/watchpartyAPI/` | Service temps réel WatchParty | [WatchParty API](API/watchpartyAPI/README.md) |
 | `API/proxiesembed/` | Proxy aiohttp pour embeds, flux et DRM | [Proxies Embed](API/proxiesembed/README.md) |

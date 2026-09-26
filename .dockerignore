@@ -10,6 +10,7 @@ build
 .gitignore
 .gitattributes
 .github
+.codex-remote-attachments
 
 # === Backends séparés (pas besoin pour le front) ===
 API
@@ -25,14 +26,17 @@ docs
 app
 
 # === Cloudflare Functions — sauf le helper utilisé par server/ ===
-functions
-!functions/_lib
+functions/*
+!functions/_lib/
+functions/_lib/*
 !functions/_lib/socialPreview.js
 
 # === Logs, dumps, artefacts locaux ===
 *.log
 *.txt
 !*.example
+!public/robots.txt
+!public/llms.txt
 crashreport.txt
 deployment-*.txt
 
@@ -59,6 +63,12 @@ movix.png
 # === Cache Vite local ===
 .vite
 node_modules/.vite
+
+# === Artefacts de validation absents du build de production ===
+tests
+coverage
+playwright-report
+test-results
 
 # === Next.js legacy (non utilisé) ===
 next.config.js

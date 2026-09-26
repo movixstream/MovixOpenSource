@@ -106,12 +106,12 @@
                     value: function (obj, prop) {
                         if (obj === null || obj === undefined) {
                             throw new TypeError(
-                                "Cannot convert undefined or null to object",
+                                "Cannot convert undefined or null to object"
                             );
                         }
                         return Object.prototype.hasOwnProperty.call(
                             Object(obj),
-                            prop,
+                            prop
                         );
                     },
                     configurable: true,
@@ -139,62 +139,65 @@
             // (SW désinscrit, caches vidés) et on recharge avec un paramètre
             // qui contourne le cache du document. Une seule fois par session
             // et par build, pour ne pas boucler si le HTML servi reste périmé.
-            (() => {
-                const buildId = "%VITE_APP_BUILD_ID%";
-                const recoveryStorageKey = `movix_build_recovery_${buildId}`;
-                const refreshSearchParam = "movix_build_refresh";
+            // Ce script classique n'est pas transpilé par Vite : rester en ES5
+            // pour que la récupération fonctionne aussi avant le bundle legacy.
+            (function () {
+                var buildId = "%VITE_APP_BUILD_ID%";
+                var recoveryStorageKey = "movix_build_recovery_" + buildId;
+                var refreshSearchParam = "movix_build_refresh";
+                var recoveryStarted = false;
+                var recoveredFromUrl = false;
 
-                const buildRecoveryUrl = () => {
-                    const url = new URL(window.location.href);
+                function buildRecoveryUrl() {
+                    var url = new URL(window.location.href);
                     url.searchParams.set(
                         refreshSearchParam,
-                        `${buildId}-${Date.now()}`,
+                        buildId + "-" + Date.now()
                     );
                     return url.toString();
-                };
+                }
 
-                const recoverClientCache = async () => {
-                    try {
+                function recoverClientCache() {
+                    return Promise.resolve().then(function () {
                         if ("serviceWorker" in navigator) {
-                            const registrations =
-                                await navigator.serviceWorker.getRegistrations();
-                            await Promise.all(
-                                registrations.map((registration) =>
-                                    registration.unregister(),
-                                ),
-                            );
+                            return navigator.serviceWorker.getRegistrations()
+                                .then(function (registrations) {
+                                    return Promise.all(registrations.map(function (registration) {
+                                        return registration.unregister();
+                                    }));
+                                });
                         }
-
+                    }).then(function () {
                         if ("caches" in window) {
-                            const cacheKeys = await caches.keys();
-                            await Promise.all(
-                                cacheKeys.map((cacheKey) =>
-                                    caches.delete(cacheKey),
-                                ),
-                            );
+                            return caches.keys().then(function (cacheKeys) {
+                                return Promise.all(cacheKeys.map(function (cacheKey) {
+                                    return caches.delete(cacheKey);
+                                }));
+                            });
                         }
-                    } catch {
+                    }).catch(function () {
                         // Ignore cleanup errors and continue with reload.
-                    }
-
-                    try {
-                        sessionStorage.setItem(recoveryStorageKey, "done");
-                    } catch {
-                        // Ignore storage errors.
-                    }
-
-                    window.location.replace(buildRecoveryUrl());
-                };
+                    }).then(function () {
+                        try {
+                            sessionStorage.setItem(recoveryStorageKey, "done");
+                        } catch (error) {
+                            // Le paramètre d'URL empêche aussi une boucle sans stockage.
+                        }
+                        window.location.replace(buildRecoveryUrl());
+                    });
+                }
 
                 try {
                     // Nettoie le paramètre laissé par un rechargement de secours.
-                    const currentUrl = new URL(window.location.href);
+                    var currentUrl = new URL(window.location.href);
                     if (currentUrl.searchParams.has(refreshSearchParam)) {
+                        recoveredFromUrl = currentUrl.searchParams.get(refreshSearchParam)
+                            .indexOf(buildId + "-") === 0;
                         currentUrl.searchParams.delete(refreshSearchParam);
                         window.history.replaceState(
                             {},
                             document.title,
-                            currentUrl.toString(),
+                            currentUrl.toString()
                         );
                     }
 
@@ -204,17 +207,18 @@
                     // comparaison ne faisait que recharger deux fois et vider
                     // tous les caches à chaque déploiement. Plus lue nulle part.
                     localStorage.removeItem("movix_build_id");
-                } catch {
+                } catch (error) {
                     // Ignore storage errors.
                 }
 
                 window.addEventListener(
                     "error",
-                    (event) => {
-                        const target = event.target;
+                    function (event) {
+                        var target = event.target;
                         if (!(target instanceof HTMLScriptElement)) return;
-                        if (target.type !== "module") return;
-                        if (!target.src.includes("/assets/")) return;
+                        if (target.type !== "module" && target.src.indexOf("-legacy") === -1) return;
+                        if (target.src.indexOf("/assets/") === -1) return;
+                        if (recoveryStarted || recoveredFromUrl) return;
 
                         try {
                             if (
@@ -223,13 +227,14 @@
                             ) {
                                 return;
                             }
-                        } catch {
+                        } catch (error) {
                             // Ignore storage errors.
                         }
 
+                        recoveryStarted = true;
                         window.__MOVIX_CACHE_RECOVERY__ = recoverClientCache();
                     },
-                    true,
+                    true
                 );
             })();
         </script>

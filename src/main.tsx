@@ -140,9 +140,17 @@ const startMovixConsoleSafetyWarning = () => {
 
 startMovixConsoleSafetyWarning();
 
+const safeLocalStorageGetItem = (key: string): string | null => {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
 // Coins carrés (Paramètres > Apparence) : posé avant le premier render pour
 // éviter un flash de coins arrondis. Togglé live depuis SettingsPage.
-if (localStorage.getItem('square_corners_enabled') === '1') {
+if (safeLocalStorageGetItem('square_corners_enabled') === '1') {
   document.documentElement.classList.add('square-corners');
 }
 
@@ -246,7 +254,7 @@ if ('serviceWorker' in navigator) {
       registration.update().catch(() => {});
 
       // Re-souscrire au push si permission déjà accordée mais subscription perdue
-      if ('PushManager' in window && Notification.permission === 'granted' && localStorage.getItem('auth_token')) {
+      if ('PushManager' in window && Notification.permission === 'granted' && safeLocalStorageGetItem('auth_token')) {
         const subscription = await registration.pushManager.getSubscription();
         if (!subscription) {
           const { subscribeToPush } = await import('./services/pushNotificationService');

@@ -6,8 +6,11 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { sentryVitePlugin } from '@sentry/vite-plugin'
 
-const buildId = process.env.CF_PAGES_COMMIT_SHA || process.env.COMMIT_REF || new Date().toISOString()
+const buildId = process.env.VITE_APP_BUILD_ID || process.env.CF_PAGES_COMMIT_SHA || process.env.COMMIT_REF || new Date().toISOString()
 process.env.VITE_APP_BUILD_ID = buildId
+
+// Les workers ont une sortie séparée et ne reçoivent pas les polyfills de la page.
+const workerBuildTarget = ['es2020', 'chrome68']
 
 const normalizeSiteUrl = (value?: string): string => {
   const candidate = value?.trim()
@@ -136,16 +139,15 @@ export default defineConfig(({ mode, command }) => {
     plugins: [
       react(),
       injectPublicConfig(),
-      // Chromium 68 = navigateur des TV LG sous webOS 5 (gamme 2020, ex. OLED CX).
-      // `modernTargets` fixe aussi `build.target` : la syntaxe (`?.`, `??`) est
-      // abaissée, et les API absentes de Chrome 68 que le code utilise vraiment
-      // (flat, Object.fromEntries, Promise.allSettled, Array.at…) sont polyfillées
-      // via core-js dans un chunk dédié. Pas de bundle legacy (SystemJS) : seuls les
-      // navigateurs à modules ES, dont Chrome 68, sont visés.
+      // Deux sorties issues du même code : modules natifs pour les navigateurs
+      // modernes, SystemJS + polyfills pour les anciens, jusqu'à Chrome 53
+      // (TV LG webOS 4). Le plugin conserve sa cible et sa détection modernes
+      // par défaut pour que les moteurs intermédiaires choisissent le bon bundle.
       legacy({
-        renderLegacyChunks: false,
-        modernTargets: 'chrome>=68, chromeAndroid>=68, edge>=105, firefox>=106, safari>=16.4, iOS>=16.4',
+        targets: ['chrome >= 53', 'edge >= 79', 'firefox >= 67', 'safari >= 15', 'ios >= 15'],
+        renderLegacyChunks: true,
         modernPolyfills: true,
+        additionalLegacyPolyfills: [resolve(__dirname, 'src/compat/legacy-dom-polyfills.js')],
       }),
       ...(process.env.ANALYZE === 'true'
         ? [
@@ -207,9 +209,21 @@ export default defineConfig(({ mode, command }) => {
       host: true,
       port: 3000,
     },
+    worker: {
+      format: 'iife',
+      // Préserver la syntaxe Chrome 68 même si le bundle moderne cible plus haut.
+      rolldownOptions: {
+        transform: { target: workerBuildTarget },
+        // La compression Oxc a sa propre cible ; sans elle, elle peut recréer
+        // une syntaxe moderne après l'abaissement effectué par le transform.
+        output: {
+          minify: { compress: { target: workerBuildTarget } },
+        },
+      },
+    },
     build: {
-      // Pas de `target` ici : @vitejs/plugin-legacy le dérive de `modernTargets`
-      // (voir `plugins`) et écraserait toute valeur posée à cet endroit.
+      // Le plugin gère les cibles JS ; le CSS est commun aux deux bundles.
+      cssTarget: ['chrome53', 'safari15'],
       // Cartes sources uniquement quand elles partent vers GlitchTip. 'hidden' :
       // générées sans commentaire sourceMappingURL dans les chunks, puis
       // supprimées de dist/ par le plugin une fois envoyées.

@@ -1359,7 +1359,7 @@ const LiveTV: React.FC = () => {
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
       {Array.from({ length: 18 }).map((_, i) => (
         <div key={i} className="animate-pulse">
-          <div className="aspect-video rounded-xl bg-white/5" />
+          <div className="media-aspect-video rounded-xl bg-white/5" />
           <div className="mt-2 h-3 w-3/4 rounded bg-white/5" />
         </div>
       ))}
@@ -1451,7 +1451,7 @@ const LiveTV: React.FC = () => {
         onClick={() => handleIptvChannelClick(stream)}
         className="group cursor-pointer"
       >
-        <div className="relative aspect-video rounded-xl overflow-hidden bg-white/[0.02] border border-white/[0.04] group-hover:border-white/10 transition-all duration-300 group-hover:bg-white/[0.04]">
+        <div className="media-aspect-video relative rounded-xl overflow-hidden bg-white/[0.02] border border-white/[0.04] group-hover:border-white/10 transition-all duration-300 group-hover:bg-white/[0.04]">
           <FavoriteChannelButton
             active={isFavorite}
             activeLabel={t('liveTV.removeFromFavorites')}
@@ -1469,7 +1469,7 @@ const LiveTV: React.FC = () => {
             <img
               src={stream.stream_icon}
               alt={stream.name}
-              className="w-full h-full object-contain p-4"
+              className="absolute inset-0 h-full w-full object-contain p-4"
               loading="lazy"
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = 'none';
@@ -1477,7 +1477,7 @@ const LiveTV: React.FC = () => {
               }}
             />
           ) : null}
-          <div className={cn('iptv-fallback w-full h-full flex flex-col items-center justify-center gap-1.5 p-3', stream.stream_icon ? 'hidden absolute inset-0' : '')}>
+          <div className={cn('iptv-fallback absolute inset-0 flex flex-col items-center justify-center gap-1.5 p-3', stream.stream_icon ? 'hidden' : '')}>
             <Tv className="w-6 h-6 text-white opacity-10" />
             <span className="text-[10px] text-white/30 line-clamp-2 text-center leading-tight">{stream.name}</span>
           </div>
@@ -1572,7 +1572,7 @@ const LiveTV: React.FC = () => {
       >
         <div className={cn(
           'relative rounded-xl overflow-hidden border transition-all duration-300',
-          isNoImage ? 'aspect-video' : 'aspect-[2/3]',
+          isNoImage ? 'media-aspect-video' : 'media-aspect-poster',
           isEventCard && !isClickableMatch
             ? 'bg-white/[0.015] border-white/[0.03] opacity-50'
             : 'bg-white/[0.02] border-white/[0.04] group-hover:border-white/10 group-hover:bg-white/[0.04]'
@@ -1591,10 +1591,10 @@ const LiveTV: React.FC = () => {
             })}
           />
           {!isNoImage && channel.poster ? (
-            <img src={channel.poster} alt={channel.name} className="w-full h-full object-cover" loading="lazy" />
+            <img src={channel.poster} alt={channel.name} className="absolute inset-0 h-full w-full object-cover" loading="lazy" />
           ) : (
             <div className={cn(
-              'w-full h-full flex flex-col items-center justify-center gap-1 p-3 text-center',
+              'absolute inset-0 flex flex-col items-center justify-center gap-1 p-3 text-center',
               isEventCard && isClickableMatch ? 'bg-gradient-to-br from-emerald-950/40 to-transparent' : ''
             )}>
               {isEventCard ? (

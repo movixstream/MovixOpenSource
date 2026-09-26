@@ -60,7 +60,7 @@ const CharacterCard: React.FC<CharacterCardProps> = ({ character, performerLabel
 
   // Même habillage que les cartes de l'onglet Détails : fond gris 800, bordure
   // gris 700, et le même éclaircissement au survol.
-  const className = 'group relative block aspect-[2/3] overflow-hidden rounded-lg border border-gray-700 bg-gray-800 transition-colors hover:border-gray-500';
+  const className = 'media-aspect-poster group relative block overflow-hidden rounded-lg border border-gray-700 bg-gray-800 transition-colors hover:border-gray-500';
 
   return character.href
     ? <Link to={character.href} className={className}>{body}</Link>
@@ -81,7 +81,7 @@ const CharactersSection: React.FC<CharactersSectionProps> = ({ data, loading = f
         <div className="mb-3 h-6 w-40 animate-pulse rounded bg-gray-800" />
         <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3">
           {Array.from({ length: 6 }, (_, index) => (
-            <div key={index} className="aspect-[2/3] animate-pulse rounded-lg bg-gray-800" />
+            <div key={index} className="media-aspect-poster animate-pulse rounded-lg bg-gray-800" />
           ))}
         </div>
       </div>
