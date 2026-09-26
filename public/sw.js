@@ -1,6 +1,8 @@
 // ============================================================================
 // Fallback domain — constantes injectées au build par vite.config.ts
 // ============================================================================
+// Ce fichier n'est pas transpilé : pas de `?.`, `??` ni `1_000`, sinon le SW ne
+// s'installe pas sur les TV webOS 5 (Chromium 68), comme le bundle.
 const DEFAULT_MIRRORS = __MOVIX_DEFAULT_MIRRORS__;
 const CONFIG_URL = __MOVIX_CONFIG_URL__;
 const NAV_TIMEOUT_MS = 3000;
@@ -477,7 +479,7 @@ async function probeOriginOnce() {
 // absorber un burst, assez court pour redétecter un blocage qui démarre. État
 // en scope module : reset quand le browser tue le SW idle, ce qui est OK (le
 // memo ne vise que les bursts, pas la persistance).
-const PROBE_CACHE_MS = 30_000;
+const PROBE_CACHE_MS = 30000;
 let probeInFlight = null;
 let lastProbeAt = 0;
 let lastProbeResult = null;
@@ -600,6 +602,6 @@ self.addEventListener('message', async (event) => {
       error: data.error || 'API error threshold reached',
       via: 'sw-message',
     });
-    event.source?.postMessage({ type: 'MOVIX_REDIRECT_TO', url });
+    if (event.source) event.source.postMessage({ type: 'MOVIX_REDIRECT_TO', url });
   } catch {}
 });

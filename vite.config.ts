@@ -196,7 +196,10 @@ export default defineConfig(({ mode, command }) => {
       port: 3000,
     },
     build: {
-      target: 'es2020', // explicit, was implicit es2020 in Vite 5
+      // Chromium 68 = navigateur des TV LG sous webOS 5 (gamme 2020, ex. OLED CX) :
+      // sans `?.`/`??` abaissés, le bundle y lève un SyntaxError et l'app reste noire.
+      // Surcoût mesuré : +0,7 % sur les assets. Ne couvre que la syntaxe, pas les API.
+      target: ['es2020', 'chrome68'],
       // Cartes sources uniquement quand elles partent vers GlitchTip. 'hidden' :
       // générées sans commentaire sourceMappingURL dans les chunks, puis
       // supprimées de dist/ par le plugin une fois envoyées.
