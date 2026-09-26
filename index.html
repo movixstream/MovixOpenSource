@@ -118,6 +118,17 @@
                     writable: true,
                 });
             }
+            // globalThis is Chrome 71+ and LG webOS 5 TVs run Chrome 68. gtag.js reads it,
+            // and as an async classic script it can run before the core-js polyfill chunk
+            // injected by @vitejs/plugin-legacy (a module script). ES5 only here, this block
+            // is not transpiled.
+            if (typeof globalThis === "undefined") {
+                Object.defineProperty(window, "globalThis", {
+                    value: window,
+                    configurable: true,
+                    writable: true,
+                });
+            }
         </script>
         <script>
             // Rechargement de secours quand le bundle d'entrée ne charge pas :

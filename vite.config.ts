@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import legacy from '@vitejs/plugin-legacy'
 import { resolve } from 'path'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { visualizer } from 'rollup-plugin-visualizer'
@@ -135,6 +136,17 @@ export default defineConfig(({ mode, command }) => {
     plugins: [
       react(),
       injectPublicConfig(),
+      // Chromium 68 = navigateur des TV LG sous webOS 5 (gamme 2020, ex. OLED CX).
+      // `modernTargets` fixe aussi `build.target` : la syntaxe (`?.`, `??`) est
+      // abaissée, et les API absentes de Chrome 68 que le code utilise vraiment
+      // (flat, Object.fromEntries, Promise.allSettled, Array.at…) sont polyfillées
+      // via core-js dans un chunk dédié. Pas de bundle legacy (SystemJS) : seuls les
+      // navigateurs à modules ES, dont Chrome 68, sont visés.
+      legacy({
+        renderLegacyChunks: false,
+        modernTargets: 'chrome>=68, chromeAndroid>=68, edge>=105, firefox>=106, safari>=16.4, iOS>=16.4',
+        modernPolyfills: true,
+      }),
       ...(process.env.ANALYZE === 'true'
         ? [
             visualizer({
@@ -196,10 +208,8 @@ export default defineConfig(({ mode, command }) => {
       port: 3000,
     },
     build: {
-      // Chromium 68 = navigateur des TV LG sous webOS 5 (gamme 2020, ex. OLED CX) :
-      // sans `?.`/`??` abaissés, le bundle y lève un SyntaxError et l'app reste noire.
-      // Surcoût mesuré : +0,7 % sur les assets. Ne couvre que la syntaxe, pas les API.
-      target: ['es2020', 'chrome68'],
+      // Pas de `target` ici : @vitejs/plugin-legacy le dérive de `modernTargets`
+      // (voir `plugins`) et écraserait toute valeur posée à cet endroit.
       // Cartes sources uniquement quand elles partent vers GlitchTip. 'hidden' :
       // générées sans commentaire sourceMappingURL dans les chunks, puis
       // supprimées de dist/ par le plugin une fois envoyées.
