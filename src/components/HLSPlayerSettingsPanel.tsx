@@ -223,6 +223,8 @@ const HLSPlayerSettingsPanel = (props: HLSPlayerSettingsPanelProps) => {
     setKeepFullscreenOnEpisodeChange,
     resumePlaybackOnEpisodeChange,
     setResumePlaybackOnEpisodeChange,
+    keepPipOnEpisodeChange,
+    setKeepPipOnEpisodeChange,
     nextPrefs,
     onNextPrefsChange,
     skipSettings,
@@ -2283,6 +2285,29 @@ const HLSPlayerSettingsPanel = (props: HLSPlayerSettingsPanelProps) => {
                           </div>
                         </button>
                         <p className="text-xs text-gray-400 mt-1 px-1">{t('watch.resumePlaybackDesc')}</p>
+                      </div>
+                    )}
+
+                    {/* Toggle Keep PiP On Episode Change (séries / animes uniquement) */}
+                    {(tvShowId || isAnime) && (
+                      <div className="mb-3 pt-4 border-t border-gray-700/60">
+                        <h3 className="text-base font-semibold text-white mb-2">{t('watch.keepPip')}</h3>
+                        <button
+                          onClick={() => setKeepPipOnEpisodeChange(!keepPipOnEpisodeChange)}
+                          className={`w-full px-4 py-3 text-sm text-left rounded-lg flex justify-between items-center transition-colors ${keepPipOnEpisodeChange ? 'bg-green-600/30 hover:bg-green-600/40 text-green-300' : 'bg-red-600/30 hover:bg-red-600/40 text-red-300'
+                            }`}
+                        >
+                          <span>{keepPipOnEpisodeChange ? t('watch.enabled') : t('watch.disabled')}</span>
+                          <div className={`w-10 h-5 flex items-center rounded-full p-1 transition-colors ${keepPipOnEpisodeChange ? 'bg-green-500' : 'bg-gray-600'}`}>
+                            <motion.div
+                              className="w-3.5 h-3.5 bg-white rounded-full shadow-md"
+                              layout
+                              transition={getTransition({ type: "spring", stiffness: 700, damping: 30 })}
+                              style={{ marginLeft: keepPipOnEpisodeChange ? 'auto' : '0px' }}
+                            />
+                          </div>
+                        </button>
+                        <p className="text-xs text-gray-400 mt-1 px-1">{t('watch.keepPipDesc')}</p>
                       </div>
                     )}
 

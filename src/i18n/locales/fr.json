@@ -1355,6 +1355,8 @@
     "keepFullscreenDesc": "Rester en plein écran lors d'un changement d'épisode. Le lecteur ne quitte plus le plein écran entre deux épisodes, quel que soit le navigateur.",
     "resumePlayback": "Reprendre la Lecture",
     "resumePlaybackDesc": "Relancer la lecture automatiquement après un changement d'épisode.",
+    "keepPip": "Garder le PiP",
+    "keepPipDesc": "Rester en PiP lors d'un changement d'épisode. La fenêtre PiP se referme puis se rouvre seule sur l'épisode suivant.",
     "nextContentPopup": "Popup Contenu Suivant",
     "pipNotAvailable": "Élément vidéo non disponible",
     "videoNotReady": "La vidéo n'est pas encore prête",

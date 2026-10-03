@@ -1355,6 +1355,8 @@
     "keepFullscreenDesc": "Stay in fullscreen when switching episodes. The player no longer drops out of fullscreen between episodes, on any browser.",
     "resumePlayback": "Resume Playback",
     "resumePlaybackDesc": "Automatically resume playback after switching episodes.",
+    "keepPip": "Keep Picture-in-Picture",
+    "keepPipDesc": "Stay in PiP when switching episodes. The PiP window closes and reopens on its own on the next episode.",
     "nextContentPopup": "Next Content Popup",
     "pipNotAvailable": "Video element not available",
     "videoNotReady": "Video is not ready yet",
