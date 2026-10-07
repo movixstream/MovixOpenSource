@@ -1227,25 +1227,53 @@ class _CurlResponseAdapter:
         return self.content._body
 
 
+# Services dont le CDN filtre l'empreinte TLS : le client Python (aiohttp,
+# requests) y prend 403 sur le master, les variantes et les segments, quels
+# que soient les en-têtes, alors que curl et curl_cffi passent. Constaté
+# sur vidzy (u*.vidzy.cc) le 2026-10-07.
+CURL_CFFI_SERVICES = frozenset({'cinep', 'vidzy'})
+
+
+def _socks5_proxy_url_for_session(session_key: str) -> Optional[str]:
+    """URL SOCKS5 derrière une session `proxy_N`, None pour les autres."""
+    match = re.fullmatch(r'proxy_(\d+)', session_key or '')
+    if not match:
+        return None
+    index = int(match.group(1))
+    return _build_socks5_proxy_url(PROXIES[index]) if index < len(PROXIES) else None
+
+
 class _CurlCffiUpstream:
     """Async context manager: curl_cffi request with JA3 impersonation.
-    Retries once through a random SOCKS5 proxy if the direct attempt is a 403."""
-    __slots__ = ('_session', '_url', '_headers', '_timeout_s', '_service_name')
+    The first attempt goes through `proxy_url` when given (direct otherwise);
+    a 403 is retried once through another random SOCKS5 proxy."""
+    __slots__ = ('_session', '_url', '_headers', '_timeout_s', '_service_name', '_proxy_url')
 
-    def __init__(self, session, url: str, headers: Dict, timeout_s: float, service_name: str):
+    def __init__(self, session, url: str, headers: Dict, timeout_s: float, service_name: str,
+                 proxy_url: Optional[str] = None):
         self._session = session
         self._url = url
         self._headers = headers
         self._timeout_s = timeout_s
         self._service_name = service_name
+        self._proxy_url = proxy_url
 
     async def __aenter__(self):
+        first_proxies = (
+            {'http': self._proxy_url, 'https': self._proxy_url}
+            if self._proxy_url else None
+        )
         resp = await self._session.get(
             self._url, headers=self._headers, timeout=self._timeout_s,
             impersonate='chrome', allow_redirects=False,
+            proxies=first_proxies,
         )
         if resp.status_code == 403 and PROXIES:
-            proxy_url = _build_socks5_proxy_url(random.choice(PROXIES))
+            candidates = [
+                url for url in (_build_socks5_proxy_url(proxy) for proxy in PROXIES)
+                if url and url != self._proxy_url
+            ]
+            proxy_url = random.choice(candidates) if candidates else None
             if proxy_url:
                 logger.warning(f'[{self._service_name.upper()}-PROXY] 403 direct â€” retrying via {_redact_proxy_url(proxy_url)}')
                 try:
@@ -5663,9 +5691,16 @@ class ProxyServer:
                         'X-Segment-Cache': 'HIT',
                     })
 
-            if service_name == 'cinep' and self.curl_session is not None:
+            if service_name in CURL_CFFI_SERVICES and self.curl_session is not None:
                 timeout_s = timeout.total or timeout.sock_read or 30
-                upstream_cm = _CurlCffiUpstream(self.curl_session, target_url, headers, timeout_s, service_name)
+                upstream_cm = _CurlCffiUpstream(
+                    self.curl_session,
+                    target_url,
+                    headers,
+                    timeout_s,
+                    service_name,
+                    proxy_url=_socks5_proxy_url_for_session(actual_session_key),
+                )
             else:
                 upstream_cm = session.get(
                     target_url,
