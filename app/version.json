@@ -1,13 +1,13 @@
 {
-  "version": "2.6.3",
-  "buildNumber": 40,
+  "version": "2.6.4",
+  "buildNumber": 41,
   "apkUrl": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app/movix-android.apk",
-  "apkSizeBytes": 72613245,
-  "apkSha256": "521c38d8230f7d1f349102d3c4bbb6b88ce61b4c1d21603ba209285c635752b8",
+  "apkSizeBytes": 72613957,
+  "apkSha256": "d54a742609da72eb57fab03f692c0d37901366bbc5561685e53904e723466fca",
   "mandatory": false,
-  "releasedAt": "2026-10-05T15:55:02.000Z",
+  "releasedAt": "2026-10-07T18:05:41.000Z",
   "releaseNotes": {
-    "fr": "Correction de « Movix injoignable » avec le DNS Cloudflare activé : l'app attend que le DNS soit prêt avant de charger Movix. Correction d'un plantage à la désactivation du DNS.",
-    "en": "Fixed \"Movix unreachable\" with the Cloudflare DNS enabled: the app now waits for the DNS to be ready before loading Movix. Fixed a crash when turning the DNS off."
+    "fr": "Les lecteurs Fsvid et Vidzy fonctionnent à nouveau : ils avaient changé leur protection et ne renvoyaient plus qu'une fausse vidéo.",
+    "en": "Fsvid and Vidzy players work again: they had changed their protection and only returned a decoy video."
   }
 }
