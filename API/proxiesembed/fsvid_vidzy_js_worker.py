@@ -103,17 +103,37 @@ BOOTSTRAP = r"""
     return output;
   }
 
+  // Le lecteur mesure un div caché (`width:calc(1in + 43px)` → 139 px CSS
+  // dans un vrai navigateur) : on garde le dernier style posé pour le relire.
+  let lastCss = '';
+  const cssUnits = { px: 1, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, pt: 96 / 72, pc: 16, q: 96 / 101.6 };
+  function measuredPx(axis) {
+    const declaration = new RegExp('(?:^|[;\\s])' + axis + '\\s*:\\s*([^;]+)', 'i').exec(lastCss);
+    if (!declaration) return 96;
+    let total = 0;
+    let found = false;
+    for (const term of declaration[1].matchAll(/([-+]?)\s*(\d+(?:\.\d+)?)\s*(px|in|cm|mm|pt|pc|q)\b/gi)) {
+      total += (term[1] === '-' ? -1 : 1) * parseFloat(term[2]) * cssUnits[term[3].toLowerCase()];
+      found = true;
+    }
+    return found ? Math.round(total) : 96;
+  }
+
   const looseObject = new Proxy(function () {}, {
     apply() { return looseObject; },
     construct() { return looseObject; },
     get(_target, property) {
       if (property === 'then') return undefined;
       if (property === Symbol.toPrimitive) return () => '';
-      // Le lecteur mesure un div `width:1in` : 96 px CSS dans un vrai navigateur.
-      if (['offsetWidth', 'offsetHeight', 'clientWidth', 'clientHeight'].includes(property)) return 96;
+      if (property === 'offsetWidth' || property === 'clientWidth') return measuredPx('width');
+      if (property === 'offsetHeight' || property === 'clientHeight') return measuredPx('height');
       return looseObject;
     },
-    set() { return true; },
+    set(_target, property, value) {
+      if (property === 'cssText') lastCss = String(value);
+      else if (property === 'width' || property === 'height') lastCss += ';' + property + ':' + String(value);
+      return true;
+    },
   });
 
   globalThis.window = globalThis;

@@ -261,6 +261,23 @@ export function createBootstrap(embedUrl) {
     }
     __movixPlayerFactory.addLanguage = __movixPlayerFactory;
     __movixPlayerFactory.getPlayers = function () { return {}; };
+    // Le lecteur mesure un div caché (\`width:calc(1in + 43px)\` → 139 px CSS
+    // dans un vrai navigateur) : on garde le dernier style posé pour le relire.
+    var __movixLastCss = '';
+    var __movixCssUnits = { px: 1, 'in': 96, cm: 96 / 2.54, mm: 96 / 25.4, pt: 96 / 72, pc: 16, q: 96 / 101.6 };
+    function __movixMeasuredPx(axis) {
+      var declaration = new RegExp('(?:^|[;\\\\s])' + axis + '\\\\s*:\\\\s*([^;]+)', 'i').exec(__movixLastCss);
+      if (!declaration) return 96;
+      var termPattern = /([-+]?)\\s*(\\d+(?:\\.\\d+)?)\\s*(px|in|cm|mm|pt|pc|q)\\b/gi;
+      var total = 0;
+      var found = false;
+      var term;
+      while ((term = termPattern.exec(declaration[1])) !== null) {
+        total += (term[1] === '-' ? -1 : 1) * parseFloat(term[2]) * __movixCssUnits[term[3].toLowerCase()];
+        found = true;
+      }
+      return found ? Math.round(total) : 96;
+    }
     var __movixLooseObject = new Proxy(function () {}, {
       apply: function () { return __movixLooseObject; },
       construct: function () { return __movixLooseObject; },
@@ -269,13 +286,17 @@ export function createBootstrap(embedUrl) {
         if (property === 'getAttribute') return function (attr) { return attr === 'src' ? '' : 'true'; };
         if (property === 'hasAttribute') return function () { return true; };
         if (property === 'referrer') return ${safeEmbedOrigin};
-        // Le lecteur mesure un div \`width:1in\` : 96 px CSS dans un vrai navigateur.
-        if (property === 'offsetWidth' || property === 'offsetHeight' || property === 'clientWidth' || property === 'clientHeight') return 96;
+        if (property === 'offsetWidth' || property === 'clientWidth') return __movixMeasuredPx('width');
+        if (property === 'offsetHeight' || property === 'clientHeight') return __movixMeasuredPx('height');
         if (property === 'then') return undefined;
         if (property === Symbol.toPrimitive) return function () { return ''; };
         return __movixLooseObject;
       },
-      set: function () { return true; }
+      set: function (_target, property, value) {
+        if (property === 'cssText') __movixLastCss = String(value);
+        else if (property === 'width' || property === 'height') __movixLastCss += ';' + property + ':' + String(value);
+        return true;
+      }
     });
     var console = { log: function(){}, info: function(){}, warn: function(){}, error: function(){}, debug: function(){} };
     var location = {

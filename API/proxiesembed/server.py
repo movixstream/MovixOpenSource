@@ -4219,13 +4219,26 @@ class ProxyServer:
             'pt': 96 / 72, 'pc': 16.0, 'q': 96 / 101.6,
         }
 
+        def css_length_to_px(value: str) -> Optional[int]:
+            """Convertit `1in` ou `calc(1in + 43px)` en pixels CSS."""
+            total = 0.0
+            found = False
+            for sign, number, unit in re.findall(
+                r'([-+]?)\s*(\d+(?:\.\d+)?)\s*(px|in|cm|mm|pt|pc|q)\b',
+                value,
+                re.IGNORECASE,
+            ):
+                total += (-1 if sign == '-' else 1) * float(number) * css_px_per_unit[unit.lower()]
+                found = True
+            return round(total) if found else None
+
         def resolve_identifier(name: str) -> Optional[int]:
             """Valeur d'une variable de la clé autre que la somme du hostname.
 
             Le lecteur ajoute la largeur mesurée d'un div caché
-            (`width:1in` → offsetWidth = 96 px CSS) : on relit l'unité dans
-            la page pour suivre une rotation. Renvoie None pour la somme du
-            hostname, que l'appelant calcule.
+            (`width:calc(1in + 43px)` → offsetWidth = 139 px CSS) : on relit
+            la valeur dans la page pour suivre une rotation. Renvoie None pour
+            la somme du hostname, que l'appelant calcule.
             """
             token = re.escape(name)
             measured = re.search(
@@ -4235,12 +4248,14 @@ class ProxyServer:
             if measured:
                 axis = 'width' if measured.group(1) == 'Width' else 'height'
                 css = re.search(
-                    rf'(?:^|[;"\'\s]){axis}\s*:\s*(\d+(?:\.\d+)?)\s*(px|in|cm|mm|pt|pc|q)\b',
+                    rf'(?:^|[;"\'\s]){axis}\s*:\s*([^;"\']+)',
                     script[max(0, measured.start() - 600):measured.start()],
                     re.IGNORECASE,
                 )
                 if css:
-                    return round(float(css.group(1)) * css_px_per_unit[css.group(2).lower()])
+                    pixels = css_length_to_px(css.group(1))
+                    if pixels is not None:
+                        return pixels
                 return 0
             literal = re.search(rf'\b{token}\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\s*[;,]', script)
             if literal and not re.search(rf'\b{token}\s*=\s*\(?\s*{token}\s*\+', script):

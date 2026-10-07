@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Movix Proxy Extension (Tampermonkey)
 // @namespace    https://movix.cash
-// @version      1.7.1
+// @version      1.7.2
 // @description  Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus - version userscript Tampermonkey
 // @author       Movix
 // @updateURL    https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
@@ -425,7 +425,7 @@
 
   const USERSCRIPT_MANIFEST = {
     name: "Movix Proxy Extension",
-    version: "1.7.1",
+    version: "1.7.2",
     description:
       "Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus",
   };
@@ -1970,20 +1970,29 @@
       return { seed, step };
     };
 
-    // Le lecteur ajoute à la clé la largeur d'un div caché (`width:1in` →
-    // offsetWidth = 96 px en CSS). On relit l'unité depuis la page pour suivre
-    // une éventuelle rotation (cm, mm, pt…).
+    // Le lecteur ajoute à la clé la largeur d'un div caché
+    // (`width:calc(1in + 43px)` → offsetWidth = 139 px en CSS). On relit la
+    // valeur depuis la page pour suivre une éventuelle rotation (cm, mm, calc…).
     const CSS_PX_PER_UNIT = { px: 1, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, pt: 96 / 72, pc: 16, q: 96 / 101.6 };
+    const cssLengthToPx = (value) => {
+      let total = 0;
+      let found = false;
+      for (const term of String(value).matchAll(/([-+]?)\s*(\d+(?:\.\d+)?)\s*(px|in|cm|mm|pt|pc|q)\b/gi)) {
+        total += (term[1] === "-" ? -1 : 1) * parseFloat(term[2]) * CSS_PX_PER_UNIT[term[3].toLowerCase()];
+        found = true;
+      }
+      return found ? Math.round(total) : null;
+    };
     const resolveRollingIdentifier = (name, hostnameSum) => {
       const token = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const source = String(script || "");
       const measured = new RegExp(`\\b${token}\\s*=\\s*[A-Za-z_$][\\w$]*\\.(?:offset|client)(Width|Height)\\b`).exec(source);
       if (measured) {
         const axis = measured[1] === "Width" ? "width" : "height";
-        const css = new RegExp(`(?:^|[;"'\\s])${axis}\\s*:\\s*(\\d+(?:\\.\\d+)?)\\s*(px|in|cm|mm|pt|pc|q)\\b`, "i")
+        const css = new RegExp(`(?:^|[;"'\\s])${axis}\\s*:\\s*([^;"']+)`, "i")
           .exec(source.substring(Math.max(0, measured.index - 600), measured.index));
-        if (css) return Math.round(parseFloat(css[1]) * CSS_PX_PER_UNIT[css[2].toLowerCase()]);
-        return 0;
+        const pixels = css ? cssLengthToPx(css[1]) : null;
+        return pixels ?? 0;
       }
       const literal = new RegExp(`\\b${token}\\s*=\\s*(0[xX][0-9a-fA-F]+|\\d+)\\s*[;,]`).exec(source);
       if (literal && !new RegExp(`\\b${token}\\s*=\\s*\\(?\\s*${token}\\s*\\+`).test(source)) {
