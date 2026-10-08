@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512">
   <title>Loadix</title>
-  <rect width="100" height="100" fill="#F3F4EF"/>
-  <path fill="#3B6FFF" fill-rule="evenodd" d="M12 15L36 15L36 23L20 23L20 77L36 77L36 85L12 85ZM88 15L64 15L64 23L80 23L80 77L64 77L64 85L88 85Z"/>
-  <path fill="#000000" d="M42 34.75L49.2 34.75L49.2 59.4L62 59.4L62 65.25L42 65.25Z"/>
+  <rect width="100" height="100" fill="#F4F4F0"/>
+  <path fill="#3B6EFF" fill-rule="evenodd" d="M12 15L36 15L36 23L20 23L20 77L36 77L36 85L12 85ZM88 15L64 15L64 23L80 23L80 77L64 77L64 85L88 85Z"/>
+  <path fill="#000000" d="M42 65.28V34.72H49.24V59.37H62.02V65.28Z"/>
 </svg>
