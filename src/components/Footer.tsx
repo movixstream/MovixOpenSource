@@ -17,6 +17,7 @@ import redisLogo from '@/assets/technology-logos/redis.svg';
 import socketLogo from '@/assets/technology-logos/socketdotio.svg';
 import rustLogo from '@/assets/technology-logos/rust.svg';
 import webassemblyLogo from '@/assets/technology-logos/webassembly.svg';
+import { MovixWordmark } from './brand/MovixWordmark';
 import './Footer.css';
 
 // Développé avec ❤️ par @mysticsaba, projet commencé à 14 ans.
@@ -91,7 +92,10 @@ const Footer = () => {
         <nav aria-label={t('footer.navigation')} className="grid grid-cols-2 gap-x-6 gap-y-7 sm:grid-cols-3 sm:gap-x-10">
           {linkGroups.map((group, index) => (
             <div key={group.title} className={`min-w-0 ${index === 2 ? 'col-span-2 sm:col-span-1' : ''}`}>
-              <h2 className="mb-2 text-base font-semibold text-white">{t(group.title)}</h2>
+              <h2 className="mb-2 text-base font-semibold text-white">
+                {/* La colonne Movix porte le logo long, à la hauteur d'une ligne de titre. */}
+                {group.title === 'footer.movix' ? <MovixWordmark className="block h-6 w-auto" /> : t(group.title)}
+              </h2>
               <ul>
                 {group.links.map(({ label, icon: Icon, to, href }) => (
                   <li key={label}>
