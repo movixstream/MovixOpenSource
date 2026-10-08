@@ -162,7 +162,7 @@ const AccessCodeForm: React.FC<AccessCodeFormProps> = ({ isModal = false, hideNo
                     {t('vip.donate')}
                   </Link>
                   <a
-                    href="https://t.me/movix_site"
+                    href="https://t.me/ix_annonces"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block text-center bg-[#0088cc] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#006699] transition-colors duration-200"
@@ -278,7 +278,7 @@ const AccessCodeForm: React.FC<AccessCodeFormProps> = ({ isModal = false, hideNo
                     {t('vip.donate')}
                   </Link>
                   <a
-                    href="https://t.me/movix_site"
+                    href="https://t.me/ix_annonces"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block text-center bg-[#0088cc] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#006699] transition-colors duration-200"

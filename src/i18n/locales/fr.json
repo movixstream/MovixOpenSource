@@ -3920,7 +3920,7 @@
     "perfectOffer": "L'offre parfaite pour ceux qui ne veulent pas s'embêter avec l'installation d'un bloqueur de pub et le changement de DNS.",
     "howToSubscribe": "Comment s'abonner ?",
     "contactToActivate": "Contacte-nous directement pour activer ton accès VIP.",
-    "telegramChannel": "Canal Telegram (t.me/movix_site)",
+    "telegramChannel": "Canal Telegram (t.me/ix_annonces)",
     "discordContact": "Discord: mysticsaba_alt",
     "telegramPersonal": "Ou sur Telegram perso :",
     "supportMessage": "Les VIPs font vivre le site ! Serveurs, proxys internes, et tests de nouvelles fonctionnalités en cours de développement... Tout ça coûte de l'argent, et chaque contribution nous aide à continuer 💛",
@@ -5603,7 +5603,11 @@
     "joinCommunity": "Rejoignez la communauté",
     "officialAnnouncements": "Toutes les annonces officielles, le support et les discussions sont sur <strong>Telegram</strong>.",
     "joinUsNow": "Rejoignez-nous pour ne rien rater.",
-    "joinTelegram": "Rejoindre Telegram"
+    "joinTelegram": "Rejoindre Telegram",
+    "announcementTitle": "Nouveau canal Telegram",
+    "announcementBody": "Notre nouveau Telegram, c'est <strong>t.me/ix_annonces</strong>. Une grosse annonce vous y attend : toutes les nouveautés, le changement de logo et plus encore.",
+    "announcementJoin": "Rejoindre le Telegram",
+    "announcementLater": "Plus tard"
   },
   "discord": {
     "joinServer": "Rejoindre le serveur Discord",
@@ -7152,7 +7156,7 @@
     "otherChangeTonDns": "changetondns.fr — tuto français pas à pas",
     "otherMirrors": "Miroirs actifs — liste sur rentry.co",
     "otherMirrorsMovixHealth": "Miroirs actifs — aussi listés sur movix.online",
-    "otherTelegram": "Support Telegram @movix_site",
+    "otherTelegram": "Support Telegram @ix_annonces",
     "backCta": "Retour"
   },
   "help": {
@@ -7587,7 +7591,7 @@
       "officialListTitle": "Où voir la liste officielle",
       "officialListBody": "Deux endroits publient la liste canonique des miroirs alive : <1>movix.online</1> (statut des domaines avec indicateur up/down en temps réel) et <2>rentry.co/movix</2> (liste brute, éditée par l'équipe Movix, toujours à jour). Si tu doutes d'une URL qui prétend être Movix, vérifie-la sur un de ces deux endroits — tout ce qui n'y figure PAS est un faux (domaines sacrificiels pour tromper les bots anti-piratage ou tentatives de phishing).",
       "newDeviceTitle": "Nouveau téléphone / nouveau navigateur — la redirection marche pas",
-      "newDeviceBody": "Le service worker ne peut te rediriger QUE s'il a été installé au moins une fois avant le blocage. Sur un appareil neuf qui n'a jamais visité {{currentDomain}}, si le domaine est déjà bloqué par ton FAI, tu arriveras sur une page d'erreur du FAI sans aucune redirection. Solution : ouvre movix.online ou rentry.co/movix depuis n'importe quel navigateur (ces pages sont hébergées hors bloc FAI), récupère un miroir alive, et visite-le. Ou rejoins <1>Telegram @movix_site</1> où la liste est toujours à jour.",
+      "newDeviceBody": "Le service worker ne peut te rediriger QUE s'il a été installé au moins une fois avant le blocage. Sur un appareil neuf qui n'a jamais visité {{currentDomain}}, si le domaine est déjà bloqué par ton FAI, tu arriveras sur une page d'erreur du FAI sans aucune redirection. Solution : ouvre movix.online ou rentry.co/movix depuis n'importe quel navigateur (ces pages sont hébergées hors bloc FAI), récupère un miroir alive, et visite-le. Ou rejoins <1>Telegram @ix_annonces</1> où la liste est toujours à jour.",
       "reliabilityTitle": "Fréquence des changements",
       "reliabilityBody": "Un domaine peut tomber du jour au lendemain (nouvelle décision ARCOM) ou rester stable des mois. L'équipe tourne plusieurs domaines en parallèle — quand un tombe, un autre prend le relais automatiquement. La liste sur rentry.co est mise à jour dans la journée qui suit un changement.",
       "limitsTitle": "Limites",

@@ -286,7 +286,7 @@ function render503Page() {
     <h1>Site temporairement indisponible</h1>
     <p>Tous nos domaines connus sont inaccessibles depuis votre connexion.</p>
     <p>Rejoins notre canal Telegram pour recevoir l'adresse du nouveau domaine.</p>
-    <a href="https://t.me/movix_site">Ouvrir Telegram</a>
+    <a href="https://t.me/ix_annonces">Ouvrir Telegram</a>
   </div>
 </body>
 </html>`;

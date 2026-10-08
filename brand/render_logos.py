@@ -504,6 +504,10 @@ def main():
         path = ROOT / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(icon_svg, encoding="utf-8", newline="\n")
+    # Logo du groupe pour le site (popup d'annonce du Telegram ix).
+    (ROOT / "src/assets/brand/groupe-ix.svg").write_text(
+        svg_doc(icons["groupe-ix"], (100, 100), "Groupe ix", bg=BG, size=(512, 512)),
+        encoding="utf-8", newline="\n")
 
     # Icônes Movix déjà présentes dans le dépôt : même nom, même taille.
     densities = ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")

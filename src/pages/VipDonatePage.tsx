@@ -48,7 +48,7 @@ const PAYMENT_IMAGES = {
   ltc: 'https://upload.wikimedia.org/wikipedia/commons/f/f8/LTC-400.png'
 } as const;
 
-const SUPPORT_TELEGRAM_URL = import.meta.env.VITE_SUPPORT_TELEGRAM_URL || 'https://t.me/movix_site';
+const SUPPORT_TELEGRAM_URL = import.meta.env.VITE_SUPPORT_TELEGRAM_URL || 'https://t.me/ix_annonces';
 const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 const VipDonatePage: React.FC = () => {
   const navigate = useNavigate();

@@ -39,7 +39,7 @@ const RedirectPopup: React.FC<RedirectPopupProps> = ({
   };
 
   const handleTelegram = () => {
-    window.open('https://t.me/movix_site', '_blank');
+    window.open('https://t.me/ix_annonces', '_blank');
   };
 
 

@@ -35,5 +35,5 @@ export const FALLBACK_CONFIG = {
   ],
   CACHE_KEY: 'address:lastConfig',
   GITHUB_URL: 'https://github.com/movixstream/MovixOpenSource',
-  TELEGRAM_URL: 'https://t.me/movix_site',
+  TELEGRAM_URL: 'https://t.me/ix_annonces',
 };

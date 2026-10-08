@@ -205,7 +205,7 @@ Complément côté React : `src/services/blockDetection.ts` pose un interceptor 
 
 Admin : éditer la paste rentry pour ajouter/retirer un miroir. Nouveaux clients voient la liste immédiatement ; clients existants après ≤ 24h (TTL cache SW).
 
-Scope : ne sauve QUE les users ayant déjà visité `movix.tax` au moins une fois avant le blocage (sinon SW pas installé). Les nouveaux utilisateurs passent par Telegram `@movix_site`.
+Scope : ne sauve QUE les users ayant déjà visité `movix.tax` au moins une fois avant le blocage (sinon SW pas installé). Les nouveaux utilisateurs passent par Telegram `@ix_annonces`.
 
 ### Deployment
 - Frontend: Cloudflare Pages (uses `CF_PAGES_COMMIT_SHA` for build ID)

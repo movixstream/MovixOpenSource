@@ -48,7 +48,7 @@ const linkGroups: { title: string; links: FooterLink[] }[] = [
   {
     title: 'footer.community',
     links: [
-      { label: 'footer.telegram', href: 'https://t.me/movix_site', icon: TelegramIcon },
+      { label: 'footer.telegram', href: 'https://t.me/ix_annonces', icon: TelegramIcon },
       { label: 'footer.sourceCode', href: 'https://github.com/movixstream/MovixOpenSource', icon: GithubIcon },
       { label: 'costs.navLabel', to: '/frais', icon: Euro },
     ],

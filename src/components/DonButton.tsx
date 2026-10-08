@@ -165,12 +165,12 @@ const DonButton: React.FC = () => {
                     <p className="text-sm">
                       📱 <span className="font-medium">Telegram:</span>{" "}
                       <a
-                        href="https://t.me/movix_site"
+                        href="https://t.me/ix_annonces"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-blue-400 hover:text-blue-300 underline transition-colors"
                       >
-                        t.me/movix_site
+                        t.me/ix_annonces
                       </a>
                     </p>
                   </div>

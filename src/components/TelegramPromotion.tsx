@@ -25,7 +25,7 @@ const TelegramPromotion: React.FC = () => {
         </div>
 
         <a
-          href="https://t.me/movix_site"
+          href="https://t.me/ix_annonces"
           target="_blank"
           rel="noopener noreferrer"
           aria-label={t('telegram.joinTelegram')}

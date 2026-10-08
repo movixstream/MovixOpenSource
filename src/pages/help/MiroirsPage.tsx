@@ -12,7 +12,7 @@ const MiroirsPage: React.FC = () => {
   }, [t]);
 
   const telegramUrl =
-    import.meta.env.VITE_SUPPORT_TELEGRAM_URL || 'https://t.me/movix_site';
+    import.meta.env.VITE_SUPPORT_TELEGRAM_URL || 'https://t.me/ix_annonces';
 
   const sections: TutoSection[] = [
     {

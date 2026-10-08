@@ -25,7 +25,7 @@ const EXTERNAL_RESOURCES: Array<{
   { labelKey: 'helpDns.otherMirrors', href: 'https://rentry.co/movix' },
   {
     labelKey: 'helpDns.otherTelegram',
-    href: import.meta.env.VITE_SUPPORT_TELEGRAM_URL || 'https://t.me/movix_site',
+    href: import.meta.env.VITE_SUPPORT_TELEGRAM_URL || 'https://t.me/ix_annonces',
   },
 ];
 

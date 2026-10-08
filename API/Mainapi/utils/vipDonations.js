@@ -30,7 +30,7 @@ const VIP_PAYMENT_METHODS = Object.freeze({
 });
 const VIP_PAYMENT_METHOD_ENUM_SQL = "ENUM('btc', 'ltc', 'cryptogate', 'paygate_hosted', 'autobuy', 'payblis')";
 
-const DEFAULT_SUPPORT_TELEGRAM_URL = 'https://t.me/movix_site';
+const DEFAULT_SUPPORT_TELEGRAM_URL = 'https://t.me/ix_annonces';
 const FINAL_STATUSES = new Set(['delivered', 'cancelled']);
 const DEFAULT_EXPIRATION_MINUTES = 210;
 const DEFAULT_PAYGATE_MIN_PAID_RATIO = 0.60;

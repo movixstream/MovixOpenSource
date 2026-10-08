@@ -24,6 +24,7 @@ import { AlertService } from './services/alertService';
 import NotificationToast from './components/NotificationToast';
 import { NotificationData } from './types/alerts';
 import RedirectPopup from './components/RedirectPopup';
+import TelegramAnnouncementPopup from './components/TelegramAnnouncementPopup';
 import { SITE_URL } from './config/runtime';
 import RequireUsernameChange from './components/RequireUsernameChange';
 import { TopProgressBar } from './components/TopProgressBar';
@@ -1934,6 +1935,11 @@ const AppWithIntro: React.FC = () => {
       <RedirectPopup
         isOpen={showRedirectPopup}
         onClose={() => setShowRedirectPopup(false)}
+      />
+
+      {/* Annonce du nouveau Telegram ix : une seule fois, jamais sur le lecteur */}
+      <TelegramAnnouncementPopup
+        suspended={isWatchRoute || isWrappedRoute || currentPath.startsWith('/oauth/authorize') || showRedirectPopup}
       />
 
       {/* Screensaver */}

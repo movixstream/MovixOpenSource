@@ -54,7 +54,7 @@ function poisonDecodeResponse(id) {
     id: String(id),
     provider: 'direct',
     embed_url: {
-      lien: 'https://t.me/movix_site',
+      lien: 'https://t.me/ix_annonces',
       taille: null,
       created_at: null,
     },

@@ -1047,7 +1047,7 @@ const AdminWishboard: React.FC = () => {
 
         setDeletingBatch(true);
         const authToken = localStorage.getItem('auth_token');
-        const rejectionReason = 'Déjà disponible, pour plus d\'assistance : https://t.me/+3vNnexiqrs4yMzM8';
+        const rejectionReason = 'Déjà disponible, pour plus d\'assistance : https://t.me/ix_annonces';
 
         for (const item of toReject) {
             try {

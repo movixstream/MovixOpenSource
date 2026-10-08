@@ -3920,7 +3920,7 @@
     "perfectOffer": "The perfect offer for those who don't want to bother with ad blocker installation and DNS changes.",
     "howToSubscribe": "How to subscribe?",
     "contactToActivate": "Contact us directly to activate your VIP access.",
-    "telegramChannel": "Telegram Channel (t.me/movix_site)",
+    "telegramChannel": "Telegram Channel (t.me/ix_annonces)",
     "discordContact": "Discord: mysticsaba_alt",
     "telegramPersonal": "Or on personal Telegram:",
     "supportMessage": "VIPs keep the site alive! Servers, internal proxies, and testing new features in development... All of this costs money, and every contribution helps us keep going 💛",
@@ -5603,7 +5603,11 @@
     "joinCommunity": "Join the community",
     "officialAnnouncements": "All official announcements, support and discussions are on <strong>Telegram</strong>.",
     "joinUsNow": "Join us so you don't miss a thing.",
-    "joinTelegram": "Join Telegram"
+    "joinTelegram": "Join Telegram",
+    "announcementTitle": "New Telegram channel",
+    "announcementBody": "Our new Telegram is <strong>t.me/ix_annonces</strong>. A big announcement is waiting for you there: all the new features, the logo change and more.",
+    "announcementJoin": "Join the Telegram",
+    "announcementLater": "Later"
   },
   "discord": {
     "joinServer": "Join the Discord server",
@@ -7152,7 +7156,7 @@
     "otherChangeTonDns": "changetondns.fr — step-by-step tutorial (FR)",
     "otherMirrors": "Active mirrors — list on rentry.co",
     "otherMirrorsMovixHealth": "Active mirrors — also listed on movix.online",
-    "otherTelegram": "Telegram support @movix_site",
+    "otherTelegram": "Telegram support @ix_annonces",
     "backCta": "Back"
   },
   "help": {
@@ -7587,7 +7591,7 @@
       "officialListTitle": "Where to see the official list",
       "officialListBody": "Two places publish the canonical alive-mirror list: <1>movix.online</1> (domain status with real-time up/down indicator) and <2>rentry.co/movix</2> (raw list, edited by the Movix team, always current). If you doubt a URL claiming to be Movix, check it against one of these — anything NOT on the list is a fake (sacrificial domains designed to fool anti-piracy bots, or phishing attempts).",
       "newDeviceTitle": "New phone / new browser — the redirect doesn't kick in",
-      "newDeviceBody": "The service worker can only redirect you if it's been installed at least once before the block. On a brand-new device that has never visited {{currentDomain}}, if the domain is already ISP-blocked, you'll hit an ISP error page with no redirect. Solution: open movix.online or rentry.co/movix from any browser (those pages are hosted outside the ISP block), grab an alive mirror, and visit it. Or join <1>Telegram @movix_site</1> where the list is always up to date.",
+      "newDeviceBody": "The service worker can only redirect you if it's been installed at least once before the block. On a brand-new device that has never visited {{currentDomain}}, if the domain is already ISP-blocked, you'll hit an ISP error page with no redirect. Solution: open movix.online or rentry.co/movix from any browser (those pages are hosted outside the ISP block), grab an alive mirror, and visit it. Or join <1>Telegram @ix_annonces</1> where the list is always up to date.",
       "reliabilityTitle": "How often things change",
       "reliabilityBody": "A domain can go down overnight (new ARCOM order) or stay stable for months. The team rotates multiple domains in parallel — when one goes down, another takes over automatically. The rentry.co list is updated within 24h of any change.",
       "limitsTitle": "Limits",

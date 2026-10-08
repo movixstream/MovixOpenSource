@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 import LegalDocumentPage, { LegalSection } from '../components/legal/LegalDocumentPage';
 
 const CONTACT_EMAIL = 'movixstreaming@gmail.com';
-const TELEGRAM_URL = 'https://t.me/movix_site';
+const TELEGRAM_URL = 'https://t.me/ix_annonces';
 
 const Privacy = () => {
   const { t } = useTranslation();
