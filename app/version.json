@@ -1,13 +1,13 @@
 {
-  "version": "2.6.4",
-  "buildNumber": 41,
+  "version": "2.6.5",
+  "buildNumber": 42,
   "apkUrl": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app/movix-android.apk",
-  "apkSizeBytes": 72613957,
-  "apkSha256": "d54a742609da72eb57fab03f692c0d37901366bbc5561685e53904e723466fca",
+  "apkSizeBytes": 64290469,
+  "apkSha256": "3df4f53e17abfbe90804e012004f81b821d26fd41b25c1ccc5f5a44917356e88",
   "mandatory": false,
-  "releasedAt": "2026-10-07T18:05:41.000Z",
+  "releasedAt": "2026-10-08T19:09:58.000Z",
   "releaseNotes": {
-    "fr": "Les lecteurs Fsvid et Vidzy fonctionnent à nouveau : ils avaient changé leur protection et ne renvoyaient plus qu'une fausse vidéo.",
-    "en": "Fsvid and Vidzy players work again: they had changed their protection and only returned a decoy video."
+    "fr": "Nouveau logo Movix ! L'app passe aussi au nouveau canal Telegram : t.me/ix_annonces.",
+    "en": "New Movix logo! The app also moves to the new Telegram channel: t.me/ix_annonces."
   }
 }
