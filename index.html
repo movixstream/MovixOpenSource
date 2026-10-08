@@ -39,12 +39,12 @@
              donc dans le chunk de cette route, servie depuis notre origine avec
              un cache immuable, et seulement quand on y va. -->
 
-        <!-- Icons -->
-        <link rel="icon" href="/movix.png" />
-        <link rel="icon" type="image/png" href="/movix.png" sizes="96x96" />
+        <!-- Icônes : le SVG d'abord. Le PNG garde sa vraie taille déclarée,
+             sinon Chrome le préfère au SVG ; il ne sert plus qu'aux navigateurs
+             sans favicon SVG et à l'écran d'accueil iOS, qui n'accepte que le PNG. -->
         <link rel="icon" type="image/svg+xml" href="/movix.svg" />
-        <link rel="shortcut icon" href="/movix.png" />
-        <link rel="apple-touch-icon" sizes="180x180" href="/movix.png" />
+        <link rel="icon" type="image/png" sizes="1024x1024" href="/movix.png" />
+        <link rel="apple-touch-icon" href="/movix.png" />
         <link rel="manifest" href="/manifest.json" />
 
         <title data-rh="true">
