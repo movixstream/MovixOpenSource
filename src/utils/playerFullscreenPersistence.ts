@@ -48,6 +48,7 @@ import { safePlay } from './safePlay';
 /** Clés localStorage des réglages (partagées avec le panneau de paramètres). */
 export const KEEP_FULLSCREEN_PREF_KEY = 'playerKeepFullscreenOnEpisodeChangePref';
 export const RESUME_PLAYBACK_PREF_KEY = 'playerResumePlaybackOnEpisodeChangePref';
+export const KEEP_PIP_PREF_KEY = 'playerKeepPipOnEpisodeChangePref';
 
 /** Clé sessionStorage du marqueur de passage d'un épisode à l'autre. */
 const HANDOFF_KEY = 'movix:player:episodeHandoff';
@@ -92,6 +93,8 @@ export interface EpisodeHandoffState {
   fullscreen: boolean;
   /** La lecture était en cours (ou l'épisode venait de se terminer). */
   playing: boolean;
+  /** Le lecteur HLS était en PiP. */
+  pip: boolean;
 }
 
 type FullscreenDocument = Document & {
@@ -173,6 +176,8 @@ export const isKeepFullscreenEnabled = (): boolean => readBooleanPref(KEEP_FULLS
 export const setKeepFullscreenEnabled = (v: boolean): void => writeBooleanPref(KEEP_FULLSCREEN_PREF_KEY, v);
 export const isResumePlaybackEnabled = (): boolean => readBooleanPref(RESUME_PLAYBACK_PREF_KEY);
 export const setResumePlaybackEnabled = (v: boolean): void => writeBooleanPref(RESUME_PLAYBACK_PREF_KEY, v);
+export const isKeepPipEnabled = (): boolean => readBooleanPref(KEEP_PIP_PREF_KEY);
+export const setKeepPipEnabled = (v: boolean): void => writeBooleanPref(KEEP_PIP_PREF_KEY, v);
 
 /** Demande le plein écran sur un élément, en gérant les préfixes navigateurs. */
 const requestFullscreenOn = async (element: HTMLElement): Promise<boolean> => {
@@ -311,6 +316,7 @@ export const markEpisodeHandoff = (): void => {
     // `ended` compte comme « en lecture » : après la fin d'un épisode, la vidéo
     // est techniquement en pause alors que l'utilisateur regardait bien.
     playing: Boolean(video && (!video.paused || video.ended)),
+    pip: Boolean(video && document.pictureInPictureElement === video),
   };
 
   // Le plein écran ne se perd plus tout seul au changement d'épisode : si
@@ -321,7 +327,11 @@ export const markEpisodeHandoff = (): void => {
     state.fullscreen = false;
   }
 
-  if (!state.fullscreen && !state.playing) return;
+  if (state.pip && !isKeepPipEnabled()) {
+    state.pip = false;
+  }
+
+  if (!state.fullscreen && !state.playing && !state.pip) return;
 
   try {
     sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ ...state, ts: Date.now() }));
@@ -344,7 +354,7 @@ export const readEpisodeHandoff = (): EpisodeHandoffState | null => {
   }
   if (!raw) return null;
 
-  let parsed: { fullscreen?: unknown; playing?: unknown; ts?: unknown };
+  let parsed: { fullscreen?: unknown; playing?: unknown; pip?: unknown; ts?: unknown };
   try {
     parsed = JSON.parse(raw);
   } catch {
@@ -362,9 +372,10 @@ export const readEpisodeHandoff = (): EpisodeHandoffState | null => {
   const state: EpisodeHandoffState = {
     fullscreen: parsed.fullscreen === true && isKeepFullscreenEnabled(),
     playing: parsed.playing === true && isResumePlaybackEnabled(),
+    pip: parsed.pip === true && isKeepPipEnabled(),
   };
 
-  if (!state.fullscreen && !state.playing) {
+  if (!state.fullscreen && !state.playing && !state.pip) {
     clearEpisodeHandoff();
     return null;
   }
@@ -413,6 +424,7 @@ interface RestoreOptions {
   getVideo: () => HTMLVideoElement | null;
   /** Le lecteur peut-il demander le plein écran sur l'hôte persistant ? */
   useHost?: boolean;
+  requestPip?: () => Promise<boolean>;
 }
 
 /**
@@ -426,11 +438,12 @@ interface RestoreOptions {
  *
  * @returns une fonction d'annulation à appeler au démontage du lecteur.
  */
-export const restoreEpisodeHandoff = ({ state, getContainer, getVideo, useHost = false }: RestoreOptions): (() => void) => {
+export const restoreEpisodeHandoff = ({ state, getContainer, getVideo, useHost = false, requestPip }: RestoreOptions): (() => void) => {
   let cancelled = false;
   let gestureConsumed = false;
   let fullscreenDone = !state.fullscreen;
   let playbackDone = !state.playing;
+  let pipDone = !state.pip || typeof requestPip !== 'function';
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let watchedVideo: HTMLVideoElement | null = null;
 
@@ -449,7 +462,7 @@ export const restoreEpisodeHandoff = ({ state, getContainer, getVideo, useHost =
   };
 
   const finishIfDone = (): boolean => {
-    if (!fullscreenDone || !playbackDone) return false;
+    if (!fullscreenDone || !playbackDone || !pipDone) return false;
     clearEpisodeHandoff();
     cleanup();
     return true;
@@ -460,6 +473,16 @@ export const restoreEpisodeHandoff = ({ state, getContainer, getVideo, useHost =
     if (!video) return Promise.resolve(false);
     if (!video.paused && !video.ended) return Promise.resolve(true);
     return safePlay(video).then(() => true, () => false);
+  };
+
+  const isAlreadyPip = (): boolean => {
+    const video = getVideo();
+    return Boolean(video && document.pictureInPictureElement === video);
+  };
+
+  const tryPip = (): Promise<boolean> => {
+    if (!requestPip || isAlreadyPip()) return Promise.resolve(true);
+    return requestPip().then((done) => done || isAlreadyPip(), () => false);
   };
 
   const tryFullscreen = (): Promise<boolean> => {
@@ -477,10 +500,15 @@ export const restoreEpisodeHandoff = ({ state, getContainer, getVideo, useHost =
     // utilisateur, donc attendre sa réponse avant d'appeler `play()` ferait
     // systématiquement échouer la reprise de lecture.
     const pendingPlayback = playbackDone ? null : tryPlayback();
+    const pendingPip = pipDone ? null : tryPip();
     const pendingFullscreen = fullscreenDone ? null : tryFullscreen();
 
     if (pendingPlayback && await pendingPlayback) {
       playbackDone = true;
+    }
+
+    if (pendingPip && await pendingPip) {
+      pipDone = true;
     }
 
     if (pendingFullscreen && await pendingFullscreen) {
