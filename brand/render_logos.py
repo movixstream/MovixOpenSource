@@ -3,6 +3,7 @@
 Usage :
     python brand/render_logos.py                     # kit + icônes du dépôt Movix
     python brand/render_logos.py --loadix ../Loadix  # met aussi à jour Loadix
+    python brand/render_logos.py --redirection ../../Movix-OS/movixredirection  # et movix.online
 
 Requis : Pillow, numpy, fontTools, et `npm install` fait à la racine (la
 police vient de node_modules/@fontsource/inter : Inter ExtraBold, celle
@@ -452,11 +453,47 @@ def rasterize(layers, viewbox, out, bg=None, scale=1.0, circle=False):
     return result
 
 
+def text_image(text, size, color):
+    """Texte en Inter 800 tramé au plus juste, sur fond transparent."""
+    placed, s = place(text, size, 0, 0)
+    glyphs = [outline(g, s, ox, size) for g, ox in placed]
+    contours = [c for _, cs in glyphs for c in cs]
+    x0, y0, x1, y1 = ink_box(contours)
+    pad = 2
+    polys = [[(x - x0 + pad, y - y0 + pad) for x, y in c] for c in contours]
+    w, h = math.ceil(x1 - x0) + 2 * pad, math.ceil(y1 - y0) + 2 * pad
+    layer = {"color": color, "rule": "nonzero", "d": "", "polys": polys, "rects": [], "snap": False}
+    return rasterize([layer], (w, h), (w, h))
+
+
+def og_image():
+    """Image de partage 1200 × 630 du site d'adresses, en PNG.
+
+    Discord, Telegram, X et Facebook n'affichent pas les images de partage
+    en SVG. Le fond reprend l'ancienne image : noir, lueur rouge en haut.
+    """
+    W, H = 1200, 630
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    t = np.clip(np.hypot((xx - W / 2) / (0.8 * W), yy / (0.8 * H)), 0, 1)[..., None]
+    base, glow = np.array(rgb("#0A0A0A"), np.float32), np.array(rgb("#7F1D1D"), np.float32)
+    image = Image.fromarray((base + (glow - base) * 0.55 * (1 - t)).astype(np.uint8), "RGB").convert("RGBA")
+
+    layers, box = lockup("Movıx", RED, LIGHT, perforated=True)
+    mark_w = 640
+    mark = rasterize(layers, box, (mark_w, round(mark_w * box[1] / box[0])))
+    image.alpha_composite(mark, ((W - mark_w) // 2, 140))
+    for text, size, color, top in (("Adresse officielle et miroirs", 40, "#D1D5DB", 370),
+                                   ("movix.online", 34, "#F87171", 435)):
+        line = text_image(text, size, color)
+        image.alpha_composite(line, ((W - line.width) // 2, top))
+    return image
+
+
 def save_png(image, path, opaque):
     path.parent.mkdir(parents=True, exist_ok=True)
     (image.convert("RGB") if opaque else image).save(path, optimize=True)
-    print(f"{path.relative_to(ROOT.parent).as_posix()}  {image.size[0]}×{image.size[1]}  "
-          f"{path.stat().st_size // 1024} Ko")
+    shown = path.relative_to(ROOT.parent) if path.is_relative_to(ROOT.parent) else path
+    print(f"{shown.as_posix()}  {image.size[0]}×{image.size[1]}  {path.stat().st_size // 1024} Ko")
 
 
 def current_size(path):
@@ -467,6 +504,8 @@ def current_size(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--loadix", type=Path, help="dossier du dépôt Loadix à mettre à jour aussi")
+    parser.add_argument("--redirection", type=Path,
+                        help="dossier du site d'adresses movix.online (movixredirection) à mettre à jour aussi")
     args = parser.parse_args()
 
     names = {"groupe-ix": "Groupe ix", "movix": "Movix", "loadix": "Loadix"}
@@ -531,6 +570,24 @@ def main():
         path = ROOT / f"app/android/app/src/main/res/mipmap-{d}/ic_launcher_round.png"
         save_png(rasterize(icons["movix"], (100, 100), current_size(path), bg=BG,
                            scale=ROUND_SCALE, circle=True), path, False)
+
+    if args.redirection:
+        site = args.redirection.resolve()
+        # Favicon SVG, icône PNG (écran d'accueil Apple, navigateurs sans
+        # favicon SVG, données structurées) et image de partage en PNG.
+        (site / "public/favicon.svg").write_text(icon_svg, encoding="utf-8", newline="\n")
+        save_png(rasterize(icons["movix"], (100, 100), (1024, 1024), bg=BG), site / "public/movix.png", True)
+        save_png(og_image(), site / "public/og-image.png", True)
+        # Logo long (barre du haut, pied de page) et logos de la section du groupe ix.
+        layers, viewbox = lockup("Movıx", RED, "currentColor", perforated=True)
+        component = site / "src/components/brand/MovixWordmark.tsx"
+        component.parent.mkdir(parents=True, exist_ok=True)
+        component.write_text(wordmark_component(layers, viewbox), encoding="utf-8", newline="\n")
+        for name in ("groupe-ix", "loadix"):
+            path = site / f"src/assets/brand/{name}.svg"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(svg_doc(icons[name], (100, 100), names[name], bg=BG, size=(512, 512)),
+                            encoding="utf-8", newline="\n")
 
     if args.loadix:
         loadix = args.loadix.resolve()
