@@ -512,7 +512,6 @@ def main():
     # Icônes Movix déjà présentes dans le dépôt : même nom, même taille.
     densities = ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")
     square = [
-        "movix.png",
         "public/movix.png",
         "public/movix512.png",
         "public/movix-192.png",
