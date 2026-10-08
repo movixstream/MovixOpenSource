@@ -6,10 +6,10 @@
   "Other": [
     {
       "name": "Movix",
-      "version": "2.6.4",
+      "version": "2.6.5",
       "down": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app/movix-ios-unsigner.ipa",
       "category": "Other",
-      "description": "Application iOS officielle de Movix : navigation intégrée, lecture vidéo native, image dans l'image, Chromecast et DNS sécurisé. L'IPA distribuée ici n'est pas signée : Scarlet la signe au moment de l'installation. Version 2.6.4 (build 41). Notes de version : https://github.com/movixstream/MovixOpenSource/releases/tag/ios-v2.6.4",
+      "description": "Application iOS officielle de Movix : navigation intégrée, lecture vidéo native, image dans l'image, Chromecast et DNS sécurisé. L'IPA distribuée ici n'est pas signée : Scarlet la signe au moment de l'installation. Version 2.6.5 (build 42). Notes de version : https://github.com/movixstream/MovixOpenSource/releases/tag/ios-v2.6.5",
       "bundleID": "com.movix.app",
       "icon": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app/ios/Movix/Images.xcassets/AppIcon.appiconset/icon-1024.png",
       "dev": "Movix",
