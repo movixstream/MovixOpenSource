@@ -9,10 +9,11 @@ import { discordAuth } from '../services/discordAuth';
 import { googleAuth } from '../services/googleAuth';
 import { broadcastAuthChange, clearPendingAuthAction, clearStoredAuthSession, setPendingAuthAuthorize } from '../utils/accountAuth';
 import { useProfile } from '../context/ProfileContext';
+import movixIcon from '@/assets/brand/movix.svg';
 
 const API_URL = import.meta.env.VITE_MAIN_API;
 const DEFAULT_AVATAR = 'https://as2.ftcdn.net/v2/jpg/05/89/93/27/1000_F_589932782_vQAEAZhHnq1QCGu5ikwrYaQD0Mmurm0N.webp';
-const MOVIX_LOGO_SRC = '/movix.png';
+const MOVIX_LOGO_SRC = movixIcon;
 
 interface OAuthPreviewResponse {
   success: boolean;

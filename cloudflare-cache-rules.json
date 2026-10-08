@@ -31,7 +31,7 @@
       {
         "ref": "movix_public_media",
         "description": "Movix - Medias publics selon les en-tetes origine",
-        "expression": "((http.host in {\"{{DOMAIN}}\" \"www.{{DOMAIN}}\"}) and ((starts_with(http.request.uri.path, \"/avatars/\") or starts_with(http.request.uri.path, \"/live/\") or starts_with(http.request.uri.path, \"/help/\") or starts_with(http.request.uri.path, \"/WatchpartyTutorial/\")) or http.request.uri.path in {\"/apothecary_backdrop.jpg\" \"/apple-touch-icon-180.png\" \"/favicon-48.png\" \"/movix-192.png\" \"/movix.png\" \"/movix512.png\" \"/thumbnail.png\"}) and lower(http.request.uri.path.extension) in {\"png\" \"jpg\" \"jpeg\" \"gif\" \"webp\" \"avif\" \"svg\" \"ico\" \"woff\" \"woff2\" \"ttf\" \"otf\" \"eot\" \"mp4\" \"webm\" \"m4v\" \"mp3\"}) and not any(lower(http.request.headers.names[*])[*] eq \"authorization\")",
+        "expression": "((http.host in {\"{{DOMAIN}}\" \"www.{{DOMAIN}}\"}) and ((starts_with(http.request.uri.path, \"/avatars/\") or starts_with(http.request.uri.path, \"/live/\") or starts_with(http.request.uri.path, \"/help/\") or starts_with(http.request.uri.path, \"/WatchpartyTutorial/\")) or http.request.uri.path in {\"/apothecary_backdrop.jpg\" \"/apple-touch-icon-180.png\" \"/favicon-48.png\" \"/movix-192.png\" \"/movix.png\" \"/movix.svg\" \"/movix512.png\" \"/thumbnail.png\"}) and lower(http.request.uri.path.extension) in {\"png\" \"jpg\" \"jpeg\" \"gif\" \"webp\" \"avif\" \"svg\" \"ico\" \"woff\" \"woff2\" \"ttf\" \"otf\" \"eot\" \"mp4\" \"webm\" \"m4v\" \"mp3\"}) and not any(lower(http.request.headers.names[*])[*] eq \"authorization\")",
         "action": "set_cache_settings",
         "action_parameters": {
           "browser_ttl": {

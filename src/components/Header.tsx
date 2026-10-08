@@ -8,6 +8,7 @@ import { Film, Search, Menu, X, Star, Tv2, Users, Clapperboard, Bell, Tv, Lightb
 import { motion, AnimatePresence } from 'framer-motion';
 import ProfileMenu from './ProfileMenu';
 import NotificationsPopup from './NotificationsPopup';
+import { MovixWordmark } from './brand/MovixWordmark';
 import { getUnreadNotificationsCount, getNotificationsDisabled } from '../services/apiNotificationService';
 import { encodeId } from '../utils/idEncoder';
 
@@ -449,7 +450,7 @@ const Header: React.FC = () => {
               {/* Logo */}
               <Link
                 to="/"
-                className="text-2xl md:text-3xl font-extrabold flex items-center hover:scale-105 transition-transform duration-300 flex-shrink-0"
+                className="flex items-center hover:scale-105 transition-transform duration-300 flex-shrink-0"
                 onClick={(e) => {
                   if (location.pathname === '/') {
                     e.preventDefault();
@@ -462,7 +463,8 @@ const Header: React.FC = () => {
                   }
                 }}
               >
-                <span className="text-red-600 tracking-wider">MOVIX</span>
+                {/* Logo long [Movix] : rouge fixe hors palette, lettres claires. */}
+                <MovixWordmark className="h-[30px] w-auto text-[#f4f4f0] md:h-9" />
               </Link>
 
               <a

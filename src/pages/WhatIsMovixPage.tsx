@@ -7,6 +7,7 @@ import { SquareBackground } from '../components/ui/square-background';
 import ShinyText from '../components/ui/shiny-text';
 import AnimatedBorderCard from '../components/ui/animated-border-card';
 import { Button } from '../components/ui/button';
+import movixIcon from '@/assets/brand/movix.svg';
 
 // Sources supportées
 const supportedSources = [
@@ -105,7 +106,7 @@ const WhatIsMovixPage: React.FC = () => {
               className="flex justify-center mb-8"
             >
               <img
-                src="/movix.png"
+                src={movixIcon}
                 alt="Movix Logo"
                 className="w-28 h-28 sm:w-36 sm:h-36 md:w-44 md:h-44 drop-shadow-[0_0_40px_rgba(220,38,38,0.35)]"
                 style={{ transform: 'rotate(-8deg)' }}
@@ -342,7 +343,7 @@ const WhatIsMovixPage: React.FC = () => {
             className="p-8 backdrop-blur-sm"
           >
             <img
-              src="/movix.png"
+              src={movixIcon}
               alt="Movix Logo"
               className="w-12 h-12 mx-auto mb-4 drop-shadow-lg"
             />

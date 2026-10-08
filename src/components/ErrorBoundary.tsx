@@ -1,6 +1,7 @@
 import React from 'react';
 import { isChunkLoadError, isChunkResponseError, reloadForChunkFailure } from '../routing/lazyWithRetry';
 import { captureCrash, isRecoverableError } from '../utils/errorTracking';
+import { MovixWordmark } from './brand/MovixWordmark';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -144,7 +145,7 @@ class ErrorBoundary extends React.Component<React.PropsWithChildren, ErrorBounda
       return (
         <div style={{ minHeight: '100vh', backgroundColor: '#000', color: '#f3f4f6', fontFamily: 'ui-sans-serif, system-ui, sans-serif', padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ maxWidth: 420, width: '100%', textAlign: 'center' }}>
-            <div style={{ fontSize: 32, fontWeight: 900, color: '#dc2626', letterSpacing: '0.1em', marginBottom: 24 }}>MOVIX</div>
+            <MovixWordmark style={{ display: 'block', height: 44, width: 'auto', margin: '0 auto 24px', color: '#f4f4f0' }} />
             {reloadScheduled && (
               <div style={{ width: 40, height: 40, margin: '0 auto 24px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: '#dc2626', borderRadius: '50%', animation: 'movix-eb-spin 0.8s linear infinite' }} />
             )}

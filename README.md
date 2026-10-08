@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="./movix.png" alt="Movix" width="120" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./brand/movix-inverse.svg" />
+    <img src="./brand/movix-horizontal.svg" alt="Movix" width="320" />
+  </picture>
 </p>
 
 <h1 align="center">Movix</h1>

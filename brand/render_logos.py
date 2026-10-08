@@ -16,10 +16,15 @@ Repères relevés sur Loadix :
   crochets de 7, point carré de 18 à la place du point du i).
 
 Chaque PNG existant est réécrit à son nom et à sa taille actuels : seul
-le dessin change.
+le dessin change. Le script régénère aussi le composant React du logo long
+(src/components/brand/MovixWordmark.tsx : en-tête, écran d'erreur), l'icône
+SVG du site et des extensions et, avec --loadix, les logos SVG de Loadix
+(contours vectorisés), son favicon, son avatar rond et l'icône Movix de son
+bouton de connexion.
 """
 import argparse
 import math
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -338,6 +343,31 @@ def svg_doc(layers, viewbox, title, bg=None, size=None, scale=1.0):
     return "\n".join(lines) + "\n"
 
 
+def wordmark_component(layers, viewbox):
+    """Composant React du logo long, régénéré avec le reste du kit."""
+    paths = "\n".join(
+        f'      <path fill="{layer["color"]}"'
+        + (' fillRule="evenodd"' if layer["rule"] == "evenodd" else "")
+        + f' d="{layer["d"]}" />'
+        for layer in layers
+    )
+    return f"""// Généré par brand/render_logos.py : ne pas modifier à la main.
+import type {{ SVGProps }} from 'react';
+
+/**
+ * Logo long [Movix] : crochets perforés et point du i en rouge, lettres en
+ * currentColor pour suivre la couleur du texte autour.
+ */
+export function MovixWordmark(props: SVGProps<SVGSVGElement>) {{
+  return (
+    <svg viewBox="0 0 {num(viewbox[0])} {num(viewbox[1])}" role="img" aria-label="Movix" {{...props}}>
+{paths}
+    </svg>
+  );
+}}
+"""
+
+
 def rasterize(layers, viewbox, out, bg=None, scale=1.0, circle=False):
     """Trame chaque calque en suréchantillonné puis compose en alpha.
 
@@ -358,14 +388,23 @@ def rasterize(layers, viewbox, out, bg=None, scale=1.0, circle=False):
         return ((y - cy) * scale + cy) * unit
 
     def coverage(polys_px, rule):
-        acc = np.zeros((H * k, W * k), np.int16)
+        # Chaque contour est tramé dans son seul rectangle englobant : un
+        # masque pleine taille par contour épuisait la mémoire à 4096 px.
+        acc = np.zeros((H * k, W * k), np.int8)
         for poly in polys_px:
-            mask = Image.new("L", (W * k, H * k), 0)
-            ImageDraw.Draw(mask).polygon(poly, fill=1)
-            area = sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(poly, poly[1:] + poly[:1]))
-            acc += np.asarray(mask, np.int16) * (1 if rule == "evenodd" or area >= 0 else -1)
+            xs, ys = [p[0] for p in poly], [p[1] for p in poly]
+            x0, y0 = max(0, math.floor(min(xs))), max(0, math.floor(min(ys)))
+            x1, y1 = min(W * k, math.ceil(max(xs)) + 1), min(H * k, math.ceil(max(ys)) + 1)
+            if x1 <= x0 or y1 <= y0:
+                continue
+            mask = Image.new("L", (x1 - x0, y1 - y0), 0)
+            ImageDraw.Draw(mask).polygon([(x - x0, y - y0) for x, y in poly], fill=1)
+            area = sum(a * d - c * b for (a, b), (c, d) in zip(poly, poly[1:] + poly[:1]))
+            acc[y0:y1, x0:x1] += np.asarray(mask, np.int8) * (1 if rule == "evenodd" or area >= 0 else -1)
         filled = (acc % 2 != 0) if rule == "evenodd" else (acc != 0)
-        return Image.fromarray((filled * 255).astype(np.uint8), "L").reduce(k)
+        # Reste en octets : `filled * 255` passait par un tableau int64 de
+        # plus de 500 Mo pour les images de 2100 px.
+        return Image.fromarray(filled.view(np.uint8) * np.uint8(255), "L").reduce(k)
 
     result = Image.new("RGBA", out, (0, 0, 0, 0))
     if bg:
@@ -450,6 +489,22 @@ def main():
                                                     encoding="utf-8", newline="\n")
         save_png(rasterize(layers, viewbox, out, bg=bg), BRAND / f"movix-{variant}.png", bg is not None)
 
+    # Logo long du site (en-tête, écran d'erreur) : lettres en currentColor.
+    layers, viewbox = lockup("Movıx", RED, "currentColor", perforated=True)
+    component = ROOT / "src/components/brand/MovixWordmark.tsx"
+    component.parent.mkdir(exist_ok=True)
+    component.write_text(wordmark_component(layers, viewbox), encoding="utf-8", newline="\n")
+
+    # Icône en SVG pour le site et les extensions : favicon, page À propos,
+    # page OAuth, fenêtre des extensions. Les PNG restent pour les manifestes,
+    # les notifications et les e-mails, qui n'acceptent pas le SVG.
+    icon_svg = svg_doc(icons["movix"], (100, 100), "Movix", bg=BG, size=(512, 512))
+    for rel in ("public/movix.svg", "src/assets/brand/movix.svg",
+                "extension/Chrome/movix.svg", "extension/Firefox/movix.svg"):
+        path = ROOT / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(icon_svg, encoding="utf-8", newline="\n")
+
     # Icônes Movix déjà présentes dans le dépôt : même nom, même taille.
     densities = ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")
     square = [
@@ -484,6 +539,27 @@ def main():
         size = current_size(loadix / "logos/loadix-brackets-icon.png")
         save_png(rasterize(icons["loadix"], (100, 100), size, bg=BG, scale=AVATAR_SCALE),
                  avatar.with_suffix(".png"), True)
+        # Copie servie par le site (avatar rond du bot officiel).
+        for suffix in (".svg", ".png"):
+            shutil.copyfile(avatar.with_suffix(suffix),
+                            loadix / f"loadix-web/public/logos/loadix-brackets-avatar{suffix}")
+        # Logos Loadix en SVG à contours vectorisés : même dessin que les PNG,
+        # sans dépendre du chargement d'Inter (le texte SVG plaçait mal le
+        # point carré et les crochets tant que la police n'était pas là).
+        horizontal, lockup_box = lockup("Loadıx", BLUE, INK, perforated=False)
+        inverse, _ = lockup("Loadıx", BLUE, LIGHT, perforated=False)
+        files = {
+            "loadix-brackets-horizontal.svg": svg_doc(horizontal, lockup_box, "[Loadix]"),
+            "loadix-brackets-inverse.svg": svg_doc(inverse, lockup_box, "[Loadix] inverse"),
+            "loadix-brackets-icon.svg": svg_doc(icons["loadix"], (100, 100), "Loadix", size=(100, 100)),
+        }
+        for folder in (loadix / "logos", loadix / "loadix-web/public/logos"):
+            for name, content in files.items():
+                (folder / name).write_text(content, encoding="utf-8", newline="\n")
+        # Favicon sur fond clair, comme l'icône PNG.
+        (loadix / "loadix-web/public/favicon.svg").write_text(
+            svg_doc(icons["loadix"], (100, 100), "Loadix", bg=BG, size=(100, 100)),
+            encoding="utf-8", newline="\n")
         # Bouton « Continuer avec Movix » de la page de connexion Loadix.
         path = loadix / "loadix-web/public/icons/movix.png"
         save_png(rasterize(icons["movix"], (100, 100), current_size(path), bg=BG), path, True)
