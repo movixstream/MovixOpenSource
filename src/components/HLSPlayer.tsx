@@ -190,6 +190,7 @@ import {
 import { useExternalSubtitles } from '../hooks/useExternalSubtitles.ts';
 import type { SubtitleTrack } from '../services/subtitles/index.ts';
 import { getEmbeddedSubtitleContent, getEmbeddedSubtitleTracks } from '../utils/embeddedSubtitles.ts';
+import { isHiddenOnTv } from '@/routing/registry';
 import type {
   KisskhFallbackTransport,
   KisskhSource,
@@ -12362,6 +12363,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                   </button>
                 </div>
               )}
+              {/* Watch Party : hors périmètre V1 sur TV (/watchparty/create non monté). */}
+              {!isHiddenOnTv('/watchparty/create') && (
               <div className="relative flex items-center h-[24px]">
                 <button
                   onClick={toggleWatchParty}
@@ -12384,6 +12387,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                   </motion.div>
                 </button>
               </div>
+              )}
               <div className="relative flex items-center h-[24px]">
                 <button
                   onClick={togglePip}
