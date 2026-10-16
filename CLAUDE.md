@@ -207,6 +207,24 @@ Admin : éditer la paste rentry pour ajouter/retirer un miroir. Nouveaux clients
 
 Scope : ne sauve QUE les users ayant déjà visité `movix.tax` au moins une fois avant le blocage (sinon SW pas installé). Les nouveaux utilisateurs passent par Telegram `@ix_annonces`.
 
+### TV Platform Marker (`?platform=tv`)
+
+`src/utils/tvPlatform.ts` answers one question: are we on a TV? The webOS loader
+(packaged out of tree as an `.ipk`) opens the site with
+`?platform=tv&tvsrc=webos-ipk`; that query param disappears on the first SPA
+navigation, so `persistTvPlatformFromUrl()` runs in `main.tsx` before the first
+render and mirrors it to `localStorage`. A TV user-agent is the fallback when the
+marker is missing (TV's built-in browser opened by hand, storage cleared).
+
+Do not confuse it with the weak-hardware regex in `utils/animationPreferences.ts`:
+that one drives light mode and a low-end phone matches it without being a TV.
+
+V1 scope is restricted by `tvExcluded` on `RouteEntry` (`src/routing/registry.tsx`):
+`App.tsx` filters those routes out when `isTvPlatform()`, so a deep link to an
+excluded route lands on `<NotFound />`. Menus must hide their links through
+`isHiddenOnTv(href)` (`src/routing/tvScope.ts`), which reads the registry — never
+a hand-copied list of paths, which would silently drift.
+
 ### Deployment
 - Frontend: Cloudflare Pages (uses `CF_PAGES_COMMIT_SHA` for build ID)
 - Build ID injected as `VITE_APP_BUILD_ID`

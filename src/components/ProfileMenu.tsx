@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LogOut, User, List, Star, Check, ChevronDown, Crown, Settings, Shield } from 'lucide-react';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
+import { isHiddenOnTv } from '@/routing/registry';
 import { googleAuth } from '../services/googleAuth';
 import { discordAuth } from '../services/discordAuth';
 import { useVipModal } from '../context/VipModalContext';
@@ -160,6 +161,8 @@ const ProfileMenu: React.FC = () => {
   };
 
   // Fonction pour ouvrir la modal VIP
+  const showVipButton = isVip || !isHiddenOnTv('/vip');
+
   const handleOpenVipModal = () => {
     setIsOpen(false); // Fermer le menu de profil
     if (openVipModal) {
@@ -307,7 +310,7 @@ const ProfileMenu: React.FC = () => {
                   </div>
                   
                   <div className="px-4 py-3 border-t border-gray-700/50 space-y-3">
-                    {canAccessAdminPanel && (
+                    {canAccessAdminPanel && !isHiddenOnTv('/admin') && (
                       <Link
                         to="/admin"
                         className="flex items-center justify-center gap-2 w-full px-3 py-3 max-md:py-4 bg-gradient-to-r from-amber-500/90 to-red-600/90 hover:from-amber-500 hover:to-red-600 text-white rounded-lg transition-colors shadow-md"
@@ -318,7 +321,9 @@ const ProfileMenu: React.FC = () => {
                       </Link>
                     )}
 
-                    {/* Bouton VIP */}
+                    {/* Bouton VIP — l'invitation à devenir VIP mène à /vip, hors
+                        périmètre V1 sur TV ; le statut VIP, lui, reste affiché. */}
+                    {showVipButton && (
                     <motion.div
                       whileHover={isVip ? undefined : { scale: 1.02 }}
                       whileTap={isVip ? undefined : { scale: 0.98 }}
@@ -334,6 +339,7 @@ const ProfileMenu: React.FC = () => {
                         {isVip ? t('vip.youAreVip') : t('vip.becomeVip')}
                       </span>
                     </motion.div>
+                    )}
 
                     <motion.div 
                       whileHover={{ scale: 1.02 }}
@@ -411,6 +417,7 @@ const ProfileMenu: React.FC = () => {
                     </Link>
 
                     {/* Bouton VIP pour les non-connectés */}
+                    {showVipButton && (
                     <motion.button
                       whileHover={isVip ? undefined : { scale: 1.02 }}
                       whileTap={isVip ? undefined : { scale: 0.98 }}
@@ -426,6 +433,7 @@ const ProfileMenu: React.FC = () => {
                         {isVip ? t('vip.youAreVip') : t('vip.becomeVip')}
                       </span>
                     </motion.button>
+                    )}
                   </div>
                 </div>
               )}
