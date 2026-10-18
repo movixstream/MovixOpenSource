@@ -23,6 +23,17 @@ const { readAccountData } = require('../utils/accountDataCache');
 const { logSyncErrorToDiscord } = require('../utils/discord');
 const { createRedisRateLimitStore } = require('../utils/redisRateLimitStore');
 const {
+  applyMarkOps,
+  ensureImported,
+  marksOfProfile,
+  mirrorSyncOps,
+  pruneProgressKeys,
+  touchesMarks,
+} = require('../utils/historyImport');
+const { parseMarksKey, removeTitleFromProfile } = require('../utils/historyRules');
+const { createHistoryStore } = require('../utils/historyStore');
+const { createDefaultMediaStore } = require('../utils/mediaStore');
+const {
   ALLOWED_SYNC_USER_TYPES,
   SYNC_LIMITS,
   SyncPolicyError,
@@ -205,6 +216,224 @@ async function withProfileSyncLock(userType, userId, profileId, task) {
     task,
     { timeoutSeconds: 30 }
   );
+}
+
+// === Historique (tables watch_progress / watch_history) ===
+// La synchro recopie `progress_*` et `continueWatching` dans les tables « au
+// mieux » : rien de ce bloc ne doit faire échouer ni ralentir la réponse.
+let historyStore = null;
+
+function getHistoryStore() {
+  if (!historyStore) {
+    const pool = getPool();
+    historyStore = createHistoryStore({ pool, mediaStore: createDefaultMediaStore(pool) });
+  }
+  return historyStore;
+}
+
+// Construit le vrai magasin (et charge le cache TMDB) seulement au premier usage.
+const lazyHistoryStore = {
+  recordProgress: (...args) => getHistoryStore().recordProgress(...args),
+  touch: (...args) => getHistoryStore().touch(...args),
+  hide: (...args) => getHistoryStore().hide(...args),
+  hideAll: (...args) => getHistoryStore().hideAll(...args),
+  addMarks: (...args) => getHistoryStore().addMarks(...args),
+  removeMarks: (...args) => getHistoryStore().removeMarks(...args),
+  replaceMarks: (...args) => getHistoryStore().replaceMarks(...args),
+};
+
+// Profils dont les marques ont été recalées sur le fichier dans ce worker
+// (au plus 10 000, le plus ancien sort en premier ; un accès le rafraîchit).
+const MAX_VERIFIED_MARK_OWNERS = 10000;
+const verifiedMarkOwners = new Set();
+
+function markOwnerKey(owner) {
+  return `${owner.userType}:${owner.userId}:${owner.profileId}`;
+}
+
+function rememberVerifiedMarks(key) {
+  verifiedMarkOwners.delete(key);
+  if (verifiedMarkOwners.size >= MAX_VERIFIED_MARK_OWNERS) {
+    verifiedMarkOwners.delete(verifiedMarkOwners.values().next().value);
+  }
+  verifiedMarkOwners.add(key);
+}
+
+/**
+ * Recale les marques « Déjà vu » du profil sur son fichier, relu SOUS le
+ * verrou de synchro : aucun POST ne peut écrire de marque pendant ce temps,
+ * donc un retrait fait avant ou après n'est jamais défait. Clé de marques
+ * illisible : ajouts seulement. Ne lève jamais.
+ * @returns {Promise<boolean>} vrai si le recalage a réussi (profil retenu
+ *   comme vérifié dans ce worker)
+ */
+async function resyncProfileMarks(owner) {
+  try {
+    await withProfileSyncLock(owner.userType, owner.userId, owner.profileId, async () => {
+      const { marks, complete } = marksOfProfile(await readProfileImportData(owner.userType, owner.userId, owner.profileId));
+      if (complete) await lazyHistoryStore.replaceMarks(owner, marks);
+      else if (marks.length > 0) await lazyHistoryStore.addMarks(owner, marks);
+    });
+    rememberVerifiedMarks(markOwnerKey(owner));
+    return true;
+  } catch (error) {
+    console.warn('[HISTORY] Marques « Déjà vu » du profil non recalées:', error && error.message ? error.message : error);
+    return false;
+  }
+}
+
+/**
+ * Marques du profil fiables pour l'onglet « Historique » : recalées une fois
+ * par profil et par worker (après un import, un redémarrage, ou un profil
+ * importé avant les marques), et de nouveau tant que le recalage échoue.
+ * @returns {Promise<boolean>} faux si le recalage vient d'échouer
+ */
+async function ensureProfileMarks(owner) {
+  const key = markOwnerKey(owner);
+  if (verifiedMarkOwners.has(key)) {
+    rememberVerifiedMarks(key);
+    return true;
+  }
+  return resyncProfileMarks(owner);
+}
+
+/**
+ * « Supprimer de l'historique » : sous le verrou de synchro du profil,
+ * 1. retire le titre du fichier du profil (lu complet) et l'écrit s'il a
+ *    changé ; au-delà de 600 clés, même règle que POST /sync (élagage des
+ *    plus vieilles progress_* seulement après un import réussi, sinon 413) ;
+ * 2. attend (au plus 10 s) les travaux d'historique encore en cours pour ce
+ *    profil (miroir et import lancés sans attente par un POST précédent) :
+ *    sinon ils pourraient réécrire les lignes du titre après le DELETE ;
+ * 3. efface le titre en base (historique, progression, marques, temps du
+ *    lecteur web : `deleteTitle`) ; si l'attente a expiré, attend encore une
+ *    fois puis efface de nouveau.
+ * Le fichier est nettoyé sous le verrou : les POST suivants, l'import et le
+ * recalage des marques relisent un fichier sans le titre. Une erreur
+ * d'écriture ou SQL est propagée (500) ; un nouvel essai est sans risque :
+ * fichier déjà propre → pas de réécriture, puis la base est effacée.
+ */
+async function deleteTitleFromProfile(owner, mediaType, tmdbId) {
+  return withProfileSyncLock(owner.userType, owner.userId, owner.profileId, async () => {
+    const snapshot = await readProfileSnapshot(owner.userType, owner.userId, owner.profileId);
+    const data = snapshot.original ? { ...snapshot.original } : { ...snapshot.data };
+    if (removeTitleFromProfile(data, mediaType, tmdbId)) {
+      if (Object.keys(data).length > SYNC_LIMITS.maxKeysPerProfile) {
+        const importStatus = await runHistoryImport(owner, { ...data });
+        if (importStatus === 'imported' || importStatus === 'already') {
+          pruneProgressKeys(data, SYNC_LIMITS.maxKeysPerProfile);
+        }
+      }
+      // Toujours au-delà de la limite : 413 (SyncPolicyError), comme un POST.
+      const nextSnapshot = sanitizeProfileData(data);
+      if (!(await writeProfileSnapshot(owner.userType, owner.userId, owner.profileId, nextSnapshot))) {
+        throw new Error('Écriture du profil impossible');
+      }
+    }
+    const { done } = await waitHistoryWork(owner);
+    await getHistoryStore().deleteTitle(owner, mediaType, tmdbId);
+    // Attente expirée : un travail pouvait encore écrire ; on le laisse
+    // finir (au plus 10 s de plus) et on efface de nouveau.
+    if (!done) {
+      await waitHistoryWork(owner);
+      await getHistoryStore().deleteTitle(owner, mediaType, tmdbId);
+    }
+  });
+}
+
+/**
+ * Marques modifiées hors de `/api/sync` (routes OAuth, sous le verrou déjà
+ * tenu par l'appelant) : même écriture que pour un POST, seulement pour les
+ * clés `watched_*` qui ont changé. Ne lève jamais.
+ */
+async function applyProfileMarkChanges(owner, previousData, nextData) {
+  try {
+    const before = previousData || {};
+    const after = nextData || {};
+    const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])]
+      .filter((key) => parseMarksKey(key) && before[key] !== after[key]);
+    if (keys.length === 0) return;
+    await applyMarkOps(lazyHistoryStore, owner, keys.map((key) => ({ op: 'set', key })), after,
+      new Map(keys.map((key) => [key, before[key]])));
+  } catch (error) {
+    console.warn('[HISTORY] Marques « Déjà vu » OAuth non recopiées:', error && error.message ? error.message : error);
+  }
+}
+
+// Import des anciennes données du profil. Verrou distinct de celui de la
+// synchro : pas d'interblocage. Ne lève jamais ; renvoie le statut de
+// `ensureImported` ('failed' sur une erreur inattendue).
+async function runHistoryImport(owner, profileData) {
+  try {
+    const status = await ensureImported(getPool(), lazyHistoryStore, owner, async () => profileData, {
+      withLock: withMysqlAdvisoryLock,
+      afterImport: resyncProfileMarks,
+    });
+    if (status === 'failed') console.warn('[HISTORY] Import du profil en échec, synchro poursuivie');
+    return status;
+  } catch (error) {
+    console.warn('[HISTORY] Import du profil impossible, synchro poursuivie:', error && error.message ? error.message : error);
+    return 'failed';
+  }
+}
+
+// Profil supprimé : efface sa progression et son historique. Au mieux : ne
+// lève jamais, une erreur est seulement loguée et la suppression continue.
+async function deleteProfileHistory(userType, userId, profileId) {
+  try {
+    if (!getPool()) throw new Error('pool MySQL indisponible');
+    await getHistoryStore().deleteProfile({ userType, userId, profileId });
+  } catch (error) {
+    console.error(`[HISTORY] Historique du profil ${profileId} non effacé:`, error && error.message ? error.message : error);
+  }
+}
+
+// Travaux d'historique lancés sans attente par POST /sync (miroir, import),
+// par profil : la suppression d'un titre les attend pour qu'ils ne
+// réécrivent pas ses lignes après coup. Au plus 10 000 profils suivis ; une
+// entrée part dès que ses travaux sont finis.
+const MAX_PENDING_HISTORY_OWNERS = 10000;
+const PENDING_HISTORY_WAIT_MS = 10 * 1000;
+const pendingHistoryWork = new Map();
+
+function trackHistoryWork(owner, promise) {
+  const key = markOwnerKey(owner);
+  const previous = pendingHistoryWork.get(key);
+  const settled = promise.then(() => {}, () => {});
+  const chained = previous ? Promise.all([previous, settled]).then(() => {}) : settled;
+  if (!previous && pendingHistoryWork.size >= MAX_PENDING_HISTORY_OWNERS) {
+    pendingHistoryWork.delete(pendingHistoryWork.keys().next().value);
+  }
+  pendingHistoryWork.set(key, chained);
+  chained.then(() => {
+    if (pendingHistoryWork.get(key) === chained) pendingHistoryWork.delete(key);
+  });
+}
+
+/**
+ * Attend (au plus 10 s) les travaux d'historique en cours du profil.
+ * @returns {Promise<{ pending: boolean, done: boolean }>} `pending` : il y en
+ *   avait ; `done` : ils sont tous finis (faux si l'attente a expiré)
+ */
+async function waitHistoryWork(owner) {
+  const work = pendingHistoryWork.get(markOwnerKey(owner));
+  if (!work) return { pending: false, done: true };
+  let timer;
+  const expired = new Promise((resolve) => { timer = setTimeout(() => resolve(false), PENDING_HISTORY_WAIT_MS); });
+  const done = await Promise.race([work.then(() => true), expired]);
+  clearTimeout(timer);
+  return { pending: true, done };
+}
+
+// Même import, sans faire attendre la synchro.
+function startHistoryImport(owner, profileData) {
+  trackHistoryWork(owner, Promise.resolve().then(() => runHistoryImport(owner, profileData)));
+}
+
+function startHistoryMirror(owner, ops, finalValues, previousValues) {
+  trackHistoryWork(owner, mirrorSyncOps(lazyHistoryStore, owner, ops, finalValues, previousValues).catch((error) => {
+    console.warn('[HISTORY] Miroir de la synchro impossible:', error && error.message ? error.message : error);
+  }));
 }
 
 function createSyncStatsResponse(profileId, profileStats, legacyStats) {
@@ -421,7 +650,18 @@ async function readProfileSnapshot(userType, userId, profileId) {
   try {
     const fileContent = await fsp.readFile(profilePath, 'utf8');
     const parsed = JSON.parse(fileContent);
-    return sanitizeProfileData(parsed);
+    // Profil déjà au-delà de la limite de clés : élaguer les plus vieilles
+    // progressions EN MÉMOIRE plutôt que de bloquer toute lecture en 413.
+    // Ce snapshot n'est jamais écrit tel quel (`changed: false`) : seul un
+    // POST, après un import réussi de l'historique, écrit le fichier élagué.
+    const original = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...parsed } : null;
+    const pruned = pruneProgressKeys(parsed, SYNC_LIMITS.maxKeysPerProfile);
+    const snapshot = sanitizeProfileData(parsed);
+    if (pruned.length > 0) {
+      // `original` : données complètes du fichier, d'avant l'élagage.
+      return { ...snapshot, changed: false, original };
+    }
+    return snapshot;
   } catch (error) {
     if (error.code === 'ENOENT') return sanitizeProfileData({});
     if (error instanceof SyncPolicyError) throw error;
@@ -436,7 +676,9 @@ function scheduleProfileCleanup(userType, userId, profileId) {
   // réécrire une ancienne version par-dessus une synchronisation plus récente.
   withProfileSyncLock(userType, userId, profileId, async () => {
     const latest = await readProfileSnapshot(userType, userId, profileId);
-    if (latest.changed) await writeProfileSnapshot(userType, userId, profileId, latest);
+    // Jamais d'écriture d'un fichier élagué en mémoire (`original`) : ses
+    // progressions ne sont peut-être pas encore importées dans l'historique.
+    if (latest.changed && !latest.original) await writeProfileSnapshot(userType, userId, profileId, latest);
   }).catch(error => {
     console.error(`Erreur lors du nettoyage du profil ${profileId}:`, error.message);
   });
@@ -446,6 +688,13 @@ async function readProfileData(userType, userId, profileId) {
   const snapshot = await readProfileSnapshot(userType, userId, profileId);
   if (snapshot.changed) scheduleProfileCleanup(userType, userId, profileId);
   return snapshot.data;
+}
+
+// Données complètes du profil pour l'import de l'historique : jamais la vue
+// élaguée en mémoire, sinon les plus vieilles progressions seraient perdues.
+async function readProfileImportData(userType, userId, profileId) {
+  const snapshot = await readProfileSnapshot(userType, userId, profileId);
+  return snapshot.original ? { ...snapshot.original } : snapshot.data;
 }
 
 // Privé : seuls les résultats de sanitizeProfileData sont transmis ici.
@@ -536,13 +785,46 @@ router.post('/sync', syncRateLimit, rejectOversizedSync, authorizeSyncWrite, ...
       getOwnedProfile(userData, profileId);
 
       const snapshot = await readProfileSnapshot(userType, finalUserId, profileId);
-      const serverData = snapshot.data;
+      // Fichier déjà au-delà de la limite : on repart des données complètes,
+      // l'élagage en mémoire de la lecture n'est jamais écrit tel quel.
+      const serverData = snapshot.original ? { ...snapshot.original } : snapshot.data;
+      const owner = { userType, userId: finalUserId, profileId };
+      // Données d'avant les ops et d'avant tout élagage, pour l'import.
+      const importSource = { ...serverData };
+
       const previousValues = new Map(ops.map(op => [op.key, serverData[op.key]]));
       ops.forEach((op) => applySyncOperation(serverData, op));
+      // Valeurs finales des clés touchées, lues avant l'élagage : une
+      // progression élaguée du fichier reste recopiée dans l'historique.
+      const finalValues = Object.fromEntries([...previousValues.keys()].map(key => [key, serverData[key]]));
+
+      // Plus de 413 TOO_MANY_KEYS : au-delà de la limite, les plus vieilles
+      // progress_* sortent du fichier. On n'élague qu'une fois le profil
+      // importé dans l'historique (import attendu ici, seulement dans ce cas) ;
+      // sinon rien n'est élagué et la limite répond 413 comme avant.
+      let prunedKeys = [];
+      if (Object.keys(serverData).length > SYNC_LIMITS.maxKeysPerProfile) {
+        const importStatus = await runHistoryImport(owner, importSource);
+        if (importStatus === 'imported' || importStatus === 'already') {
+          prunedKeys = pruneProgressKeys(serverData, SYNC_LIMITS.maxKeysPerProfile);
+          if (prunedKeys.length > 0) {
+            console.warn(`[HISTORY] ${prunedKeys.length} anciennes clés progress_* élaguées pour ${userType}:${finalUserId}:${profileId}, à retirer aussi côté client`);
+          }
+        } else {
+          console.warn(`[HISTORY] Import non fait (${importStatus}) : pas d'élagage pour ${userType}:${finalUserId}:${profileId}`);
+        }
+      } else {
+        // Cas courant : import des anciennes données en tâche de fond.
+        startHistoryImport(owner, importSource);
+      }
+
       // Le stockage synchronisé ne contient que des chaînes : undefined
       // distingue donc une clé absente sans comparer/sérialiser tout le profil.
-      const changed = [...previousValues].some(([key, value]) => serverData[key] !== value);
-      const nextSnapshot = changed ? sanitizeProfileData(serverData) : snapshot;
+      const changed = prunedKeys.length > 0
+        || [...previousValues].some(([key, value]) => serverData[key] !== value);
+      // Avec `original`, le snapshot lu est élagué en mémoire : toujours revalider
+      // les données complètes (413 si l'élagage n'a pas eu lieu).
+      const nextSnapshot = changed || snapshot.original ? sanitizeProfileData(serverData) : snapshot;
 
       if (changed || snapshot.changed) {
         const writeSuccess = await writeProfileSnapshot(userType, finalUserId, profileId, nextSnapshot);
@@ -552,6 +834,15 @@ router.post('/sync', syncRateLimit, rejectOversizedSync, authorizeSyncWrite, ...
           throw new Error('Failed to save data');
         }
       }
+
+      // Marques « Déjà vu » : écrites ici, sous le verrou et attendues, pour
+      // que deux envois s'appliquent dans l'ordre. Ne lève jamais.
+      // Données finales complètes : un épisode retiré d'une clé reste marqué
+      // s'il l'est encore par une autre (watched_tv_episodes / watched_episodes_tv_*).
+      if (touchesMarks(ops)) await applyMarkOps(lazyHistoryStore, owner, ops, serverData, previousValues);
+
+      // Recopie dans l'historique sans faire attendre la réponse.
+      startHistoryMirror(owner, ops, finalValues, previousValues);
 
       return nextSnapshot.stats;
     });
@@ -704,6 +995,14 @@ module.exports.waitForOperations = waitForOperations;
 module.exports.readUserData = readUserData;
 module.exports.writeUserData = writeUserData;
 module.exports.readProfileData = readProfileData;
+module.exports.readProfileImportData = readProfileImportData;
+// Magasin d'historique partagé avec routes/history.js (construit au premier usage).
+module.exports.getHistoryStore = getHistoryStore;
+module.exports.resyncProfileMarks = resyncProfileMarks;
+module.exports.ensureProfileMarks = ensureProfileMarks;
+module.exports.applyProfileMarkChanges = applyProfileMarkChanges;
+module.exports.deleteTitleFromProfile = deleteTitleFromProfile;
+module.exports.deleteProfileHistory = deleteProfileHistory;
 module.exports.writeProfileData = writeProfileData;
 module.exports.withProfileSyncLock = withProfileSyncLock;
 module.exports.USERS_DIR = USERS_DIR;

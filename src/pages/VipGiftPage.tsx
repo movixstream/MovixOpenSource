@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { ArrowLeft, Copy, Gift, Loader2, LockKeyhole, ShieldCheck, Sparkles, Unlock } from 'lucide-react';
+import { ArrowLeft, Copy, Gift, KeyRound, Loader2, LockKeyhole, ShieldCheck, Sparkles, Unlock } from 'lucide-react';
 
 import TurnstileWidget from '../components/TurnstileWidget';
 import AnimatedBorderCard from '../components/ui/animated-border-card';
@@ -11,6 +11,7 @@ import BlurText from '../components/ui/blur-text';
 import { Button } from '../components/ui/button';
 import ShinyText from '../components/ui/shiny-text';
 import { SquareBackground } from '../components/ui/square-background';
+import { useVipModal } from '../context/VipModalContext';
 import { getVipGift, unsealVipGift, VipGift } from '../services/vipDonationsService';
 import { TURNSTILE_SITE_KEY, getVipDurationLabel } from '../utils/vipDonationsUi';
 import { copyText } from '../utils/clipboard';
@@ -18,6 +19,7 @@ import { copyText } from '../utils/clipboard';
 const VipGiftPage: React.FC = () => {
   const { giftToken } = useParams<{ giftToken: string }>();
   const { t } = useTranslation();
+  const { openVipModal } = useVipModal();
   const [gift, setGift] = useState<VipGift | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isUnsealing, setIsUnsealing] = useState(false);
@@ -65,6 +67,21 @@ const VipGiftPage: React.FC = () => {
     } else {
       toast.error(t('vipDonations.common.copyFailed'));
     }
+  };
+
+  // La fenêtre VIP n'accepte pas de clé préremplie : on copie la clé avant de
+  // l'ouvrir, il ne reste qu'à la coller.
+  const handleActivateKey = () => {
+    if (!gift?.vipKey) {
+      return;
+    }
+
+    void copyText(gift.vipKey).then((copied) => {
+      if (copied) {
+        toast.success(t('vipDonations.common.copyVipKeySuccess'));
+      }
+    });
+    openVipModal();
   };
 
   const handleUnseal = async () => {
@@ -254,11 +271,28 @@ const VipGiftPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={handleCopyKey}
+                        aria-label={t('vipDonations.track.thanks.copyKey')}
+                        title={t('vipDonations.track.thanks.copyKey')}
                         className="rounded-2xl border border-white/10 p-3 text-white/60 transition-colors hover:border-white/20 hover:text-white group/icon"
                       >
                         <Copy className="h-4 w-4 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity]" />
                       </button>
                     </div>
+
+                    {gift.vipKey && (
+                      <>
+                        <Button
+                          className="mt-4 h-12 w-full bg-cyan-400 text-slate-950 shadow-cyan-500/20 hover:bg-cyan-300 focus-visible:ring-cyan-300/50"
+                          onClick={handleActivateKey}
+                        >
+                          <KeyRound className="mr-2 h-4 w-4" />
+                          {t('vipDonations.track.thanks.activateButton')}
+                        </Button>
+                        <p className="mt-2 text-center text-xs leading-5 text-white/45">
+                          {t('vipDonations.track.thanks.activateHint')}
+                        </p>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -287,10 +321,7 @@ const VipGiftPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="text-sm leading-6 text-white/58">
-                    <p>{t('vipDonations.gift.supportText1')}</p>
-                    <p className="mt-2">{t('vipDonations.gift.supportText2')}</p>
-                  </div>
+                  <p className="text-sm leading-6 text-white/58">{t('vipDonations.gift.supportText1')}</p>
                 </div>
               </AnimatedBorderCard>
 

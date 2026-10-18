@@ -9,9 +9,11 @@ const cheerio = require('cheerio');
 const filename = path.resolve(__dirname, '../wiflix.js');
 const source = fs.readFileSync(filename, 'utf8');
 const start = source.indexOf('const normalizeString =');
-const end = source.indexOf('// === Release Date Extraction ===', start);
+// Recherche et extraction des fiches, jusqu'au chargement des données.
+const end = source.indexOf('// === Data Fetching ===', start);
 assert.ok(start > 0 && end > start);
-const searchSource = source.slice(start, end) + '\nglobalThis.search = searchWiflixMovie;';
+const searchSource = source.slice(start, end)
+  + '\nglobalThis.search = searchWiflixMovie;\nglobalThis.extract = extractWiflixPlayers;';
 const base = 'https://source.test';
 
 function card(title, href, season = null) {
@@ -20,18 +22,25 @@ function card(title, href, season = null) {
   }</div>`;
 }
 
-async function search(title, html) {
+function load(globals) {
   const context = vm.createContext({
-    cheerio,
+    cheerio, URL,
     WIFLIX_BASE_URL: base,
+    refreshStep() {},
+    console: { log() {}, error() {} },
+    ...globals,
+  });
+  vm.runInContext(searchSource, context, { filename });
+  return context;
+}
+
+async function search(title, html) {
+  return load({
     makeWiflixSearchRequest: async (_home, _url, options) => {
       assert.equal(new URLSearchParams(options.data).get('story'), title);
       return { data: html };
     },
-    console: { log() {}, error() {} },
-  });
-  vm.runInContext(searchSource, context, { filename });
-  return context.search(title);
+  }).search(title);
 }
 
 test('From (2022) est reconnu parmi ses autres saisons et les titres contenant From', async () => {
@@ -130,4 +139,41 @@ test('un film ne remplace pas une série, et inversement', async () => {
 test('les recommandations populaires ne sont pas des résultats de recherche', async () => {
   const html = `<div id="no-results-rec">${card('From (2022)', '/recommendation.html', 1)}</div>`;
   assert.equal((await search('From saison 1', html)).url, null);
+});
+
+test('le coupe-circuit Flemmix reste une indisponibilité, sans journal à chaque appel', async () => {
+  const logs = [], steps = [];
+  const capture = { log: (...args) => logs.push(args.join(' ')), error: (...args) => logs.push(args.join(' ')) };
+  const failWith = error => async () => { throw error; };
+  const circuitOpen = Object.assign(new Error('Source Flemmix en pause'), {
+    code: 'SOURCE_CIRCUIT_OPEN', isSourceCircuitOpen: true, httpStatus: 503,
+  });
+  const paused = load({
+    makeWiflixSearchRequest: failWith(circuitOpen), makeWiflixRequest: failWith(circuitOpen),
+    refreshStep: (stage, details, error) => steps.push(`${stage} ${details.query} ${error?.code}`),
+    console: capture,
+  });
+  const result = await paused.search('From saison 1');
+  // Indisponible, et non « aucun résultat » : pas de liste de candidats vide.
+  assert.equal(result.unavailable, true);
+  assert.equal(result.url, null);
+  assert.equal(result.candidates, undefined);
+  assert.deepEqual(steps, ['search_error From saison 1 SOURCE_CIRCUIT_OPEN']);
+  // Fiche non chargée : sans identité, la boucle la traite comme une panne.
+  const page = await paused.extract(`${base}/from.html`);
+  assert.equal(page.identity, undefined);
+  assert.equal(page.players.length, 0);
+  assert.deepEqual(logs, []);
+
+  // Les autres échecs restent journalisés.
+  const timeout = Object.assign(new Error('timeout of 15000ms exceeded'), { code: 'ECONNABORTED' });
+  const failing = load({
+    makeWiflixSearchRequest: failWith(timeout), makeWiflixRequest: failWith(timeout), console: capture,
+  });
+  assert.equal((await failing.search('From saison 1')).unavailable, true);
+  assert.equal((await failing.extract(`${base}/from.html`)).identity, undefined);
+  assert.deepEqual(logs, [
+    '[WIFLIX SEARCH] Echec: timeout of 15000ms exceeded',
+    '[WIFLIX PLAYERS] Echec: timeout of 15000ms exceeded',
+  ]);
 });

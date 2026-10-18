@@ -31,9 +31,11 @@ import { TopProgressBar } from './components/TopProgressBar';
 import SmoothScroll from './components/SmoothScroll';
 import { getProviderCatalogScope, ROUTES, type RouteEntry } from './routing/registry';
 import { IdleRoutePrefetch } from '@/routing/IdleRoutePrefetch';
+import { isTvPlatform } from './utils/tvPlatform';
 import { DelayedSuspense } from './components/DelayedSuspense';
 import { RouteProgressBar } from './components/RouteProgressBar';
 import ScreenSaver from './components/ScreenSaver';
+import { HalloweenAtmosphere } from './components/HalloweenAtmosphere';
 import { useIdleTimer } from './hooks/useIdleTimer';
 import { startVipVerification } from './utils/vipUtils';
 import { readLocalStorage, readSessionStorage } from './utils/browserStorage';
@@ -352,7 +354,8 @@ const ScrollToTop = () => {
     const previousPath = prevPathRef.current;
     const pathChanged = previousPath !== location.pathname;
     prevPathRef.current = location.pathname;
-    if (!pathChanged && location.pathname === '/search') {
+    // Idem sur /profile : changer d'onglet (?tab=…) ne doit pas remonter la page.
+    if (!pathChanged && (location.pathname === '/search' || location.pathname === '/profile')) {
       return undefined;
     }
 
@@ -504,7 +507,8 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   }
 
   const isAuthenticated = isDiscordAuth || isGoogleAuth || isBip39Auth || isVipAuth || isVipUser;
-  return isAuthenticated ? children : <Navigate to="/login" />;
+  // Il n'existe pas de route /login : la connexion passe par /create-account.
+  return isAuthenticated ? children : <Navigate to="/create-account" replace />;
 };
 
 // Pages secondaires lazy-ifiées (perf) : elles étaient importées eagerly et ajoutaient
@@ -1905,6 +1909,8 @@ const AppWithIntro: React.FC = () => {
       <SmoothScroll />
       {/* Ne pas afficher le Header sur les routes lecteur et Wrapped */}
       {shouldShowHeader && <Header />}
+      {/* Thème Halloween : coupé sur les mêmes routes que le Header */}
+      <HalloweenAtmosphere suspended={!shouldShowHeader} />
       <PersistenceManager />
       <div className={shouldShowHeader && !isHeroHeaderPage ? 'pt-20' : ''}>
         <AlertNotificationManager />
@@ -1944,7 +1950,7 @@ const AppWithIntro: React.FC = () => {
         onClose={() => setShowRedirectPopup(false)}
       />
 
-      {/* Annonce du nouveau Telegram ix : une seule fois, jamais sur le lecteur */}
+      {/* Annonce du canal Matrix ix : une seule fois, jamais sur le lecteur */}
       <TelegramAnnouncementPopup
         suspended={isWatchRoute || isWrappedRoute || currentPath.startsWith('/oauth/authorize') || showRedirectPopup}
       />

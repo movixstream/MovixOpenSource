@@ -7,6 +7,7 @@ import CatalogSkeleton from '../components/skeletons/CatalogSkeleton';
 import EmblaCarouselGenres from '../components/EmblaCarouselGenres';
 import LazySection from '../components/LazySection';
 import CarouselTitle from '../components/CarouselTitle';
+import { Flame, Compass } from 'lucide-react';
 
 import TelegramPromotion from '../components/TelegramPromotion';
 import { useWrappedTracker } from '../hooks/useWrappedTracker';
@@ -889,12 +890,12 @@ const Movies: React.FC = () => {
   }, [isTop10CardHovered]);
 
   const trendingTitle = useMemo(
-    () => <CarouselTitle icon="🔥" iconClass="text-red-600" label={t('home.trendingToday')} />,
+    () => <CarouselTitle icon={Flame} iconClass="text-red-600" label={t('home.trendingToday')} />,
     [t]
   );
 
   const genresTitle = useMemo(
-    () => <CarouselTitle icon="🧭" iconClass="text-white" label={t('genres.findByGenre')} />,
+    () => <CarouselTitle icon={Compass} iconClass="text-white" label={t('genres.findByGenre')} />,
     [t]
   );
 

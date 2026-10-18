@@ -340,6 +340,9 @@ router.get('/tv/:id/season/:season', async (req, res) => {
 
 const { verifyTurnstile, turnstileSecretFor } = require('../utils/turnstile');
 const { verifyAccessKey } = require('../checkVip');
+const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
+const { createRedisRateLimitStore } = require('../utils/redisRateLimitStore');
 
 // Domaine de sortie du CDN, quand il ne doit pas être celui que l'API annonce.
 // Le partenaire fait tourner ses domaines de distribution comme n'importe quel
@@ -381,41 +384,34 @@ function applyCdnOverride(fileUrl) {
 }
 
 /**
- * Rend l'URL de lecture contre un jeton Turnstile.
- *
- * Le statut VIP n'entre pas ici : il dispense de la pub, côté client, pas de
- * la vérification. Les admins non plus : on passe par `verifyTurnstile`, sans
- * la dispense de `verifyTurnstileFromRequest`, pour que l'équipe voie
- * exactement le parcours qu'elle fait vivre aux autres.
+ * Contrôle du corps commun au site et à la télé.
+ * Renvoie `true` si la réponse d'erreur est déjà partie.
  */
-router.post('/mp4/resolve', async (req, res) => {
-  const { kind, tmdbId, season, episode, index, turnstileToken } = req.body || {};
-
+function rejectInvalidMp4Request(res, { kind, tmdbId, season, episode }) {
   if (kind !== 'movie' && kind !== 'tv') {
-    return res.status(400).json({ success: false, error: 'Type invalide' });
+    res.status(400).json({ success: false, error: 'Type invalide' });
+    return true;
   }
   if (!/^\d+$/.test(String(tmdbId || ''))) {
-    return res.status(400).json({ success: false, error: 'TMDB id invalide' });
+    res.status(400).json({ success: false, error: 'TMDB id invalide' });
+    return true;
   }
   if (kind === 'tv' && (!/^\d+$/.test(String(season || '')) || !/^\d+$/.test(String(episode || '')))) {
-    return res.status(400).json({ success: false, error: 'Saison/épisode invalides' });
+    res.status(400).json({ success: false, error: 'Saison/épisode invalides' });
+    return true;
   }
   if (!CONFIGURED) {
-    return res.status(503).json({ success: false, error: 'SwiftFlux non configuré' });
+    res.status(503).json({ success: false, error: 'SwiftFlux non configuré' });
+    return true;
   }
+  return false;
+}
 
-  if (process.env.TURNSTILE_SECRET_KEY) {
-    if (!turnstileToken) {
-      return res.status(400).json({ success: false, error: 'Vérification de sécurité requise' });
-    }
-    const ip = req.headers['cf-connecting-ip']
-      || req.headers['x-forwarded-for']?.split(',')[0]?.trim()
-      || req.ip;
-    if (!(await verifyTurnstile(turnstileToken, ip, turnstileSecretFor(req)))) {
-      return res.status(403).json({ success: false, error: 'Vérification de sécurité échouée. Réessayez.' });
-    }
-  }
-
+/**
+ * Trouve le fichier demandé et rend son URL (Turnstile vérifié avant pour le
+ * site ; route ouverte pour l'appli télé).
+ */
+async function respondWithMp4(req, res, { kind, tmdbId, season, episode, index }) {
   try {
     const env = kind === 'movie'
       ? await withCache(`movie-${tmdbId}`, () => fetchMovie(tmdbId))
@@ -434,7 +430,7 @@ router.post('/mp4/resolve', async (req, res) => {
     }
 
     const vipStatus = await verifyAccessKey(req.headers['x-access-key'] || null);
-    res.json({
+    return res.json({
       success: true,
       url: applyCdnOverride(item.url),
       ...mp4Meta(item, wanted),
@@ -442,8 +438,60 @@ router.post('/mp4/resolve', async (req, res) => {
     });
   } catch (err) {
     console.error(`[SwiftFlux MP4 RESOLVE] ${kind}/${tmdbId}: ${err.message}`);
-    res.status(502).json({ success: false, error: 'Erreur SwiftFlux' });
+    return res.status(502).json({ success: false, error: 'Erreur SwiftFlux' });
   }
+}
+
+/**
+ * Rend l'URL de lecture contre un jeton Turnstile.
+ *
+ * Le statut VIP n'entre pas ici : il dispense de la pub, côté client, pas de
+ * la vérification. Les admins non plus : on passe par `verifyTurnstile`, sans
+ * la dispense de `verifyTurnstileFromRequest`, pour que l'équipe voie
+ * exactement le parcours qu'elle fait vivre aux autres.
+ */
+router.post('/mp4/resolve', async (req, res) => {
+  const { kind, tmdbId, season, episode, index, turnstileToken } = req.body || {};
+
+  if (rejectInvalidMp4Request(res, { kind, tmdbId, season, episode })) return undefined;
+
+  if (process.env.TURNSTILE_SECRET_KEY) {
+    if (!turnstileToken) {
+      return res.status(400).json({ success: false, error: 'Vérification de sécurité requise' });
+    }
+    const ip = req.headers['cf-connecting-ip']
+      || req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+      || req.ip;
+    if (!(await verifyTurnstile(turnstileToken, ip, turnstileSecretFor(req)))) {
+      return res.status(403).json({ success: false, error: 'Vérification de sécurité échouée. Réessayez.' });
+    }
+  }
+
+  return respondWithMp4(req, res, { kind, tmdbId, season, episode, index });
+});
+
+// Seul garde-fou de la route télé : une limite par IP, pour qu'un script ne
+// vide pas à lui seul le budget amont partagé (900 appels/min).
+const tvResolveRateLimit = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 60,
+  store: createRedisRateLimitStore({ prefix: 'rate-limit:swiftflux-tv:', windowMs: 10 * 60 * 1000 }),
+  passOnStoreError: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'rate_limited' },
+  keyGenerator: (req) => req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim() || ipKeyGenerator(req.ip),
+  validate: { xForwardedForHeader: false, ip: false },
+});
+
+/**
+ * Même résolution pour l'appli télé, sans captcha ni compte (choix assumé :
+ * la télé ne peut pas afficher Turnstile). Ouverte à qui l'appelle, limitée par IP.
+ */
+router.post('/tv/mp4/resolve', tvResolveRateLimit, async (req, res) => {
+  const { kind, tmdbId, season, episode, index } = req.body || {};
+  if (rejectInvalidMp4Request(res, { kind, tmdbId, season, episode })) return undefined;
+  return respondWithMp4(req, res, { kind, tmdbId, season, episode, index });
 });
 
 module.exports = router;

@@ -5,10 +5,10 @@ import type Lenis from 'lenis';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import {
-  ArrowLeft, Settings, Shield, Monitor, Smartphone, Tablet,
+  ArrowLeft, Settings, Shield, Monitor, Smartphone, Tablet, Tv,
   Copy, X, Snowflake, Activity, Trash2, Crown, Volume2,
   Database, Key, Lock, Palette, Eye, Download, Upload, Globe, AlertTriangle, History, CalendarClock, FlaskConical, Link2, MessageCircle, BellOff, Sparkles,
-  Zap, RefreshCw, ChevronDown, ListOrdered, Gauge, Megaphone, Square, Captions
+  Zap, RefreshCw, ChevronDown, ListOrdered, Gauge, Megaphone, Square, Captions, Ghost
 } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
@@ -63,6 +63,12 @@ import {
   type AdPopupMode,
 } from '../utils/adPopupMode';
 import {
+  EPISODE_LIST_SOURCE_EVENT,
+  getDefaultEpisodeListSource,
+  setDefaultEpisodeListSource,
+  type EpisodeListSource,
+} from '../utils/tvmazeEpisodes';
+import {
   isAdultAdsEnabled,
   setAdultAdsEnabled,
   subscribeToAdultAdsChanges,
@@ -73,6 +79,7 @@ import { MediaColorSettings } from '@/components/Settings/MediaColorSettings';
 import { SettingsToggle } from '@/components/Settings/SettingsToggle';
 import { BgColorPickerPanel } from '../components/Settings/BgColorPickerPanel';
 import { useLightMode } from '../context/LightModeContext';
+import { setHalloweenTheme, useHalloweenTheme } from '../hooks/useHalloweenTheme';
 import { SettingsSearchBar } from '../components/Settings/SettingsSearchBar';
 import { SubtitlePreview } from '../components/subtitles/SubtitlePreview';
 import { SubtitleStyleControls } from '../components/subtitles/SubtitleStyleControls';
@@ -543,6 +550,20 @@ const SettingsPage: React.FC = () => {
     setSquareCornersEnabled(next);
     localStorage.setItem('square_corners_enabled', next ? '1' : '0');
     document.documentElement.classList.toggle('square-corners', next);
+  };
+
+  const halloweenThemeEnabled = useHalloweenTheme();
+
+  // Liste d'épisodes par défaut des séries (TVmaze ou TMDB).
+  const [episodeListSource, setEpisodeListSourceState] = useState<EpisodeListSource>(() => getDefaultEpisodeListSource());
+  useEffect(() => {
+    const sync = () => setEpisodeListSourceState(getDefaultEpisodeListSource());
+    window.addEventListener(EPISODE_LIST_SOURCE_EVENT, sync);
+    return () => window.removeEventListener(EPISODE_LIST_SOURCE_EVENT, sync);
+  }, []);
+  const handleEpisodeListSourceChange = (source: EpisodeListSource) => {
+    setEpisodeListSourceState(source);
+    setDefaultEpisodeListSource(source);
   };
 
   const [introEnabled, setIntroEnabled] = useState(() => {
@@ -1596,6 +1617,7 @@ const SettingsPage: React.FC = () => {
   const getDeviceIcon = (deviceType: SessionDeviceType) => {
     if (deviceType === 'mobile') return <Smartphone className="w-5 h-5" />;
     if (deviceType === 'tablet') return <Tablet className="w-5 h-5" />;
+    if (deviceType === 'tv') return <Tv className="w-5 h-5" />;
     return <Monitor className="w-5 h-5" />;
   };
 
@@ -1830,6 +1852,51 @@ const SettingsPage: React.FC = () => {
                   </button>
                 </div>
 
+                {/* Liste d'épisodes par défaut des séries (TVmaze / TMDB) */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.075 }}
+                  data-settings-search-title
+                  data-settings-search-keywords="séries,series,épisodes,episodes,chapitres,chapters,tvmaze,tmdb,liste,list,saison,season,filtre,filter"
+                  className="p-4 bg-gray-800/30 rounded-xl border border-gray-700/40 hover:border-gray-600/50 transition-colors"
+                >
+                  <div className="mb-3">
+                    <h4 className="font-medium text-white mb-0.5 text-sm">{t('settings.episodeListSource')}</h4>
+                    <p className="text-xs text-gray-500 leading-relaxed">{t('settings.episodeListSourceDesc')}</p>
+                    <p className="text-xs text-gray-500 leading-relaxed mt-1.5">{t('settings.episodeListSourceFilterHelp')}</p>
+                  </div>
+                  <div className="flex gap-2 flex-wrap" role="radiogroup" aria-label={t('settings.episodeListSource')}>
+                    {([
+                      { id: 'tvmaze',     labelKey: 'settings.episodeListSourceTvmaze',    descKey: 'settings.episodeListSourceTvmazeDesc' },
+                      { id: 'tvmaze_all', labelKey: 'settings.episodeListSourceTvmazeAll', descKey: 'settings.episodeListSourceTvmazeAllDesc', warnKey: 'settings.episodeListSourceTvmazeAllWarning' },
+                      { id: 'tmdb',       labelKey: 'settings.episodeListSourceTmdb',      descKey: 'settings.episodeListSourceTmdbDesc' },
+                    ] as const).map((opt) => {
+                      const active = episodeListSource === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          onClick={() => handleEpisodeListSourceChange(opt.id)}
+                          className={`flex-1 min-w-[140px] p-3 rounded-xl text-left transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/60 ${
+                            active
+                              ? 'bg-red-600/10 border-red-500/40 text-white'
+                              : 'bg-gray-700/20 border-gray-700/40 text-gray-400 hover:bg-gray-700/40 hover:text-white'
+                          }`}
+                        >
+                          <div className="text-xs font-semibold">{t(opt.labelKey)}</div>
+                          <div className="text-[10px] text-gray-500 mt-0.5">
+                            {t(opt.descKey)}
+                            {'warnKey' in opt && <strong className="block font-bold text-red-500">{t(opt.warnKey)}</strong>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+
                 {/* Smooth scroll — sélecteur unifié 4 options
                     (Désactivé / Standard / Fluide / Ultra fluide). Le toggle
                     ON/OFF séparé d'avant a été fusionné dans ce sélecteur :
@@ -1945,6 +2012,25 @@ const SettingsPage: React.FC = () => {
                     </p>
                   </div>
                   {renderToggle(isSnowfallActive, handleSnowfallToggle, 'blue')}
+                </motion.div>
+
+                {/* Thème Halloween */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1625 }}
+                  className="flex items-center justify-between p-4 bg-gray-800/30 rounded-xl border border-gray-700/40 hover:border-gray-600/50 transition-colors group"
+                >
+                  <div className="flex-1 mr-4">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <Ghost className="w-3.5 h-3.5 text-orange-400" />
+                      <h4 className="font-medium text-white text-sm">{t('settings.halloweenTheme')}</h4>
+                    </div>
+                    <p className="text-xs text-gray-500 leading-relaxed">
+                      {t('settings.halloweenThemeDesc')}
+                    </p>
+                  </div>
+                  {renderToggle(halloweenThemeEnabled, () => setHalloweenTheme(!halloweenThemeEnabled))}
                 </motion.div>
 
                 {/* Coins carrés */}
@@ -2539,7 +2625,7 @@ const SettingsPage: React.FC = () => {
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2">
                                       <h4 className="font-medium text-white text-sm">
-                                        {getSessionBrowserLabel(deviceInfo, t('common.unknown'))}
+                                        {getSessionBrowserLabel(deviceInfo, t('common.unknown'), t('settings.sessionDeviceTypes.tv'))}
                                       </h4>
                                       {isCurrentSession && (
                                         <span className="px-2 py-0.5 text-[10px] bg-green-500/15 text-green-400 rounded-full font-medium">

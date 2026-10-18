@@ -229,14 +229,9 @@ async function searchCoflixUncached(title, mediaType, releaseYear) {
         : filteredResults.filter((r) => r.year == null);
 
       if (mediaType === "movie") {
-        if (
-          yearMatchedResults.length > 0 &&
-          yearMatchedResults[0].similarity >= 0.8
-        ) {
-          filteredResults = [yearMatchedResults[0]];
-        } else {
-          filteredResults = [];
-        }
+        // Toutes les fiches valables, la meilleure en tête : deux films du même
+        // titre peuvent sortir la même année, l'appelant départage à l'affiche.
+        filteredResults = yearMatchedResults.filter((r) => r.similarity >= 0.8);
       } else if (mediaType === "tv") {
         if (
           yearMatchedResults.length > 0 &&
@@ -267,7 +262,8 @@ async function searchCoflixUncached(title, mediaType, releaseYear) {
     return filteredResults;
   } catch (error) {
     // Global Coflix-site 429 is announced once by makeCoflixRequest's cooldown — don't spam per title.
-    if (!error?.coflixSiteRateLimited) {
+    // Même chose pour la pause du disjoncteur, annoncée une fois par proxyManager.
+    if (!error?.coflixSiteRateLimited && !error?.isSourceCircuitOpen) {
       console.error(
         `Erreur lors de la recherche sur Coflix pour ${title}: ${deps.formatCoflixError(error)}`,
       );
@@ -645,6 +641,11 @@ async function getMovieDataFromCoflix(url) {
 
     return result;
   } catch (error) {
+    // Coflix en pause : panne temporaire, jamais un résultat vide à mettre en cache.
+    if (error?.isSourceCircuitOpen) {
+      if (hadCache) return cachedData;
+      throw error;
+    }
     if (
       error &&
       (error.isAxiosError || (error.response && error.response.status))
@@ -733,6 +734,7 @@ async function getTvDataFromCoflix(url, seasonNumber, episodeNumber) {
         episodePlayerLinks.push(...links);
       }
     } catch (episodeError) {
+      if (episodeError?.isSourceCircuitOpen) throw episodeError;
       console.error(
         `Erreur lors de la recuperation des donnees de l'episode: ${deps.formatCoflixError(episodeError)}`,
       );
@@ -772,6 +774,11 @@ async function getTvDataFromCoflix(url, seasonNumber, episodeNumber) {
 
     return result;
   } catch (error) {
+    // Coflix en pause : panne temporaire, jamais un résultat vide à mettre en cache.
+    if (error?.isSourceCircuitOpen) {
+      if (hadCache) return cachedData;
+      throw error;
+    }
     if (
       error &&
       (error.isAxiosError || (error.response && error.response.status))

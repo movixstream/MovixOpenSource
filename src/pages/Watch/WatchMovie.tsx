@@ -12,8 +12,8 @@ import AdFreePlayerAds from '../../components/AdFreePlayerAds';
 import AdWaitingScreen from '@/components/AdWaitingScreen';
 import { extractM3u8FromEmbed, extractUqloadFile, extractVidzyM3u8, extractFsvidM3u8, extractDoodStreamFile, isDoodStreamExtractionEnabled, registerServerResolvedSources, type M3u8Result } from '../../utils/extractM3u8';
 import type { SeekStreamingHlsSource } from '../../utils/seekStreamingCandidates';
-import { runExtractionPass } from '../../utils/runExtractionPass';
-import { pickAutoSelectedSource, sortHostersByPriority, type SourceAvailability } from '../../utils/sourceAutoSelect';
+import { runExtractionPass, type ExtractionPassResult } from '../../utils/runExtractionPass';
+import { pickAutoSelectedSource, sortHostersByPriority, hosterKeyOf, type SourceAvailability } from '../../utils/sourceAutoSelect';
 import type { TopLevelSourceId } from '../../types/sourcePriority';
 import { getSourcePriorityPrefs, buildDefaults, subscribeToPriorityChanges } from '../../utils/sourcePriorityPrefs';
 import { detectHoster } from '../../utils/hosterRegistry';
@@ -1264,9 +1264,16 @@ const WatchMovie: React.FC = () => {
             console.log(`✅ Added ${validDroploadResults.length} Firebase Dropload HLS sources`);
           }
         }
+      // Les passes d'extraction partent toutes maintenant, en même temps, et
+      // ne sont attendues qu'une fois, juste avant le tri final. Avec
+      // l'extension, chaque passe peut prendre jusqu'au délai max d'un
+      // hébergeur (10 à 15 s) : les enchaîner retenait l'écran de chargement
+      // une trentaine de secondes. L'ordre de fusion, lui, ne change pas.
+      const emptyPass: Promise<ExtractionPassResult> = Promise.resolve({ hls: [], file: [] });
+
       // Process Firebase custom links — passe d'extraction générique
-      if (customLinks.length > 0) {
-        const customPass = await runExtractionPass(
+      const customPassPromise = customLinks.length > 0
+        ? runExtractionPass(
           customLinks
             .filter((url: unknown): url is string => typeof url === 'string' && !!url)
             .map((url: string) => ({ url })),
@@ -1275,14 +1282,12 @@ const WatchMovie: React.FC = () => {
             origin: 'custom',
             context: { category: 'moviesTv', topLevel: 'custom' },
           },
-        );
-        finalHlsSources = [...finalHlsSources, ...customPass.hls];
-        finalFileSources = [...finalFileSources, ...customPass.file];
-      }
+        )
+        : emptyPass;
 
       // Process Coflix MULTI links — passe d'extraction générique (ignore Omega)
-      if (coflixResult && Array.isArray(coflixResult.player_links) && coflixResult.player_links.length > 0) {
-        const coflixPass = await runExtractionPass(
+      const coflixPassPromise = (coflixResult && Array.isArray(coflixResult.player_links) && coflixResult.player_links.length > 0)
+        ? runExtractionPass(
           coflixResult.player_links
             .map((p: any) => ({
               url: getCoflixPreferredUrl(p),
@@ -1295,16 +1300,12 @@ const WatchMovie: React.FC = () => {
             origin: 'coflix',
             context: { category: 'moviesTv', topLevel: 'coflix' },
           },
-        );
-        finalHlsSources = [...finalHlsSources, ...coflixPass.hls];
-        finalFileSources = [...finalFileSources, ...coflixPass.file];
-      }
-
-      console.log('🎯 Final HLS sources after supervideo/dropload processing:', finalHlsSources);
+        )
+        : emptyPass;
 
       // =========== TRAITEMENT DES RÉSULTATS FSTREAM ===========
       let fstreamProcessedSources: { url: string; label: string; category: string }[] = [];
-      const fstreamHlsSources: { url: string; label: string; category: string }[] = [];
+      let fstreamHlsPromise: Promise<{ url: string; label: string; category: string }[]> = Promise.resolve([]);
       const fsvidSources: { url: string; label: string; category: string }[] = [];
 
       // Check if user is VIP or connected (utilise isUserVip pour inclure les utilisateurs connectés)
@@ -1425,8 +1426,7 @@ const WatchMovie: React.FC = () => {
         }
 
         if (fstreamExtractionPromises.length > 0) {
-          const fstreamExtractionResults = await Promise.all(fstreamExtractionPromises);
-
+          fstreamHlsPromise = Promise.all(fstreamExtractionPromises).then((fstreamExtractionResults) => {
           // Séparer les sources fsvid, vidzy et uqload pour les ordonner correctement
           const fsvidHlsSources: { url: string; label: string; category: string }[] = [];
           const vidzyHlsSources: { url: string; label: string; category: string }[] = [];
@@ -1458,10 +1458,9 @@ const WatchMovie: React.FC = () => {
           });
 
           // Ajouter fsvid en premier, puis vidzy, puis uqload
-          fstreamHlsSources.push(...fsvidHlsSources, ...vidzyHlsSources, ...uqloadHlsSources);
+          return [...fsvidHlsSources, ...vidzyHlsSources, ...uqloadHlsSources];
+          });
         }
-
-        console.log(`🎯 FStream HLS sources extracted: ${fstreamHlsSources.length}`);
       } else {
         setFstreamData(null);
         console.log('❌ No FStream sources available');
@@ -1470,20 +1469,9 @@ const WatchMovie: React.FC = () => {
       setFstreamSources(fstreamProcessedSources);
       console.log('🎯 [WatchMovie] FStream sources set:', fstreamProcessedSources.length, fstreamProcessedSources);
 
-      // Ajouter les sources HLS FStream aux sources finales
-      if (fstreamHlsSources.length > 0) {
-        // Prioriser les sources VFF puis Default pour FStream HLS
-        const fsvidVffSources = fstreamHlsSources.filter(s => s.category === 'VFF');
-        const fsvidDefaultSources = fstreamHlsSources.filter(s => s.category === 'Default');
-        const fsvidOtherSources = fstreamHlsSources.filter(s => s.category !== 'VFF' && s.category !== 'Default');
-
-        const prioritizedFstreamHls = [...fsvidVffSources, ...fsvidDefaultSources, ...fsvidOtherSources];
-        finalHlsSources = [...prioritizedFstreamHls, ...finalHlsSources];
-        console.log(`🎯 Added ${fstreamHlsSources.length} FStream HLS sources to final sources`);
-      }
-
       // =========== TRAITEMENT DES RÉSULTATS WIFLIX (LYNX) ===========
       let wiflixProcessedSources: { url: string; label: string; category: string }[] = [];
+      let wiflixPassPromise = emptyPass;
 
       if (wiflixResult && wiflixResult.success && wiflixResult.players) {
         console.log('🎬 Processing Wiflix/Lynx result:', wiflixResult);
@@ -1518,21 +1506,10 @@ const WatchMovie: React.FC = () => {
         console.log('🎯 Wiflix VF sources found:', vfSources.length);
 
         // =========== EXTRACTION M3U8 DEPUIS WIFLIX (passe générique) ===========
-        const wiflixPass = await runExtractionPass(wiflixProcessedSources, MAIN_API, {
+        wiflixPassPromise = runExtractionPass(wiflixProcessedSources, MAIN_API, {
           origin: 'wiflix',
           context: { category: 'moviesTv', topLevel: 'wiflix' },
         });
-        // VF devant, VOSTFR derrière — l'ordre historique de ce bloc.
-        finalHlsSources = [
-          ...wiflixPass.hls.filter(s => !s.isVostfr),
-          ...finalHlsSources,
-          ...wiflixPass.hls.filter(s => s.isVostfr),
-        ];
-        finalFileSources = [
-          ...wiflixPass.file.filter(s => !s.isVostfr),
-          ...finalFileSources,
-          ...wiflixPass.file.filter(s => s.isVostfr),
-        ];
       } else {
         setWiflixData(null);
         console.log('❌ No Wiflix/Lynx sources available');
@@ -1575,14 +1552,12 @@ const WatchMovie: React.FC = () => {
       setJ1fSources(j1fProcessedSources);
 
       // --- Passe d'extraction m3u8 générique (tous hosters supportés) ---
-      if (j1fProcessedSources.length > 0) {
-        const j1fPass = await runExtractionPass(j1fProcessedSources, MAIN_API, {
+      const j1fPassPromise = j1fProcessedSources.length > 0
+        ? runExtractionPass(j1fProcessedSources, MAIN_API, {
           origin: 'j1f',
           context: { category: 'moviesTv', topLevel: 'j1f' },
-        });
-        finalHlsSources = [...finalHlsSources, ...j1fPass.hls];
-        finalFileSources = [...finalFileSources, ...j1fPass.file];
-      }
+        })
+        : emptyPass;
 
       // =========== TRAITEMENT DES RÉSULTATS SWIFTFLOW ===========
       let swiftflowProcessedSources: { url: string; label: string; category: string }[] = [];
@@ -1618,14 +1593,12 @@ const WatchMovie: React.FC = () => {
       setSwiftflowSources(swiftflowProcessedSources);
 
       // --- Passe d'extraction m3u8 générique (tous hosters supportés) ---
-      if (swiftflowProcessedSources.length > 0) {
-        const swiftflowPass = await runExtractionPass(swiftflowProcessedSources, MAIN_API, {
+      const swiftflowPassPromise = swiftflowProcessedSources.length > 0
+        ? runExtractionPass(swiftflowProcessedSources, MAIN_API, {
           origin: 'swiftflow',
           context: { category: 'moviesTv', topLevel: 'swiftflow' },
-        });
-        finalHlsSources = [...finalHlsSources, ...swiftflowPass.hls];
-        finalFileSources = [...finalFileSources, ...swiftflowPass.file];
-      }
+        })
+        : emptyPass;
 
       // =========== TRAITEMENT DES RÉSULTATS VIPER ===========
       const viperProcessedSources: { url: string; label: string; quality: string; language: string }[] = [];
@@ -1669,23 +1642,62 @@ const WatchMovie: React.FC = () => {
       // écrits à la main : `runExtractionPass` route chaque lien vers
       // l'extracteur correspondant, donc tout hoster supporté est couvert
       // d'office, y compris ceux ajoutés plus tard.
-      if (viperProcessedSources.length > 0) {
-        const viperPass = await runExtractionPass(viperProcessedSources, MAIN_API, {
+      const viperPassPromise = viperProcessedSources.length > 0
+        ? runExtractionPass(viperProcessedSources, MAIN_API, {
           origin: 'viper',
           context: { category: 'moviesTv', topLevel: 'viper' },
-        });
-        // VF devant, VOSTFR derrière — l'ordre historique de ce bloc.
-        finalHlsSources = [
-          ...viperPass.hls.filter(s => !s.isVostfr),
-          ...finalHlsSources,
-          ...viperPass.hls.filter(s => s.isVostfr),
-        ];
-        finalFileSources = [
-          ...viperPass.file.filter(s => !s.isVostfr),
-          ...finalFileSources,
-          ...viperPass.file.filter(s => s.isVostfr),
-        ];
+        })
+        : emptyPass;
+
+      // =========== FUSION DES PASSES, DANS L'ORDRE HISTORIQUE ===========
+      const [
+        customPass, coflixPass, fstreamHlsSources,
+        wiflixPass, j1fPass, swiftflowPass, viperPass,
+      ] = await Promise.all([
+        customPassPromise, coflixPassPromise, fstreamHlsPromise,
+        wiflixPassPromise, j1fPassPromise, swiftflowPassPromise, viperPassPromise,
+      ]);
+
+      finalHlsSources = [...finalHlsSources, ...customPass.hls, ...coflixPass.hls];
+      finalFileSources = [...finalFileSources, ...customPass.file, ...coflixPass.file];
+
+      console.log(`🎯 FStream HLS sources extracted: ${fstreamHlsSources.length}`);
+      if (fstreamHlsSources.length > 0) {
+        // Prioriser les sources VFF puis Default pour FStream HLS
+        const fsvidVffSources = fstreamHlsSources.filter(s => s.category === 'VFF');
+        const fsvidDefaultSources = fstreamHlsSources.filter(s => s.category === 'Default');
+        const fsvidOtherSources = fstreamHlsSources.filter(s => s.category !== 'VFF' && s.category !== 'Default');
+
+        const prioritizedFstreamHls = [...fsvidVffSources, ...fsvidDefaultSources, ...fsvidOtherSources];
+        finalHlsSources = [...prioritizedFstreamHls, ...finalHlsSources];
       }
+
+      // VF devant, VOSTFR derrière — l'ordre historique du bloc Wiflix.
+      finalHlsSources = [
+        ...wiflixPass.hls.filter(s => !s.isVostfr),
+        ...finalHlsSources,
+        ...wiflixPass.hls.filter(s => s.isVostfr),
+      ];
+      finalFileSources = [
+        ...wiflixPass.file.filter(s => !s.isVostfr),
+        ...finalFileSources,
+        ...wiflixPass.file.filter(s => s.isVostfr),
+      ];
+
+      finalHlsSources = [...finalHlsSources, ...j1fPass.hls, ...swiftflowPass.hls];
+      finalFileSources = [...finalFileSources, ...j1fPass.file, ...swiftflowPass.file];
+
+      // VF devant, VOSTFR derrière — l'ordre historique du bloc Viper.
+      finalHlsSources = [
+        ...viperPass.hls.filter(s => !s.isVostfr),
+        ...finalHlsSources,
+        ...viperPass.hls.filter(s => s.isVostfr),
+      ];
+      finalFileSources = [
+        ...viperPass.file.filter(s => !s.isVostfr),
+        ...finalFileSources,
+        ...viperPass.file.filter(s => s.isVostfr),
+      ];
 
       // Pré-tri par priorité hoster (M4) — le state stocke la liste ordonnée
       // selon le pin user. selectedNexusHls/FileSource = 0 joue le top, et
@@ -2331,7 +2343,24 @@ const WatchMovie: React.FC = () => {
         !isAutomaticFallback
         && typeof type === 'string'
       ) {
-        setLastPlayer(type === 'kisskh_main' ? 'kisskh' : type);
+        // Retrouve la ligne cliquée pour mémoriser le lecteur précis (Lulu,
+        // Vidara…) et pas seulement la source qui le contient.
+        const pickedItem = type === 'nexus_hls'
+          ? nexusHlsSources.find(source => source.url === acceptedPlaybackUrl)
+          : type === 'nexus_file'
+            ? nexusFileSources.find(source => source.url === acceptedPlaybackUrl)
+            : type === 'bravo'
+              ? purstreamSources.find(source => source.url === acceptedPlaybackUrl)
+              : type === 'darkino'
+                ? (() => {
+                    const dk = darkinoSources.find(source => source.m3u8 === acceptedPlaybackUrl);
+                    return dk ? { url: dk.m3u8, label: dk.label || dk.quality } : undefined;
+                  })()
+                : undefined;
+        setLastPlayer(
+          type === 'kisskh_main' ? 'kisskh' : type,
+          hosterKeyOf(pickedItem ?? { url: acceptedPlaybackUrl }),
+        );
       }
 
       // When any source is picked from the menu, hide the "no content" message and the menu itself.
@@ -2882,7 +2911,7 @@ const WatchMovie: React.FC = () => {
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -2993,7 +3022,7 @@ const WatchMovie: React.FC = () => {
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3151,7 +3180,7 @@ const WatchMovie: React.FC = () => {
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3275,7 +3304,7 @@ const WatchMovie: React.FC = () => {
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3388,7 +3417,7 @@ const WatchMovie: React.FC = () => {
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3502,7 +3531,7 @@ const WatchMovie: React.FC = () => {
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3619,7 +3648,7 @@ const WatchMovie: React.FC = () => {
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3740,7 +3769,7 @@ const WatchMovie: React.FC = () => {
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3866,7 +3895,7 @@ const WatchMovie: React.FC = () => {
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3974,7 +4003,7 @@ const WatchMovie: React.FC = () => {
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}

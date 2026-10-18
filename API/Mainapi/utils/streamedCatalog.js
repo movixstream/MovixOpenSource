@@ -6,6 +6,8 @@ const STREAMED_BASE = 'https://streamed.pk';
 const MATCH_TTL = 60000;
 const STREAM_TTL = 30000;
 const STALE_TTL = 5 * 60000;
+// /live met parfois plus d'une heure à inclure un match commencé.
+const STARTED_GRACE = 3 * 3600000;
 const SOURCE_ORDER = new Map([['golf', 0], ['foxtrot', 1]]);
 
 // Identifiants de /api/sports ; le manifeste reste disponible si Streamed tombe.
@@ -124,7 +126,7 @@ function createStreamedSource({ axios, readCache, writeCache, now = Date.now }) 
     const live = new Set(liveIds);
     return matches
       .filter(match => (category === 'all' || match.category === category) &&
-        (live.has(match.id) || Number(match.date) >= now()))
+        (live.has(match.id) || Number(match.date) >= now() - STARTED_GRACE))
       .map(match => parseMatch(match, live))
       .sort((a, b) => Number(b._isLive) - Number(a._isLive) || (a._timestamp || 0) - (b._timestamp || 0));
   }

@@ -8,7 +8,8 @@
 <h1 align="center">Movix</h1>
 
 <p align="center">
-  <strong>Le 1er site de streaming open source made in France et 100% vibecodé.</strong>
+  <strong>Le 1er site de streaming open source made in France et 100% vibecodé.</strong><br />
+  Site web, appli mobile Android/iOS et appli Android TV native.
 </p>
 
 <p align="center">
@@ -20,7 +21,8 @@
   <a href="https://redis.io">Redis</a> |
   <a href="https://socket.io">Socket.IO</a> |
   <a href="https://www.python.org">Python</a> |
-  <a href="https://www.rust-lang.org">Rust</a>
+  <a href="https://www.rust-lang.org">Rust</a> |
+  <a href="https://kotlinlang.org">Kotlin</a>
 </p>
 
 <p align="center">
@@ -77,7 +79,7 @@ Movix fait partie d'**ix**, une petite famille de projets dont les noms finissen
 | Movix | `[M]` en rouge, crochets perforés comme une pellicule | streaming de films, séries et anime |
 | [Loadix](https://loadix.fun) | `[L]` en bleu | index communautaire francophone de releases DDL et NZB |
 
-Les annonces des projets passent par le canal Telegram [t.me/ix_annonces](https://t.me/ix_annonces). Les logos, leurs versions rondes pour les avatars et le script qui les génère sont dans [`brand/`](brand/).
+Les annonces des projets passent par l’espace Matrix [#groupe-ix:matrix.org](<https://matrix.to/#/%23groupe-ix:matrix.org>). Les logos, leurs versions rondes pour les avatars et le script qui les génère sont dans [`brand/`](brand/).
 
 ## Ce que contient le repo
 
@@ -91,6 +93,7 @@ Les annonces des projets passent par le canal Telegram [t.me/ix_annonces](https:
 | `API/proxiesembed/` | Proxy aiohttp pour embeds, flux et DRM | [Proxies Embed](API/proxiesembed/README.md) |
 | `extension/` + `userscript/` | Outils navigateur Movix | [Movix OS](README_MOVIX_OS.md) |
 | `app/` | App mobile React Native (Android OK, iOS non testé) | [App mobile](app/README.md) |
+| `app-tv/` | Appli Android TV native (Kotlin, Compose for TV, Media3), APK publiée dans `app-tv/movix-tv.apk` | [Appli TV](app-tv/README.md) |
 | `wasm/watchparty-sync/` | Moteur Rust/WASM de la Sync Pro | [WatchParty Sync WASM](wasm/watchparty-sync/README.md) |
 | `cloudflareproxy/` | Worker Cloudflare CORS/proxy | [Cloudflare Proxy](cloudflareproxy/README.md) |
 
@@ -107,6 +110,7 @@ movix-main/
 |-- extension/                  # Extension Chrome / Firefox
 |-- userscript/                 # Variante Tampermonkey
 |-- app/                        # App mobile React Native (Android/iOS)
+|-- app-tv/                     # Appli Android TV native (Kotlin/Compose)
 |-- wasm/watchparty-sync/       # Sync Pro en Rust/WASM
 |-- cloudflareproxy/            # Worker Cloudflare
 |-- functions/                  # Handlers serverless annexes
@@ -126,6 +130,7 @@ movix-main/
 - MySQL et Redis pour `API/Mainapi`
 - Rust + `wasm-bindgen` seulement si tu touches la Sync Pro WASM
 - React Native CLI + Android Studio (et Xcode + CocoaPods sur Mac) seulement si tu touches l'app mobile `app/` — iOS n'a pas été testé, voir [`app/README.md`](app/README.md)
+- JDK 17 et SDK Android (plateforme 37) seulement si tu touches l'appli TV `app-tv/`, voir [`app-tv/README.md`](app-tv/README.md)
 
 ### Installer les dépendances utiles
 
@@ -277,6 +282,7 @@ le [guide de déploiement Docker](docs/deployment-docker.md).
 - [Extension navigateur](extension/README.md)
 - [Userscript Tampermonkey](userscript/README.md)
 - [App mobile React Native](app/README.md) — Android fonctionnel, iOS non testé (aide recherchée)
+- [Appli Android TV native](app-tv/README.md) — Fire TV, Google TV et Android TV ; installation expliquée sur la page `/app-tv` du site
 - [WatchParty Sync WASM](wasm/watchparty-sync/README.md)
 - [Cloudflare Proxy](cloudflareproxy/README.md)
 

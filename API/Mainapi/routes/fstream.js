@@ -16,6 +16,7 @@ const {
   generateFStreamCacheKey,
   getFStreamRefreshInfo,
   refreshFStreamCache,
+  invalidateFStreamCache,
   ongoingFStreamRequests,
   getOrCreateFStreamRequest
 } = require('../utils/cacheManager');
@@ -352,6 +353,13 @@ async function searchFStreamDirect(query, page = 1) {
   return searchFStream(query, page);
 }
 
+// FStream renvoie certains titres échappés à la PHP (« L\'Arène - Saison 1 »).
+// Normalisé, « l arene » ne correspond plus à « larene » (TMDB « L'Arène ») et
+// la fiche est écartée dès le score de titre.
+function repairFStreamSearchHtml(html) {
+  return String(html || '').replace(/\\'/g, "'");
+}
+
 // Fallback "fuzzy" : search.php avec titre nu + filtre permissif (pas de filtre annee).
 // Remplace l'ancien get_seasons.php (mort cote upstream depuis ~2026-05) qui prenait
 // un TMDB id ; on simule le meme role en listant toutes les saisons matchant le titre.
@@ -378,7 +386,7 @@ async function fetchFStreamSeasonSearchResults(tmdbId, serieTitle) {
     const html = typeof result === 'string' ? result : '';
     if (!html.trim()) return [];
 
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(repairFStreamSearchHtml(html));
     const normalize = (s) => (s || '').toLowerCase().normalize('NFD')
       .replace(/[̀-ͯ]/g, '').replace(/[''`´]/g, '')
       .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1558,7 +1566,7 @@ async function extractFStreamSeriesPlayers(htmlContent, pageUrl = null) {
 
 // === Filtering ===
 function parseFStreamCandidates(html) {
-  const $ = cheerio.load(html);
+  const $ = cheerio.load(repairFStreamSearchHtml(html));
   const candidates = [];
   $('div.search-item').each((_, node) => {
     const row = $(node), title = row.find('.search-title').text().trim();
@@ -1582,7 +1590,7 @@ function parseFStreamCandidates(html) {
 async function findValidatedFStream(tmdb, type, season, seasonData) {
   const verifier = createIdentityVerifier({ apiUrl: TMDB_API_URL, apiKey: TMDB_API_KEY, type,
     details: tmdb, english: { title: tmdb.name_no_lang, overview: tmdb.overview_en }, seasonData });
-  const queried = new Set(), visited = new Set(), related = [];
+  const queried = new Set(), visited = new Set(), rejected = new Set(), related = [];
   let candidateCount = 0, pageChecks = 0, lastError = null, confirmedWithoutPlayers = false;
   let titles = verifier.titles;
   const inspect = async candidate => {
@@ -1616,7 +1624,10 @@ async function findValidatedFStream(tmdb, type, season, seasonData) {
       }
     }
     refreshStep('candidate_identity', { title: candidate.title, url: candidate.link, ...identity });
-    if (!identity.accepted) return null;
+    if (!identity.accepted) {
+      rejected.add(candidate.link);
+      return null;
+    }
     const players = type === 'tv' ? await getSeriesPlayersForUrl(candidate.link) : await getMoviePlayersForUrl(candidate.link);
     if (!(players.total > 0)) {
       confirmedWithoutPlayers = true;
@@ -1679,7 +1690,7 @@ async function findValidatedFStream(tmdb, type, season, seasonData) {
     }
   }
   if (lastError) throw lastError;
-  return { failureCode: confirmedWithoutPlayers ? 'extraction_empty' : 'content_not_found' };
+  return { failureCode: confirmedWithoutPlayers ? 'extraction_empty' : 'content_not_found', rejected };
 }
 
 async function loadFStreamContent(type, id, season, cachedData) {
@@ -1694,6 +1705,13 @@ async function loadFStreamContent(type, id, season, cachedData) {
   // fetchTmdbDetails renvoie aussi null lors d'une panne : ne pas en faire un négatif durable.
   if (!tmdb) throw Object.assign(new Error('Métadonnées TMDB indisponibles'), { code: 'TMDB_UNAVAILABLE' });
   const found = await findValidatedFStream(tmdb, type, season, seasonData);
+  const cachedLink = cachedData?.search?.bestMatch?.link;
+  if (!found.candidate && cachedLink && found.rejected?.has(canonicalFStreamUrl(cachedLink))) {
+    // La fiche en cache vient d'être réfutée (homonyme : « Kraken » norvégien
+    // servi pour le film français) : le cache ne doit plus la servir.
+    refreshStep('cached_selection_refuted', { url: cachedLink });
+    await invalidateFStreamCache(generateFStreamCacheKey(type, id, season ?? null));
+  }
   if (!found.candidate) return uncachedFStreamResponse(404, {
     success: false, source: 'FStream', type, code: found.failureCode,
     error: 'Aucune fiche FStream utilisable après recherche et vérification',

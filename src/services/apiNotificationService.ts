@@ -91,6 +91,20 @@ function getAuthToken(): string | null {
 }
 
 /**
+ * Compte et profil courants, pour ne pas réafficher les notifications d'un
+ * autre profil (cache du menu des notifications).
+ */
+export function getNotificationsOwnerKey(): string | null {
+  try {
+    const token = getAuthToken();
+    const profileId = getCurrentProfileId();
+    return token && profileId ? `${token}|${profileId}` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Récupère le profileId actuel depuis le localStorage
  */
 function getCurrentProfileId(): string | null {

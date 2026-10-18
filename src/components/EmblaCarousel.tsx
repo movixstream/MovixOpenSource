@@ -1,7 +1,7 @@
 import { useLightMode } from '@/context/LightModeContext';
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import useEmblaCarousel, {
-  reInitMountedEmbla,
+  reInitMountedEmblaKeepingLocation,
   watchMountedEmblaResize,
 } from '@/hooks/useFlexGapEmblaCarousel';
 import { Star, Calendar, Trash, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -26,6 +26,10 @@ const POSTER_FALLBACK = `data:image/svg+xml,${encodeURIComponent('<svg width="50
 // Stable frozen constant for non-history carousel items — prevents fresh object
 // identity inside limitedItems.map() from defeating CarouselCard memo. — perf
 const EMPTY_PROGRESS = Object.freeze({ percentage: 0, position: 0, duration: 0 });
+// Cartes par carrousel. L'historique n'a pas de limite : une carte loin de
+// l'écran n'est qu'une boîte vide (contenu rendu près du viewport seulement),
+// et tout rendre d'un coup évite d'ajouter des cartes pendant le défilement.
+const CAROUSEL_MAX_ITEMS = 30;
 
 export interface Media {
   id: number;
@@ -48,6 +52,10 @@ interface ContinueWatching {
   poster_path: string;
   media_type: 'movie' | 'tv';
   progress?: number;
+  // Position et durée (secondes) fournies par le serveur ; sinon lues dans
+  // les clés `progress_*` du localStorage.
+  position?: number;
+  duration?: number;
   lastWatched: string;
   overview?: string;
   backdrop_path?: string;
@@ -70,6 +78,10 @@ interface EmblaCarouselProps {
   showRanking?: boolean;
   priorityZIndex?: boolean; // Pour les sections qui doivent être au-dessus des autres
   onViewAll?: () => void; // Callback pour le bouton "Voir tous"
+  /** Outils posés après le titre (ex. frissomètre de la rangée Halloween). */
+  headerExtra?: React.ReactNode;
+  /** Calque posé sur les cartes, sous les flèches (ex. lampe torche). */
+  overlay?: React.ReactNode;
 }
 
 interface LazyImageProps {
@@ -208,6 +220,9 @@ export const CarouselCard = React.memo<{
 }) => {
   const { t } = useTranslation();
   const [starred, setStarred] = useState(initialStarred);
+  // Nombre d'ajouts faits depuis cette carte : le thème Halloween fait
+  // descendre l'araignée du bouton à chaque ajout.
+  const [spiderDrops, setSpiderDrops] = useState(0);
   const title = item.title || item.name || '';
   const isCollection = item.media_type === 'collection';
 
@@ -283,6 +298,7 @@ export const CarouselCard = React.memo<{
       list.unshift(newItem);
       localStorage.setItem(key, JSON.stringify(list));
       setStarred(true);
+      setSpiderDrops((count) => count + 1);
       toast.success(`${title} ${t('lists.addedToList')}`, { duration: 2000 });
     }
   }, [item, title, t, isCollection]);
@@ -319,13 +335,13 @@ export const CarouselCard = React.memo<{
       >
         {renderContent && <>
         {/* Type badge */}
-        {!preview?.customImage && <span className="absolute top-2 left-2 z-10 px-2 py-1 rounded-lg bg-black/75 text-[10px] font-semibold uppercase tracking-wider text-white/80">
+        {!preview?.customImage && <span data-card-type-badge className="absolute top-2 left-2 z-10 px-2 py-1 rounded-lg bg-black/75 text-[10px] font-semibold uppercase tracking-wider text-white/80">
           {typeLabel}
         </span>}
 
         {/* Episode badge for history TV items */}
         {isHistory && 'currentEpisode' in item && item.currentEpisode && item.media_type === 'tv' && (
-          <span className="absolute top-9 left-2 z-10 px-2 py-1 rounded-lg bg-red-600 text-[10px] font-semibold tracking-wider text-white">
+          <span data-card-episode-badge className="absolute top-9 left-2 z-10 px-2 py-1 rounded-lg bg-red-600 text-[10px] font-semibold tracking-wider text-white">
             S{item.currentEpisode.season}:E{item.currentEpisode.episode}
           </span>
         )}
@@ -349,6 +365,13 @@ export const CarouselCard = React.memo<{
           </button>
         ) : (
           <WatchlistAction
+            data-card-watchlist
+            // Alterne entre deux valeurs pour relancer l'animation à chaque ajout.
+            data-spider-drop={spiderDrops ? (spiderDrops % 2 ? 'a' : 'b') : undefined}
+            // Remontée finie : l'araignée retourne au seul survol.
+            onAnimationEnd={spiderDrops ? (e) => {
+              if (e.animationName.startsWith('halloween-watchlist-spider')) setSpiderDrops(0);
+            } : undefined}
             type={preview ? undefined : 'button'}
             onClick={preview ? undefined : toggleWatchlist}
             title={preview ? undefined : starred ? t('profile.removeFromWatchlist') : t('profile.addToWatchlist')}
@@ -422,7 +445,7 @@ export const CarouselCard = React.memo<{
           </div>
           <div className="flex items-center gap-2 mb-1">
             {item.vote_average ? (
-              <div className="flex items-center gap-1">
+              <div data-card-rating className="flex items-center gap-1">
                 <Star className="w-3 h-3 text-yellow-400" />
                 <span className="text-xs text-white/80">
                   {item.vote_average.toFixed(1)}
@@ -430,7 +453,7 @@ export const CarouselCard = React.memo<{
               </div>
             ) : null}
             {year && (
-              <div className="flex items-center gap-1">
+              <div data-card-year className="flex items-center gap-1">
             <Calendar className="w-3 h-3 text-white opacity-60" />
                 <span className="media-card-muted text-xs text-white/60">{year}</span>
               </div>
@@ -490,7 +513,9 @@ const EmblaCarousel: React.FC<EmblaCarouselProps> = ({
   onRemoveAll,
   showRanking = false,
   priorityZIndex: _priorityZIndex = false,
-  onViewAll
+  onViewAll,
+  headerExtra,
+  overlay
 }) => {
   const { t } = useTranslation();
   const { effectivePrefs } = useLightMode();
@@ -532,8 +557,11 @@ const EmblaCarousel: React.FC<EmblaCarouselProps> = ({
     return ids;
   }, []);
 
-  // Limite le nombre d'items pour éviter de surcharger le DOM (max 30 items par carousel)
-  const limitedItems = useMemo(() => allowedItems.slice(0, 30), [allowedItems]);
+  // Limite le nombre d'items pour éviter de surcharger le DOM, sauf l'historique.
+  const limitedItems = useMemo(
+    () => (isHistory ? allowedItems : allowedItems.slice(0, CAROUSEL_MAX_ITEMS)),
+    [allowedItems, isHistory],
+  );
   const slidesRevision = useMemo(
     () => limitedItems.map((item) => `${item.media_type}:${item.id}`).join('|'),
     [limitedItems],
@@ -547,7 +575,7 @@ const EmblaCarousel: React.FC<EmblaCarouselProps> = ({
     }
     if (previousSlidesRevision.current === slidesRevision) return;
     previousSlidesRevision.current = slidesRevision;
-    reInitMountedEmbla(emblaApi);
+    reInitMountedEmblaKeepingLocation(emblaApi);
   }, [emblaApi, slidesRevision]);
 
   // `priority` cap statique : les N premières cards reçoivent
@@ -716,7 +744,13 @@ const EmblaCarousel: React.FC<EmblaCarouselProps> = ({
     for (const item of limitedItems) {
       const h = item as ContinueWatching;
       const itemKey = `${h.id}-${h.media_type}`;
-      if (h.media_type === 'tv' && h.currentEpisode) {
+      if (typeof h.position === 'number' && typeof h.duration === 'number' && h.position > 0 && h.duration > 0) {
+        map.set(itemKey, {
+          percentage: Math.min((h.position / h.duration) * 100, 100),
+          position: h.position,
+          duration: h.duration,
+        });
+      } else if (h.media_type === 'tv' && h.currentEpisode) {
         const ep = getEpisodeProgress(h.id, h.currentEpisode.season, h.currentEpisode.episode);
         map.set(itemKey, {
           percentage: ep.percentage,
@@ -740,7 +774,7 @@ const EmblaCarousel: React.FC<EmblaCarouselProps> = ({
   return (
     <div className="mb-4 content-row-container -mx-3 md:-mx-4 group/carousel" style={{ position: 'relative' }}>
         <div className="flex justify-between items-center mb-2 px-4 md:px-6 relative">
-          <div className="flex items-center gap-3">
+          <div className={`flex items-center gap-3 ${headerExtra ? 'flex-wrap gap-y-2' : ''}`}>
             <h2 className="section-title">{title}</h2>
             {onViewAll && (
               <button
@@ -751,6 +785,7 @@ const EmblaCarousel: React.FC<EmblaCarouselProps> = ({
                 <ChevronRight className="w-3 h-3" />
               </button>
             )}
+            {headerExtra}
           </div>
           {isHistory && onRemoveAll && limitedItems.length > 0 && (
             <button
@@ -803,6 +838,7 @@ const EmblaCarousel: React.FC<EmblaCarouselProps> = ({
               })}
             </div>
           </div>
+          {overlay}
           {/* Boutons de navigation - verticaux noirs avec slide-in au hover */}
           <button
             type="button"
@@ -810,6 +846,7 @@ const EmblaCarousel: React.FC<EmblaCarouselProps> = ({
             disabled={!canScrollPrev}
             onClick={handlePrev}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            data-carousel-arrow="prev"
             className={`group/icon hidden md:flex absolute left-6 md:left-8 top-1/2 z-[950]
                      w-12 h-32 rounded-2xl items-center justify-center text-white/90 hover:text-white
                      bg-gradient-to-b from-neutral-900/95 via-black/95 to-neutral-900/95
@@ -829,6 +866,7 @@ const EmblaCarousel: React.FC<EmblaCarouselProps> = ({
             disabled={!canScrollNext}
             onClick={handleNext}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            data-carousel-arrow="next"
             className={`group/icon hidden md:flex absolute right-6 md:right-8 top-1/2 z-[950]
                      w-12 h-32 rounded-2xl items-center justify-center text-white/90 hover:text-white
                      bg-gradient-to-b from-neutral-900/95 via-black/95 to-neutral-900/95

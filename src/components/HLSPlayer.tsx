@@ -197,6 +197,9 @@ import type {
   KisskhSubtitleTrack,
 } from '../types/kisskh';
 import { readLocalStorage, removeLocalStorage, writeLocalStorage } from '../utils/browserStorage';
+import { getTvmazeSeasonsOverride } from '../services/tvmazeEpisodeList';
+import { useHalloweenTheme } from '../hooks/useHalloweenTheme';
+import { HalloweenProgressPumpkin } from './halloween/HalloweenIcons';
 
 const EMPTY_KISSKH_SOURCES: KisskhSource[] = [];
 const EMPTY_KISSKH_SUBTITLES: KisskhSubtitleTrack[] = [];
@@ -330,6 +333,35 @@ function selectExactHlsFallbackLevel(
   targetHeight: number,
 ): number {
   return options.find(option => option.height === targetHeight)?.index ?? -1;
+}
+
+/**
+ * Déplace la tête de lecture sans jamais lever d'exception.
+ *
+ * Dans la WKWebView de l'app iOS, écrire `video.currentTime` peut lever
+ * « TypeError: Attempted to assign to readonly property. » dans certains états
+ * du média (constaté sur la barre de progression et le double-tap, juste
+ * après l'échec de la playlist de l'aperçu). Dans un gestionnaire de clic ou de
+ * double-tap, l'exception remontait jusqu'à GlitchTip et coupait le reste du
+ * gestionnaire. Une valeur non finie lèverait aussi une TypeError : on l'ignore.
+ * Renvoie `true` si le déplacement a été accepté.
+ */
+function seekVideoSafely(video: HTMLVideoElement | null | undefined, time: number): boolean {
+  if (!video || !Number.isFinite(time)) return false;
+  try {
+    video.currentTime = time;
+    return true;
+  } catch (error) {
+    const fastSeek = (video as HTMLVideoElement & { fastSeek?: (t: number) => void }).fastSeek;
+    if (typeof fastSeek === 'function') {
+      try {
+        fastSeek.call(video, time);
+        return true;
+      } catch { /* repli refusé aussi */ }
+    }
+    console.warn('[HLSPlayer] déplacement de la lecture refusé par le navigateur', error);
+    return false;
+  }
 }
 
 function decideHlsVideoFallback({
@@ -857,12 +889,12 @@ const handle429Error = (
 
       // Repositionner la vidéo sur la position cible
       if (videoRef.current.readyState >= 1) {
-        videoRef.current.currentTime = targetTime;
+        seekVideoSafely(videoRef.current, targetTime);
       } else {
         // Si la vidéo n'est pas prête, attendre qu'elle le soit
         const onLoadedMetadata = () => {
           if (videoRef.current) {
-            videoRef.current.currentTime = targetTime;
+            seekVideoSafely(videoRef.current, targetTime);
             videoRef.current.removeEventListener('loadedmetadata', onLoadedMetadata);
           }
         };
@@ -1437,6 +1469,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     return savedBoost ? parseFloat(savedBoost) : 1;
   });
   const audioContextRef = useRef<AudioContext | null>(null);
+  const audioContextCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
 
@@ -1746,10 +1779,17 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     if (!focusableTarget) return;
 
     window.requestAnimationFrame(() => {
-      focusableTarget.scrollIntoView({
-        block: 'nearest',
-        inline: 'nearest'
-      });
+      try {
+        focusableTarget.scrollIntoView({
+          block: 'nearest',
+          inline: 'nearest'
+        });
+      } catch {
+        // Firefox < 58 refuse la valeur 'nearest' de ScrollLogicalPosition
+        // et lève une TypeError : on retombe sur la forme booléenne, comprise
+        // partout (false = aligner le bas de l'élément sur le bas visible).
+        try { focusableTarget.scrollIntoView(false); } catch { /* sans défilement */ }
+      }
     });
   }, []);
 
@@ -2726,6 +2766,12 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
     setLoadingEpisodes(true);
     try {
+      // Même liste que la fiche série quand le découpage TVmaze est actif.
+      const tvmazeSeasons = await getTvmazeSeasonsOverride(tvShowId);
+      if (tvmazeSeasons?.[seasonNum]) {
+        setEpisodesBySeasons(prev => ({ ...prev, [seasonNum]: tvmazeSeasons[seasonNum] }));
+        return;
+      }
       const response = await axios.get(`https://api.themoviedb.org/3/tv/${tvShowId}/season/${seasonNum}`, {
         params: { api_key: TMDB_API_KEY, language: getTmdbLanguage() }
       });
@@ -3257,8 +3303,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     // Définir les lecteurs VO/VOSTFR à conserver (enlever 6, 4 et 2)
     if (showVostfrMenu) {
       const vostfrSources = [
+        { id: 'vidy', label: 'Vidy', url: '' }, // vidy.st (interface FR, accent Movix)
         { id: '111movies', label: '111Movies', url: '' },
-        { id: 'peachify', label: 'Peachify', url: '' }, // Peachify (priorité, FR subs + accent Movix)
         { id: 'vostfr', label: 'Videasy', url: '' }, // Videasy
         { id: 'vidlink', label: 'Vidlink', url: '' }, // vidlink
         { id: 'vidsrccc', label: 'Vidsrc.io', url: '' }, // vidsrc.io
@@ -3274,16 +3320,16 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         // boutons Sources/Open dupliqués (rendus dans le parent ET dans l'iframe imbriqué).
         if (tvShowId != null && seasonNumber != null && episodeNumber != null) {
           // TV Show URLs
-          if (source.id === '111movies') finalUrl = `https://111movies.net/tv/${tvShowId}/${seasonNumber}/${episodeNumber}`;
-          else if (source.id === 'peachify') finalUrl = `https://peachify.top/embed/tv/${tvShowId}/${seasonNumber}/${episodeNumber}?sub=French&accent=dc2626`;
+          if (source.id === 'vidy') finalUrl = `https://www.vidy.st/fr/tv/${tvShowId}/${seasonNumber}/${episodeNumber}?color=DC2626`;
+          else if (source.id === '111movies') finalUrl = `https://111movies.net/tv/${tvShowId}/${seasonNumber}/${episodeNumber}`;
           else if (source.id === 'vidlink') finalUrl = `https://vidlink.pro/tv/${tvShowId}/${seasonNumber}/${episodeNumber}`; // vidlink.pro
           else if (source.id === 'vidsrccc') finalUrl = `https://vidsrc.io/embed/tv?tmdb=${tvShowId}&season=${seasonNumber}&episode=${episodeNumber}`;
           else if (source.id === 'vostfr') finalUrl = `https://player.videasy.net/tv/${tvShowId}/${seasonNumber}/${episodeNumber}`; // Videasy
           else if (source.id === 'vidsrcwtf1') finalUrl = `https://vidsrc.wtf/api/1/tv/?id=${tvShowId}&s=${seasonNumber}&e=${episodeNumber}`; // Assumed pattern
         } else if (movieId) {
           // Movie URLs (existing logic)
-          if (source.id === '111movies') finalUrl = `https://111movies.net/movie/${movieId}`;
-          else if (source.id === 'peachify') finalUrl = `https://peachify.top/embed/movie/${movieId}?sub=French&accent=dc2626`;
+          if (source.id === 'vidy') finalUrl = `https://www.vidy.st/fr/movie/${movieId}?color=DC2626`;
+          else if (source.id === '111movies') finalUrl = `https://111movies.net/movie/${movieId}`;
           else if (source.id === 'vidlink') finalUrl = `https://vidlink.pro/movie/${movieId}`; // vidlink.pro
           else if (source.id === 'vidsrccc') finalUrl = `https://vidsrc.io/embed/movie?tmdb=${movieId}`;
           else if (source.id === 'vostfr') finalUrl = `https://player.videasy.net/movie/${movieId}`;
@@ -3680,10 +3726,6 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       if ((window as any).error502RetryCount) {
         (window as any).error502RetryCount = {};
         console.log('✅ Cleared 502 error retry counters');
-      }
-      if ((window as any).bufferStalledRetryCount) {
-        (window as any).bufferStalledRetryCount = {};
-        console.log('✅ Cleared buffer stalled error retry counters');
       }
       if ((window as any).fragParsingLateRetries) {
         delete (window as any).fragParsingLateRetries;
@@ -4097,20 +4139,69 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
       // Surveillance des niveaux de buffer
       hls.on(Hls.Events.BUFFER_APPENDED, (_event, data) => {
-        if (data.type === 'video' || data.type === 'audio') {
+        if ((data.type === 'video' || data.type === 'audio') && !video.paused && !video.seeking) {
+          // Mesurer la plage qui contient la tête de lecture : après un saut,
+          // la dernière plage peut se trouver avant elle (valeurs négatives).
           const buffered = video.buffered;
-          if (buffered.length > 0) {
-            const bufferEnd = buffered.end(buffered.length - 1);
-            const currentTime = video.currentTime;
-            const bufferAhead = bufferEnd - currentTime;
-
-            // Si le buffer devient trop faible, préparer une récupération préventive
-            if (bufferAhead < 2 && !video.paused) {
-              console.log(`📊 Low buffer detected: ${bufferAhead.toFixed(2)}s ahead`);
+          const currentTime = video.currentTime;
+          let bufferAhead = 0;
+          for (let i = 0; i < buffered.length; i++) {
+            if (currentTime >= buffered.start(i) && currentTime <= buffered.end(i)) {
+              bufferAhead = buffered.end(i) - currentTime;
+              break;
             }
+          }
+
+          if (bufferAhead < 2) {
+            console.log(`📊 Low buffer detected: ${bufferAhead.toFixed(2)}s ahead`);
           }
         }
       });
+
+      // Un blocage signalé par HLS.js est le plus souvent une attente réseau :
+      // juste après un saut, le fragment visé n'est pas encore arrivé. Arrêter
+      // le chargement à chaque signalement annulait justement ce fragment, et
+      // l'événement `playing` provoqué par les petites poussées de HLS.js
+      // remettait le compteur à zéro : la lecture tournait en boucle sur place.
+      // On laisse donc HLS.js charger et on n'intervient que si la tête de
+      // lecture reste vraiment figée : relance du chargement, puis repli.
+      let stallWatchdog: ReturnType<typeof setInterval> | null = null;
+      const clearStallWatchdog = () => {
+        if (stallWatchdog) {
+          clearInterval(stallWatchdog);
+          stallWatchdog = null;
+        }
+      };
+      const watchStalledPlayback = () => {
+        if (stallWatchdog) return;
+        const stalledAt = video.currentTime;
+        let lastPosition = stalledAt;
+        let stalledSeconds = 0;
+        stallWatchdog = setInterval(() => {
+          const position = video.currentTime;
+          const advanced = position - lastPosition;
+          lastPosition = position;
+          // Pause, saut de l'utilisateur ou lecture repartie depuis quelques
+          // secondes : la surveillance s'arrête.
+          if (hlsRef.current !== hls || video.paused || Math.abs(position - stalledAt) >= 3) {
+            clearStallWatchdog();
+            return;
+          }
+          // Une seconde de lecture avec des données d'avance (HAVE_FUTURE_DATA)
+          // ne compte pas. Les poussées de HLS.js se font sans données
+          // d'avance et ne déplacent la tête de lecture que de quelques dixièmes.
+          if (advanced > 0 && video.readyState >= 3) return;
+          stalledSeconds += 1;
+          if (stalledSeconds === 8) {
+            console.warn(`🔁 Lecture figée depuis 8 s à ${video.currentTime.toFixed(1)}s : relance du chargement`);
+            hls.startLoad(video.currentTime);
+          } else if (stalledSeconds >= 16) {
+            clearStallWatchdog();
+            console.error('❌ Lecture toujours figée après 16 s : changement de source');
+            requestHlsFallback(undefined, src);
+          }
+        }, 1000);
+      };
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
         // A broken/unsupported subtitle must never kill video playback — drop
@@ -4243,41 +4334,10 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
           console.warn('🔊 Audio/Video Error detected:', data.details);
 
-          // Gestion spécifique des erreurs de buffer stalled
-          if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
-            console.error('🚨 Buffer stalled error detected - attempting recovery...');
-
-            // Vérifier si on a trop d'erreurs bufferStalled consécutives
-            const retryKey = `bufferStalled_general`;
-            if (!(window as any).bufferStalledRetryCount) {
-              (window as any).bufferStalledRetryCount = {};
-            }
-            (window as any).bufferStalledRetryCount[retryKey] = ((window as any).bufferStalledRetryCount[retryKey] || 0) + 1;
-
-            // Si trop d'erreurs bufferStalled, déclencher un changement de source
-            if ((window as any).bufferStalledRetryCount[retryKey] > 2) {
-              console.error(`❌ Too many buffer stalled errors (${(window as any).bufferStalledRetryCount[retryKey]}), switching source...`);
-              (window as any).bufferStalledRetryCount[retryKey] = 0; // Reset le compteur
-              setTimeout(() => {
-                requestHlsFallback(undefined, src);
-              }, 1000);
-              return;
-            }
-
-            // Essayer de récupérer sans changer la position
-            if (videoRef.current && hlsRef.current) {
-              const currentTime = videoRef.current.currentTime;
-
-              console.log(`🎯 Attempting recovery from buffer stalled error at ${currentTime}s`);
-
-              hlsRef.current.stopLoad();
-              setTimeout(() => {
-                if (hlsRef.current && videoRef.current) {
-                  hlsRef.current.startLoad(currentTime);
-                  console.log(`▶️ Restarted HLS loading from: ${currentTime}s after buffer stalled error`);
-                }
-              }, 2000);
-            }
+          // Blocage non fatal : surveillé sans toucher au chargement. Le cas
+          // fatal (poussées de HLS.js épuisées) suit la récupération générique.
+          if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR && !data.fatal) {
+            watchStalledPlayback();
             return;
           }
 
@@ -4322,7 +4382,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
                   const onCanPlay = () => {
                     if (hlsRef.current === hls && videoRef.current === video) {
-                      video.currentTime = skipTime;
+                      seekVideoSafely(video, skipTime);
                       if (shouldResumeFragRecovery) {
                         safePlay(video).catch(e => console.error('Error resuming playback:', e));
                       }
@@ -4389,7 +4449,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
                     // Vérifier que le saut ne dépasse pas la durée totale
                     if (video.duration && skipTime < video.duration) {
-                      video.currentTime = skipTime;
+                      seekVideoSafely(video, skipTime);
                       console.log(`🎯 Jumped to ${skipTime}s to skip corrupted fragment (duration: ${fragmentDuration}s)`);
                     } else {
                       console.log(`⚠️ Cannot skip beyond video duration (${video.duration}s), staying at current position`);
@@ -4514,6 +4574,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       return () => {
         clearBufferingTimeout(); // Clear timeout on cleanup
         clearSourceTimeout(); // Clear source timeout on cleanup
+        clearStallWatchdog();
         // Nettoyer les tentatives de récupération
         if ((window as any).hlsRecoveryAttempts) {
           delete (window as any).hlsRecoveryAttempts;
@@ -4640,7 +4701,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
       // Si la lecture en boucle est activée, remettre la vidéo au début
       if (isLooping && videoRef.current) {
-        videoRef.current.currentTime = 0;
+        seekVideoSafely(videoRef.current, 0);
         safePlay(videoRef.current).catch(e => console.error('Error replaying video:', e));
         // Appeler onEnded et onPlayerEnded même en mode boucle
         if (onEnded) onEnded();
@@ -6038,18 +6099,32 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     };
   }, [src]);
 
-  // Cleanup audio context on unmount
+  // Cleanup audio context on unmount.
+  // Un élément <video> ne se relie qu'une seule fois à un
+  // MediaElementSourceNode. Le StrictMode démonte puis remonte aussitôt les
+  // effets sur le même élément : fermer le contexte tout de suite faisait
+  // échouer createMediaElementSource au remontage, et la vidéo restait reliée
+  // à un contexte fermé, donc muette. La fermeture attend la fin du cycle et
+  // un remontage l'annule.
   useEffect(() => {
+    if (audioContextCloseTimerRef.current) {
+      clearTimeout(audioContextCloseTimerRef.current);
+      audioContextCloseTimerRef.current = null;
+    }
     return () => {
-      if (audioContextRef.current) {
-        audioContextRef.current.close().catch(console.error);
-      }
+      audioContextCloseTimerRef.current = setTimeout(() => {
+        audioContextCloseTimerRef.current = null;
+        const ctx = audioContextRef.current;
+        if (ctx && ctx.state !== 'closed') {
+          ctx.close().catch(console.error);
+        }
+      }, 0);
     };
   }, []);
 
   const skipTime = (seconds: number) => {
     if (videoRef.current) {
-      videoRef.current.currentTime += seconds;
+      seekVideoSafely(videoRef.current, videoRef.current.currentTime + seconds);
 
       if (seconds > 0) {
         // Gérer les clics multiples pour forward
@@ -7372,7 +7447,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
   const handleReplay = () => {
     if (videoRef.current) {
-      videoRef.current.currentTime = 0;
+      seekVideoSafely(videoRef.current, 0);
       safePlay(videoRef.current).catch(error => {
         console.error('Erreur lors de la reprise de la lecture:', error);
       });
@@ -7394,7 +7469,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     });
     if (newTime === null) return;
 
-    videoRef.current.currentTime = newTime;
+    if (!seekVideoSafely(videoRef.current, newTime)) return;
     setCurrentTime(newTime);
   };
 
@@ -7506,16 +7581,19 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         // Use initialTime prop if provided and valid
         if (initialTime && initialTime > 0 && initialTime < video.duration - 30) {
           console.log(`[loadProgress] Seeking to initialTime prop: ${initialTime}`);
-          video.currentTime = initialTime;
+          seekVideoSafely(video, initialTime);
         } else {
           // Otherwise, use localStorage progress
           const savedProgress = readLocalStorage(key);
           if (savedProgress) {
             try {
               const progress: WatchProgress = JSON.parse(savedProgress);
-              if (progress.position < video.duration - 30) {
+              // Un épisode arrêté dans le générique est un épisode terminé : le
+              // reprendre à cet endroit relancerait chaque revisionnage dans les
+              // dernières secondes. Même seuil de 95 % que la fiche film.
+              if (progress.position < video.duration - 30 && progress.position < video.duration * 0.95) {
                 console.log(`[loadProgress] Seeking to saved localStorage position: ${progress.position}`);
-                video.currentTime = progress.position;
+                seekVideoSafely(video, progress.position);
               } else {
                 console.log(`[loadProgress] Not seeking: localStorage progress is too close to end.`);
               }
@@ -7716,6 +7794,11 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   // `prefers-reduced-motion` coupent les transitions et le flou.
   const { effectivePrefs: animationPrefs } = useLightMode();
 
+  // Thème Halloween : une citrouille remplace la boule des barres de
+  // progression. C'est le réglage qui compte, la classe du thème étant
+  // retirée sur les lecteurs.
+  const halloweenTheme = useHalloweenTheme();
+
   // ==========================================================================
   // Saut d'intro / résumé / outro / crédits / aperçu
   //
@@ -7856,8 +7939,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     if (!video || !Number.isFinite(seconds)) return;
     const limit = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : seconds;
     const target = Math.max(0, Math.min(seconds, limit));
-    video.currentTime = target;
-    setCurrentTime(target);
+    if (seekVideoSafely(video, target)) setCurrentTime(target);
   }, []);
 
   /**
@@ -8109,8 +8191,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       skipSeekTimerRef.current = null;
       // L'événement `seeked` natif déclenché ici est celui qu'écoute déjà la
       // synchro watch party : rien de spécifique à propager en plus.
-      video.currentTime = target;
-      setCurrentTime(target);
+      if (seekVideoSafely(video, target)) setCurrentTime(target);
     };
 
     if (skipSeekTimerRef.current !== null) window.clearTimeout(skipSeekTimerRef.current);
@@ -8591,13 +8672,13 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         case '.': // Image suivante (en pause)
           if (video.paused && Number.isFinite(video.duration) && video.duration > 0) {
             e.preventDefault();
-            video.currentTime = Math.min(video.duration, video.currentTime + (1 / 30));
+            seekVideoSafely(video, Math.min(video.duration, video.currentTime + (1 / 30)));
           }
           return;
         case ',': // Image précédente (en pause)
           if (video.paused && Number.isFinite(video.duration) && video.duration > 0) {
             e.preventDefault();
-            video.currentTime = Math.max(0, video.currentTime - (1 / 30));
+            seekVideoSafely(video, Math.max(0, video.currentTime - (1 / 30)));
           }
           return;
         case '0': // Vitesse normale
@@ -8612,7 +8693,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
           e.preventDefault();
           if (Number.isFinite(video.duration) && video.duration > 0) {
             const percent = parseInt(key) / 10;
-            video.currentTime = video.duration * percent;
+            seekVideoSafely(video, video.duration * percent);
           }
           return;
       }
@@ -8649,11 +8730,11 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
           break;
         case 'Home':
           e.preventDefault();
-          if (Number.isFinite(video.duration) && video.duration > 0) video.currentTime = 0;
+          if (Number.isFinite(video.duration) && video.duration > 0) seekVideoSafely(video, 0);
           break;
         case 'End':
           e.preventDefault();
-          if (Number.isFinite(video.duration) && video.duration > 0) video.currentTime = video.duration;
+          if (Number.isFinite(video.duration) && video.duration > 0) seekVideoSafely(video, video.duration);
           break;
       }
     };
@@ -9051,7 +9132,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       // Restaurer la position sauvegardée après un délai
       setTimeout(() => {
         if (videoRef.current && savedPosition > 0) {
-          videoRef.current.currentTime = savedPosition;
+          seekVideoSafely(videoRef.current, savedPosition);
           console.log(`⏰ Restored position: ${savedPosition}s`);
         }
       }, 1000);
@@ -9202,7 +9283,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       // When a new source loads, check if we need to restore position
       if (initialTime && initialTime > 0) {
         console.log(`Setting initial time on source change: ${initialTime}`);
-        video.currentTime = initialTime;
+        seekVideoSafely(video, initialTime);
       }
     };
 
@@ -9381,8 +9462,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         width: progressBarRect.width,
         duration,
       });
-      if (seekTime !== null) {
-        videoRef.current.currentTime = seekTime;
+      if (seekTime !== null && seekVideoSafely(videoRef.current, seekTime)) {
         setCurrentTime(seekTime);
         setHoverState(prev => ({ ...prev, time: seekTime }));
       }
@@ -9751,7 +9831,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       // Continue watching functionality removed
 
       if (video) {
-        video.currentTime = 0;
+        seekVideoSafely(video, 0);
         setCurrentTime(0);
         // Maybe add a toast notification here
       }
@@ -9760,6 +9840,29 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     } else {
       console.log("[resetCurrentProgress] No progress key found for current item.");
     }
+  };
+
+  // Efface la progression de tous les épisodes de la série en cours, pour la
+  // revoir depuis le début sans repasser épisode par épisode.
+  const resetSeriesProgress = () => {
+    if (!tvShowId) return;
+    const prefix = `progress_tv_${tvShowId}_s`;
+    const keys: string[] = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(prefix)) keys.push(k);
+      }
+    } catch {
+      return;
+    }
+    keys.forEach((k) => removeLocalStorage(k));
+    const video = videoRef.current;
+    if (video) {
+      seekVideoSafely(video, 0);
+      setCurrentTime(0);
+    }
+    toast.success(t('watch.resetSeriesProgressDone', { count: keys.length }));
   };
 
   const handleBackToInfo = (e: React.MouseEvent) => {
@@ -10250,8 +10353,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                                   className="ml-4 pl-2 border-l-2 border-gray-700 mb-2"
                                 >
                                   {[
+                                    { id: 'vidy', label: 'Vidy' },
                                     { id: '111movies', label: '111Movies' },
-                                    { id: 'peachify', label: 'Peachify' },
                                     { id: 'vostfr', label: 'Videasy' },
                                     { id: 'vidlink', label: 'Vidlink' },
                                     { id: 'vidsrccc', label: 'Vidsrc.io' },
@@ -10261,15 +10364,15 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                                     // (épisode spécial / Spéciaux TMDB) tombe dans le fallback '#' qui fait
                                     // charger la page courante en boucle dans l'iframe.
                                     const sourceUrl = movieId ?
+                                      vostfrSource.id === 'vidy' ? `https://www.vidy.st/fr/movie/${movieId}?color=DC2626` :
                                       vostfrSource.id === '111movies' ? `https://111movies.net/movie/${movieId}` :
-                                        vostfrSource.id === 'peachify' ? `https://peachify.top/embed/movie/${movieId}?sub=French&accent=dc2626` :
                                         vostfrSource.id === 'vidlink' ? `https://vidlink.pro/movie/${movieId}` :
                                           vostfrSource.id === 'vidsrccc' ? `https://vidsrc.io/embed/movie?tmdb=${movieId}` :
                                             vostfrSource.id === 'vostfr' ? `https://player.videasy.net/movie/${movieId}` :
                                               `https://vidsrc.wtf/api/1/movie/?id=${movieId}` :
                                       (tvShowId != null && seasonNumber != null && episodeNumber != null) ?
+                                        vostfrSource.id === 'vidy' ? `https://www.vidy.st/fr/tv/${tvShowId}/${seasonNumber}/${episodeNumber}?color=DC2626` :
                                         vostfrSource.id === '111movies' ? `https://111movies.net/tv/${tvShowId}/${seasonNumber}/${episodeNumber}` :
-                                          vostfrSource.id === 'peachify' ? `https://peachify.top/embed/tv/${tvShowId}/${seasonNumber}/${episodeNumber}?sub=French&accent=dc2626` :
                                           vostfrSource.id === 'vidlink' ? `https://vidlink.pro/tv/${tvShowId}/${seasonNumber}/${episodeNumber}` :
                                             vostfrSource.id === 'vidsrccc' ? `https://vidsrc.io/embed/tv?tmdb=${tvShowId}&season=${seasonNumber}&episode=${episodeNumber}` :
                                               vostfrSource.id === 'vostfr' ? `https://player.videasy.net/tv/${tvShowId}/${seasonNumber}/${episodeNumber}` :
@@ -10765,14 +10868,10 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       }
     },
     seek: (time: number) => {
-      if (videoRef.current) {
-        videoRef.current.currentTime = time;
-      }
+      seekVideoSafely(videoRef.current, time);
     },
     seekTo: (time: number) => {
-      if (videoRef.current) {
-        videoRef.current.currentTime = time;
-      }
+      seekVideoSafely(videoRef.current, time);
     },
     getDuration: () => {
       return videoRef.current ? videoRef.current.duration : 0;
@@ -10931,7 +11030,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     if (side === 'right' && showRightTapAnimation) {
       console.log('Right side tap while animation showing: adding +10s');
       setRightTapCount(prev => prev + 1);
-      if (videoRef.current) videoRef.current.currentTime += 10;
+      if (videoRef.current) seekVideoSafely(videoRef.current, videoRef.current.currentTime + 10);
       // Reset the timeout to keep animation visible
       if (rightTapTimeoutRef.current) clearTimeout(rightTapTimeoutRef.current);
       rightTapTimeoutRef.current = setTimeout(() => {
@@ -10947,7 +11046,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     if (side === 'left' && showLeftTapAnimation) {
       console.log('Left side tap while animation showing: adding -10s');
       setLeftTapCount(prev => prev + 1);
-      if (videoRef.current) videoRef.current.currentTime -= 10;
+      if (videoRef.current) seekVideoSafely(videoRef.current, videoRef.current.currentTime - 10);
       // Reset the timeout to keep animation visible
       if (leftTapTimeoutRef.current) clearTimeout(leftTapTimeoutRef.current);
       leftTapTimeoutRef.current = setTimeout(() => {
@@ -11002,7 +11101,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         console.log('Right double-tap: seeking +10s');
         setRightTapCount(prev => prev + 1);
         setShowRightTapAnimation(true);
-        if (videoRef.current) videoRef.current.currentTime += 10;
+        if (videoRef.current) seekVideoSafely(videoRef.current, videoRef.current.currentTime + 10);
         if (rightTapTimeoutRef.current) clearTimeout(rightTapTimeoutRef.current);
         rightTapTimeoutRef.current = setTimeout(() => {
           setRightTapCount(0);
@@ -11013,7 +11112,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         console.log('Left double-tap: seeking -10s');
         setLeftTapCount(prev => prev + 1);
         setShowLeftTapAnimation(true);
-        if (videoRef.current) videoRef.current.currentTime -= 10;
+        if (videoRef.current) seekVideoSafely(videoRef.current, videoRef.current.currentTime - 10);
         if (leftTapTimeoutRef.current) clearTimeout(leftTapTimeoutRef.current);
         leftTapTimeoutRef.current = setTimeout(() => {
           setLeftTapCount(0);
@@ -11372,10 +11471,14 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                         className="absolute top-0 left-0 h-full bg-red-500 rounded-full"
                         style={{ width: 'var(--slider-fill)' }}
                       />
-                      <div
-                        className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/50 bg-white opacity-100 shadow-md transition-opacity duration-150 group-data-[dragging]:opacity-100 sm:h-4 sm:w-4"
-                        style={{ left: 'var(--slider-fill)' }}
-                      />
+                      {halloweenTheme ? (
+                        <HalloweenProgressPumpkin left="var(--slider-fill)" />
+                      ) : (
+                        <div
+                          className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/50 bg-white opacity-100 shadow-md transition-opacity duration-150 group-data-[dragging]:opacity-100 sm:h-4 sm:w-4"
+                          style={{ left: 'var(--slider-fill)' }}
+                        />
+                      )}
                       <div
                         className="absolute bottom-full mb-2.5 opacity-0 transition-opacity duration-200 group-data-[pointing]:opacity-100 pointer-events-none"
                         style={{
@@ -12251,10 +12354,14 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                   })}
                 />
               ))}
-            <div
-              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-red-600 rounded-full -ml-2"
-              style={{ left: `${(currentTime / duration) * 100}%` }}
-            />
+            {halloweenTheme ? (
+              <HalloweenProgressPumpkin left={`${(currentTime / duration) * 100}%`} />
+            ) : (
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-red-600 rounded-full -ml-2"
+                style={{ left: `${(currentTime / duration) * 100}%` }}
+              />
+            )}
           </div>
 
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -12986,6 +13093,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             onOpenSegmentStudio: (tvShowId || movieId) ? openStudio : undefined,
             communitySubmissionCount: communitySubmissions.length,
             resetCurrentProgress,
+            resetSeriesProgress,
             audioEnhancerMode,
             handleAudioEnhancerChange,
             customAudio,

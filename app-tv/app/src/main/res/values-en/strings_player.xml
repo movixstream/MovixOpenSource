@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Player: episodes, autoplay and subtitle style. Kept apart from strings.xml. -->
+<resources>
+    <string name="player_eps_title">Episodes</string>
+    <string name="player_eps_now">Now playing</string>
+    <string name="player_eps_number">%1$d. %2$s</string>
+    <string name="player_next_kicker">Next episode · S%1$d E%2$d</string>
+    <string name="player_still_title">Are you still watching?</string>
+    <string name="player_still_body">Playback is paused after several episodes played in a row without touching the remote.</string>
+    <string name="player_still_continue">Continue</string>
+    <string name="player_still_stop">Stop</string>
+    <string name="player_st_title">Subtitle style</string>
+    <string name="player_st_size">Size</string>
+    <string name="player_st_color">Color</string>
+    <string name="player_st_background">Background</string>
+    <string name="player_st_position">Position</string>
+    <string name="player_st_outline">Outline</string>
+    <string name="player_st_percent">%1$d%%</string>
+    <string name="player_st_no_background">No background</string>
+    <string name="player_st_bottom">Bottom</string>
+    <string name="player_st_raised">Raised</string>
+    <string name="player_st_outline_on">Black outline</string>
+    <string name="player_st_outline_off">No outline</string>
+    <string name="player_st_white">White</string>
+    <string name="player_st_yellow">Yellow</string>
+    <string name="player_st_cyan">Cyan</string>
+    <string name="player_st_green">Green</string>
+</resources>

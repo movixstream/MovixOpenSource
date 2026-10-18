@@ -135,25 +135,27 @@ enum MediaProxyPolicy {
 
   private static let providerDecoyHostSuffixes = ["fsvid.lol", "vidzy.cc", "vidzy.org"]
 
-  // Vidzy exige le token zstd. q=0 conserve des corps identity : le transport
-  // HTTP natif ne décompresse pas les réponses et doit préserver les Range.
+  // Uqload : q=0 conserve des corps identity, le transport HTTP natif ne
+  // décompresse pas les réponses et doit préserver les Range.
   private static let providerMediaAcceptEncoding =
     "identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0"
+  // Fsvid/Vidzy servent leur playlist leurre (`/e/segN.ts`, la vidéo troll) en
+  // 200 dès que `gzip;q=0` figure dans la requête (mesuré le 2026-10-15) :
+  // `identity` seul donne le vrai flux, lui aussi non compressé.
 
   static func playbackAcceptEncoding(for url: URL) -> String {
     guard let host = url.host?.lowercased() else { return "identity" }
     let normalizedHost = host.hasSuffix(".") ? String(host.dropLast()) : host
-    let isProviderHost = providerDecoyHostSuffixes.contains {
-      normalizedHost == $0 || normalizedHost.hasSuffix(".\($0)")
-    } || normalizedHost.range(
+    let isUqloadHost = normalizedHost.range(
       of: #"(?:^|\.)uqload\.[a-z]{2,24}$"#,
       options: .regularExpression
     ) != nil
-    return isProviderHost ? providerMediaAcceptEncoding : "identity"
+    return isUqloadHost ? providerMediaAcceptEncoding : "identity"
   }
 
   /// Vrai si l'URL est le flux leurre servi par Fsvid/Vidzy quand ils jugent la
-  /// requête illégitime (302 vers .../troll/master.m3u8).
+  /// requête illégitime : 302 vers .../troll/master.m3u8, ou playlist 200 de
+  /// segments `/e/segN.ts`.
   static func isProviderDecoyURL(_ rawURL: String) -> Bool {
     guard let components = URLComponents(string: rawURL),
           let host = components.host?.lowercased() else {
@@ -164,7 +166,9 @@ enum MediaProxyPolicy {
       normalizedHost == $0 || normalizedHost.hasSuffix(".\($0)")
     }
     guard isProviderHost else { return false }
-    return components.percentEncodedPath.lowercased().split(separator: "/").contains("troll")
+    let path = components.percentEncodedPath.lowercased()
+    return path.split(separator: "/").contains("troll")
+      || path.range(of: #"^/e/seg[0-9]+\.ts$"#, options: .regularExpression) != nil
   }
 
   static let allowedRequestHeaders: [String: String] = [

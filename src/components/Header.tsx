@@ -2,14 +2,16 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom';
 import Snowfall from 'react-snowfall';
 import { useLightMode } from '@/context/LightModeContext';
+import { isHalloweenSeason, setHalloweenTheme, useHalloweenTheme } from '@/hooks/useHalloweenTheme';
+import { HalloweenBatIcon, HalloweenLantern, HalloweenPumpkinIcon, HalloweenThemeToggleIcon } from './halloween/HalloweenIcons';
+import { MovixWordmark } from './brand/MovixWordmark';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { isHiddenOnTv } from '@/routing/registry';
-import { Film, Search, Menu, X, Star, Tv2, Users, Clapperboard, Bell, Tv, Lightbulb, Network, List, Radio, Unlock, ChevronDown, ExternalLink, LayoutGrid, Settings, Dices, Sparkles, HelpCircle, Github, CalendarDays } from 'lucide-react';
+import { Film, Search, X, Star, Tv2, Users, Clapperboard, Bell, Tv, Lightbulb, Network, List, Radio, Unlock, ChevronDown, ExternalLink, LayoutGrid, Settings, Dices, Sparkles, HelpCircle, Github, CalendarDays, Puzzle, Smartphone, MonitorPlay } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ProfileMenu from './ProfileMenu';
 import NotificationsPopup from './NotificationsPopup';
-import { MovixWordmark } from './brand/MovixWordmark';
 import { getUnreadNotificationsCount, getNotificationsDisabled } from '../services/apiNotificationService';
 import { encodeId } from '../utils/idEncoder';
 
@@ -17,44 +19,52 @@ import { useSearch } from '../context/SearchContext';
 import { isUserVip } from '../utils/authUtils';
 import { checkVipStatus } from '../utils/vipUtils';
 import { useTranslation } from 'react-i18next';
-import { SquareBackground } from './ui/square-background';
+import { BurgerIcon, ExploreDesktopPanel, ExploreMobileSheet, type ExploreGroup } from './ExploreMenu';
+import { LiquidDropdown, LiquidSheet } from './header/liquidMenu';
+import { useSheetScrollLock } from './header/useSheetScrollLock';
+import { HeaderPanelsContext, type HeaderPanels } from './header/headerPanels';
+import { useIsDesktopNav } from '../hooks/useIsDesktopNav';
 import { APRIL_FOOLS_ADMIN_PATH, isAprilFoolsAdminEnabled } from '../utils/aprilFools';
 import { getOverlayPortalRoot } from '../utils/overlayPortal';
 import { useAgeRestrictedContent } from '../hooks/useAgeRestrictedContent';
 import { readLocalStorage, readSessionStorage } from '../utils/browserStorage';
-
-// Couleurs pour les cards du mega menu
-const cardColors: Record<string, { bg: string; text: string; border: string }> = {
-  purple: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
-  green: { bg: 'bg-green-500/10', text: 'text-green-400', border: 'border-green-500/20' },
-  blue: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
-  orange: { bg: 'bg-orange-500/10', text: 'text-orange-400', border: 'border-orange-500/20' },
-  indigo: { bg: 'bg-indigo-500/10', text: 'text-indigo-400', border: 'border-indigo-500/20' },
-  pink: { bg: 'bg-pink-500/10', text: 'text-pink-400', border: 'border-pink-500/20' },
-  red: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/20' },
-  sky: { bg: 'bg-sky-500/10', text: 'text-sky-400', border: 'border-sky-500/20' },
-  yellow: { bg: 'bg-yellow-500/10', text: 'text-yellow-400', border: 'border-yellow-500/20' },
-  gray: { bg: 'bg-white/5', text: 'text-gray-400', border: 'border-white/10' },
-};
-
-interface ExploreItem {
-  name: string;
-  path: string;
-  icon: React.ReactNode;
-  color: string;
-  desc: string;
-  external?: boolean;
-}
-
-interface ExploreGroup {
-  title: string;
-  items: ExploreItem[];
-}
+import { IX_MATRIX_URL } from '@/config/community';
+import { MatrixIcon } from './brand/MatrixIcon';
 
 const Header: React.FC = () => {
   const { t } = useTranslation();
   const { effectivePrefs } = useLightMode();
+  const halloween = useHalloweenTheme();
+  // Citrouille qui allume ou éteint le thème : en octobre, ou dès que le thème
+  // est actif pour pouvoir le couper ; le reste de l'année, seul le réglage.
+  const showHalloweenToggle = halloween || isHalloweenSeason();
   const [isExploreOpen, setIsExploreOpen] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const isDesktopNav = useIsDesktopNav();
+  // Un panneau plein écran (Explorer, notifications ou profil) couvre la page.
+  const isSheetOpen = !isDesktopNav && (isExploreOpen || showNotifications || isProfileOpen);
+  const pauseDecor = isExploreOpen || showNotifications || isProfileOpen;
+
+  // Signale un menu ouvert (Explorer, notifications ou profil, sur ordinateur
+  // comme sur mobile) : le décor
+  // Halloween se fige le temps du menu (voir halloween-decor.css).
+  // L'attribut de pause va sur les trois conteneurs du décor, pas sur
+  // <html> : une règle CSS lue depuis <html> recalculait le style de toute la
+  // page (~100 ms bloquées sur Chrome Android, à l'ouverture comme à la
+  // fermeture). Sur <html>, l'attribut ne sert plus qu'à
+  // HalloweenWitchFlight, et aucune règle CSS ne le lit.
+  useEffect(() => {
+    if (!pauseDecor) return;
+    const root = document.documentElement;
+    const decor = document.querySelectorAll('.halloween-backdrop, .halloween-atmosphere, .halloween-overhead');
+    root.setAttribute('data-explore-open', '');
+    decor.forEach((el) => el.setAttribute('data-explore-paused', ''));
+    return () => {
+      root.removeAttribute('data-explore-open');
+      decor.forEach((el) => el.removeAttribute('data-explore-paused'));
+    };
+  }, [pauseDecor]);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [isSnowfallActive, setIsSnowfallActive] = useState(() => {
     return readSessionStorage('snowfall_active') === 'true';
@@ -73,7 +83,6 @@ const Header: React.FC = () => {
     return () => window.removeEventListener('snowfall_toggled', handleSnowfallToggle);
   }, []);
 
-  const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationsDisabled, setNotificationsDisabled] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -85,7 +94,16 @@ const Header: React.FC = () => {
   const autocompleteRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
   const exploreRef = useRef<HTMLDivElement>(null);
+  const exploreSheetRef = useRef<HTMLDivElement>(null);
   const exploreOverlayRef = useRef<HTMLDivElement>(null);
+  const exploreTriggerRef = useRef<HTMLButtonElement>(null);
+  const burgerRef = useRef<HTMLButtonElement>(null);
+  const notificationsTriggerRef = useRef<HTMLButtonElement>(null);
+  const notificationsSheetScrollerRef = useRef<HTMLDivElement>(null);
+  // Calque de l'en-tête où coulent les menus d'ordinateur du profil (rendu
+  // par ProfileMenu, en portail) : sous la ligne d'icônes, comme Explorer.
+  const [panelHost, setPanelHost] = useState<HTMLDivElement | null>(null);
+  const headerPanels = useMemo<HeaderPanels>(() => ({ host: panelHost, onProfileOpenChange: setIsProfileOpen }), [panelHost]);
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const location = useLocation();
   const navigate = useNavigate();
@@ -114,40 +132,49 @@ const Header: React.FC = () => {
       // Trouver quoi regarder, du plus dirigé au plus sérendipitaire.
       title: t('nav.groupDiscover'),
       items: [
-        { name: t('nav.collections'), path: '/collections', icon: <Film size={20} />, color: 'purple', desc: t('nav.collectionsDesc') },
-        { name: t('nav.top10'), path: '/top10', icon: <Star size={20} />, color: 'yellow', desc: t('nav.top10Desc') },
-        { name: t('nav.suggestions'), path: '/suggestion', icon: <Sparkles size={20} />, color: 'pink', desc: t('nav.suggestionsDesc') },
-        { name: t('nav.roulette'), path: '/roulette', icon: <Dices size={20} />, color: 'red', desc: t('roulette.navDesc') },
-        { name: t('nav.cinegraph'), path: '/cinegraph', icon: <Network size={20} />, color: 'blue', desc: t('nav.cinegraphDesc') },
+        { name: t('nav.collections'), path: '/collections', icon: <Film size={18} />, desc: t('nav.collectionsDesc') },
+        { name: t('nav.top10'), path: '/top10', icon: <Star size={18} />, desc: t('nav.top10Desc') },
+        { name: t('nav.suggestions'), path: '/suggestion', icon: <Sparkles size={18} />, desc: t('nav.suggestionsDesc') },
+        { name: t('nav.roulette'), path: '/roulette', icon: <Dices size={18} />, desc: t('roulette.navDesc') },
+        { name: t('nav.cinegraph'), path: '/cinegraph', icon: <Network size={18} />, desc: t('nav.cinegraphDesc') },
       ]
     },
     {
       // Tout ce qui implique d'autres utilisateurs — Watch Party compris.
       title: t('nav.groupCommunity'),
       items: [
-        { name: t('nav.watchParty'), path: '/watchparty/list', icon: <Users size={20} />, color: 'orange', desc: t('nav.watchPartyDesc') },
-        { name: t('nav.sharedLists'), path: '/list-catalog', icon: <List size={20} />, color: 'indigo', desc: t('nav.sharedListsDesc') },
-        { name: t('nav.greenlight'), path: '/wishboard', icon: <Lightbulb size={20} />, color: 'green', desc: t('nav.greenlightDesc') },
+        { name: t('nav.watchParty'), path: '/watchparty/list', icon: <Users size={18} />, desc: t('nav.watchPartyDesc') },
+        { name: t('nav.sharedLists'), path: '/list-catalog', icon: <List size={18} />, desc: t('nav.sharedListsDesc') },
+        { name: t('nav.greenlight'), path: '/wishboard', icon: <Lightbulb size={18} />, desc: t('nav.greenlightDesc') },
       ]
     },
     {
       // Ce qui passe en ce moment, puis ce qui arrive bientôt.
       title: t('nav.groupLive'),
       items: [
-        { name: t('nav.liveTV'), path: '/live-tv', icon: <Tv size={20} />, color: 'red', desc: t('nav.liveTVDesc') },
-        ...(isVip ? [{ name: t('nav.francetv'), path: '/ftv', icon: <Radio size={20} />, color: 'sky' as const, desc: t('nav.francetvDesc') }] : []),
-        { name: t('nav.calendar'), path: '/calendar', icon: <CalendarDays size={20} />, color: 'green', desc: t('nav.calendarDesc') },
+        { name: t('nav.liveTV'), path: '/live-tv', icon: <Tv size={18} />, desc: t('nav.liveTVDesc') },
+        ...(isVip ? [{ name: t('nav.francetv'), path: '/ftv', icon: <Radio size={18} />, desc: t('nav.francetvDesc') }] : []),
+        { name: t('nav.calendar'), path: '/calendar', icon: <CalendarDays size={18} />, desc: t('nav.calendarDesc') },
+      ]
+    },
+    {
+      // Movix hors du site : pour que les visiteurs découvrent les applis.
+      title: t('nav.groupApps'),
+      items: [
+        { name: t('nav.appsExtension'), path: '/extension', icon: <Puzzle size={18} />, desc: t('nav.appsExtensionDesc') },
+        { name: t('nav.appsMobile'), path: '/app', icon: <Smartphone size={18} />, desc: t('nav.appsMobileDesc') },
+        { name: t('nav.appsTv'), path: '/app-tv', icon: <MonitorPlay size={18} />, desc: t('nav.appsTvDesc') },
       ]
     },
     {
       // Outils du compte d'abord, liens externes en dernier.
       title: t('nav.groupTools'),
       items: [
-        ...(isVip ? [{ name: t('nav.debrid'), path: '/debrid', icon: <Unlock size={20} />, color: 'yellow' as const, desc: t('nav.debridDesc') }] : []),
-        { name: t('nav.settings'), path: '/settings', icon: <Settings size={20} />, color: 'gray', desc: t('nav.settingsDesc') },
-        { name: t('nav.helpHub'), path: '/help', icon: <HelpCircle size={20} />, color: 'indigo', desc: t('nav.helpHubDesc') },
-        { name: t('nav.github'), path: 'https://github.com/movixstream/MovixOpenSource', icon: <Github size={20} />, color: 'gray', desc: t('nav.githubDesc'), external: true },
-        { name: t('footer.ourUrls'), path: 'https://movix.online', icon: <ExternalLink size={20} />, color: 'gray', desc: t('nav.officialLinksDesc'), external: true },
+        ...(isVip ? [{ name: t('nav.debrid'), path: '/debrid', icon: <Unlock size={18} />, desc: t('nav.debridDesc') }] : []),
+        { name: t('nav.settings'), path: '/settings', icon: <Settings size={18} />, desc: t('nav.settingsDesc') },
+        { name: t('nav.helpHub'), path: '/help', icon: <HelpCircle size={18} />, desc: t('nav.helpHubDesc') },
+        { name: t('nav.github'), path: 'https://github.com/movixstream/MovixOpenSource', icon: <Github size={18} />, desc: t('nav.githubDesc'), external: true },
+        { name: t('footer.ourUrls'), path: 'https://movix.online', icon: <ExternalLink size={18} />, desc: t('nav.officialLinksDesc'), external: true },
       ]
     },
   ]
@@ -231,97 +258,69 @@ const Header: React.FC = () => {
         && !mobileSearchInputRef.current?.contains(target)) {
         setShowAutocomplete(false);
       }
+      // Le menu des notifications (déroulant ou panneau mobile) porte
+      // data-notifications-popup : ses clics, liquide compris, restent
+      // intérieurs.
       if (showNotifications && notificationsRef.current) {
         if (target.closest('[data-notification-button]') || target.closest('[data-notifications-popup]')) return;
         if (!notificationsRef.current.contains(target)) setShowNotifications(false);
       }
-      // Le menu mobile est rendu en portail : ses clics restent intérieurs.
-      if (isExploreOpen && exploreRef.current) {
-        if (!exploreRef.current.contains(target)
-          && !exploreOverlayRef.current?.contains(target)
-          && !target.closest('[data-explore-trigger]')) {
-          setIsExploreOpen(false);
-        }
+      // Le menu mobile est rendu en portail : ses clics restent intérieurs (son
+      // voile referme le menu lui-même). Un toucher sur une icône de l'en-tête
+      // ferme le menu et fait son action.
+      if (isExploreOpen
+        && !exploreRef.current?.contains(target)
+        && !exploreSheetRef.current?.contains(target)
+        && !target.closest('[data-explore-trigger]')) {
+        setIsExploreOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showNotifications, isExploreOpen]);
 
-  // Bloquer le scroll (html + body + Lenis) quand le menu fullscreen est ouvert.
-  // body en position:fixed avec top:-scrollY (technique body-scroll-lock) :
-  // iOS ignore overflow:hidden sur body, et un fixed sans top compensé fait
-  // sauter la page en haut derrière le menu + perd la position au retour.
+  // Échap ferme le menu et rend le focus au bouton qui l'a ouvert.
   useEffect(() => {
-    const isMobile = window.innerWidth < 1024;
-    if (!(isExploreOpen && isMobile)) return;
-
-    const lenis = (window as any).lenis;
-    const scrollY = window.scrollY;
-    const lockedPath = window.location.pathname;
-
-    document.documentElement.style.overflow = 'hidden';
-    document.documentElement.style.overscrollBehavior = 'none';
-    document.body.style.overflow = 'hidden';
-    document.body.style.overscrollBehavior = 'none';
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.left = '0';
-    document.body.style.right = '0';
-    document.body.style.width = '100%';
-    if (lenis) {
-      lenis.destroy();
-      // Sans ce delete, window.lenis pointe vers une instance détruite : le
-      // test !window.lenis à la fermeture ne passe jamais et le smooth scroll
-      // n'est jamais réinitialisé pour les utilisateurs qui l'ont activé.
-      delete (window as any).lenis;
-    }
-
-    // Anti-chaînage iOS/WKWebView, sans preventDefault. Quand un geste démarre
-    // pile sur un bord du scroller (scrollTop 0, ou fond atteint), WebKit
-    // décide dès le premier touchmove de transférer le pan à l'ancêtre — ici
-    // le document verrouillé ou l'UIScrollView du WKWebView — et le geste
-    // entier est consommé sans rien faire : « des fois on ne peut pas
-    // scroller ». On décolle donc le scroller du bord d'un pixel avant que la
-    // décision soit prise.
-    //
-    // La version précédente preventDefault-ait ces gestes : c'était pire, un
-    // simple tremblement de 1px vers le bas en haut de liste tuait le geste
-    // entier puisque WebKit ne réévalue pas sa décision ensuite.
-    const overlay = exploreOverlayRef.current;
-    const nudgeOffEdges = () => {
-      const el = exploreOverlayRef.current;
-      if (!el) return;
-      const max = el.scrollHeight - el.clientHeight;
-      if (max <= 2) return; // rien à faire défiler : le chaînage est sans effet
-      if (el.scrollTop <= 0) el.scrollTop = 1;
-      else if (el.scrollTop >= max) el.scrollTop = max - 1;
+    if (!isExploreOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setIsExploreOpen(false);
+      (isDesktopNav ? exploreTriggerRef : burgerRef).current?.focus();
     };
-    nudgeOffEdges();
-    overlay?.addEventListener('touchstart', nudgeOffEdges, { passive: true });
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isExploreOpen, isDesktopNav]);
 
-    return () => {
-      overlay?.removeEventListener('touchstart', nudgeOffEdges);
-      document.documentElement.style.overflow = '';
-      document.documentElement.style.overscrollBehavior = '';
-      document.body.style.overflow = '';
-      document.body.style.overscrollBehavior = '';
-      document.body.style.position = '';
-      document.body.style.top = '';
-      document.body.style.left = '';
-      document.body.style.right = '';
-      document.body.style.width = '';
-      // Restaure la position uniquement si on est resté sur la même page :
-      // une navigation via un lien du menu doit laisser le scroll-to-top de
-      // la nouvelle route gagner.
-      if (window.location.pathname === lockedPath) {
-        window.scrollTo({ top: scrollY, left: 0, behavior: 'instant' as ScrollBehavior });
-      }
-      if (!(window as any).lenis) {
-        window.dispatchEvent(new CustomEvent('settings_smooth_scroll_changed'));
-      }
+  // Même chose pour les notifications : focus rendu à la cloche.
+  useEffect(() => {
+    if (!showNotifications) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setShowNotifications(false);
+      notificationsTriggerRef.current?.focus();
     };
-  }, [isExploreOpen]);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showNotifications]);
+
+  // Panneaux plein écran ouverts : la page derrière ne défile plus.
+  useSheetScrollLock(isExploreOpen && !isDesktopNav, exploreOverlayRef);
+  useSheetScrollLock(showNotifications && !isDesktopNav, notificationsSheetScrollerRef);
+
+  const closeNotifications = useCallback(() => setShowNotifications(false), []);
+  // Croix du menu d'ordinateur : le focus revient à la cloche.
+  const closeNotificationsToBell = useCallback(() => {
+    setShowNotifications(false);
+    notificationsTriggerRef.current?.focus();
+  }, []);
+
+  // Cloche retirée menu ouvert (déconnexion, préférence arrivée en retard) :
+  // le menu se ferme aussi, sinon la page restait verrouillée sans menu, puis
+  // il se rouvrait tout seul au retour de la cloche.
+  const notificationsAvailable = isAuthenticated && !notificationsDisabled;
+  useEffect(() => {
+    if (!notificationsAvailable) setShowNotifications(false);
+  }, [notificationsAvailable]);
 
   // Reset on navigation
   useEffect(() => {
@@ -410,47 +409,32 @@ const Header: React.FC = () => {
     }
   };
 
-  const renderExploreCard = (item: ExploreItem) => {
-    const colors = cardColors[item.color] || cardColors.gray;
-    const content = (
-      <div className={`flex flex-col items-center text-center p-5 rounded-2xl border ${colors.border} bg-white/[0.04] active:bg-white/[0.08] transition-all duration-200 cursor-pointer h-full`}>
-        <div className={`w-14 h-14 rounded-2xl ${colors.bg} ${colors.text} flex items-center justify-center mb-3 border ${colors.border}`}>
-          {item.icon}
-        </div>
-        <span className="text-white text-sm font-semibold mb-1">{item.name}</span>
-        <span className="text-white/50 text-xs leading-tight">{item.desc}</span>
-      </div>
-    );
-
-    if (item.external) {
-      return (
-        <a key={item.path} href={item.path} target="_blank" rel="noopener noreferrer" onClick={() => setIsExploreOpen(false)}>
-          {content}
-        </a>
-      );
-    }
-    return (
-      <Link key={item.path} to={item.path} onClick={() => setIsExploreOpen(false)}>
-        {content}
-      </Link>
-    );
-  };
-
-  // Toutes les items pour le fullscreen mobile
-  const allExploreItems = exploreGroups.flatMap(g => g.items);
+  const closeExplore = useCallback(() => setIsExploreOpen(false), []);
 
   return (
-    <>
-      {/* max-lg:pointer-events-none quand le menu fullscreen est ouvert : le
-          header (z-11000) reste au-dessus de l'overlay (z-10999) pour montrer
-          la croix — sans ça, tout geste de scroll qui démarre dans la bande
-          des ~64px du header est avalé par lui et le menu ne bouge pas. Le
-          bouton burger/croix garde pointer-events-auto pour rester cliquable. */}
-      <header className={`!fixed inset-x-0 top-0 w-full z-[11000] transition-all duration-300 ${isExploreOpen ? 'max-lg:pointer-events-none' : ''}`}>
-        <div className="absolute inset-0 pointer-events-none z-0 bg-gradient-to-b from-black/90 via-black/70 to-transparent" aria-hidden="true" />
-        <div className="relative z-10">
-          <div className="max-w-[1400px] 2xl:max-w-[1600px] mx-auto">
-            <div className="flex items-center h-16 px-4 md:px-6 lg:px-8 gap-3 md:gap-5 lg:gap-3 xl:gap-5 max-[360px]:gap-1 max-[360px]:px-2">
+    <HeaderPanelsContext.Provider value={headerPanels}>
+      {/* L'en-tête (z-11000) reste au-dessus des panneaux mobiles (z-10999) :
+          ses icônes forment la première ligne du panneau, la croix comprise.
+          La zone qui défile commence sous lui, il peut donc garder ses
+          clics. */}
+      <header data-site-header className="!fixed inset-x-0 top-0 w-full z-[11000] transition-all duration-300">
+        {/* Panneau mobile ouvert : le dégradé s'efface, sinon il assombrit le
+            haut du panneau. Il se retire de bas en haut : il remonte hors de
+            l'écran en s'effaçant, sans être écrasé, et redescend par le même
+            chemin à la fermeture (transform et opacity seulement : composité). */}
+        <div className={`absolute inset-0 pointer-events-none z-0 bg-gradient-to-b from-black/90 via-black/70 to-transparent [will-change:opacity,transform] transition-[opacity,transform] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-opacity motion-reduce:!translate-y-0 ${isExploreOpen || showNotifications || isProfileOpen ? 'max-lg:!opacity-0 max-lg:-translate-y-full' : ''}`} aria-hidden="true" />
+        {/* Même grille que le cadre du HeroSlider : 100vw comme `body`
+            (index.css), 1920 px au plus, marges px-3 / sm:px-6 / md:px-12 /
+            lg:px-20. Le logo et le profil tombent sur ses bords. 100vw et non
+            la largeur de l'en-tête fixe : selon le navigateur, 100vw inclut
+            la barre de défilement, sous laquelle passe toute la page. */}
+        <div className="relative z-10 w-screen">
+          <div className="max-w-[1920px] mx-auto">
+            {/* La citrouille ajoute un bouton : sous 390 px, les écarts passent
+                à ceux des petits écrans pour que la ligne tienne avec la
+                cloche et l'avatar. Sous 361 px, marge de 8 px au lieu de 12
+                pour la même raison. */}
+            <div className={`flex items-center h-16 px-3 sm:px-6 md:px-12 lg:px-20 gap-3 md:gap-5 lg:gap-3 xl:gap-5 max-[360px]:gap-1 max-[360px]:px-2 ${showHalloweenToggle ? 'max-[389px]:gap-1' : ''}`}>
 
               {/* Logo */}
               <Link
@@ -468,25 +452,26 @@ const Header: React.FC = () => {
                   }
                 }}
               >
-                {/* Logo long [Movix] : rouge fixe hors palette, lettres claires. */}
-                <MovixWordmark className="h-[30px] w-auto text-[#f4f4f0] md:h-9" />
+                {/* Logo long [Movix] : rouge fixe hors palette, lettres claires. Le thème
+                    Halloween lui ajoute une lueur et une chauve-souris. */}
+                <span data-movix-logo className="inline-flex text-[#f4f4f0]">
+                  <MovixWordmark className="h-[30px] w-auto md:h-9" />
+                </span>
               </Link>
 
               <a
-                href="https://t.me/ix_annonces"
+                href={IX_MATRIX_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label={t('telegram.joinTelegram')}
                 title={t('telegram.joinTelegram')}
-                className="pointer-events-auto inline-flex h-11 w-11 shrink-0 items-center justify-center p-2 text-sky-400 transition-colors duration-150 hover:text-sky-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 motion-reduce:transition-none"
+                className="pointer-events-auto inline-flex h-11 w-11 shrink-0 items-center justify-center p-2 text-white group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
               >
-                <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5 shrink-0" aria-hidden="true">
-                  <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19l-9.48 5.99-4.1-1.28c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3L18.24 18.8c-.19.92-.73 1.14-1.48.71l-4.14-3.06-1.99 1.93c-.23.23-.42.42-.85.42z" />
-                </svg>
+                <MatrixIcon className="h-5 w-5 shrink-0 opacity-80 transition-opacity duration-150 group-hover:opacity-100 motion-reduce:transition-none" />
               </a>
 
               {/* Desktop Nav: 3 items principaux + Explorer */}
-              <nav className="hidden lg:flex items-center gap-1">
+              <nav className="hidden lg:flex items-center gap-1" data-main-nav>
                 {mainNavItems.map((item) => (
                   <Link
                     key={item.path}
@@ -522,26 +507,35 @@ const Header: React.FC = () => {
 
                 {/* Bouton Explorer */}
                 <button
+                  ref={exploreTriggerRef}
+                  type="button"
                   data-explore-trigger
+                  aria-expanded={isExploreOpen}
+                  aria-controls={isExploreOpen ? 'explore-menu' : undefined}
                   onClick={() => setIsExploreOpen(!isExploreOpen)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-all duration-200 border ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-[color,background-color,border-color] duration-200 border ${
                     isExploreOpen
-                      ? 'text-white bg-white/10 border-white/20'
+                      // Ouvert : le liquide du menu le remplit et le borde.
+                      ? 'text-white bg-transparent border-transparent'
                       : 'text-gray-400 hover:text-white border-white/10 hover:border-white/20 hover:bg-white/5'
                   }`}
                 >
-                  <LayoutGrid size={15} />
+                  {halloween ? <HalloweenPumpkinIcon /> : <LayoutGrid size={15} />}
                   <span>{t('nav.explore')}</span>
-                  <ChevronDown size={14} className={`transition-transform duration-200 ${isExploreOpen ? 'rotate-180' : ''}`} />
+                  {halloween
+                    ? <HalloweenBatIcon className={`transition-transform duration-200 ${isExploreOpen ? 'rotate-180' : ''}`} />
+                    : <ChevronDown size={14} className={`transition-transform duration-200 ${isExploreOpen ? 'rotate-180' : ''}`} />}
                 </button>
               </nav>
 
               {/* Spacer */}
               <div className="flex-1" />
 
-              {/* Desktop Search */}
-              <div className="hidden md:block relative w-[14rem] lg:w-[15rem] xl:w-[20rem] 2xl:w-[22rem]">
-                <form onSubmit={handleSearchSubmit} className="relative">
+              {/* Desktop Search. min-w-0 : c'est lui qui rétrécit quand la ligne
+                  manque de place (marges du HeroSlider, 1024-1280 px) ; sans
+                  lui, la largeur minimale du champ écrasait le profil. */}
+              <div className="hidden md:block relative min-w-0 w-[14rem] lg:w-[15rem] xl:w-[20rem] 2xl:w-[22rem]">
+                <form onSubmit={handleSearchSubmit} className="relative" data-header-search>
                   <input
                     ref={searchInputRef}
                     type="text"
@@ -564,7 +558,7 @@ const Header: React.FC = () => {
               </div>
 
               {/* Right section */}
-              <div className="flex items-center gap-1 sm:gap-1.5">
+              <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
                 {isAprilFoolsAdminVisible && (
                   <Link
                     to={APRIL_FOOLS_ADMIN_PATH}
@@ -589,32 +583,53 @@ const Header: React.FC = () => {
                   <Search size={20} />
                 </motion.button>
 
-                {/* Notifications */}
+                {/* Thème Halloween : la citrouille l'allume ou l'éteint. Sous
+                    346 px, la ligne ne tient plus : le réglage reste. */}
+                {showHalloweenToggle && (
+                  <motion.button
+                    type="button"
+                    data-halloween-toggle
+                    className="group flex items-center justify-center p-2 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400/70 max-[345px]:hidden"
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => setHalloweenTheme(!halloween)}
+                    aria-label={t('settings.halloweenTheme')}
+                    aria-pressed={halloween}
+                    title={t(halloween ? 'header.halloweenOff' : 'header.halloweenOn')}
+                  >
+                    <HalloweenThemeToggleIcon lit={halloween} />
+                  </motion.button>
+                )}
+
+                {/* Notifications : le menu coule de la cloche (rond de 36 px),
+                    voir plus bas. Sur ordinateur, pas d'enfoncement au clic :
+                    le liquide prend la mesure du bouton à l'ouverture. */}
                 {isAuthenticated && !notificationsDisabled && (
                   <div className="relative" ref={notificationsRef}>
                     <motion.button
+                      ref={notificationsTriggerRef}
+                      type="button"
                       data-notification-button
-                      className="relative flex items-center justify-center p-2 text-gray-400 hover:text-white transition-colors"
-                      whileTap={{ scale: 0.9 }}
+                      aria-label={t('notifications.title')}
+                      aria-expanded={showNotifications}
+                      className={`relative flex h-9 w-9 items-center justify-center rounded-full transition-colors ${showNotifications ? 'text-white' : 'text-gray-400 hover:text-white'}`}
+                      whileTap={isDesktopNav ? undefined : { scale: 0.9 }}
                       onClick={() => setShowNotifications(!showNotifications)}
                     >
                       <Bell size={20} />
+                      {/* La lanterne pend sous la cloche, là où coule le menu. */}
+                      {/* Elle s'efface avant que le liquide la couvre, et ne
+                          revient qu'une fois le panneau rentré (300 ms). */}
+                      {halloween && (
+                        <HalloweenLantern
+                          className={`transition-opacity motion-reduce:transition-none ${showNotifications || isSheetOpen ? 'opacity-0 duration-100' : 'opacity-100 delay-300 duration-150'}`}
+                        />
+                      )}
                       {unreadCount > 0 && (
                         <span className="absolute -top-0.5 -right-0.5 bg-red-600 text-white text-[10px] rounded-full h-4 min-w-4 flex items-center justify-center px-1 font-bold">
                           {unreadCount > 9 ? '9+' : unreadCount}
                         </span>
                       )}
                     </motion.button>
-                    <AnimatePresence>
-                      {showNotifications && (
-                        <div className="fixed right-4 sm:right-6 top-16 z-50">
-                          <NotificationsPopup
-                            onClose={() => setShowNotifications(false)}
-                            onNotificationUpdate={refreshUnreadCount}
-                          />
-                        </div>
-                      )}
-                    </AnimatePresence>
                   </div>
                 )}
 
@@ -623,167 +638,116 @@ const Header: React.FC = () => {
                   <ProfileMenu />
                 </div>
 
-                {/* Mobile/Tablet: Burger → ouvre fullscreen explore */}
+                {/* Mobile/Tablet : le panneau Explorer sort de ce rond, de même
+                    taille et de même teinte que lui au départ. 36 px, comme
+                    les autres icônes : la ligne tient encore à 375 px avec la
+                    citrouille. */}
                 <motion.button
-                  className="lg:hidden p-1.5 text-gray-400 hover:text-white transition-colors pointer-events-auto"
+                  ref={burgerRef}
+                  type="button"
+                  className="lg:hidden flex h-9 w-9 shrink-0 items-center justify-center group rounded-full bg-white/[0.07] text-white"
                   whileTap={{ scale: 0.9 }}
                   onClick={() => setIsExploreOpen(!isExploreOpen)}
                   data-explore-trigger
+                  aria-label={t('header.menu')}
+                  aria-expanded={isExploreOpen}
+                  aria-controls={isExploreOpen ? 'explore-menu' : undefined}
                 >
-                  {isExploreOpen ? <X size={22} /> : <Menu size={22} />}
+                  <BurgerIcon open={isExploreOpen} />
                 </motion.button>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Desktop Mega Menu Dropdown */}
+        {/* Menu Explorer sur ordinateur : il se déroule depuis son bouton. */}
         <AnimatePresence>
-          {isExploreOpen && (
-            <motion.div
-              ref={exploreRef}
-              className="hidden lg:block absolute top-full left-0 right-0 z-[11001]"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
-            >
-              <div className="max-w-[1400px] 2xl:max-w-[1600px] mx-auto px-8 pt-3 pb-2">
-                <SquareBackground
-                  squareSize={40}
-                  borderColor="rgba(239, 68, 68, 0.08)"
-                  className="border border-white/10 rounded-2xl shadow-2xl shadow-black/50 bg-black"
-                >
-                  <div className="p-8">
-                    <div className="grid grid-cols-4 gap-10">
-                      {exploreGroups.map((group) => (
-                        <div key={group.title}>
-                          <h4 className="text-xs font-semibold text-white/30 uppercase tracking-wider mb-4 px-1">{group.title}</h4>
-                          <div className="flex flex-col gap-3">
-                            {group.items.map((item) => {
-                              const colors = cardColors[item.color] || cardColors.gray;
-                              const inner = (
-                                <div className={`flex items-center gap-4 px-5 py-5 rounded-xl border ${colors.border} bg-white/[0.03] hover:${colors.bg} hover:scale-[1.02] transition-all duration-200 cursor-pointer`}>
-                                  <div className={`w-12 h-12 rounded-xl ${colors.bg} ${colors.text} flex items-center justify-center flex-shrink-0 border ${colors.border}`}>
-                                    {item.icon}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <div className="text-white text-sm font-medium">{item.name}</div>
-                                    <div className="text-white/40 text-xs truncate">{item.desc}</div>
-                                  </div>
-                                </div>
-                              );
-                              if (item.external) {
-                                return <a key={item.path} href={item.path} target="_blank" rel="noopener noreferrer" onClick={() => setIsExploreOpen(false)}>{inner}</a>;
-                              }
-                              return <Link key={item.path} to={item.path} onClick={() => setIsExploreOpen(false)}>{inner}</Link>;
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </SquareBackground>
-              </div>
-            </motion.div>
+          {isExploreOpen && isDesktopNav && (
+            <ExploreDesktopPanel
+              key="explore-desktop"
+              groups={exploreGroups}
+              pathname={location.pathname}
+              label={t('nav.explore')}
+              triggerRef={exploreTriggerRef}
+              containerRef={exploreRef}
+              onNavigate={closeExplore}
+            />
           )}
         </AnimatePresence>
+
+        {/* Notifications sur ordinateur : la cloche se remplit et coule dans
+            le menu, calé sur le bord droit de la grille. */}
+        <AnimatePresence>
+          {showNotifications && isAuthenticated && !notificationsDisabled && isDesktopNav && (
+            <LiquidDropdown
+              key="notifications-desktop"
+              data-notifications-menu
+              data-notifications-popup
+              triggerRef={notificationsTriggerRef}
+              triggerRadius={18}
+              panelRadius={20}
+              neckWidth={16}
+              align="end"
+              panelClassName="w-96"
+            >
+              <NotificationsPopup variant="panel" onClose={closeNotificationsToBell} onNotificationUpdate={refreshUnreadCount} />
+            </LiquidDropdown>
+          )}
+        </AnimatePresence>
+
+        {/* Calque des menus d'ordinateur rendus par d'autres composants (le
+            profil) : sans boîte, ses menus se placent dans l'en-tête. */}
+        <div ref={setPanelHost} data-header-panels className="contents" />
       </header>
 
-      {/* Fullscreen Explore Menu (Mobile/Tablet) */}
-      {/* Porté dans la racine de surcouches (enfant direct de <body>) plutôt
-          que rendu sur place. Sur place, la chaîne d'ancêtres du menu est
-          #movix-fullscreen-host (`relative overflow-clip`) → #root
-          (`overflow-x: clip`) → body (`position: relative; overflow-x: clip`).
-          C'est la configuration connue pour casser `position: fixed` sur iOS
-          WebKit : l'overlay est clippé ou mal dimensionné de façon
-          intermittente selon l'état de la barre d'outils, et son scroller
-          interne se retrouve avec scrollHeight == clientHeight — le menu
-          s'affiche mais ne défile plus. Le portail sort des deux `clip`
-          intérieurs et rend le dimensionnement de nouveau relatif au viewport. */}
+      {/* Menu Explorer mobile/tablette. Porté dans la racine de surcouches
+          (enfant direct de <body>) plutôt que rendu sur place. Sur place, la
+          chaîne d'ancêtres du menu est #movix-fullscreen-host (`relative
+          overflow-clip`) → #root (`overflow-x: clip`) → body (`position:
+          relative; overflow-x: clip`). C'est la configuration connue pour
+          casser `position: fixed` sur iOS WebKit : le panneau est clippé ou
+          mal dimensionné de façon intermittente selon l'état de la barre
+          d'outils, et la zone qui défile se retrouve avec scrollHeight ==
+          clientHeight — le menu s'affiche mais ne défile plus. Le portail sort
+          des deux `clip` intérieurs et rend le dimensionnement de nouveau
+          relatif au viewport. La zone qui défile a ses quatre bords fixés :
+          aucune chaîne de height:100% que WebKit pourrait résoudre en `auto`. */}
       {createPortal(
         <AnimatePresence>
-          {isExploreOpen && (
-            // L'overlay EST le scroller. L'ancienne structure empilait
-            // fixed inset-0 → SquareBackground (`overflow-hidden`, h-full) →
-            // wrapper h-full → scroller h-full : quatre maillons de
-            // height:100% dont WebKit résout parfois un maillon en `auto`, ce
-            // qui rendait le scroller aussi haut que son contenu (donc plus
-            // rien à faire défiler). Sans chaîne, plus de maillon à casser.
-            // Opacity seule : une transform sur un ancêtre du scroller pendant
-            // le mount laisse parfois sa région tactile obsolète dans l'arbre
-            // de scroll asynchrone de WebKit.
-            <motion.div
-              ref={exploreOverlayRef}
-              data-lenis-prevent
-              className="lg:hidden fixed inset-0 z-[10999] overflow-y-auto bg-black"
-              style={{ touchAction: 'pan-y', overscrollBehavior: 'contain' }}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3, ease: [0.32, 0.72, 0, 1] }}
+          {isExploreOpen && !isDesktopNav && (
+            <ExploreMobileSheet
+              key="explore-mobile"
+              groups={exploreGroups}
+              mainItems={mainNavItems}
+              pathname={location.pathname}
+              label={t('nav.explore')}
+              triggerRef={burgerRef}
+              rootRef={exploreSheetRef}
+              scrollerRef={exploreOverlayRef}
+              onClose={closeExplore}
+            />
+          )}
+        </AnimatePresence>,
+        getOverlayPortalRoot(),
+      )}
+
+      {/* Notifications sur mobile et tablette : le rond de la cloche s'étire
+          en panneau, porté dans la même racine que le menu Explorer. */}
+      {createPortal(
+        <AnimatePresence>
+          {showNotifications && isAuthenticated && !notificationsDisabled && !isDesktopNav && (
+            <LiquidSheet
+              key="notifications-sheet"
+              data-notifications-sheet
+              data-notifications-popup
+              triggerRef={notificationsTriggerRef}
+              triggerRadius={18}
+              scrollerRef={notificationsSheetScrollerRef}
+              onClose={closeNotifications}
+              contentClassName="px-1"
             >
-              {/* Décor en couche `fixed` derrière le contenu : il ne défile pas
-                  et n'entre plus dans la chaîne de hauteur du scroller. */}
-              <SquareBackground
-                squareSize={48}
-                borderColor="rgba(239, 68, 68, 0.2)"
-                className="fixed inset-0 bg-black pointer-events-none"
-              >
-                {/* Glow effects — radial-gradient au lieu de blur-[100px].
-                    Le blur 100px sur un 400×400 coûte ~3-5ms/frame en composit GPU
-                    tant que le menu est ouvert (coût ∝ rayon²). Le radial-gradient
-                    donne visuellement le même halo doux sans toucher au filter
-                    pipeline → ~0ms. */}
-                <div
-                  className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] pointer-events-none"
-                  style={{
-                    background:
-                      'radial-gradient(circle, rgba(220, 38, 38, 0.18) 0%, rgba(220, 38, 38, 0.08) 35%, transparent 70%)',
-                  }}
-                />
-                <div className="absolute bottom-0 left-0 right-0 h-[200px] bg-gradient-to-t from-red-950/15 to-transparent pointer-events-none" />
-              </SquareBackground>
-
-              <div className="relative">
-                {/* Spacer pour le header */}
-                <div className="h-20" />
-
-                {/* Slide d'entrée ici (et pas sur l'overlay) : cf. commentaire
-                    au-dessus du motion.div overlay. */}
-                <motion.div
-                  className="px-5 pb-12 pt-2"
-                  initial={{ y: 40 }}
-                  animate={{ y: 0 }}
-                  exit={{ y: 40 }}
-                  transition={{ duration: 0.3, ease: [0.32, 0.72, 0, 1] }}
-                >
-                  {/* Items principaux en haut */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
-                    {mainNavItems.map((item) => (
-                      <Link
-                        key={item.path}
-                        to={item.path}
-                        onClick={() => setIsExploreOpen(false)}
-                        className={`flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-medium transition-all border whitespace-nowrap ${
-                          item.isActive
-                            ? 'bg-red-600/20 border-red-500/30 text-white'
-                            : 'bg-white/[0.06] border-white/[0.08] text-gray-300 active:bg-white/10'
-                        }`}
-                      >
-                        {item.icon}
-                        <span>{item.name}</span>
-                      </Link>
-                    ))}
-                  </div>
-
-                  {/* Grille de cards */}
-                  <div className="grid grid-cols-2 gap-4">
-                    {allExploreItems.map((item) => renderExploreCard(item))}
-                  </div>
-                </motion.div>
-              </div>
-            </motion.div>
+              <NotificationsPopup variant="sheet" onClose={closeNotifications} onNotificationUpdate={refreshUnreadCount} />
+            </LiquidSheet>
           )}
         </AnimatePresence>,
         getOverlayPortalRoot(),
@@ -915,7 +879,7 @@ const Header: React.FC = () => {
           }}
         />
       )}
-    </>
+    </HeaderPanelsContext.Provider>
   );
 };
 

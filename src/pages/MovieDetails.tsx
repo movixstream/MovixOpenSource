@@ -35,6 +35,9 @@ import { useImageQuality, useImageViewport } from '../hooks/useImageQuality';
 import { useImageSlot } from '../hooks/useImageSlot';
 import { getCoverImageWidth, getTmdbImageProps, getTmdbImageUrl } from '../utils/tmdbImages';
 import { readLocalStorage, writeLocalStorage } from '../utils/browserStorage';
+import { useTitleHistory } from '../hooks/useTitleHistory';
+import { localProgressFinished, movieResume, movieWatchedState, seedProgress } from '../utils/titleHistoryMerge';
+import { EstimateInfoDialog } from '../components/profile/EstimateInfo';
 
 const MAIN_API = import.meta.env.VITE_MAIN_API;
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
@@ -1014,6 +1017,10 @@ const MovieDetails = (): JSX.Element => {
     favorite: false,
     watched: false
   });
+  // Historique serveur du film (autre appareil, lecteurs web, « Déjà vu ») :
+  // le stockage local gagne toujours, le serveur comble ce qui manque.
+  const titleHistory = useTitleHistory('movie', id);
+  const [estimateInfoOpen, setEstimateInfoOpen] = useState(false);
 
   const [showAddToList, setShowAddToList] = useState(false);
 
@@ -1432,6 +1439,15 @@ const MovieDetails = (): JSX.Element => {
     });
   };
 
+  // Vu et reprise fusionnés avec le serveur. Une clé progress_ locale, même
+  // finie, gagne : le serveur ne sert que s'il n'y en a pas.
+  const watchedView = movieWatchedState(
+    watchStatus.watched,
+    id ? localProgressFinished(readLocalStorage(`progress_${id}`)) : false,
+    titleHistory,
+  );
+  const serverResume = id && !hasProgress && !readLocalStorage(`progress_${id}`) ? movieResume(null, titleHistory) : null;
+
   // Convert WatchButtons to a regular function to access parent scope variables
   function WatchButtons() {
     // Format time from seconds to MM:SS or HH:MM:SS if hours > 0
@@ -1465,6 +1481,19 @@ const MovieDetails = (): JSX.Element => {
                   <span>{t('details.continueBtn')}</span>
                   <span className="text-xs bg-red-800/80 text-white px-1.5 py-0.5 rounded font-medium mt-1">
                     {formatTime(watchProgress)}/{formatTime(videoDuration)}
+                  </span>
+                </div>
+              </>
+            ) : serverResume ? (
+              <>
+                <Play className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" />
+                <div className="flex flex-col items-center text-center w-full min-w-0">
+                  {/* Estimé seul : le lecteur repartira du début, donc « Regarder ». */}
+                  <span>{serverResume.estimated ? t('details.watchBtn') : t('details.continueBtn')}</span>
+                  <span className="text-xs bg-red-800/80 text-white px-1.5 py-0.5 rounded font-medium mt-1">
+                    {serverResume.estimated
+                      ? t('profilePage.progress.estimated', { percent: Math.round((serverResume.position / serverResume.duration) * 100), defaultValue: '≈ {{percent}} % · estimé' })
+                      : `${formatTime(serverResume.position)}/${formatTime(serverResume.duration)}`}
                   </span>
                 </div>
               </>
@@ -1550,13 +1579,13 @@ const MovieDetails = (): JSX.Element => {
             whileTap={{ scale: 0.95 }}
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
             onClick={() => updateWatchStatus('watched', !watchStatus.watched)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg ${watchStatus.watched
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg ${watchedView.toggleOn
               ? 'bg-red-600 text-white'
               : 'bg-gray-800 hover:bg-gray-700'
               }`}
           >
             <motion.div
-              animate={watchStatus.watched ?
+              animate={watchedView.toggleOn ?
                 { scale: [1, 1.3, 1], rotate: [0, 0, 360] } :
                 {}
               }
@@ -1566,6 +1595,25 @@ const MovieDetails = (): JSX.Element => {
             </motion.div>
             {t('details.watchedBtn')}
           </motion.button>
+          {/* « Vu » connu du serveur seulement : indication à côté, le bouton
+              ne pose et ne retire que la marque locale. */}
+          {watchedView.serverWatched === 'estimated' && (
+            <button
+              type="button"
+              onClick={() => setEstimateInfoOpen(true)}
+              aria-haspopup="dialog"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-dashed border-white/25 px-3 text-sm text-white/75 underline decoration-dotted underline-offset-4 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+            >
+              {t('details.watchedEstimatedBtn', 'Vu (estimé)')}
+              <Info className="w-4 h-4 text-white opacity-60" aria-hidden="true" />
+            </button>
+          )}
+          {watchedView.serverWatched === 'otherDevice' && (
+            <span className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-dashed border-white/25 px-3 text-sm text-white/75">
+              <Check className="w-4 h-4 text-white opacity-60" aria-hidden="true" />
+              {t('details.watchedOtherDevice', 'Vu sur un autre appareil')}
+            </span>
+          )}
 
 
           <AddToListButton
@@ -1597,6 +1645,13 @@ const MovieDetails = (): JSX.Element => {
       releaseWarningRef.current?.focus({ preventScroll: true });
       return;
     }
+    // Reprise venue du serveur : le lecteur ne lit que progress_ local, on
+    // y recopie la position exacte (jamais un estimé de lecteur web).
+    // Relu au clic : une position locale apparue depuis le rendu gagne.
+    const seed = serverResume && !readLocalStorage(`progress_${id}`)
+      ? seedProgress(serverResume, new Date().toISOString())
+      : null;
+    if (seed) writeLocalStorage(`progress_${id}`, seed);
     // Mode cinéma toujours actif - naviguer vers la page de visionnage
     navigate(`/watch/movie/${encodeId(id)}`);
   };
@@ -2068,15 +2123,15 @@ const MovieDetails = (): JSX.Element => {
           {movieReleaseWarningsEnabled && (
             <>
               <div className="mt-3 flex flex-wrap items-start gap-2 text-sm font-medium">
-                <span className={`max-w-full px-2 py-1 rounded-md ${movieReleases.homeVideo && isMovieReleaseDatePending(movieReleases.homeVideo.date, releaseNow) ? 'bg-yellow-800 text-yellow-50' : 'bg-gray-800 text-gray-100'}`}>
+                <span data-halloween-frame="orange" className={`max-w-full px-2 py-1 rounded-md ${movieReleases.homeVideo && isMovieReleaseDatePending(movieReleases.homeVideo.date, releaseNow) ? 'bg-yellow-800 text-yellow-50' : 'bg-gray-800 text-gray-100'}`}>
                   {getMovieReleaseLabel(movieReleases.homeVideo, 'homeVideo', t, i18n.language, releaseNow)}
                 </span>
                 {movieReleases.theatrical ? (
-                  <span className="max-w-full px-2 py-1 rounded-md bg-gray-800 text-gray-100">
+                  <span data-halloween-frame="green" className="max-w-full px-2 py-1 rounded-md bg-gray-800 text-gray-100">
                     {getMovieReleaseLabel(movieReleases.theatrical, 'theatrical', t, i18n.language, releaseNow)}
                   </span>
                 ) : movieReleases.referenceDate && (
-                  <span className="max-w-full px-2 py-1 rounded-md bg-gray-800 text-gray-100">
+                  <span data-halloween-frame="green" className="max-w-full px-2 py-1 rounded-md bg-gray-800 text-gray-100">
                     {t('details.movieRelease.announcedDate', { date: formatMovieReleaseDate(movieReleases.referenceDate, i18n.language) })}
                   </span>
                 )}
@@ -2105,6 +2160,7 @@ const MovieDetails = (): JSX.Element => {
             {/* Boutons d'action en-dessous du poster */}
             <div className="mt-6">
               <WatchButtons />
+              <EstimateInfoDialog open={estimateInfoOpen} onOpenChange={setEstimateInfoOpen} />
             </div>
           </motion.div>
 
@@ -2348,7 +2404,7 @@ const MovieDetails = (): JSX.Element => {
                     </div>
 
                     {/* TMDB Info Box */}
-                    <div className="mb-6 p-4 border border-red-500/50 bg-red-500/10 rounded-lg flex gap-3 items-start">
+                    <div data-halloween-parchment className="mb-6 p-4 border border-red-500/50 bg-red-500/10 rounded-lg flex gap-3 items-start">
                       <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
                       <div className="text-sm text-gray-300">
                         <p>

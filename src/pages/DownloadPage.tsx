@@ -417,9 +417,12 @@ const EpisodeDropdown: React.FC<{
     return () => document.removeEventListener('mousedown', handleClick);
   }, [isOpen, onToggle]);
 
-  // Utiliser les données DarkiWorld si disponibles, sinon fallback vers TMDB
-  const displayEpisodes = darkiWorldEpisodes.length > 0 ? darkiWorldEpisodes : episodes;
-  const isDarkiWorld = darkiWorldEpisodes.length > 0;
+  // Utiliser les données DarkiWorld si disponibles, sinon fallback vers TMDB.
+  // Les deux listes peuvent manquer après un échec réseau (GlitchTip G2).
+  const safeDarkiWorldEpisodes = Array.isArray(darkiWorldEpisodes) ? darkiWorldEpisodes : [];
+  const safeEpisodes = Array.isArray(episodes) ? episodes : [];
+  const isDarkiWorld = safeDarkiWorldEpisodes.length > 0;
+  const displayEpisodes = isDarkiWorld ? safeDarkiWorldEpisodes : safeEpisodes;
 
   // Gestion du scroll infini pour les épisodes DarkiWorld
   useEffect(() => {
@@ -951,9 +954,13 @@ const DownloadPage: React.FC = () => {
           const response = await axios.get(
             `https://api.themoviedb.org/3/tv/${id}/season/${selectedSeason}?api_key=${TMDB_API_KEY}&language=${getTmdbLanguage()}`
           );
-          setEpisodes(response.data.episodes);
+          // Une réponse sans liste (requête coupée, cache vide) laissait
+          // `episodes` à undefined et le menu des épisodes plantait sur
+          // `.map` (GlitchTip G2).
+          const seasonEpisodes = Array.isArray(response?.data?.episodes) ? response.data.episodes : [];
+          setEpisodes(seasonEpisodes);
           // Réinitialiser l'épisode sélectionné au premier épisode de la nouvelle saison
-          if (response.data.episodes && response.data.episodes.length > 0) {
+          if (seasonEpisodes.length > 0) {
             setSelectedEpisode(1);
           }
         } catch (err) {
@@ -1150,16 +1157,17 @@ const DownloadPage: React.FC = () => {
       if (response.data.success && response.data.pagination) {
         console.log('Pagination episodes:', response.data.pagination);
 
+        const pageEpisodes = Array.isArray(response.data.pagination.data) ? response.data.pagination.data : [];
         if (append && page > 1) {
           // Pour le scroll infini, ajouter les nouveaux épisodes aux existants
-          setDarkiWorldEpisodes(prev => [...prev, ...response.data.pagination.data]);
+          setDarkiWorldEpisodes(prev => [...prev, ...pageEpisodes]);
         } else {
           // Pour le chargement initial, remplacer les épisodes
-          setDarkiWorldEpisodes(response.data.pagination.data);
-          
+          setDarkiWorldEpisodes(pageEpisodes);
+
           // Sélectionner le premier épisode par défaut
-          if (response.data.pagination.data.length > 0) {
-            setSelectedDarkiWorldEpisode(response.data.pagination.data[0]);
+          if (pageEpisodes.length > 0) {
+            setSelectedDarkiWorldEpisode(pageEpisodes[0]);
           }
         }
         

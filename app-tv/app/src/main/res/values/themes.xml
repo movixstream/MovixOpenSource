@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fond noir dès la première image : pas d'écran blanc au démarrage. -->
+    <style name="Theme.Movix" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/ink</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:colorBackground">@color/ink</item>
+    </style>
+    <color name="ink">#0A0A0A</color>
+</resources>

@@ -1,3 +1,4 @@
+import { IX_MATRIX_URL } from '@/config/community';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, ShieldAlert, Shield, Globe, Bug } from 'lucide-react';
@@ -12,7 +13,7 @@ const CaMarchePlusPage: React.FC = () => {
   }, [t]);
 
   const telegramUrl =
-    import.meta.env.VITE_SUPPORT_TELEGRAM_URL || 'https://t.me/ix_annonces';
+    import.meta.env.VITE_SUPPORT_TELEGRAM_URL || IX_MATRIX_URL;
 
   const sections: TutoSection[] = [
     {

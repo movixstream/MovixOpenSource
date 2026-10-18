@@ -483,6 +483,9 @@ const LiveTVPlayback = React.forwardRef<LiveTVPlaybackHandle>(
     const [pendingChannel, setPendingChannel] = useState<Channel | null>(null);
     const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
     const closingPlayerRef = useRef(false);
+    // Vrai seulement si le lecteur a bien ajouté son entrée d'historique :
+    // sans elle, un history.back() à la fermeture quitterait la page.
+    const playerHistoryPushedRef = useRef(false);
 
     React.useImperativeHandle(ref, () => ({
       openPlayer: setSelectedChannel,
@@ -492,8 +495,22 @@ const LiveTVPlayback = React.forwardRef<LiveTVPlaybackHandle>(
     useEffect(() => {
       if (!selectedChannel) return;
       closingPlayerRef.current = false;
-      window.history.pushState({ ...window.history.state, playerOpen: true }, '');
+      // Changer de chaîne lecteur ouvert relance l'effet : réutiliser l'entrée
+      // déjà poussée au lieu d'en empiler une par chaîne.
+      if (!playerHistoryPushedRef.current) {
+        try {
+          window.history.pushState({ ...window.history.state, playerOpen: true }, '');
+          playerHistoryPushedRef.current = true;
+        } catch (error) {
+          // iOS refuse plus de 100 pushState en 10 s, tous scripts confondus :
+          // les scripts publicitaires de la page en consomment beaucoup et
+          // l'ouverture de la chaîne faisait tomber toute la page (GlitchTip
+          // G4). Le lecteur s'ouvre quand même, sans entrée d'historique.
+          console.warn('[LiveTV] history.pushState refusé :', String(error));
+        }
+      }
       const handlePopState = () => {
+        playerHistoryPushedRef.current = false;
         closingPlayerRef.current = true;
         setSelectedChannel(null);
       };
@@ -506,7 +523,10 @@ const LiveTVPlayback = React.forwardRef<LiveTVPlaybackHandle>(
       closingPlayerRef.current = true;
       // Démarrer la sortie dès le clic, sans attendre le popstate asynchrone.
       setSelectedChannel(null);
-      window.history.back();
+      if (playerHistoryPushedRef.current) {
+        playerHistoryPushedRef.current = false;
+        window.history.back();
+      }
     }, []);
 
     useWrappedTracker({
@@ -1313,7 +1333,7 @@ const LiveTV: React.FC = () => {
   };
 
   // Catalog icon: vavoo country groups render a flag via react-country-flag.
-  const getCatalogIcon = (catalog: Catalog): React.ReactNode => {
+  const getCatalogIcon = (catalog: Catalog, active = false): React.ReactNode => {
     if (catalog.id.startsWith('vavoo_')) {
       const code = vavooGroupCountry[catalog.id];
       if (code) {
@@ -1326,14 +1346,42 @@ const LiveTV: React.FC = () => {
           />
         );
       }
-      return <Globe className="w-3.5 h-3.5" />; // All, Balkans — no single country
+      // Couleur pleine + opacity : un currentColor translucide hérité du
+      // bouton ferait ressortir les croisements des tracés de l'icône.
+      return (
+        <Globe
+          className={cn(
+            'w-3.5 h-3.5 text-white transition-opacity duration-200',
+            active ? 'opacity-100' : 'opacity-50 group-hover/icon:opacity-70',
+          )}
+        />
+      ); // All, Balkans — no single country
     }
     return <span className="text-base">{getCatalogEmoji(catalog)}</span>;
   };
 
   // Source icons mapping
+  // L'icône Radio reçoit sa propre couleur pleine + opacity au lieu d'hériter
+  // du texte translucide de la pastille (croisements des tracés plus clairs).
+  const getSourceIcon = (source: string, isActive: boolean, isLocked: boolean): React.ReactNode => {
+    if (source === 'vavoo') {
+      return (
+        <Radio
+          className={cn(
+            'w-3.5 h-3.5 transition-[color,opacity] duration-200',
+            isActive
+              ? 'text-red-400'
+              : isLocked
+                ? 'text-white opacity-25'
+                : 'text-white opacity-60 group-hover/icon:opacity-90',
+          )}
+        />
+      );
+    }
+    return sourceIcons[source];
+  };
+
   const sourceIcons: Record<string, React.ReactNode> = {
-    'vavoo': <Radio className="w-3.5 h-3.5" />,
     'fctv': <span className="text-sm leading-none">⚽</span>,
     'streamed': <span className="text-sm leading-none">🏟️</span>,
     'iptv': <i className="bi bi-globe text-sm" />,
@@ -1743,7 +1791,7 @@ const LiveTV: React.FC = () => {
                       whileTap={{ scale: 0.96 }}
                       onClick={() => !isLocked && handleSourceChange(source)}
                       className={cn(
-                        'relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 border shrink-0',
+                        'group/icon relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 border shrink-0',
                         isActive
                           ? 'bg-red-500/15 text-red-400 border-red-500/30 shadow-sm shadow-red-500/10'
                           : isLocked
@@ -1751,7 +1799,7 @@ const LiveTV: React.FC = () => {
                             : 'bg-white/[0.03] text-white/60 border-white/[0.06] hover:bg-white/[0.06] hover:text-white/90 hover:border-white/10'
                       )}
                     >
-                      {sourceIcons[source]}
+                      {getSourceIcon(source, isActive, isLocked)}
                       {label}
                       {isLocked && <Lock className="w-3 h-3 ml-0.5 text-white opacity-20" />}
                       {source === 'iptv' && !isLocked && (
@@ -1952,13 +2000,13 @@ const LiveTV: React.FC = () => {
                       key={catalog.id}
                       onClick={() => setSelectedCatalog(catalog.id)}
                       className={cn(
-                        'flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm whitespace-nowrap transition-all duration-200 border shrink-0',
+                        'group/icon flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm whitespace-nowrap transition-all duration-200 border shrink-0',
                         active
                           ? 'bg-white/10 text-white border-white/15 font-medium'
                           : 'bg-white/[0.02] text-white/50 border-transparent hover:bg-white/[0.05] hover:text-white/70'
                       )}
                     >
-                      {getCatalogIcon(catalog)}
+                      {getCatalogIcon(catalog, active)}
                       {formatCatalogName(catalog)}
                     </button>
                   );

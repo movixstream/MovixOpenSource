@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Clapperboard,
   Flag,
+  HandCoins,
   HelpCircle,
   KeyRound,
   Link2,
@@ -24,6 +25,7 @@ import AdminOAuthApps from './AdminOAuthApps';
 import AdminReports from './AdminReports';
 import AdminSharedLists from './AdminSharedLists';
 import AdminTeam from './AdminTeam';
+import AdminVipDonationSettings from './AdminVipDonationSettings';
 import StreamingLinksManager from './StreamingLinksManager';
 import VipInvoicesManager from './VipInvoicesManager';
 import VipKeysManager from './VipKeysManager';
@@ -34,6 +36,7 @@ type AdminSection =
   | 'links'
   | 'vip-keys'
   | 'vip-invoices'
+  | 'vip-donation-settings'
   | 'oauth-apps'
   | 'wishboard'
   | 'link-submissions'
@@ -93,6 +96,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ role }) => {
         icon: Sparkles,
         accent: 'text-yellow-300',
         highlight: '234 179 8'
+      },
+      {
+        id: 'vip-donation-settings',
+        title: t('vipDonations.settings.dashboardTitle'),
+        description: t('vipDonations.settings.dashboardDescription'),
+        icon: HandCoins,
+        accent: 'text-amber-300',
+        highlight: '245 158 11'
       },
       {
         id: 'oauth-apps',
@@ -275,6 +286,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ role }) => {
                 {t('admin.manageVipKeys')}
               </h2>
               <VipKeysManager />
+            </div>
+          )}
+
+          {activeSection === 'vip-donation-settings' && role === 'admin' && (
+            <div>
+              <h2 className="mb-6 flex items-center gap-3 text-2xl font-bold text-white">
+                <HandCoins className="h-6 w-6 text-amber-300" />
+                {t('vipDonations.settings.dashboardTitle')}
+              </h2>
+              <AdminVipDonationSettings />
             </div>
           )}
 

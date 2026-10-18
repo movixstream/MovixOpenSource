@@ -91,7 +91,12 @@ const loadChunkErrorDetection = () => {
     window: { location: { origin: 'https://movix.test' } },
   });
   const isCorruptedChunkError = sourceFunction(file, 'isCorruptedChunkError', { CORRUPTED_CHUNK_MESSAGES, isLazyCompileError });
-  const isChunkResponseError = sourceFunction(file, 'isChunkResponseError', { isCorruptedChunkError });
+  const isSystemJsNotInstantiatedError = sourceFunction(file, 'isSystemJsNotInstantiatedError', {
+    SYSTEMJS_NOT_INSTANTIATED_PATTERN: sourceFunction(file, 'SYSTEMJS_NOT_INSTANTIATED_PATTERN'),
+    LEGACY_JS_ASSET_PATTERN: sourceFunction(file, 'LEGACY_JS_ASSET_PATTERN'),
+    window: { location: { origin: 'https://movix.test', href: 'https://movix.test/' } },
+  });
+  const isChunkResponseError = sourceFunction(file, 'isChunkResponseError', { isCorruptedChunkError, isSystemJsNotInstantiatedError });
   return {
     isChunkResponseError,
     isChunkLoadError: sourceFunction(file, 'isChunkLoadError', {
@@ -109,18 +114,74 @@ test('SystemJS #3 et le refus CORS de Safari sont des échecs de chargement, pas
   assert.equal(isChunkLoadError(new Error('https://movix.test/assets/WatchTv-legacy-BtxG_s7l.js, (SystemJS https://github.com/systemjs/systemjs/blob/main/docs/errors.md#3)')), true);
   assert.equal(isChunkLoadError(new Error('https://movix.test/assets/popcorn-legacy-1Pz-aL03.js, https://movix.test/assets/detailCharacters-legacy-D2kcG1rU.js (SystemJS https://github.com/systemjs/systemjs/blob/main/docs/errors.md#3)')), true);
   assert.equal(isChunkLoadError(Object.assign(new Error('Cross-origin script load denied by Cross-Origin Resource Sharing policy.'), { name: 'TypeError' })), true);
-  assert.equal(isChunkLoadError(new Error('x (SystemJS https://github.com/systemjs/systemjs/blob/main/docs/errors.md#2)')), false, 'un module non instancié reste visible');
+  assert.equal(isChunkLoadError(new Error('x (SystemJS https://github.com/systemjs/systemjs/blob/main/docs/errors.md#2)')), false, 'un module non instancié hors de nos chunks reste visible');
+});
+
+test('SystemJS #2 sur un de nos chunks legacy désigne une réponse étrangère : purge puis rechargement', () => {
+  const { isChunkLoadError, isChunkResponseError } = loadChunkErrorDetection();
+  const notInstantiated = (url: string) => new Error(`${url} (SystemJS https://github.com/systemjs/systemjs/blob/main/docs/errors.md#2)`);
+  // FRONTEND-FU, Firefox 88.
+  const fu = notInstantiated('https://movix.test/assets/exclusiveCategories-legacy-D6XwnYyJ.js');
+  assert.equal(isChunkResponseError(fu), true);
+  assert.equal(isChunkLoadError(fu), true);
+  assert.equal(isChunkLoadError(notInstantiated('https://autre.test/assets/exclusiveCategories-legacy-D6XwnYyJ.js')), false, 'autre origine');
+  assert.equal(isChunkLoadError(notInstantiated('https://movix.test/assets/exclusiveCategories-D6XwnYyJ.js')), false, 'chunk moderne : SystemJS ne le charge pas');
+  assert.equal(isChunkLoadError(notInstantiated('https://movix.test/assets/vendor-legacy.js')), false, 'fichier sans hash');
 });
 
 test('un chunk tronqué déclenche la purge du cache, une vraie erreur de syntaxe reste visible', () => {
   const { isChunkLoadError, isChunkResponseError } = loadChunkErrorDetection();
-  for (const message of ['Unexpected end of script', 'Unexpected EOF', "Invalid character: '\\0'", 'Invalid or unexpected token', 'Unexpected end of input']) {
+  for (const message of ['Unexpected end of script', 'Unexpected EOF', "Invalid character: '\\0'", 'Invalid or unexpected token', 'Unexpected end of input', '`` literal not terminated before end of script', 'expected expression, got end of script']) {
     assert.equal(isChunkResponseError(syntaxError(message)), true, message);
     assert.equal(isChunkLoadError(syntaxError(message)), true, message);
   }
   assert.equal(isChunkLoadError(syntaxError('Invalid regular expression: invalid group specifier name')), false);
   assert.equal(isChunkLoadError(syntaxError("Unexpected identifier 'as'")), false);
   assert.equal(isChunkLoadError(new Error('Unexpected end of script')), false, 'seul un SyntaxError du moteur compte');
+  for (const message of ['missing ) after argument list', 'missing name after . operator', "Invalid character: '@'"]) {
+    assert.equal(isChunkLoadError(syntaxError(message)), false, `${message} : pas de rechargement sans limite`);
+  }
+});
+
+test('une erreur d’analyse ambiguë au chargement d’une route n’a droit qu’à une purge et un rechargement', () => {
+  const file = 'src/routing/lazyWithRetry.ts';
+  const storage = new Map<string, string>();
+  const sessionStorage = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => void storage.set(key, value),
+    removeItem: (key: string) => void storage.delete(key),
+  };
+  const purges: boolean[] = [];
+  let budget = true;
+  const reloadOnceFor = sourceFunction(file, 'reloadOnceFor', {
+    sessionStorage,
+    reloadForChunkFailure: (opts: { purgeAssetCache?: boolean }) => { purges.push(Boolean(opts?.purgeAssetCache)); return budget; },
+  });
+  const reload = sourceFunction(file, 'reloadForDamagedChunkParse', {
+    getLoadParseErrorMessage: sourceFunction(file, 'getLoadParseErrorMessage', {
+      LOAD_PARSE_ERROR_PATTERNS: sourceFunction(file, 'LOAD_PARSE_ERROR_PATTERNS'),
+    }),
+    reloadOnceFor,
+    LOAD_PARSE_RECOVERY_KEY_PREFIX: sourceFunction(file, 'LOAD_PARSE_RECOVERY_KEY_PREFIX'),
+    BUILD_RELEASE: '2026-10-13T20:06:23.687Z',
+  });
+
+  // FRONTEND-F9 (Firefox 157), G5 (Firefox Mobile 157), G0 (Safari 16.1).
+  for (const message of ['missing ) after argument list', 'missing name after . operator', "Invalid character: '@'"]) {
+    assert.equal(reload(syntaxError(message), '/movie/:id'), true, `${message} : première fois`);
+    assert.equal(reload(syntaxError(message), '/movie/:id'), false, `${message} : l’erreur persistante reste remontée`);
+  }
+  assert.deepEqual(purges, [true, true, true], 'le cache d’assets est vidé avant chaque rechargement');
+  assert.equal(reload(syntaxError('missing ) after argument list'), '/tv/:id'), true, 'autre route, autre tentative');
+
+  assert.equal(reload(new Error('missing ) after argument list'), '/x'), false, 'seul un SyntaxError du moteur compte');
+  assert.equal(reload(syntaxError("Invalid character: '#'"), '/x'), false, 'une syntaxe non prise en charge reste visible');
+  assert.equal(reload(syntaxError("Unexpected identifier 'as'"), '/x'), false);
+
+  budget = false;
+  assert.equal(reload(syntaxError('missing ) after argument list'), '/person/:id'), false, 'budget général épuisé');
+  budget = true;
+  assert.equal(reload(syntaxError('missing ) after argument list'), '/person/:id'), true, 'la tentative n’a pas été consommée');
 });
 
 test('une erreur d’analyse levée depuis un de nos chunks déjà exécutés désigne un cache abîmé', () => {
@@ -144,4 +205,61 @@ test('une erreur d’analyse levée depuis un de nos chunks déjà exécutés d�
   assert.equal(isChunkLoadError(withStack("Failed to execute 'querySelector' on 'Document': 'a[' is not a valid selector.", [
     'q (https://movix.test/assets/index-AbCdEf12.js:3:4)',
   ])), false, 'un sélecteur invalide reste un bug visible');
+});
+
+/**
+ * Budget de rechargement avec une horloge et un sessionStorage simulés. Chaque
+ * appel à `fail()` joue « un chunk échoue après ses essais », `succeed()` joue
+ * « un autre chunk vient de se charger ».
+ */
+const reloadBudget = () => {
+  const file = 'src/routing/lazyWithRetry.ts';
+  const clock = { now: 1_000_000 };
+  const storage = new Map<string, string>();
+  const sessionStorage = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => void storage.set(key, value),
+    removeItem: (key: string) => void storage.delete(key),
+  };
+  const Date = { now: () => clock.now };
+  const constants = Object.fromEntries(['RELOAD_KEY', 'RELOAD_WINDOW_MS', 'MAX_RELOADS', 'MIN_RELOAD_SPACING_MS', 'STABLE_AFTER_RELOAD_MS']
+    .map((name) => [name, sourceFunction(file, name)]));
+  const readReloadState = sourceFunction(file, 'readReloadState', { ...constants, sessionStorage, Date });
+  const reloads: number[] = [];
+  const window = { setTimeout: (run: () => void) => run(), location: { reload: () => reloads.push(clock.now) } };
+  const reloadForChunkFailure = sourceFunction(file, 'reloadForChunkFailure', {
+    ...constants, readReloadState, sessionStorage, Date, window,
+    purgeServiceWorkerAssetCache: async () => {}, sleep: async () => {}, PURGE_TIMEOUT_MS: 0,
+  });
+  const clearChunkReloadHistory = sourceFunction(file, 'clearChunkReloadHistory', { ...constants, readReloadState, sessionStorage, Date });
+  return {
+    reloads,
+    fail: () => reloadForChunkFailure() as boolean,
+    succeed: () => clearChunkReloadHistory(),
+    wait: (ms: number) => { clock.now += ms; },
+  };
+};
+
+test('une route qui se charge puis un chunk imbriqué qui échoue toujours ne rechargent pas sans fin', () => {
+  const budget = reloadBudget();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    assert.equal(budget.fail(), true, `rechargement ${attempt + 1}`);
+    // Après le rechargement, la route revient (succès), puis la carte échoue encore.
+    budget.wait(4_000);
+    budget.succeed();
+  }
+  assert.equal(budget.fail(), false, 'budget épuisé : ErrorBoundary prend le relais');
+  assert.equal(budget.reloads.length, 3);
+});
+
+test('une page restée stable rend le budget au prochain déploiement', () => {
+  const budget = reloadBudget();
+  assert.equal(budget.fail(), true);
+  budget.wait(40_000);
+  budget.succeed();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    assert.equal(budget.fail(), true, `nouveau rechargement ${attempt + 1}`);
+    budget.wait(4_000);
+  }
+  assert.equal(budget.fail(), false);
 });

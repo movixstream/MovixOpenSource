@@ -16,6 +16,12 @@ interface ShinyTextProps {
     delay?: number;
 }
 
+// Le rouge d'accent passe par la variable du thème Halloween (orange quand
+// il est actif) ; les autres couleurs restent telles quelles.
+const themeColor = (value: string) => (
+    value.toLowerCase() === '#ef4444' ? 'rgb(var(--movix-red-500, 239 68 68))' : value
+);
+
 const AnimatedShinyText: React.FC<ShinyTextProps> = ({
     text,
     disabled = false,
@@ -101,8 +107,10 @@ const AnimatedShinyText: React.FC<ShinyTextProps> = ({
         if (pauseOnHover) setIsPaused(false);
     }, [pauseOnHover]);
 
+    const base = themeColor(color);
+    const shine = themeColor(shineColor);
     const gradientStyle: React.CSSProperties = {
-        backgroundImage: `linear-gradient(${spread}deg, ${color} 0%, ${color} 35%, ${shineColor} 50%, ${color} 65%, ${color} 100%)`,
+        backgroundImage: `linear-gradient(${spread}deg, ${base} 0%, ${base} 35%, ${shine} 50%, ${base} 65%, ${base} 100%)`,
         backgroundSize: '200% auto',
         WebkitBackgroundClip: 'text',
         backgroundClip: 'text',
@@ -124,7 +132,7 @@ const AnimatedShinyText: React.FC<ShinyTextProps> = ({
 const ShinyText: React.FC<ShinyTextProps> = (props) => {
     const { effectivePrefs } = useLightMode();
     if (props.disabled || !effectivePrefs.bgAnimations) {
-        return <span className={`inline-block ${props.className ?? ''}`} style={{ color: props.color ?? '#b5b5b5' }}>{props.text}</span>;
+        return <span className={`inline-block ${props.className ?? ''}`} style={{ color: themeColor(props.color ?? '#b5b5b5') }}>{props.text}</span>;
     }
     return <AnimatedShinyText {...props} />;
 };

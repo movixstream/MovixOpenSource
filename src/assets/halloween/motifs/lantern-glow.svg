@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="256" viewBox="0 0 512 256" fill="none">
+  <title>Lueur de lanterne</title>
+  <defs>
+    <radialGradient id="glow" cx="256" cy="128" r="232" gradientTransform="matrix(1 0 0 .45 0 70.4)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fed7aa" stop-opacity=".6"/><stop offset=".35" stop-color="#fb923c" stop-opacity=".3"/><stop offset=".7" stop-color="#ea580c" stop-opacity=".1"/><stop offset="1" stop-color="#ea580c" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="256" cy="128" rx="232" ry="104" fill="url(#glow)"/>
+</svg>

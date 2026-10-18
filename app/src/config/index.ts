@@ -1,5 +1,5 @@
 export const CONFIG = {
-  SITE_URL: 'https://movix.luxe',
+  SITE_URL: 'https://movix.dog',
   DNS_PRIMARY: '1.1.1.1',
   DNS_SECONDARY: '1.0.0.1',
   DNS_DOH_URL: 'https://cloudflare-dns.com/dns-query',
@@ -21,8 +21,9 @@ export const UPDATE_CHECK = {
 // « active » de address.json.
 export const FALLBACK_CONFIG = {
   RESOLVER_HOSTS: ['movix.online'],
-  PRIMARY_URL: 'https://movix.luxe',
+  PRIMARY_URL: 'https://movix.dog',
   MIRRORS: [
+    'https://movix.luxe',
     'https://movix.college',
     'https://movix.men',
     'https://movix.fun',
@@ -35,5 +36,5 @@ export const FALLBACK_CONFIG = {
   ],
   CACHE_KEY: 'address:lastConfig',
   GITHUB_URL: 'https://github.com/movixstream/MovixOpenSource',
-  TELEGRAM_URL: 'https://t.me/ix_annonces',
+  TELEGRAM_URL: 'https://matrix.to/#/%23groupe-ix:matrix.org',
 };

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { useTranslation } from 'react-i18next';
 import axios from 'axios';
-import { Loader, ChevronRight, Film, Tv } from 'lucide-react';
+import { Loader, ChevronRight, Film, Tv, Flame } from 'lucide-react';
 
 import HeroSlider from '../components/HeroSlider';
 import CarouselTitle from '../components/CarouselTitle';
@@ -1161,7 +1161,7 @@ const ProviderContent: React.FC = () => {
   }, [hoveredCategoryItemsMap]);
 
   const trendingTitle = useMemo(
-    () => <CarouselTitle icon="🔥" iconClass="text-red-600" label={t('providerCatalog.todayTrends')} />,
+    () => <CarouselTitle icon={Flame} iconClass="text-red-600" label={t('providerCatalog.todayTrends')} />,
     [t]
   );
 

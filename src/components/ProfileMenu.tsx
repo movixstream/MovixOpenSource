@@ -1,24 +1,102 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { motion, AnimatePresence } from 'framer-motion';
-import { LogOut, User, List, Star, Check, ChevronDown, Crown, Settings, Shield } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { ArrowLeftRight, Check, ChevronDown, Crown, KeyRound, List, LogOut, Settings, Shield, Star, User } from 'lucide-react';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
+import { cn } from '@/lib/utils';
 import { isHiddenOnTv } from '@/routing/registry';
 import { googleAuth } from '../services/googleAuth';
 import { discordAuth } from '../services/discordAuth';
 import { useVipModal } from '../context/VipModalContext';
-import ProfileSwitcher from './ProfileSwitcher';
 import { isUserVip } from '../utils/authUtils';
 import { checkVipStatus } from '../utils/vipUtils';
 import { useProfile } from '../context/ProfileContext';
 import { broadcastAuthChange, clearStoredAuthSession } from '../utils/accountAuth';
+import { readLocalStorage } from '../utils/browserStorage';
+import { getOverlayPortalRoot } from '../utils/overlayPortal';
+import { useIsDesktopNav } from '../hooks/useIsDesktopNav';
+import { HoverHighlight, HoverHighlightItem } from './ui/hover-highlight';
+import { LiquidButton } from './ui/liquid-button';
+import HoldButton from './ui/hold-button';
+import { LiquidDropdown, LiquidSheet } from './header/liquidMenu';
+import { useSheetScrollLock } from './header/useSheetScrollLock';
+import { HeaderPanelsContext } from './header/headerPanels';
+
+/* ─── Menu profil et menu de connexion ───────────────────────────────────────
+   Même liquide que le menu Explorer : sur ordinateur, la pastille du profil
+   se remplit en gardant sa forme, puis une patte étroite coule de son centre
+   jusqu'au menu, auquel elle reste collée ; sur mobile, le rond de l'avatar
+   s'étire en panneau plein écran.
+   Des lignes comme celles d'Explorer, un seul fond qui glisse de l'une à
+   l'autre ; un seul bouton en couleur, Devenir VIP, que l'or remplit au
+   survol ; la déconnexion n'est qu'une ligne, rouge au survol. */
+
+const DEFAULT_AVATAR = 'https://as2.ftcdn.net/v2/jpg/05/89/93/27/1000_F_589932782_vQAEAZhHnq1QCGu5ikwrYaQD0Mmurm0N.webp';
+const DISCORD_LOGO = 'https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a6a49cf127bf92de1e2_icon_clyde_blurple_RGB.png';
+const GOOGLE_LOGO = 'https://www.google.com/images/branding/googleg/1x/googleg_standard_color_128dp.png';
+
+type Provider = 'discord' | 'google' | 'bip39' | null;
+type MenuVariant = 'panel' | 'sheet';
+
+const readProvider = (): Provider => {
+  if (readLocalStorage('discord_auth') === 'true') return 'discord';
+  if (readLocalStorage('google_auth') === 'true') return 'google';
+  if (readLocalStorage('bip39_auth') === 'true') return 'bip39';
+  return null;
+};
+
+const onAvatarError = (event: React.SyntheticEvent<HTMLImageElement>) => {
+  if (event.currentTarget.src !== DEFAULT_AVATAR) event.currentTarget.src = DEFAULT_AVATAR;
+};
+
+// Couleur pleine et opacité sur l'icône seule : une couleur translucide
+// éclaircirait les croisements de ses tracés.
+const ICON_CLASS = 'h-[18px] w-[18px] shrink-0 text-white opacity-45 transition-[color,opacity] duration-150 group-hover:opacity-90';
+// Fond de survol simple du panneau mobile, seulement avec une souris
+// (fenêtre étroite sur ordinateur) : au toucher, il resterait accroché.
+const SHEET_HOVER = '[@media(hover:hover)_and_(pointer:fine)]:hover:bg-white/[0.05]';
+
+const rowClass = (variant: MenuVariant, extra?: string) => cn(
+  'group flex w-full items-center gap-3 rounded-xl px-3 text-left outline-none transition-colors duration-150 active:bg-white/[0.07] focus-visible:ring-1 focus-visible:ring-white/25',
+  variant === 'sheet' ? cn('py-3 text-base', SHEET_HOVER) : 'py-2.5 text-sm',
+  extra ?? 'text-white/85',
+);
+
+/** Liste du menu : sur ordinateur, un même fond glisse de ligne en ligne. */
+const MenuList: React.FC<{ variant: MenuVariant; className?: string; children: React.ReactNode }> = ({ variant, className, children }) => (
+  variant === 'panel'
+    ? <HoverHighlight className="rounded-xl bg-white/[0.06]"><ul className={className}>{children}</ul></HoverHighlight>
+    : <ul className={className}>{children}</ul>
+);
+
+const MenuItem: React.FC<{ variant: MenuVariant; value: string; children: React.ReactNode }> = ({ variant, value, children }) => (
+  variant === 'panel'
+    ? <HoverHighlightItem itemValue={value}>{children}</HoverHighlightItem>
+    : <li data-sheet-item>{children}</li>
+);
+
+const MenuDivider: React.FC = () => (
+  <li aria-hidden="true" data-sheet-item className="mx-3 my-1.5 h-px bg-white/[0.07]" />
+);
 
 const ProfileMenu: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isDesktopNav = useIsDesktopNav();
+  const { host: panelHost, onProfileOpenChange } = useContext(HeaderPanelsContext);
+  const menuId = useId();
   const [isOpen, setIsOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isVip, setIsVip] = useState(false);
+  const [provider, setProvider] = useState<Provider>(null);
   const [canAccessAdminPanel, setCanAccessAdminPanel] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
 
   // Use profile context for display data
   let currentProfile = null;
@@ -29,7 +107,7 @@ const ProfileMenu: React.FC = () => {
     // ProfileProvider might not be available yet
   }
 
-  const profileImage = currentProfile?.avatar || 'https://as2.ftcdn.net/v2/jpg/05/89/93/27/1000_F_589932782_vQAEAZhHnq1QCGu5ikwrYaQD0Mmurm0N.webp';
+  const profileImage = currentProfile?.avatar || DEFAULT_AVATAR;
   const username = currentProfile?.name || '';
 
   // Safe hook usage with error handling
@@ -37,7 +115,7 @@ const ProfileMenu: React.FC = () => {
   try {
     const vipModal = useVipModal();
     openVipModal = vipModal.openVipModal;
-  } catch (error) {
+  } catch {
     // Silently handle the error - VipModalProvider might not be available yet
     openVipModal = null;
   }
@@ -48,15 +126,16 @@ const ProfileMenu: React.FC = () => {
     const checkAuth = () => {
       try {
         const auth = localStorage.getItem('auth');
-        const discordAuth = localStorage.getItem('discord_auth');
-        const googleAuth = localStorage.getItem('google_auth');
+        const discordAuthFlag = localStorage.getItem('discord_auth');
+        const googleAuthFlag = localStorage.getItem('google_auth');
         const bip39Auth = localStorage.getItem('bip39_auth');
         const isVipUser = isUserVip();
 
-        const isAuth = discordAuth === 'true' || googleAuth === 'true' || bip39Auth === 'true' || !!auth;
+        const isAuth = discordAuthFlag === 'true' || googleAuthFlag === 'true' || bip39Auth === 'true' || !!auth;
 
         setIsAuthenticated(isAuth);
         setIsVip(isVipUser);
+        setProvider(readProvider());
       } catch {
         // Conserver l'état courant si le stockage est inaccessible.
       }
@@ -122,6 +201,45 @@ const ProfileMenu: React.FC = () => {
     checkAdminAccess();
   }, [isAuthenticated]);
 
+  const close = useCallback(() => setIsOpen(false), []);
+
+  // Une autre page referme le menu.
+  useEffect(() => {
+    setIsOpen(false);
+  }, [location.pathname]);
+
+  // L'en-tête suit l'ouverture (dégradé et décor, sur mobile), dans la même
+  // image que le panneau : avec un useEffect, il suivait une image plus tard.
+  useLayoutEffect(() => {
+    onProfileOpenChange?.(isOpen);
+  }, [isOpen, onProfileOpenChange]);
+  useEffect(() => () => onProfileOpenChange?.(false), [onProfileOpenChange]);
+
+  // Clic ailleurs : le menu se referme ; Échap le referme et rend le focus au
+  // bouton. Le menu d'ordinateur et le panneau mobile sont rendus ailleurs
+  // (portails) : leurs clics restent intérieurs.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target) || sheetRef.current?.contains(target)) return;
+      setIsOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  useSheetScrollLock(isOpen && !isDesktopNav, scrollerRef);
+
   const handleLogout = async () => {
     const sessionId = localStorage.getItem('session_id');
     const token = localStorage.getItem('auth_token');
@@ -145,7 +263,7 @@ const ProfileMenu: React.FC = () => {
     try {
       clearStoredAuthSession();
       broadcastAuthChange();
-    } catch {}
+    } catch { /* Stockage inaccessible : la redirection déconnecte quand même l'affichage. */ }
     setIsAuthenticated(false);
     setIsOpen(false);
     // Redirection simple (pas besoin de reload explicite)
@@ -173,274 +291,270 @@ const ProfileMenu: React.FC = () => {
     }
   };
 
-  return (
-    <div className="relative z-50 flex items-center justify-center">
-      {/* Desktop profile button */}
-      <motion.div
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 cursor-pointer md:px-0 max-md:px-0 max-md:py-0 max-md:bg-transparent"
-      >
-        <div className="flex items-center gap-1 sm:gap-2">
-          <div className="relative group">
-            <img
-              src={isAuthenticated ? profileImage : 'https://as2.ftcdn.net/v2/jpg/05/89/93/27/1000_F_589932782_vQAEAZhHnq1QCGu5ikwrYaQD0Mmurm0N.webp'}
-              alt={t('header.profile')}
-              className="w-7 h-7 md:w-7 md:h-7 max-md:w-7 max-md:h-7 rounded-full object-cover border-2 border-transparent group-hover:border-red-600 transition-all duration-300 shadow-md"
-              onError={(e) => {
-                e.currentTarget.src = 'https://as2.ftcdn.net/v2/jpg/05/89/93/27/1000_F_589932782_vQAEAZhHnq1QCGu5ikwrYaQD0Mmurm0N.webp';
-              }}
-              key={profileImage}
-            />
-            {isAuthenticated && (
-              <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border border-black"></span>
-            )}
-            {isVip && (
-              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-yellow-500 text-xs flex items-center justify-center rounded-full border border-black">
-                <Crown className="w-2 h-2 text-black" />
-              </span>
-            )}
-          </div>
-          <span className="hidden sm:inline md:inline text-sm font-medium truncate max-w-[80px] lg:max-w-[120px]">
-            {isAuthenticated ? 
-              (username.length > 12 ? username.substring(0, 12) + '...' : username) 
-              : t('auth.login')}
-          </span>
+  const handleSwitchProfile = () => {
+    setIsOpen(false);
+    navigate('/profile-selection');
+  };
+
+  // Sous le nom : la fin du VIP (la date est gardée à l'activation de la clé),
+  // ou le compte utilisé pour se connecter.
+  const vipStatus = () => {
+    const raw = readLocalStorage('access_code_expires');
+    const expires = raw && raw !== 'never' ? new Date(raw) : null;
+    if (!expires || Number.isNaN(expires.getTime())) return t('vip.youAreVip');
+    try {
+      const date = new Intl.DateTimeFormat(i18n.language, { day: 'numeric', month: 'short', year: 'numeric' }).format(expires);
+      return t('vip.activeUntil', { date });
+    } catch {
+      return t('vip.youAreVip');
+    }
+  };
+
+  const providerStatus = () => {
+    if (provider === 'bip39') return t('profile.connectedWithSecretPhrase');
+    if (provider === 'discord') return `${t('profile.connectedWith')} Discord`;
+    if (provider === 'google') return `${t('profile.connectedWith')} Google`;
+    return t('profile.connectedUser');
+  };
+
+  const vipLine = (className?: string) => (
+    <p className={cn('flex items-center gap-1 text-xs text-[#e2b13c]', className)}>
+      <Crown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span className="truncate">{vipStatus()}</span>
+    </p>
+  );
+
+  const becomeVipButton = (
+    <LiquidButton tone="gold" onClick={handleOpenVipModal}>
+      <Crown className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+      <span>{t('vip.becomeVip')}</span>
+    </LiquidButton>
+  );
+
+  const navLinks = [
+    { to: '/profile', label: t('profile.title'), Icon: User },
+    { to: '/profile?tab=watchlist', label: t('profile.watchlist'), Icon: List },
+    { to: '/profile?tab=favorites', label: t('common.favorites'), Icon: Star },
+    { to: '/profile?tab=watched', label: t('profile.watched'), Icon: Check },
+  ];
+
+  const renderConnected = (variant: MenuVariant) => (
+    <div className={variant === 'panel' ? 'p-2' : undefined}>
+      <div data-sheet-item className="flex items-center gap-3 px-3 pb-3 pt-2">
+        <img
+          src={profileImage}
+          alt=""
+          className="h-10 w-10 shrink-0 rounded-full object-cover"
+          onError={onAvatarError}
+        />
+        <div className="min-w-0">
+          <p className="truncate text-[15px] font-medium leading-5 text-white">{username}</p>
+          {isVip
+            ? vipLine('mt-0.5')
+            : <p className="mt-0.5 truncate text-xs text-white/45">{providerStatus()}</p>}
         </div>
-        
-        <ChevronDown className="w-4 h-4 hidden sm:inline md:inline transition-transform duration-300" />
-      </motion.div>
+      </div>
 
-      <AnimatePresence>
-        {isOpen && (
-          <>
-            {/* Overlay to close menu when clicking outside */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40"
-              onClick={() => setIsOpen(false)}
-            ></motion.div>
-            
-            <motion.div
-              initial={{ opacity: 0, y: 10, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 10, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className="absolute right-0 md:right-0 top-full mt-2 w-64 max-sm:w-64 sm:w-64 rounded-xl bg-gradient-to-b from-gray-900 to-gray-800 shadow-2xl border border-gray-700 overflow-hidden z-[100]"
-            >
-              {/* Small triangle at the top of the menu - visible only on desktop */}
-              <div className="absolute right-3 -top-2 w-4 h-4 bg-gray-900 transform rotate-45 border-t border-l border-gray-700 md:block"></div>
-              
-              {isAuthenticated ? (
-                <>
-                  <div className="px-5 py-4 border-b border-gray-700/50">
-                    <div className="flex items-center gap-3">
-                      <img 
-                        src={profileImage} 
-                        alt={t('header.profile')}
-                        className="w-10 h-10 md:w-10 md:h-10 max-md:w-12 max-md:h-12 rounded-full object-cover border-2 border-red-600/70"
-                        onError={(e) => {
-                          e.currentTarget.src = 'https://as2.ftcdn.net/v2/jpg/05/89/93/27/1000_F_589932782_vQAEAZhHnq1QCGu5ikwrYaQD0Mmurm0N.webp';
-                        }}
-                      />
-                      <div>
-                        <div className="font-semibold text-white max-md:text-lg">
-                          {username}
-                          {isVip && (
-                            <span className="ml-2 px-1.5 py-0.5 bg-yellow-500 text-black text-xs font-bold rounded-full">
-                              VIP
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs max-md:text-sm text-gray-400">{t('profile.connectedUser')}</div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="py-1">
-                    <div className="px-5 py-3 border-b border-gray-700/30">
-                      <ProfileSwitcher />
-                    </div>
-
-                    <div className="max-h-64 overflow-y-auto">
-                    <Link 
-                      to="/profile"
-                      className="flex items-center gap-3 px-5 py-3 max-md:py-4 hover:bg-gray-700/50 transition-colors cursor-pointer"
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <User className="w-4 h-4 md:w-4 md:h-4 max-md:w-5 max-md:h-5 text-gray-400" />
-                      <span className="max-md:text-base">{t('profile.title')}</span>
-                    </Link>
-                    <Link 
-                      to="/profile?tab=watchlist"
-                      className="flex items-center gap-3 px-5 py-3 max-md:py-4 hover:bg-gray-700/50 transition-colors cursor-pointer"
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <List className="w-4 h-4 md:w-4 md:h-4 max-md:w-5 max-md:h-5 text-gray-400" />
-                      <span className="max-md:text-base">{t('profile.watchlist')}</span>
-                    </Link>
-                    <Link 
-                      to="/profile?tab=favorites"
-                      className="flex items-center gap-3 px-5 py-3 max-md:py-4 hover:bg-gray-700/50 transition-colors cursor-pointer"
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <Star className="w-4 h-4 md:w-4 md:h-4 max-md:w-5 max-md:h-5 text-gray-400" />
-                      <span className="max-md:text-base">{t('common.favorites')}</span>
-                    </Link>
-                    <Link 
-                      to="/profile?tab=watched"
-                      className="flex items-center gap-3 px-5 py-3 max-md:py-4 hover:bg-gray-700/50 transition-colors cursor-pointer"
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <Check className="w-4 h-4 md:w-4 md:h-4 max-md:w-5 max-md:h-5 text-gray-400" />
-                      <span className="max-md:text-base">{t('profile.watched')}</span>
-                    </Link>
-                    <Link 
-                      to="/settings"
-                      className="flex items-center gap-3 px-5 py-3 max-md:py-4 hover:bg-gray-700/50 transition-colors cursor-pointer border-t border-gray-700/30"
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <Settings className="w-4 h-4 md:w-4 md:h-4 max-md:w-5 max-md:h-5 text-gray-400" />
-                      <span className="max-md:text-base">{t('settings.title')}</span>
-                    </Link>
-                    </div>
-                  </div>
-                  
-                  <div className="px-4 py-3 border-t border-gray-700/50 space-y-3">
-                    {canAccessAdminPanel && !isHiddenOnTv('/admin') && (
-                      <Link
-                        to="/admin"
-                        className="flex items-center justify-center gap-2 w-full px-3 py-3 max-md:py-4 bg-gradient-to-r from-amber-500/90 to-red-600/90 hover:from-amber-500 hover:to-red-600 text-white rounded-lg transition-colors shadow-md"
-                        onClick={() => setIsOpen(false)}
-                      >
-                        <Shield className="w-4 h-4 md:w-4 md:h-4 max-md:w-5 max-md:h-5" />
-                        <span className="font-medium max-md:text-base">{t('admin.adminPanel')}</span>
-                      </Link>
-                    )}
-
-                    {/* Bouton VIP — l'invitation à devenir VIP mène à /vip, hors
-                        périmètre V1 sur TV ; le statut VIP, lui, reste affiché. */}
-                    {showVipButton && (
-                    <motion.div
-                      whileHover={isVip ? undefined : { scale: 1.02 }}
-                      whileTap={isVip ? undefined : { scale: 0.98 }}
-                      className={`flex items-center justify-center gap-2 w-full px-3 py-3 max-md:py-3
-                        ${isVip
-                          ? 'bg-gradient-to-r from-yellow-500 to-amber-600 text-black cursor-default opacity-80'
-                          : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white cursor-pointer hover:shadow-md'
-                        } rounded-lg transition-colors`}
-                      onClick={isVip ? undefined : handleOpenVipModal}
-                    >
-                      <Crown className="w-4 h-4 md:w-4 md:h-4 max-md:w-5 max-md:h-5" />
-                      <span className="font-medium max-md:text-base">
-                        {isVip ? t('vip.youAreVip') : t('vip.becomeVip')}
-                      </span>
-                    </motion.div>
-                    )}
-
-                    <motion.div 
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="flex items-center justify-center gap-2 w-full px-3 py-3 max-md:py-4 bg-red-600/80 hover:bg-red-600 text-white rounded-lg transition-colors cursor-pointer"
-                      onClick={handleLogout}
-                    >
-                      <LogOut className="w-4 h-4 md:w-4 md:h-4 max-md:w-5 max-md:h-5" />
-                      <span className="font-medium max-md:text-base">{t('auth.logout')}</span>
-                    </motion.div>
-                  </div>
-                </>
-              ) : (
-                <div className="p-4 max-md:p-5">
-                  <div className="text-sm max-md:text-base text-gray-400 px-2 pb-3 border-b border-gray-700/50 mb-3">
-                    {t('auth.loginPrompt')}
-                  </div>
-                  
-                  <div className="space-y-3 max-md:space-y-4">
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={handleLogin}
-                      className="flex items-center justify-center gap-3 w-full px-4 py-3 max-md:py-4 bg-[#5865F2] hover:bg-[#4752C4] text-white rounded-lg transition-colors shadow-md"
-                    >
-                      <div className="flex items-center justify-center w-7 h-7 max-md:w-8 max-md:h-8 bg-white rounded-full p-0.5">
-                        <img 
-                          src="https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a6a49cf127bf92de1e2_icon_clyde_blurple_RGB.png"
-                          alt="Discord"
-                          className="w-5 h-5 max-md:w-6 max-md:h-6 object-contain"
-                        />
-                      </div>
-                      <span className="font-medium max-md:text-base">{t('auth.loginWithDiscord')}</span>
-                    </motion.button>
-                    
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={handleGoogleLogin}
-                      className="flex items-center justify-center gap-3 w-full px-4 py-3 max-md:py-4 bg-white hover:bg-gray-100 text-gray-800 rounded-lg transition-colors shadow-md"
-                    >
-                      <div className="flex items-center justify-center w-7 h-7 max-md:w-8 max-md:h-8 bg-white rounded-full shadow-sm border border-gray-200 p-0.5">
-                        <img
-                          src="https://www.google.com/images/branding/googleg/1x/googleg_standard_color_128dp.png"
-                          alt="Google"
-                          className="w-5 h-5 max-md:w-6 max-md:h-6 object-contain"
-                        />
-                      </div>
-                      <span className="font-medium max-md:text-base">{t('auth.loginWithGoogle')}</span>
-                    </motion.button>
-
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => window.location.href = '/login-bip39'}
-                      className="flex items-center justify-center gap-3 w-full px-4 py-3 max-md:py-4 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-lg transition-colors shadow-md"
-                    >
-                      <div className="flex items-center justify-center w-7 h-7 max-md:w-8 max-md:h-8 bg-white/20 rounded-full p-0.5">
-                        <svg className="w-5 h-5 max-md:w-6 max-md:h-6" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
-                        </svg>
-                      </div>
-                      <span className="font-medium max-md:text-base">{t('auth.secretPhrase')}</span>
-                    </motion.button>
-
-                    <Link
-                      to="/settings"
-                      className="flex items-center justify-center gap-3 w-full px-4 py-3 max-md:py-4 bg-gray-700/50 hover:bg-gray-700/80 text-white rounded-lg transition-colors shadow-md border border-gray-600/30"
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <div className="flex items-center justify-center w-7 h-7 max-md:w-8 max-md:h-8 bg-white/10 rounded-full p-0.5">
-                        <Settings className="w-5 h-5 max-md:w-6 max-md:h-6" />
-                      </div>
-                      <span className="font-medium max-md:text-base">{t('settings.title')}</span>
-                    </Link>
-
-                    {/* Bouton VIP pour les non-connectés */}
-                    {showVipButton && (
-                    <motion.button
-                      whileHover={isVip ? undefined : { scale: 1.02 }}
-                      whileTap={isVip ? undefined : { scale: 0.98 }}
-                      onClick={isVip ? undefined : handleOpenVipModal}
-                      className={`flex items-center justify-center gap-3 w-full px-4 py-3 max-md:py-4
-                        ${isVip
-                          ? 'bg-gradient-to-r from-yellow-500 to-amber-600 text-black cursor-default opacity-80'
-                          : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white cursor-pointer hover:shadow-md'
-                        } rounded-lg transition-colors`}
-                    >
-                      <Crown className="w-5 h-5 max-md:w-6 max-md:h-6" />
-                      <span className="font-medium max-md:text-base">
-                        {isVip ? t('vip.youAreVip') : t('vip.becomeVip')}
-                      </span>
-                    </motion.button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          </>
+      <MenuList variant={variant}>
+        {currentProfile && (
+          <MenuItem variant={variant} value="switch-profile">
+            <button type="button" onClick={handleSwitchProfile} className={rowClass(variant)}>
+              <ArrowLeftRight className={ICON_CLASS} aria-hidden="true" />
+              <span>{t('profile.switchProfile')}</span>
+            </button>
+          </MenuItem>
         )}
-      </AnimatePresence>
+        <MenuDivider />
+        {navLinks.map(({ to, label, Icon }) => (
+          <MenuItem key={to} variant={variant} value={to}>
+            <Link to={to} onClick={close} className={rowClass(variant)}>
+              <Icon className={ICON_CLASS} aria-hidden="true" />
+              <span>{label}</span>
+            </Link>
+          </MenuItem>
+        ))}
+        <MenuDivider />
+        <MenuItem variant={variant} value="/settings">
+          <Link to="/settings" onClick={close} className={rowClass(variant)}>
+            <Settings className={ICON_CLASS} aria-hidden="true" />
+            <span>{t('settings.title')}</span>
+          </Link>
+        </MenuItem>
+        {canAccessAdminPanel && !isHiddenOnTv('/admin') && (
+          <MenuItem variant={variant} value="/admin">
+            <Link to="/admin" onClick={close} className={rowClass(variant)}>
+              <Shield className={ICON_CLASS} aria-hidden="true" />
+              <span>{t('admin.adminPanel')}</span>
+            </Link>
+          </MenuItem>
+        )}
+      </MenuList>
+
+      {/* L'invitation « Devenir VIP » mène à /vip, hors périmètre V1 sur TV ;
+          le statut VIP, lui, reste affiché. */}
+      {!isVip && showVipButton && (
+        <div data-sheet-item className="px-1 pt-2">
+          {becomeVipButton}
+        </div>
+      )}
+
+      <div data-sheet-item className="px-1 pb-1 pt-2">
+          {/* Déconnexion à maintenir (HoldButton de React Bits) : le rouge
+              du site monte en vague dans le bouton, un clic de travers ne
+              déconnecte plus. */}
+          <HoldButton
+            onHold={handleLogout}
+            hint={t('auth.holdToLogout')}
+            icon={<LogOut className="h-4 w-4" aria-hidden="true" />}
+            doneIcon={<LogOut className="h-4 w-4" aria-hidden="true" />}
+            doneLabel={t('auth.logout')}
+            backgroundColor="rgba(255, 255, 255, 0.04)"
+            fillColor="#dc2626"
+            textColor="rgba(255, 255, 255, 0.75)"
+            fillTextColor="#ffffff"
+            radius={12}
+            holdTime={1200}
+            glow={false}
+            resetAfter={0}
+            size={variant === 'sheet' ? 'lg' : 'md'}
+            className="w-full text-sm"
+          >
+            {t('auth.holdToLogout')}
+          </HoldButton>
+      </div>
+    </div>
+  );
+
+  const renderSignIn = (variant: MenuVariant) => (
+    <div className={variant === 'panel' ? 'p-3' : 'px-1'}>
+      <p data-sheet-item className="px-1 pb-3 pt-1 text-[13px] leading-relaxed text-white/50">
+        {t('auth.loginPrompt')}
+      </p>
+      <div className="grid gap-2">
+        <LiquidButton data-sheet-item onClick={handleLogin}>
+          <img src={DISCORD_LOGO} alt="" className="h-5 w-5 shrink-0 object-contain" />
+          <span>{t('auth.loginWithDiscord')}</span>
+        </LiquidButton>
+        <LiquidButton data-sheet-item onClick={handleGoogleLogin}>
+          <img src={GOOGLE_LOGO} alt="" className="h-[18px] w-[18px] shrink-0 object-contain" />
+          <span>{t('auth.loginWithGoogle')}</span>
+        </LiquidButton>
+        <LiquidButton data-sheet-item onClick={() => { window.location.href = '/login-bip39'; }}>
+          <KeyRound className="h-[18px] w-[18px] shrink-0 text-white opacity-70" aria-hidden="true" />
+          <span>{t('auth.secretPhrase')}</span>
+        </LiquidButton>
+      </div>
+      <div data-sheet-item aria-hidden="true" className="mx-2 mb-1.5 mt-3 h-px bg-white/[0.07]" />
+      <MenuList variant={variant}>
+        <MenuItem variant={variant} value="/settings">
+          <Link to="/settings" onClick={close} className={rowClass(variant)}>
+            <Settings className={ICON_CLASS} aria-hidden="true" />
+            <span>{t('settings.title')}</span>
+          </Link>
+        </MenuItem>
+      </MenuList>
+      {showVipButton && (
+        <div data-sheet-item className="pt-2">
+          {isVip ? vipLine('justify-center py-2') : becomeVipButton}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderContent = (variant: MenuVariant) => (isAuthenticated ? renderConnected(variant) : renderSignIn(variant));
+
+  const displayName = isAuthenticated
+    ? (username.length > 12 ? `${username.substring(0, 12)}...` : username)
+    : t('auth.login');
+
+  return (
+    <div className="relative flex items-center">
+      {/* Le bouton du profil : une pastille que le liquide du menu remplit à
+          l'ouverture (bord et fond s'effacent alors). Sur téléphone, le rond
+          de l'avatar seul. */}
+      <button
+        ref={triggerRef}
+        type="button"
+        data-profile-trigger
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? menuId : undefined}
+        aria-label={isAuthenticated ? (username || t('header.profile')) : t('auth.login')}
+        onClick={() => setIsOpen((open) => !open)}
+        className={cn(
+          'flex h-9 min-w-9 shrink-0 items-center justify-center gap-2 rounded-full border outline-none transition-[color,background-color,border-color] duration-200 focus-visible:ring-2 focus-visible:ring-white/40 sm:pl-1 sm:pr-2.5',
+          isOpen
+            ? 'border-transparent bg-transparent text-white'
+            : 'border-transparent text-white/85 hover:text-white sm:border-white/10 sm:hover:border-white/20 sm:hover:bg-white/5',
+        )}
+      >
+        <span className="relative shrink-0" data-profile-avatar>
+          <img
+            src={isAuthenticated ? profileImage : DEFAULT_AVATAR}
+            alt=""
+            className="h-7 w-7 rounded-full object-cover"
+            onError={onAvatarError}
+            key={profileImage}
+          />
+          {isVip && (
+            <span aria-hidden="true" className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-black bg-[#e2b13c] text-[#241a06]">
+              <Crown className="h-2 w-2" strokeWidth={3} />
+            </span>
+          )}
+        </span>
+        <span className="hidden max-w-[80px] truncate text-sm font-medium sm:inline lg:max-w-[120px]">
+          {displayName}
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className={cn('hidden h-4 w-4 shrink-0 text-white opacity-70 transition-transform duration-200 sm:block', isOpen && 'rotate-180')}
+        />
+      </button>
+
+      {/* Ordinateur : le menu coule du bouton, dans le calque de l'en-tête. */}
+      {panelHost && createPortal(
+        <AnimatePresence>
+          {isOpen && isDesktopNav && (
+            <LiquidDropdown
+              key="profile-menu"
+              id={menuId}
+              data-profile-menu
+              triggerRef={triggerRef}
+              containerRef={panelRef}
+              triggerRadius={18}
+              panelRadius={20}
+              neckWidth={36}
+              align="end"
+              panelClassName="w-72"
+            >
+              {renderContent('panel')}
+            </LiquidDropdown>
+          )}
+        </AnimatePresence>,
+        panelHost,
+      )}
+
+      {/* Mobile et tablette : le rond de l'avatar s'étire en panneau, porté
+          dans la racine des surcouches comme le menu Explorer. */}
+      {createPortal(
+        <AnimatePresence>
+          {isOpen && !isDesktopNav && (
+            <LiquidSheet
+              key="profile-sheet"
+              id={menuId}
+              data-profile-sheet
+              triggerRef={triggerRef}
+              triggerRadius={18}
+              rootRef={sheetRef}
+              scrollerRef={scrollerRef}
+              onClose={close}
+              contentClassName="px-2"
+            >
+              {renderContent('sheet')}
+            </LiquidSheet>
+          )}
+        </AnimatePresence>,
+        getOverlayPortalRoot(),
+      )}
     </div>
   );
 };

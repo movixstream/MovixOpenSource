@@ -33,6 +33,26 @@ test('les titres courts FStream acceptent les variantes TMDB exactes sans accept
   assert.equal(context.validate(selection({ title: 'FROM', original_title: 'FROM' }, 'From Me to You Kimi ni Todoke - Saison 1', 1), '1'), false);
 });
 
+test('les titres FStream échappés « L\\\'Arène » retrouvent leur apostrophe', () => {
+  const context = vm.createContext({});
+  vm.runInContext(fragment('function repairFStreamSearchHtml(', '// get_seasons.php (ajax')
+    + '\nglobalThis.repair = repairFStreamSearchHtml;', context, { filename });
+  const item = (path, alt, title) => `<div class='search-item' onclick="location.href='/${path}'"><div class='search-poster'>`
+    + `<img src='https://image.tmdb.org/t/p/w500/x.jpg' alt='${alt}' loading='lazy'></div>`
+    + `<div class='search-info'><div class='search-title'>${title}</div></div></div>`;
+  const html = item('15139977-larne-saison-1-2026.html', "L\\'Arène - Saison 1", "L\\'Arène - Saison 1")
+    + item('15130792-bugs-bunny-dans-l-arene.html', "Bugs Bunny dans l'arène", "Bugs Bunny dans l'arène (1955)")
+    + item('15131436-arenes-sanglantes.html', 'Arènes sanglantes', 'Arènes sanglantes (1941)');
+  const $ = cheerio.load(context.repair(html));
+  const rows = $('div.search-item').map((_, node) => ({
+    title: $(node).find('.search-title').text().trim(),
+    src: $(node).find('img').attr('src'),
+  })).get();
+  assert.deepEqual(rows.map(row => row.title),
+    ["L'Arène - Saison 1", "Bugs Bunny dans l'arène (1955)", 'Arènes sanglantes (1941)']);
+  assert.ok(rows.every(row => row.src === 'https://image.tmdb.org/t/p/w500/x.jpg'));
+});
+
 test('les recherches FStream se mutualisent en préservant la variante AJAX sans pagination', async () => {
   let calls = 0;
   const html = '<div class="search-item" onclick="location.href=\'/42-serie-test.html\'"><div class="search-title">Serie Test - Saison 1</div></div>';

@@ -1,8 +1,10 @@
+import { IX_MATRIX_URL } from '@/config/community';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, MessageCircle, Trash2, Send, X, AlertTriangle, Info, ExternalLink, Popcorn, Flag } from 'lucide-react';
+import { Heart, MessageCircle, Trash2, Send, X, AlertTriangle, Info, ExternalLink, Popcorn, Flag, Bell, BellOff } from 'lucide-react';
+import { isPushSupported, isSubscribed as isPushSubscribed, subscribeToPush, getPushPermission } from '../services/pushNotificationService';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -1019,6 +1021,10 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentI
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportedIds, setReportedIds] = useState<Set<string>>(new Set());
 
+  // Suivi des nouveaux commentaires
+  const [followingComments, setFollowingComments] = useState(false);
+  const [followingBusy, setFollowingBusy] = useState(false);
+
   // Turnstile
   const [turnstileToken, setTurnstileToken] = useState('');
   const turnstileRef = useRef<HTMLDivElement>(null);
@@ -1181,6 +1187,50 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentI
     loadComments(1);
     fetchLimits();
   }, [loadComments]);
+
+  // Abonnement aux nouveaux commentaires de ce contenu (par profil)
+  useEffect(() => {
+    const token = localStorage.getItem('auth_token');
+    if (!token || !profileId) {
+      setFollowingComments(false);
+      return;
+    }
+    let cancelled = false;
+    axios.get(`${MAIN_API}/api/comments/subscriptions/${contentType}/${contentId}`, {
+      params: { profileId },
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(({ data }) => { if (!cancelled) setFollowingComments(data?.subscribed === true); })
+      .catch(() => { if (!cancelled) setFollowingComments(false); });
+    return () => { cancelled = true; };
+  }, [contentType, contentId, profileId]);
+
+  const handleToggleFollowComments = async () => {
+    const token = localStorage.getItem('auth_token');
+    if (!token || !profileId || followingBusy) return;
+    const next = !followingComments;
+    setFollowingBusy(true);
+    try {
+      await axios.put(
+        `${MAIN_API}/api/comments/subscriptions/${contentType}/${contentId}`,
+        { profileId, subscribed: next },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setFollowingComments(next);
+      toast.success(next ? t('comments.followEnabled') : t('comments.followDisabled'));
+
+      // Proposer aussi les notifications push du navigateur quand c'est possible.
+      if (next && isPushSupported() && getPushPermission() !== 'denied') {
+        const alreadyPush = await isPushSubscribed();
+        if (!alreadyPush) await subscribeToPush();
+      }
+    } catch (error) {
+      console.error('Erreur lors du suivi des commentaires:', error);
+      toast.error(t('comments.followError'));
+    } finally {
+      setFollowingBusy(false);
+    }
+  };
 
   // Charger les limites de commentaires
   const fetchLimits = async () => {
@@ -1878,12 +1928,12 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentI
                 {t('comments.requestPage')}
               </Link>
               <a
-                href="https://t.me/ix_annonces"
+                href={IX_MATRIX_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
               >
-                Telegram
+                Matrix
                 <ExternalLink className="w-4 h-4" />
               </a>
             </div>
@@ -1988,6 +2038,26 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentI
         </div>
       )
       }
+
+      {/* Bouton pour être prévenu des nouveaux commentaires */}
+      {isAuthenticated && profileId && (
+        <div className="mb-4 sm:mb-6 flex justify-end">
+          <button
+            type="button"
+            onClick={handleToggleFollowComments}
+            disabled={followingBusy}
+            aria-pressed={followingComments}
+            title={followingComments ? t('comments.unfollowHint') : t('comments.followHint')}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${followingComments
+              ? 'bg-blue-500/20 border-blue-500/40 text-blue-300 hover:bg-blue-500/30'
+              : 'bg-gray-800/60 border-gray-700/60 text-gray-300 hover:bg-gray-700/60 hover:text-white'
+              }`}
+          >
+            {followingComments ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+            <span>{followingComments ? t('comments.unfollow') : t('comments.follow')}</span>
+          </button>
+        </div>
+      )}
 
       {/* Liste des commentaires */}
       <div className="space-y-4 sm:space-y-6">

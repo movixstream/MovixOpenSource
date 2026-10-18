@@ -1,3 +1,4 @@
+import { IX_MATRIX_URL } from '@/config/community';
 import { useEffect, useMemo, useState, Fragment } from 'react';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { motion } from 'framer-motion';
@@ -250,7 +251,7 @@ const HelpHubPage: React.FC = () => {
             {t('help.hub.bottomCta')}
           </p>
           <a
-            href={import.meta.env.VITE_SUPPORT_TELEGRAM_URL || 'https://t.me/ix_annonces'}
+            href={import.meta.env.VITE_SUPPORT_TELEGRAM_URL || IX_MATRIX_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 border border-white/20 text-white font-semibold text-sm transition-colors"

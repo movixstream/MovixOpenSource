@@ -161,6 +161,15 @@ class MediaProxyPolicyTest {
         assertTrue(MediaProxyPolicy.isProviderDecoyUrl("https://s1.fsvid.lol/troll/master.m3u8"))
         assertTrue(MediaProxyPolicy.isProviderDecoyUrl("https://s1.fsvid.lol/troll/seg0.ts"))
         assertTrue(MediaProxyPolicy.isProviderDecoyUrl("https://u14.vidzy.cc/troll/master.m3u8"))
+        // Leurre servi en 200 a l'URL reelle du master (releve le 2026-10-15).
+        assertTrue(MediaProxyPolicy.isProviderDecoyUrl("https://s1.fsvid.lol/e/seg0.ts"))
+        assertTrue(MediaProxyPolicy.isProviderDecoyUrl("https://u14.vidzy.cc/e/seg8.ts"))
+        assertFalse(
+            MediaProxyPolicy.isProviderDecoyUrl(
+                "https://s1.fsvid.lol/hls2/01/00031/id_n/seg-1-v1-a1.ts?t=x",
+            ),
+        )
+        assertFalse(MediaProxyPolicy.isProviderDecoyUrl("https://cdn.example.com/e/seg0.ts"))
 
         // Un vrai flux, et un hote tiers qui contient "troll", restent acceptes.
         assertFalse(
@@ -230,10 +239,14 @@ class MediaProxyPolicyTest {
 
     @Test
     fun limitsExplicitEncodingToTheProviderDomains() {
-        for (host in listOf(
-            "r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org",
-            "strm4.uqload.vc", "strm1.uqload.bz", "STRM4.UQLOAD.VC.",
-        )) {
+        // `gzip;q=0` fait servir a Fsvid/Vidzy leur playlist leurre `/e/segN.ts`.
+        for (host in listOf("r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org")) {
+            assertEquals(
+                "identity",
+                MediaProxyPolicy.playbackAcceptEncoding("https://$host/master.m3u8"),
+            )
+        }
+        for (host in listOf("strm4.uqload.vc", "strm1.uqload.bz", "STRM4.UQLOAD.VC.")) {
             assertEquals(
                 "identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0",
                 MediaProxyPolicy.playbackAcceptEncoding("https://$host/master.m3u8"),
@@ -247,6 +260,19 @@ class MediaProxyPolicyTest {
         )) {
             assertEquals(null, MediaProxyPolicy.playbackAcceptEncoding(url))
         }
+    }
+
+    @Test
+    fun keepsFsvidVidzyOnCronetForTheChromeTlsFingerprint() {
+        // Leur CDN sert un faux master de 177 octets a un TLS non-Chrome (OkHttp).
+        for (host in listOf("r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org")) {
+            assertFalse(MediaProxyPolicy.requiresOkHttpUpstream("https://$host/master.m3u8"))
+        }
+        for (host in listOf("strm4.uqload.vc", "STRM4.UQLOAD.VC.")) {
+            assertTrue(MediaProxyPolicy.requiresOkHttpUpstream("https://$host/master.m3u8"))
+        }
+        assertFalse(MediaProxyPolicy.requiresOkHttpUpstream("https://notuqload.vc/master.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresOkHttpUpstream("not-a-url"))
     }
 
     @Test

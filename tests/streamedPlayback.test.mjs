@@ -135,7 +135,7 @@ for (const file of ['extension/Chrome/background.js', 'extension/Firefox/backgro
   });
   test(`${file} : les destinations décodées avec atob restent contrôlées`, async () => {
     const helper = fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').split('// BEGIN STREAMED HANDSHAKE')[1].split('// END STREAMED HANDSHAKE')[0];
-    for (const target of ['https://embed.st.evil.test/embed/ingest/match/1', 'https://127.0.0.1/private',
+    for (const target of ['https://127.0.0.1/private', 'https://localhost/private', 'https://[::1]/private',
       'http://embed.st/embed/ingest/match/1', 'https://user@embed.st/embed/ingest/match/1', 'javascript:alert(1)']) {
       const requests = [];
       const context = vm.createContext({ URL, TextEncoder, AbortController, setTimeout, clearTimeout, atob,

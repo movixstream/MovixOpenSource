@@ -1,3 +1,4 @@
+import { IX_MATRIX_URL } from '@/config/community';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -25,7 +26,7 @@ const EXTERNAL_RESOURCES: Array<{
   { labelKey: 'helpDns.otherMirrors', href: 'https://rentry.co/movix' },
   {
     labelKey: 'helpDns.otherTelegram',
-    href: import.meta.env.VITE_SUPPORT_TELEGRAM_URL || 'https://t.me/ix_annonces',
+    href: import.meta.env.VITE_SUPPORT_TELEGRAM_URL || IX_MATRIX_URL,
   },
 ];
 

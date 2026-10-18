@@ -9,11 +9,11 @@ import {
   Alert,
   NativeModules,
   Platform,
-  TouchableOpacity,
   Linking,
   Modal,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import AppButton from '../components/AppButton';
 import { CONFIG } from '../config';
 import { useBrowserUIPrefs } from '../hooks/useBrowserUIPrefs';
 import { useAddress } from '../context/AddressContext';
@@ -27,6 +27,18 @@ import {
 } from '../services/networkJournal';
 
 const { DnsModule } = NativeModules;
+
+// Sur iOS, l'interrupteur reste un UISwitch natif (Liquid Glass sur iOS 26) :
+// seule la couleur active est fixée, sans forcer le pouce ni le rail éteint.
+function switchColors(value: boolean) {
+  if (Platform.OS === 'ios') {
+    return { trackColor: { false: undefined, true: '#8b5cf6' } };
+  }
+  return {
+    trackColor: { false: '#333333', true: '#8b5cf6' },
+    thumbColor: value ? '#ffffff' : '#888888',
+  };
+}
 
 // Doit rester aligné sur `M3U8_EXTRACTOR_KEYS` (src/utils/extractionPrefs.ts) :
 // les préférences sont partagées avec le site via le pont d'injection.
@@ -243,8 +255,7 @@ export default function SettingsScreen() {
             <Switch
               value={dnsEnabled}
               onValueChange={toggleDns}
-              trackColor={{ false: '#333333', true: '#8b5cf6' }}
-              thumbColor={dnsEnabled ? '#ffffff' : '#888888'}
+              {...switchColors(dnsEnabled)}
             />
           </View>
 
@@ -310,8 +321,7 @@ export default function SettingsScreen() {
             <Switch
               value={uiPrefs.showUrlBar}
               onValueChange={setShowUrlBar}
-              trackColor={{ false: '#333333', true: '#8b5cf6' }}
-              thumbColor={uiPrefs.showUrlBar ? '#ffffff' : '#888888'}
+              {...switchColors(uiPrefs.showUrlBar)}
             />
           </View>
 
@@ -327,8 +337,7 @@ export default function SettingsScreen() {
             <Switch
               value={uiPrefs.showNavBar}
               onValueChange={setShowNavBar}
-              trackColor={{ false: '#333333', true: '#8b5cf6' }}
-              thumbColor={uiPrefs.showNavBar ? '#ffffff' : '#888888'}
+              {...switchColors(uiPrefs.showNavBar)}
             />
           </View>
         </View>
@@ -351,8 +360,7 @@ export default function SettingsScreen() {
               <Switch
                 value={extractionPrefs.m3u8[key]}
                 onValueChange={(v) => updateExtractionPrefs({ ...extractionPrefs, m3u8: { ...extractionPrefs.m3u8, [key]: v } })}
-                trackColor={{ false: '#333333', true: '#8b5cf6' }}
-                thumbColor={extractionPrefs.m3u8[key] ? '#ffffff' : '#888888'}
+                {...switchColors(extractionPrefs.m3u8[key])}
               />
             </View>
           ))}
@@ -366,8 +374,7 @@ export default function SettingsScreen() {
               <Switch
                 value={extractionPrefs.livetv[key]}
                 onValueChange={(v) => updateExtractionPrefs({ ...extractionPrefs, livetv: { ...extractionPrefs.livetv, [key]: v } })}
-                trackColor={{ false: '#333333', true: '#8b5cf6' }}
-                thumbColor={extractionPrefs.livetv[key] ? '#ffffff' : '#888888'}
+                {...switchColors(extractionPrefs.livetv[key])}
               />
             </View>
           ))}
@@ -387,9 +394,15 @@ export default function SettingsScreen() {
           <Text style={styles.rowSubtitle}>
             Les dernières étapes et erreurs de diffusion sont conservées pendant cette session, sur Android et iOS.
           </Text>
-          <TouchableOpacity style={[styles.linkButton, { marginTop: 12 }]} onPress={() => copyJournal(false)} accessibilityRole="button">
-            <Text style={styles.linkText}>Copier les logs Cast</Text>
-          </TouchableOpacity>
+          <AppButton
+            title="Copier les logs Cast"
+            systemImage="doc.on.doc"
+            compact
+            onPress={() => copyJournal(false)}
+            style={{ marginTop: 12 }}
+            fallbackStyle={styles.linkButton}
+            fallbackTextStyle={styles.linkText}
+          />
         </View>
 
         <View style={styles.card}>
@@ -404,37 +417,53 @@ export default function SettingsScreen() {
             <Switch
               value={journalEnabled}
               onValueChange={toggleJournal}
-              trackColor={{ false: '#333333', true: '#8b5cf6' }}
-              thumbColor={journalEnabled ? '#ffffff' : '#888888'}
+              {...switchColors(journalEnabled)}
             />
           </View>
 
           {journalEnabled && (
             <View style={{ marginTop: 12 }}>
-              <TouchableOpacity style={styles.linkButton} onPress={openJournal}>
-                <Text style={styles.linkText}>Voir le journal</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.linkButton, { marginTop: 8 }]}
+              <AppButton
+                title="Voir le journal"
+                systemImage="list.bullet.rectangle"
+                compact
+                onPress={openJournal}
+                style={{ marginTop: 12 }}
+                fallbackStyle={styles.linkButton}
+                fallbackTextStyle={styles.linkText}
+              />
+              <AppButton
+                title={exportingJournal ? 'Préparation du partage…' : 'Partager le fichier .txt'}
+                systemImage="square.and.arrow.up"
+                compact
                 onPress={shareJournal}
                 disabled={exportingJournal}
-                accessibilityRole="button">
-                <Text style={styles.linkText}>{exportingJournal ? 'Préparation du partage…' : 'Partager le fichier .txt'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.linkButton, { marginTop: 8 }]}
+                style={{ marginTop: 8 }}
+                fallbackStyle={styles.linkButton}
+                fallbackTextStyle={styles.linkText}
+              />
+              <AppButton
+                title="Copier les logs"
+                systemImage="doc.on.doc"
+                compact
                 onPress={() => copyJournal()}
-                accessibilityRole="button">
-                <Text style={styles.linkText}>Copier les logs</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.linkButton, { marginTop: 8 }]}
+                style={{ marginTop: 8 }}
+                fallbackStyle={styles.linkButton}
+                fallbackTextStyle={styles.linkText}
+              />
+              <AppButton
+                title="Vider le journal"
+                systemImage="trash"
+                variant="destructive"
+                compact
                 onPress={async () => {
                   await clearNetworkJournal();
                   setJournalEntries([]);
-                }}>
-                <Text style={styles.linkText}>Vider le journal</Text>
-              </TouchableOpacity>
+                }}
+                style={{ marginTop: 8 }}
+                fallbackStyle={styles.linkButton}
+                fallbackTextStyle={styles.linkText}
+              />
             </View>
           )}
         </View>
@@ -457,17 +486,34 @@ export default function SettingsScreen() {
             <Text style={styles.sectionTitle}>
               Journal réseau ({journalEntries.length})
             </Text>
-            <TouchableOpacity onPress={() => setJournalVisible(false)}>
-              <Text style={styles.linkText}>Fermer</Text>
-            </TouchableOpacity>
+            <AppButton
+              title="Fermer"
+              compact
+              onPress={() => setJournalVisible(false)}
+              style={Platform.OS === 'ios' ? { width: 100 } : undefined}
+              fallbackTextStyle={styles.linkText}
+            />
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 20 }}>
-            <TouchableOpacity style={styles.linkButton} onPress={() => copyJournal()} accessibilityRole="button">
-              <Text style={styles.linkText}>Copier les logs</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.linkButton} onPress={shareJournal} disabled={exportingJournal} accessibilityRole="button">
-              <Text style={styles.linkText}>{exportingJournal ? 'Préparation…' : 'Partager le fichier .txt'}</Text>
-            </TouchableOpacity>
+            <AppButton
+              title="Copier les logs"
+              systemImage="doc.on.doc"
+              compact
+              onPress={() => copyJournal()}
+              style={[{ marginTop: 12 }, Platform.OS === 'ios' && { flex: 1 }]}
+              fallbackStyle={styles.linkButton}
+              fallbackTextStyle={styles.linkText}
+            />
+            <AppButton
+              title={exportingJournal ? 'Préparation…' : 'Partager le fichier .txt'}
+              systemImage="square.and.arrow.up"
+              compact
+              onPress={shareJournal}
+              disabled={exportingJournal}
+              style={[{ marginTop: 12 }, Platform.OS === 'ios' && { flex: 1 }]}
+              fallbackStyle={styles.linkButton}
+              fallbackTextStyle={styles.linkText}
+            />
           </View>
           <ScrollView contentContainerStyle={styles.content} horizontal={false}>
             {journalEntries.length === 0 ? (
@@ -503,13 +549,17 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        <TouchableOpacity
-          style={styles.linkButton}
-          onPress={() => Linking.openURL(primaryUrl)}>
-          <Text style={styles.linkText}>
-            Visiter {primaryUrl.replace(/^https?:\/\//, '')}
-          </Text>
-        </TouchableOpacity>
+        <AppButton
+          title={`Visiter ${primaryUrl.replace(/^https?:\/\//, '')}`}
+          systemImage="safari"
+          variant="primary"
+          compact
+          accessibilityRole="link"
+          onPress={() => Linking.openURL(primaryUrl)}
+          style={{ marginTop: 12 }}
+          fallbackStyle={styles.linkButton}
+          fallbackTextStyle={styles.linkText}
+        />
       </View>
     </ScrollView>
   );
@@ -617,7 +667,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   linkButton: {
-    marginTop: 12,
     alignItems: 'center',
     paddingVertical: 10,
   },

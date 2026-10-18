@@ -30,6 +30,9 @@
 		E1A700000000000000000003 /* MovixBrowserChromeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A700000000000000000013 /* MovixBrowserChromeView.swift */; };
 		E1A700000000000000000004 /* MovixBrowserChromeViewManager.m in Sources */ = {isa = PBXBuildFile; fileRef = E1A700000000000000000014 /* MovixBrowserChromeViewManager.m */; };
 		E1A700000000000000000005 /* MovixGlassEffectViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A700000000000000000015 /* MovixGlassEffectViewTests.swift */; };
+		E1A700000000000000000006 /* MovixSwiftUIHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A700000000000000000016 /* MovixSwiftUIHostView.swift */; };
+		E1A700000000000000000007 /* MovixGlassButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A700000000000000000017 /* MovixGlassButton.swift */; };
+		E1A700000000000000000008 /* MovixGlassButtonManager.m in Sources */ = {isa = PBXBuildFile; fileRef = E1A700000000000000000018 /* MovixGlassButtonManager.m */; };
 		B10000000000000000000001 /* MediaProxyPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* MediaProxyPolicy.swift */; };
 		B10000000000000000000002 /* MediaProxyPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* MediaProxyPolicyTests.swift */; };
 		B10000000000000000000003 /* HLSPlaylistRewriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* HLSPlaylistRewriter.swift */; };
@@ -103,6 +106,9 @@
 		E1A700000000000000000013 /* MovixBrowserChromeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovixBrowserChromeView.swift; sourceTree = "<group>"; };
 		E1A700000000000000000014 /* MovixBrowserChromeViewManager.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = MovixBrowserChromeViewManager.m; sourceTree = "<group>"; };
 		E1A700000000000000000015 /* MovixGlassEffectViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovixGlassEffectViewTests.swift; sourceTree = "<group>"; };
+		E1A700000000000000000016 /* MovixSwiftUIHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovixSwiftUIHostView.swift; sourceTree = "<group>"; };
+		E1A700000000000000000017 /* MovixGlassButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MovixGlassButton.swift; sourceTree = "<group>"; };
+		E1A700000000000000000018 /* MovixGlassButtonManager.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = MovixGlassButtonManager.m; sourceTree = "<group>"; };
 		B20000000000000000000001 /* MediaProxyPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaProxyPolicy.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* MediaProxyPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaProxyPolicyTests.swift; sourceTree = "<group>"; };
 		B20000000000000000000003 /* HLSPlaylistRewriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HLSPlaylistRewriter.swift; sourceTree = "<group>"; };
@@ -255,6 +261,9 @@
 				E1A700000000000000000012 /* MovixGlassEffectViewManager.m */,
 				E1A700000000000000000013 /* MovixBrowserChromeView.swift */,
 				E1A700000000000000000014 /* MovixBrowserChromeViewManager.m */,
+				E1A700000000000000000016 /* MovixSwiftUIHostView.swift */,
+				E1A700000000000000000017 /* MovixGlassButton.swift */,
+				E1A700000000000000000018 /* MovixGlassButtonManager.m */,
 			);
 			path = Movix/UI;
 			sourceTree = "<group>";
@@ -582,6 +591,9 @@
 				E1A700000000000000000002 /* MovixGlassEffectViewManager.m in Sources */,
 				E1A700000000000000000003 /* MovixBrowserChromeView.swift in Sources */,
 				E1A700000000000000000004 /* MovixBrowserChromeViewManager.m in Sources */,
+				E1A700000000000000000006 /* MovixSwiftUIHostView.swift in Sources */,
+				E1A700000000000000000007 /* MovixGlassButton.swift in Sources */,
+				E1A700000000000000000008 /* MovixGlassButtonManager.m in Sources */,
 				B10000000000000000000001 /* MediaProxyPolicy.swift in Sources */,
 				B10000000000000000000003 /* HLSPlaylistRewriter.swift in Sources */,
 				B10000000000000000000005 /* MediaProxyModels.swift in Sources */,
@@ -676,7 +688,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Movix/Movix.entitlements;
-				CURRENT_PROJECT_VERSION = 42;
+				CURRENT_PROJECT_VERSION = 45;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Movix/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
@@ -684,7 +696,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.6.5;
+				MARKETING_VERSION = 2.6.8;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -707,14 +719,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Movix/Movix.entitlements;
-				CURRENT_PROJECT_VERSION = 42;
+				CURRENT_PROJECT_VERSION = 45;
 				INFOPLIST_FILE = Movix/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.6.5;
+				MARKETING_VERSION = 2.6.8;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",

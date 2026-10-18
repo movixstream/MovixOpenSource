@@ -572,7 +572,14 @@
     "github": "GitHub",
     "githubDesc": "Code source open-source",
     "calendar": "Calendrier",
-    "calendarDesc": "Les sorties \u00e0 venir, et les v\u00f4tres"
+    "calendarDesc": "Les sorties \u00e0 venir, et les v\u00f4tres",
+    "groupApps": "Nos applis",
+    "appsExtension": "Extension",
+    "appsExtensionDesc": "Movix dans votre navigateur",
+    "appsMobile": "Appli mobile",
+    "appsMobileDesc": "Movix sur votre téléphone",
+    "appsTv": "Appli TV",
+    "appsTvDesc": "Movix sur votre télé"
   },
   "calendar": {
     "seoTitle": "Calendrier des sorties",
@@ -672,7 +679,9 @@
     "menu": "Menu",
     "notifications": "Notifications",
     "profile": "Profil",
-    "settings": "Paramètres"
+    "settings": "Paramètres",
+    "halloweenOn": "Allumer le thème Halloween",
+    "halloweenOff": "Éteindre le thème Halloween"
   },
   "footer": {
     "copyright": "© {{year}} Movix. Tous droits réservés.",
@@ -687,7 +696,7 @@
     "legal": "Mentions légales",
     "contact": "Contact",
     "discord": "Discord",
-    "telegram": "Telegram",
+    "telegram": "Matrix",
     "description": "Votre plateforme de streaming préférée",
     "contentTitle": "À propos des contenus",
     "contentText": "Movix référence des contenus disponibles auprès de services tiers. Leur disponibilité dépend de ces services.",
@@ -697,6 +706,29 @@
     "vibeCoded": "Entièrement vibe codé"
   },
   "home": {
+    "halloween": {
+      "title": "Spécial Halloween",
+      "countdown_one": "J-{{count}} avant Halloween",
+      "countdown_other": "J-{{count}} avant Halloween",
+      "countdownShort_one": "J-{{count}}",
+      "countdownShort_other": "J-{{count}}",
+      "tonight": "C'est ce soir !",
+      "meter": "Frissomètre",
+      "moods": {
+        "soft": {
+          "label": "Frisson doux",
+          "hint": "Halloween en famille : sorcières, citrouilles et monstres gentils"
+        },
+        "chills": {
+          "label": "Chair de poule",
+          "hint": "Nuits d'Halloween, maisons hantées et tueurs masqués"
+        },
+        "terror": {
+          "label": "Terreur",
+          "hint": "Les plus grands films d'horreur. Âmes sensibles s'abstenir"
+        }
+      }
+    },
     "trending": "Tendances",
     "trendingMovies": "Films tendances",
     "trendingSeries": "Séries tendances",
@@ -1011,6 +1043,10 @@
     "watchlistBtn": "Watchlist",
     "favoritesBtn": "Favoris",
     "watchedBtn": "Vu",
+    "watchedEstimatedBtn": "Vu (estimé)",
+    "watchedOtherDevice": "Vu sur un autre appareil",
+    "estimatedShort": "estimé",
+    "otherDeviceShort": "autre appareil",
     "addToAList": "Ajouter à une liste",
     "antiSpoilConfig": "Configurer les paramètres anti-spoil",
     "antiSpoil": "Anti-Spoil",
@@ -1051,9 +1087,6 @@
     "broadcastNetworks": "Diffuseurs",
     "imagesCount_one": "{{count}} image",
     "imagesCount_other": "{{count}} images",
-    "part1And2": "Partie 1 et 2",
-    "part3And4": "Partie 3 et 4",
-    "part5": "Partie 5",
     "languages": {
       "vf": "VF",
       "vostfr": "VOSTFR"
@@ -1166,6 +1199,13 @@
     "financialNote": "Note: Ces estimations sont basées sur les tendances de l'industrie et varient considérablement selon les accords spécifiques de production et de distribution.",
     "showEpisodeGrid": "Afficher la grille des épisodes",
     "showDropdown": "Afficher le menu déroulant",
+    "episodeListSource": "Liste :",
+    "episodeListTvmaze": "TVmaze",
+    "episodeListTmdb": "TMDB",
+    "episodeListNetflix": "Netflix",
+    "seasonLayout": "Liste des saisons :",
+    "episodeListTvmazeHint": "Découpage TVmaze ({{count}} épisodes au lieu de {{tmdb}} sur TMDB)",
+    "episodeListSwitchHint": "Il manque des épisodes, ou un épisode déjà sorti ne se lance pas ? Change de liste.",
     "standardMode": "Mode standard",
     "animeModeLabel": "Mode anime",
     "standardModeAvailable": "Mode Standard disponible. Essayez-le si des épisodes/saisons manquent.",
@@ -1387,7 +1427,7 @@
     "keepFullscreen": "Garder le Plein Écran",
     "keepFullscreenDesc": "Rester en plein écran lors d'un changement d'épisode. Le lecteur ne quitte plus le plein écran entre deux épisodes, quel que soit le navigateur.",
     "resumePlayback": "Reprendre la Lecture",
-    "resumePlaybackDesc": "Relancer la lecture automatiquement après un changement d'épisode.",
+    "resumePlaybackDesc": "Si la vidéo était en lecture, l'épisode suivant démarre tout seul au lieu d'attendre en pause. Ce réglage ne choisit pas l'endroit où l'épisode reprend : pour revoir une série depuis le début, utilisez « Réinitialiser toute la série » plus bas.",
     "nextContentPopup": "Popup Contenu Suivant",
     "pipNotAvailable": "Élément vidéo non disponible",
     "videoNotReady": "La vidéo n'est pas encore prête",
@@ -1557,6 +1597,9 @@
     "reset": "Réinitialisation",
     "resetProgress": "Réinitialiser la progression (ce contenu)",
     "resetProgressDesc": "Remet la lecture au début pour ce film/épisode.",
+    "resetSeriesProgress": "Réinitialiser toute la série",
+    "resetSeriesProgressDesc": "Efface la progression de tous les épisodes : chaque épisode repartira du début.",
+    "resetSeriesProgressDone": "Progression de la série effacée ({{count}} épisode(s))",
     "frenchQuality": "Français Qualité",
     "frenchFilm": "Français Film",
     "french": "Français",
@@ -2087,6 +2130,7 @@
     "login": "Connexion",
     "register": "Inscription",
     "logout": "Déconnexion",
+    "holdToLogout": "Maintenir pour se déconnecter",
     "email": "Email",
     "password": "Mot de passe",
     "confirmPassword": "Confirmer le mot de passe",
@@ -2255,6 +2299,7 @@
     "favoriteGenres": "Genres favoris",
     "accountInfo": "Informations du compte",
     "connectedWith": "Connecté avec",
+    "connectedWithSecretPhrase": "Connecté avec une phrase secrète",
     "memberSince": "Membre depuis",
     "notConnected": "Non connecté",
     "connectAccount": "Connecter un compte",
@@ -2358,7 +2403,7 @@
     "languageSaved": "Langue enregistrée",
     "languageChanged": "Langue changée avec succès",
     "vip": "VIP",
-    "vipDesc": "Gérez votre abonnement premium",
+    "vipDesc": "Gérez votre accès VIP",
     "sessions": "Sessions",
     "sessionsDesc": "Gérez vos appareils connectés",
     "linkedAccountsTitle": "Comptes liés",
@@ -2415,6 +2460,8 @@
     "soundEffectsDesc": "Active les sons d'interface, par exemple pendant la roulette.",
     "snowEffect": "Effet de neige",
     "snowEffectDesc": "Active des flocons de neige qui tombent sur tout le site.",
+    "halloweenTheme": "Thème Halloween",
+    "halloweenThemeDesc": "Ciel de nuit brumeux, arbres morts, citrouilles, bonbons et touches orange sur tout le site. Activé d'office en octobre, et aussi depuis la citrouille de l'en-tête. Le lecteur n'est pas modifié.",
     "squareCorners": "Coins carrés",
     "squareCornersDesc": "Supprime tous les coins arrondis de l'interface (cartes, carrousels, boutons, avatars…).",
     "backgroundStyle": "Style de fond",
@@ -2476,7 +2523,7 @@
       "desktop": "Ordinateur",
       "mobile": "Téléphone",
       "tablet": "Tablette",
-      "tv": "Télévision",
+      "tv": "Télé",
       "unknown": "Appareil inconnu"
     },
     "analyticsCollection": "Collecte de données analytiques",
@@ -2632,6 +2679,16 @@
     "hideStreamingPlatforms": "Masquer les plateformes de streaming",
     "movieReleaseWarnings": "Avertissements de sortie des films",
     "movieReleaseWarningsDesc": "Afficher les dates cinéma et hors cinéma (numérique, DVD/Blu-ray, TV). Le rappel avant lecture disparaît 6 h avant le début du jour annoncé. Une version CAM ou HDTS peut déjà être disponible. Désactivé par défaut.",
+    "episodeListSource": "Liste d'épisodes par défaut",
+    "episodeListSourceDesc": "TVmaze suit souvent le découpage des plateformes (ex. 21 chapitres au lieu de 10 épisodes). Chaque série peut aussi être changée depuis sa fiche.",
+    "episodeListSourceFilterHelp": "Le filtre : TVmaze n'est utilisé que si la série a les mêmes saisons sur TVmaze et TMDB, et que TVmaze a plus d'épisodes (ex. 21 contre 10). Sinon, Movix garde TMDB. Ça évite les séries où TVmaze compte autrement, comme beaucoup d'animes rangés dans une seule saison de 500 épisodes : les sources suivent TMDB, donc ces épisodes ne se lanceraient pas.",
+    "episodeListSourceTvmaze": "TVmaze avec filtre",
+    "episodeListSourceTvmazeDesc": "Seulement quand c'est sûr (par défaut)",
+    "episodeListSourceTvmazeAll": "TVmaze sans filtre",
+    "episodeListSourceTvmazeAllDesc": "Toujours TVmaze (titres souvent en anglais).",
+    "episodeListSourceTvmazeAllWarning": "Certains épisodes peuvent ne pas se lancer.",
+    "episodeListSourceTmdb": "TMDB",
+    "episodeListSourceTmdbDesc": "Toujours la liste officielle TMDB",
     "hideStreamingPlatformsDesc": "Cache le carrousel Netflix, Prime Video et autres plateformes sur la page d'accueil.",
     "lowLatency": "Streaming basse latence",
     "lowLatencyDesc": "Réduit le retard sur les flux en direct compatibles LL-HLS. N’améliore pas la qualité vidéo ni la vitesse d’un film à la demande.",
@@ -2948,6 +3005,13 @@
   },
   "comments": {
     "title": "Commentaires",
+    "follow": "Me prévenir des nouveaux commentaires",
+    "unfollow": "Ne plus être prévenu",
+    "followHint": "Recevoir une notification à chaque nouveau commentaire sur ce titre",
+    "unfollowHint": "Arrêter les notifications pour les nouveaux commentaires de ce titre",
+    "followEnabled": "Vous serez prévenu des nouveaux commentaires",
+    "followDisabled": "Vous ne serez plus prévenu des nouveaux commentaires",
+    "followError": "Impossible de modifier le suivi des commentaires",
     "turnstileNotice": "Pour lutter contre les bots et le spam, veuillez compléter cette vérification avant chaque commentaire ou réponse.",
     "writeComment": "Écrire un commentaire...",
     "addComment": "Ajouter un commentaire...",
@@ -3862,9 +3926,7 @@
     "noAds": "Sans publicités",
     "priority": "Accès prioritaire",
     "exclusiveContent": "Contenu exclusif",
-    "buyKey": "Acheter une clé VIP",
-    "donate": "Donner",
-    "donateDescription": "Crée une invoice crypto BTC ou LTC, paie avec le QR code, puis récupère automatiquement ta clé VIP ou une URL cadeau.",
+    "donate": "Faire un don",
     "enterKey": "Entrez votre clé VIP",
     "activateKeyDescription": "Tu as déjà une clé VIP ? Active-la ici pour débloquer immédiatement ton accès.",
     "activate": "Activer",
@@ -3883,47 +3945,33 @@
       "multiLangDubs": "Doublages multi-langues",
       "customBadge": "Badge VIP personnalisé"
     },
-    "getVip": "Obtenir Movix VIP",
+    "getVip": "Soutenir Movix",
     "learnMore": "En savoir plus",
     "activationError": "Erreur lors de l'activation de la clé VIP",
     "accessMovixVip": "Accès Movix VIP",
-    "noVipKey": "Pas de clé Movix VIP ?",
-    "accessForPrice": "Accédez à Movix VIP pour seulement 5€/an et profitez de :",
-    "accessForLifePrice": "Accédez à Movix VIP pour seulement 5€ à vie et profitez de :",
+    "noVipKey": "Pas encore de clé VIP ?",
+    "accessForPrice": "Fais un don pour soutenir Movix. En remerciement, tu reçois du VIP et tu profites de :",
+    "accessForLifePrice": "Fais un don pour soutenir Movix. En remerciement, tu reçois du VIP et tu profites de :",
     "prioritySupport": "Support prioritaire",
     "getAccessClicks": "Obtenez votre accès en quelques clics :",
-    "joinTelegramForVip": "Pour obtenir un accès VIP (5€/an), rejoignez notre Telegram.",
-    "contactTelegramForVip": "Pour obtenir un accès VIP (5€ à vie), contactez mysticsaba sur Telegram.",
-    "donateForKey": "Fais un don pour obtenir ta clé Movix VIP, ou contacte-nous sur Telegram.",
+    "donateForKey": "Par carte bancaire, carte cadeau ou crypto : ta clé VIP t'est offerte en remerciement de ton don.",
     "quality4k": "Qualité jusqu'à 4K HDR",
     "multiLangSubtitles": "Sous-titres multi-langues",
     "multipleLanguages": "Plusieurs langues disponibles",
     "discoverBenefits": "Découvrir les avantages VIP",
     "youAreVip": "Vous êtes VIP",
+    "activeUntil": "VIP jusqu'au {{date}}",
     "becomeVip": "Devenir VIP",
     "adFreePlayers": "Nouveaux lecteurs sans pubs",
     "adFreePlayersDesc": "Profite d'une lecture fluide et immédiate.",
     "noAdBeforeContent": "Pas de pub avant un film ou un épisode",
     "noAdBeforeContentDesc": "Lancement instantané de tes contenus préférés.",
-    "priorityRequests": "Demandes prioritaires",
+    "priorityRequests": "Plus de demandes",
     "priorityRequestsDesc": "3 requêtes de films/séries toutes les 48h (vs 1 pour les gratuits).",
     "vipCommentTag": "Tag VIP & listes personnalisées",
     "vipCommentTagDesc": "Affiche ton statut unique en commentaire et crée des listes personnalisées à partager.",
-    "franceTvAccess": "Accès France.tv & Okoo",
-    "franceTvAccessDesc": "Regarde les replays France Télévisions en streaming avec DRM.",
-    "liveTvOtherSources": "TV en direct d'autres sources",
-    "liveTvOtherSourcesDesc": "Accède à des chaînes TV en direct depuis d'autres sources exclusives.",
     "debridService": "Débrideur intégré",
     "debridServiceDesc": "Débrider tes liens d'hébergeurs premium directement depuis Movix, sans compte externe.",
-    "supportPlatform": "Soutiens la plateforme et profite d'une expérience de streaming ultime pour seulement",
-    "yearlyPrice": "5€ par an",
-    "perfectOffer": "L'offre parfaite pour ceux qui ne veulent pas s'embêter avec l'installation d'un bloqueur de pub et le changement de DNS.",
-    "howToSubscribe": "Comment s'abonner ?",
-    "contactToActivate": "Contacte-nous directement pour activer ton accès VIP.",
-    "telegramChannel": "Canal Telegram (t.me/ix_annonces)",
-    "discordContact": "Discord: mysticsaba_alt",
-    "telegramPersonal": "Ou sur Telegram perso :",
-    "supportMessage": "Les VIPs font vivre le site ! Serveurs, proxys internes, et tests de nouvelles fonctionnalités en cours de développement... Tout ça coûte de l'argent, et chaque contribution nous aide à continuer 💛",
     "backToHome": "Retour à l'accueil",
     "errors": {
       "verifyKeyError": "Erreur lors de la vérification de la clé",
@@ -4555,73 +4603,175 @@
   "cinegraph": {
     "title": "CinéGraph",
     "description": "Explorez les connexions entre vos contenus préférés",
-    "explore": "Explorer",
-    "films": "Films",
-    "series": "Séries",
-    "persons": "Personnes",
-    "genresLabel": "Genres",
-    "director": "Réalisateur",
-    "genre": "Genre",
-    "similar": "Similaire",
-    "recommendation": "Recommandé",
-    "actor": "Acteur",
-    "company": "Studio",
-    "mappingCinematicUniverse": "Cartographie de l'univers cinématographique...",
-    "discoveringCreativeNetwork": "Découverte du réseau créatif...",
-    "exploreHiddenConnections": "Explorez les connexions cachées entre films, séries et artistes",
-    "searchPlaceholder": "Rechercher un film, une série, un acteur...",
+    "mappingCinematicUniverse": "Cartographie de l'univers cinématographique…",
+    "discoveringCreativeNetwork": "Recherche des liens entre les œuvres…",
+    "exploreHiddenConnections": "Choisissez un film, une série ou un artiste : la carte montre ce qui y est lié, et pourquoi",
+    "exploringUniverse": "Ce qui est lié à « {{title}} », et pourquoi",
+    "searchPlaceholder": "Rechercher un film, une série, un artiste…",
+    "clearSearch": "Effacer la recherche",
     "filmLabel": "Film",
     "seriesLabel": "Série",
     "artistLabel": "Artiste",
-    "zoomIn": "Zoom +",
-    "zoomOut": "Zoom -",
+    "noResultsFound": "Aucun résultat trouvé",
+    "trendingChoose": "🔥 Tendances — choisissez un point de départ",
+    "backToStart": "Revenir au choix du point de départ",
+    "trail": "Votre parcours",
+    "zonesFilter": "Zones affichées",
+    "viewMode": "Affichage",
+    "mapView": "Carte",
+    "listView": "Liste",
+    "hint": "Cliquez sur une vignette pour savoir pourquoi elle est là.",
+    "hintMap": "Cliquez sur une vignette pour savoir pourquoi elle est là. Molette : se déplacer · Ctrl + molette : zoomer · clic sur le titre d'une zone : zoomer dessus.",
+    "fullscreen": "Plein écran",
+    "exitFullscreen": "Quitter le plein écran",
+    "escKey": "Échap",
+    "focusZone": "Zoomer sur cette zone",
+    "emptyMap": "Pas assez de liens trouvés autour de « {{title}} ».",
+    "loadError": "Impossible de charger cette carte. Vérifiez votre connexion.",
+    "mapUnavailable": "La vue carte n'a pas pu se charger : voici les mêmes liens en liste.",
+    "retry": "Réessayer",
+    "recenter": "Recentrer",
+    "zoomIn": "Zoom avant",
+    "zoomOut": "Zoom arrière",
+    "close": "Fermer",
     "viewRecord": "Voir la fiche",
     "viewProfile": "Voir le profil",
-    "clickForDetails": "Cliquer pour voir les détails • Double-cliquer pour explorer",
-    "searchTitle": "Rechercher",
-    "searchDesc": "Tapez le nom d'un film, d'une série ou d'un artiste dans la barre de recherche, ou choisissez un élément tendance.",
-    "interactTitle": "Interagir",
-    "interactDesc": "Clic sur un nœud pour voir ses détails. Clic droit pour explorer son réseau. Glissez les nœuds pour réorganiser.",
-    "navigateTitle": "Naviguer",
-    "navigateDesc": "Molette pour zoomer/dézoomer. Glissez le fond pour déplacer la vue. Les boutons en bas permettent de recentrer.",
-    "filterTitle": "Filtrer",
-    "filterDesc": "Utilisez les filtres colorés (Films, Séries, Personnes, Genres) pour afficher ou masquer certains types de nœuds.",
-    "detailPanelTitle": "Panneau détail",
-    "detailPanelDesc": "Le panneau à droite liste les connexions. Cliquez dessus pour zoomer vers ce nœud sur la carte.",
-    "directors": "Réalisateurs",
-    "addDirectors": "Ajouter les réalisateurs",
-    "recommendedByTmdb": "Contenus recommandés par TMDB",
-    "trendingChoose": "🔥 Tendances — Choisissez un point de départ",
-    "noResultsFound": "Aucun résultat trouvé",
-    "exploreNetwork": "Explorer le réseau",
-    "howToUse": "Comment utiliser CinéGraph ?",
-    "visualizesDescription": "CinéGraph visualise les connexions cachées entre films, séries et artistes sous forme d'un réseau interactif.",
-    "customizeGraph": "Personnaliser le graphe",
-    "settingsDescription": "Choisissez quelles données récupérer pour construire le réseau. Les changements s'appliqueront lors de la prochaine exploration.",
-    "actorsCast": "Acteurs / Cast",
-    "addMainActors": "Ajouter les acteurs principaux",
-    "maxActors": "Nombre max d'acteurs",
-    "addGenreNodes": "Ajouter les nœuds de genre",
-    "similarsLabel": "Similaires",
-    "similarContent": "Contenus similaires",
-    "maxSimilar": "Nombre max de similaires",
-    "recommendations": "Recommandations",
-    "maxRecommendations": "Nombre max de recommandations",
-    "explorationDepth": "Profondeur d'exploration",
-    "depthDescription": "0 = nœud seul, 1 = voisins, 2 = voisins des voisins...",
-    "depthWarning": "⚠️ Profondeur ≥ 2 peut générer beaucoup de nœuds et ralentir le chargement.",
-    "resetSettings": "Réinitialiser les paramètres",
-    "movieType": "🎬 Film",
-    "tvType": "📺 Série",
-    "personType": "🎭 Artiste",
-    "genreType": "🏷️ Genre",
-    "exploringUniverse": "Exploration de l'univers de « {{title}} »",
-    "recenter": "Recentrer",
-    "nodesStat": "Nœuds",
-    "connectionsStat": "Connexions",
-    "contentsStat": "Contenus",
-    "artistsStat": "Artistes",
-    "statsConnections": "Connexions"
+    "exploreFromHere": "Explorer d'ici",
+    "rootLabel": "Au centre",
+    "linked": "lié",
+    "seeMore": "Voir plus (+{{count}})",
+    "seeMoreShort": "Voir plus",
+    "seeLess": "Voir moins",
+    "and": "{{first}} et {{last}}",
+    "andMore_one": "{{names}} et {{count}} autre",
+    "andMore_other": "{{names}} et {{count}} autres",
+    "howToUse": "Comment lire le CinéGraph ?",
+    "visualizesDescription": "Le CinéGraph place votre choix au centre et range autour ce qui lui est lié, par raison : même réalisateur, mêmes acteurs, même saga… Chaque vignette dit pourquoi elle est là.",
+    "help": {
+      "start": {
+        "icon": "🔍",
+        "title": "Choisissez un point de départ",
+        "desc": "Cherchez un film, une série ou un artiste, ou prenez une tendance."
+      },
+      "read": {
+        "icon": "🧭",
+        "title": "Lisez les zones",
+        "desc": "Le titre de chaque zone donne la raison du lien. La ligne colorée sous chaque vignette précise : « avec Leonardo DiCaprio », « volet 2 sur 3 »…"
+      },
+      "why": {
+        "icon": "👆",
+        "title": "Cliquez pour comprendre",
+        "desc": "Le panneau « Pourquoi c'est là ? » montre le lien en image et en phrases. Survolez une personne pour voir ses autres titres présents sur la carte."
+      },
+      "explore": {
+        "icon": "🔁",
+        "title": "Continuez l'exploration",
+        "desc": "« Explorer d'ici » recentre la carte sur ce titre ou cet artiste. Le fil en haut permet de revenir en arrière."
+      },
+      "navigate": {
+        "icon": "🖱️",
+        "title": "Déplacez-vous",
+        "desc": "Sur la carte : molette ou glisser pour se déplacer, Ctrl + molette ou pincer pour zoomer, clic sur le titre d'une zone pour zoomer dessus, « Recentrer » pour tout revoir, « Plein écran » pour plus de place. Sur téléphone, les zones s'affichent en liste."
+      }
+    },
+    "department": {
+      "Acting": "Interprétation",
+      "Directing": "Réalisation",
+      "Writing": "Scénario",
+      "Production": "Production",
+      "Sound": "Son",
+      "Camera": "Image",
+      "Editing": "Montage",
+      "Art": "Décors",
+      "Crew": "Équipe technique",
+      "Visual Effects": "Effets visuels",
+      "Costume & Make-Up": "Costumes et maquillage",
+      "Lighting": "Lumière"
+    },
+    "zones": {
+      "team": {
+        "title": "L'équipe",
+        "desc": "Les personnes qui ont fait « {{title}} »"
+      },
+      "saga": {
+        "title": "Même saga",
+        "desc": "Les autres volets de {{saga}}"
+      },
+      "director": {
+        "title": "Même réalisateur",
+        "titleCreator": "Même créateur",
+        "desc": "Les autres réalisations de {{names}}",
+        "descCreator": "Les autres créations de {{names}}"
+      },
+      "cast": {
+        "title": "Mêmes acteurs",
+        "desc": "Au moins un acteur en commun avec « {{title}} »"
+      },
+      "mood": {
+        "title": "Même ambiance",
+        "desc": "Des thèmes ou des genres en commun avec « {{title}} »"
+      },
+      "roles": {
+        "title": "Rôles marquants",
+        "desc": "Les films et séries où joue {{name}}"
+      },
+      "crew": {
+        "title": "Derrière la caméra",
+        "desc": "Ce que {{name}} réalise, crée ou écrit"
+      },
+      "partners": {
+        "title": "Partenaires fréquents",
+        "titleCrew": "Acteurs fidèles",
+        "desc": "Les acteurs qui jouent le plus souvent avec {{name}}",
+        "descCrew": "Les acteurs qui reviennent le plus souvent dans les œuvres de {{name}}"
+      },
+      "directors": {
+        "title": "Réalisateurs fidèles",
+        "desc": "Ceux qui dirigent le plus souvent {{name}}"
+      }
+    },
+    "chip": {
+      "director": "Réalisation",
+      "creator": "Création",
+      "writer": "Scénario",
+      "plays": "joue {{character}}",
+      "playsNoName": "à l'affiche",
+      "sagaPart": "volet {{part}} sur {{parts}}",
+      "saga": "même saga",
+      "by": "de {{name}}",
+      "with": "avec {{name}}",
+      "withMore": "avec {{name}} +{{count}}",
+      "together_one": "{{count}} titre ensemble",
+      "together_other": "{{count}} titres ensemble"
+    },
+    "why": {
+      "title": "Pourquoi c'est là ?",
+      "rootNote": "C'est le point de départ de la carte : tout le reste est rangé autour.",
+      "alsoInMap": "Aussi lié dans cette carte",
+      "crew_director": "A réalisé « {{root}} »",
+      "crew_creator": "A créé « {{root}} »",
+      "crew_writer": "A écrit « {{root}} »",
+      "crewOn_director": "Réalisation : {{root}}",
+      "crewOn_creator": "Création : {{root}}",
+      "crewOn_writer": "Scénario : {{root}}",
+      "plays": "Joue {{character}} dans « {{root}} »",
+      "playsNoName": "Joue dans « {{root}} »",
+      "playsRoot": "{{root}} y joue {{character}}",
+      "playsRootNoName": "{{root}} fait partie de la distribution",
+      "saga": "Fait partie de la même saga : {{saga}}",
+      "sagaPart": "Volet {{part}} sur {{parts}} de la saga {{saga}}",
+      "sameDirector": "Même réalisateur que « {{root}} » : {{names}}",
+      "sameCreator": "Même créateur que « {{root}} » : {{names}}",
+      "sharedCast": "Casting en commun avec « {{root}} » : {{names}}",
+      "themes": "Thèmes en commun : {{list}}",
+      "genres": "Genres en commun : {{list}}",
+      "playedWith_one": "A joué avec {{root}} dans {{count}} titre : {{titles}}",
+      "playedWith_other": "A joué avec {{root}} dans {{count}} titres : {{titles}}",
+      "castBy_one": "Joue dans {{count}} titre de {{root}} : {{titles}}",
+      "castBy_other": "Joue dans {{count}} titres de {{root}} : {{titles}}",
+      "directedRoot_one": "A dirigé {{root}} dans {{count}} titre : {{titles}}",
+      "directedRoot_other": "A dirigé {{root}} dans {{count}} titres : {{titles}}"
+    }
   },
   "notFound": {
     "backHome": "Retour à l'accueil",
@@ -4635,7 +4785,9 @@
     "v4Title": "Spoiler alert",
     "v4Desc": "Plot twist : cette page n'a jamais existé. Personne ne l'a vu venir.",
     "v5Title": "Bande-annonce trompeuse",
-    "v5Desc": "Cette page promettait beaucoup, mais elle n'est jamais sortie en salle."
+    "v5Desc": "Cette page promettait beaucoup, mais elle n'est jamais sortie en salle.",
+    "halloweenTitle": "Disparue dans la brume",
+    "halloweenDesc": "Cette page hante peut-être une autre adresse… ou n'a jamais existé."
   },
   "privacy": {
     "title": "Politique de Confidentialité",
@@ -4680,7 +4832,7 @@
     "rightObjection": "Droit d'opposition au traitement",
     "contact": "Contact",
     "contactText": "Pour toute question concernant cette politique de confidentialité ou pour exercer vos droits, vous pouvez nous contacter :",
-    "joinTelegram": "Rejoindre notre groupe Telegram",
+    "joinTelegram": "Rejoindre notre canal Matrix",
     "modifications": "Modifications",
     "modificationsText": "Nous pouvons mettre à jour cette politique de confidentialité de temps à autre. Nous vous informerons de tout changement significatif par une notification sur notre plateforme. Nous vous encourageons à consulter régulièrement cette page."
   },
@@ -4734,7 +4886,7 @@
     "passionProject": "Un projet passion",
     "passionProjectDesc": "Movix a été commencé à 14 ans, par passion pour le développement et le streaming. Chaque fonctionnalité a été pensée pour simplifier la vie des utilisateurs. Pas de budget marketing, juste du bouche-à-oreille.",
     "community": "La communauté",
-    "communityDesc": "Aujourd'hui, Movix c'est une communauté active sur Discord et Telegram. Les retours des utilisateurs guident chaque mise à jour. C'est un projet vivant, qui évolue en permanence.",
+    "communityDesc": "Aujourd'hui, Movix c'est une communauté active sur Discord et Matrix. Les retours des utilisateurs guident chaque mise à jour. C'est un projet vivant, qui évolue en permanence.",
     "alwaysFurther": "Toujours plus loin",
     "alwaysFurtherDesc": "Watch parties, listes partagées, CinéGraph, alertes de sortie, profils multiples, extension navigateur... Movix ne cesse de s'enrichir pour offrir la meilleure expérience de streaming gratuit.",
     "allYouNeed": "Tout ce dont vous avez besoin",
@@ -4838,7 +4990,7 @@
     "twitter": "Twitter",
     "facebook": "Facebook",
     "whatsapp": "WhatsApp",
-    "telegram": "Telegram",
+    "telegram": "Matrix",
     "reddit": "Reddit",
     "email": "Email"
   },
@@ -5380,13 +5532,13 @@
     "title": "Support",
     "description": "Besoin d'aide ? Contactez-nous !",
     "discord": "Rejoindre le Discord",
-    "telegram": "Rejoindre le Telegram",
+    "telegram": "Rejoindre le canal Matrix",
     "email": "Envoyer un email",
     "faq": "FAQ",
     "likeOurSite": "Tu aimes notre site ?",
     "wantToSupport": "Tu veux nous supporter ?",
     "shareTikTok": "Partage le site, fais une vidéo TikTok !",
-    "tikTokReward": "Si ta vidéo TikTok fait + de 4000 vues, on te donne même une clé VIP, en nous contactant sur Telegram ou Discord : mysticsaba_alt !"
+    "tikTokReward": "Si ta vidéo TikTok fait + de 4000 vues, on te donne même une clé VIP, en nous contactant sur Matrix (#groupe-ix), Telegram (MysticSaba) ou Discord (mysticsaba_alt) !"
   },
   "markdownToolbar": {
     "guideTitle": "Guide de formatage",
@@ -5566,6 +5718,7 @@
     "reportResolvedWithDeletion": "a traité votre signalement et supprimé le contenu",
     "reportDismissed": "a rejeté votre signalement",
     "newNotification": "Nouvelle notification",
+    "newCommentOnFollowed": "a commenté un contenu que vous suivez",
     "read": "Lu",
     "deleteNotification": "Supprimer cette notification",
     "loadMore": "Charger plus",
@@ -5574,7 +5727,10 @@
     "ignorePermanently": "Ignorer définitivement",
     "pushBannerTitle": "Recevoir les notifications",
     "pushBannerDesc": "Activez les notifications pour être alerté même quand le site est fermé.",
-    "enablePush": "Activer"
+    "enablePush": "Activer",
+    "pushLater": "Plus tard",
+    "pushNever": "Ne plus demander",
+    "markAsRead": "Marquer comme lu"
   },
   "unavailableContent": {
     "title": "Contenu indisponible",
@@ -5591,22 +5747,22 @@
     "clickIfNotRedirected": "Cliquez ici si vous n'êtes pas redirigé",
     "newAddress": "Nouvelle adresse",
     "ourNewAddress": "Notre nouvelle adresse est",
-    "joinTelegramNews": "Rejoignez notre canal Telegram pour les dernières actualités."
+    "joinTelegramNews": "Rejoignez notre canal Matrix pour les dernières actualités."
   },
   "telegram": {
-    "promotionTitle": "Rejoignez notre canal Telegram",
+    "promotionTitle": "Rejoignez notre canal Matrix",
     "promotionDescription": "Nouveautés, mises à jour du site et annonces en temps réel.",
     "promotionJoin": "Rejoindre",
-    "joinChannel": "Rejoindre le Telegram",
+    "joinChannel": "Rejoindre le canal Matrix",
     "description": "Restez informé des dernières nouveautés",
     "notNow": "Pas maintenant",
     "joinCommunity": "Rejoignez la communauté",
-    "officialAnnouncements": "Toutes les annonces officielles, le support et les discussions sont sur <strong>Telegram</strong>.",
+    "officialAnnouncements": "Toutes les annonces officielles, le support et les discussions sont sur <strong>Matrix</strong>.",
     "joinUsNow": "Rejoignez-nous pour ne rien rater.",
-    "joinTelegram": "Rejoindre Telegram",
-    "announcementTitle": "Nouveau canal Telegram",
-    "announcementBody": "Notre nouveau Telegram, c'est <strong>t.me/ix_annonces</strong>. Une grosse annonce vous y attend : toutes les nouveautés, le changement de logo et plus encore.",
-    "announcementJoin": "Rejoindre le Telegram",
+    "joinTelegram": "Rejoindre Matrix",
+    "announcementTitle": "Movix est maintenant sur Matrix",
+    "announcementBody": "Nos canaux Telegram ont été bannis, y compris celui que nous venions de recréer. On se retrouve désormais sur Matrix : <strong>#groupe-ix:matrix.org</strong>. Toutes les annonces y sont publiées.",
+    "announcementJoin": "Rejoindre sur Matrix",
     "announcementLater": "Plus tard"
   },
   "discord": {
@@ -5758,12 +5914,98 @@
   },
   "profilePage": {
     "tabs": {
-      "watchlist": "Ma Watchlist",
-      "favorites": "Mes Favoris",
-      "watched": "Vus",
-      "inProgress": "En Cours",
-      "alerts": "Mes Alertes",
-      "customLists": "Mes Listes"
+      "watchlist": "À voir",
+      "favorites": "Favoris",
+      "watched": "Déjà vu",
+      "history": "Historique",
+      "alerts": "Alertes",
+      "customLists": "Listes",
+      "sessions": "Appareils"
+    },
+    "history": {
+      "stats": {
+        "inProgress": "En cours",
+        "finished": "Terminés",
+        "watched": "Visionné",
+        "movies": "Films vus",
+        "episodes": "Épisodes vus",
+        "fromPositions": "{{time}} d’après tes positions"
+      },
+      "watchedInfo": {
+        "open": "Comment ce temps est compté",
+        "title": "Deux façons de compter",
+        "tracked": "Le grand chiffre est le temps réellement passé dans le lecteur.",
+        "positions": "Le petit additionne l’endroit où tu t’es arrêté dans chaque film et épisode : il grimpe quand tu avances dans la vidéo ou reprends ailleurs, et ne compte pas les revisionnages.",
+        "ok": "Compris"
+      },
+      "statusLabel": "Statut",
+      "status": {
+        "inProgress": "En cours",
+        "finished": "Terminés",
+        "notStarted": "Non démarrés"
+      },
+      "untitled": "Titre inconnu",
+      "watchedMark": "Vu",
+      "actions": {
+        "menu": "Actions pour « {{title}} »",
+        "markMovie": "Marquer comme vu",
+        "markEpisode": "Marquer l’épisode comme vu",
+        "markSeason": "Marquer la saison comme vue",
+        "markSeries": "Marquer la série comme vue",
+        "unmark": "Retirer de « Vu »",
+        "marked": "Marqué comme vu",
+        "unmarked": "Retiré de « Vu »",
+        "already": "Déjà marqué comme vu",
+        "notMarked": "Ce titre n’était pas dans « Vu ».",
+        "seasonError": "Impossible de charger les épisodes de cette saison. Réessaie plus tard.",
+        "loadingSeason": "Chargement des épisodes de la saison…",
+        "delete": "Supprimer de l’historique"
+      },
+      "delete": {
+        "title": "Supprimer « {{title}} » de l’historique ?",
+        "message": "Sa progression, ses épisodes vus et ses marques « Déjà vu » seront effacés. Ça impactera aussi tes statistiques (temps visionné). Cette action est définitive.",
+        "cancel": "Annuler",
+        "confirm": "Supprimer",
+        "done": "Supprimé de l’historique",
+        "error": "Impossible de supprimer ce titre pour l’instant. Réessaie dans un moment."
+      },
+      "episodesOf_one": "{{watched}}/{{count}} épisode ({{percent}} %)",
+      "episodesOf_many": "{{watched}}/{{count}} épisodes ({{percent}} %)",
+      "episodesOf_other": "{{watched}}/{{count}} épisodes ({{percent}} %)",
+      "episodesOfShort_one": "{{watched}}/{{count}} épisode",
+      "episodesOfShort_many": "{{watched}}/{{count}} épisodes",
+      "episodesOfShort_other": "{{watched}}/{{count}} épisodes",
+      "episodePercent": "{{percent}} %",
+      "episodesSeen_one": "{{count}} épisode vu",
+      "episodesSeen_many": "{{count}} épisodes vus",
+      "episodesSeen_other": "{{count}} épisodes vus",
+      "lastWatched": "Dernière lecture · {{date}}",
+      "disabledTitle": "Historique désactivé",
+      "disabledDesc": "Tu as coupé l’historique dans les réglages : rien n’est enregistré pour ce profil.",
+      "openSettings": "Ouvrir les réglages",
+      "guestTitle": "Connecte-toi pour garder ton historique",
+      "guestDesc": "L’historique complet est enregistré sur ton compte, pour chaque profil. Il n’existe pas en mode invité.",
+      "unavailableTitle": "Historique indisponible",
+      "unavailableDesc": "L’historique ne peut pas être chargé pour le moment. Réessaie un peu plus tard.",
+      "networkTitle": "Serveur injoignable",
+      "networkDesc": "Le serveur ne répond pas. Vérifie ta connexion puis réessaie.",
+      "sessionTitle": "Session expirée",
+      "sessionDesc": "Ta connexion a expiré ou ce profil n’est plus lié à ton compte. Reconnecte-toi pour retrouver ton historique.",
+      "importingTitle": "Import de ton historique en cours",
+      "importingDesc": "On recopie ce que tu as regardé sur cet appareil. Ça prend quelques secondes.",
+      "retry": "Réessayer",
+      "empty": {
+        "inProgressTitle": "Rien en cours",
+        "inProgressDesc": "Lance un film ou un épisode : il apparaîtra ici tant que tu ne l’as pas fini.",
+        "finishedTitle": "Aucun titre terminé",
+        "finishedDesc": "Les films et séries que tu finis ou marques « Déjà vu » arrivent ici.",
+        "notStartedTitle": "Aucun titre en attente",
+        "notStartedDesc": "Les titres ouverts mais à peine commencés arrivent ici."
+      },
+      "pagination": "Pages de l’historique",
+      "previous": "Précédent",
+      "next": "Suivant",
+      "pageOf": "{{page}} / {{pages}}"
     },
     "dates": {
       "alreadyReleased": "Déjà sorti",
@@ -5787,7 +6029,9 @@
       "cancel": "Annuler",
       "editAlert": "Modifier l'alerte",
       "deleteAlert": "Supprimer l'alerte",
-      "errorLoading": "Erreur lors du chargement des alertes"
+      "errorLoading": "Erreur lors du chargement des alertes",
+      "seasonEpisodeLine": "Saison {{season}}, épisode {{episode}}",
+      "alertLabelSpaced": "Alerte :"
     },
     "sessions": {
       "browser": "Navigateur",
@@ -5795,6 +6039,10 @@
       "createdOn": "Créée le {{date}} à {{time}}",
       "lastActivity": "Dernière activité: {{time}}",
       "disconnectSession": "Déconnecter cette session",
+      "lastActivitySpaced": "Dernière activité : {{time}}",
+      "disconnect": "Déconnecter",
+      "confirmTitle": "Déconnecter cette session ?",
+      "confirmMessage": "L’appareil « {{device}} » devra se reconnecter pour accéder à votre compte.",
       "justNow": "À l'instant",
       "minutesAgo": "Il y a {{count}} min",
       "hoursAgo": "Il y a {{count}}h",
@@ -5817,6 +6065,7 @@
     },
     "header": {
       "usernamePlaceholder": "Nouveau nom d'utilisateur",
+      "saveError": "Impossible d’enregistrer pour l’instant. Réessaie dans un moment.",
       "save": "Sauvegarder",
       "cancel": "Annuler"
     },
@@ -5832,7 +6081,11 @@
       "sharedList": "Liste partagée",
       "liveTV": "TV en direct",
       "delete": "Supprimer",
-      "loadingMetadata": "Chargement des métadonnées..."
+      "loadingMetadata": "Chargement des métadonnées...",
+      "removeFrom": "Retirer « {{title}} »",
+      "removed": "« {{title}} » retiré",
+      "undo": "Annuler",
+      "noMatch": "Rien ne correspond à ces filtres."
     },
     "episodes": {
       "formatEpisode": "Saison {{season}}, Épisode {{episode}}",
@@ -5848,11 +6101,23 @@
       "noEpisodeInWatchlist": "Aucun épisode dans votre watchlist.",
       "favoritesApplyToSeries": "Les favoris s'appliquent à la série entière.",
       "seasonEpisodes_one": "Saison {{season}} ({{count}} épisode)",
-      "seasonEpisodes_other": "Saison {{season}} ({{count}} épisodes)"
+      "seasonEpisodes_other": "Saison {{season}} ({{count}} épisodes)",
+      "episodeNumber": "Épisode {{episode}}",
+      "watchedHeading": "Épisodes vus",
+      "watchlistHeading": "Épisodes dans la watchlist",
+      "viewDetails": "Voir la fiche",
+      "closePanel": "Fermer le panneau des épisodes"
     },
     "progress": {
       "continue": "Continuer",
-      "inProgressBadge": "En cours"
+      "inProgressBadge": "En cours",
+      "episodeShort": "S{{season}} · É{{episode}}",
+      "lastSeen": "Dernier vu",
+      "percentSeen": "{{percent}} % vu",
+      "episodeAt": "Épisode à {{percent}} %",
+      "estimated": "≈ {{percent}} % · estimé",
+      "started": "Commencé",
+      "episodesCount": "{{seen}}/{{total}} ép."
     },
     "emptyStates": {
       "watchlistEmpty": "Votre watchlist est vide",
@@ -5862,8 +6127,8 @@
       "noFavoritesDesc": "Marquez vos films, séries, collections, listes partagées et chaînes TV préférés comme favoris pour les retrouver ici.",
       "historyEmpty": "Votre historique est vide",
       "historyEmptyDesc": "Les films, séries et collections que vous regardez apparaîtront ici.",
-      "noSeriesInProgress": "Aucune série en cours",
-      "noSeriesInProgressDesc": "Les séries que vous commencez à regarder apparaîtront ici. Continuez là où vous vous êtes arrêté !",
+      "noSeriesInProgress": "Rien en cours",
+      "noSeriesInProgressDesc": "Les films et séries que vous commencez à regarder apparaîtront ici, pour reprendre là où vous vous êtes arrêté.",
       "noAlerts": "Aucune alerte configurée",
       "noAlertsDesc": "Visitez une page de série et cliquez sur le bouton d'alerte sur les épisodes à venir.",
       "browseSeries": "Parcourir les séries"
@@ -5893,7 +6158,7 @@
       "listEmptyDesc": "Ajoutez des films, séries et collections à cette liste pour les retrouver ici."
     },
     "customLists": {
-      "title": "Mes Listes Personnalisées",
+      "title": "Mes listes",
       "listCatalog": "Catalogue des listes",
       "createList": "Créer une liste",
       "noCustomLists": "Aucune liste personnalisée",
@@ -5944,6 +6209,51 @@
       "unknownMovie": "Film inconnu",
       "unknownSeries": "Série inconnue"
     },
+    "card": {
+      "label": "Carte de membre",
+      "title": "Carte de membre",
+      "changeAvatar": "Changer d’avatar",
+      "profileCount_one": "{{count}} profil",
+      "profileCount_other": "{{count}} profils",
+      "rename": "Modifier le nom",
+      "memberSince": "Membre depuis {{date}}",
+      "switchProfile": "Changer"
+    },
+    "resume": {
+      "label": "Reprendre",
+      "kicker": "Tu en étais là",
+      "episode": "Saison {{season}}, épisode {{episode}}",
+      "action": "Reprendre",
+      "details": "Voir la fiche",
+      "remaining_one": "Reste {{count}} min",
+      "remaining_other": "Reste {{count}} min",
+      "emptyTitle": "Rien en cours",
+      "emptyDesc": "Lance un film ou un épisode : tu pourras le reprendre ici en un clic."
+    },
+    "library": {
+      "title": "Ta bibliothèque"
+    },
+    "estimate": {
+      "title": "Pourquoi « estimé » ?",
+      "intro": "Certains lecteurs n’enregistrent pas où tu t’es arrêté. Pour ces films, on calcule un avancement approximatif :",
+      "how": "le temps que tu as passé sur la page du film, divisé par sa durée.",
+      "limit": "Ce temps compte aussi les pauses, les pubs et le choix de la source : le chiffre est souvent un peu trop haut.",
+      "rewatch": "Si tu as déjà vu le film, les visionnages s’additionnent.",
+      "tip": "Avec le lecteur Movix (HLS), l’avancement est exact.",
+      "ok": "Compris"
+    },
+    "lists": {
+      "back": "Retour",
+      "deleteTitle": "Supprimer cette liste ?",
+      "deleteMessage": "« {{name}} » et tout son contenu seront supprimés. Cette action est définitive.",
+      "singleItems": "Films et séries ajoutés",
+      "openSaga": "Ouvrir la saga",
+      "removeSaga": "Retirer cette saga",
+      "dragItem": "Déplacer {{name}}",
+      "dragList": "Déplacer la liste {{name}}",
+      "openList": "Ouvrir {{name}}",
+      "listActions": "Actions de la liste"
+    },
     "editDeleteTooltip": "Clic gauche: Modifier | Clic droit: Supprimer"
   },
   "vipDonations": {
@@ -5965,9 +6275,7 @@
       "copyVipKeySuccess": "Clé VIP copiée",
       "copyFailed": "Copie impossible",
       "turnstileRequired": "Complète la vérification de sécurité.",
-        "loadingInvoice": "Chargement de l'invoice VIP...",
         "loadingGift": "Chargement du cadeau VIP...",
-        "invoiceNotFound": "Invoice introuvable",
         "giftNotFound": "Cadeau introuvable"
       },
       "payment": {
@@ -5984,130 +6292,239 @@
       },
       "status": {
       "awaiting_payment": {
-        "label": "En attente",
-        "hint": "Aucun paiement détecté pour le moment."
+        "label": "En attente du don",
+        "hint": "On attend ton don, il ne reste qu'une étape."
       },
       "partial_payment": {
-        "label": "Paiement partiel",
-        "hint": "Le montant reçu est inférieur au montant attendu."
+        "label": "Don incomplet",
+        "hint": "Le montant reçu est plus bas que prévu."
       },
       "confirming": {
-        "label": "Confirmations en cours",
-        "hint": "Le paiement est détecté. Movix attend la confirmation blockchain."
+        "label": "Don reçu",
+        "hint": "Ton don est bien arrivé. Sa confirmation est en cours, ça peut prendre quelques minutes."
       },
       "paid": {
-        "label": "Payée",
-        "hint": "Paiement confirmé. Livraison en cours."
+        "label": "Don confirmé",
+        "hint": "Ton don est confirmé. On prépare ta clé."
       },
       "delivered": {
-        "label": "Livrée",
-        "hint": "La clé VIP ou l'URL cadeau est disponible."
+        "label": "Clé prête",
+        "hint": "Merci ! Ta clé est prête."
       },
       "expired": {
-        "label": "Expirée",
-        "hint": "L'invoice a expiré. Si tu as déjà payé, contacte le support."
+        "label": "Temps écoulé",
+        "hint": "Le temps pour envoyer ton don est écoulé. Si tu l'as déjà envoyé, écris-nous."
       },
       "cancelled": {
-        "label": "Annulée",
-        "hint": "Cette invoice a été annulée."
+        "label": "Annulé",
+        "hint": "Ce don a été annulé. Si c'est une erreur, écris-nous."
       }
     },
-    "payblis": {
-      "cardTitle": "Payblis",
-      "cardHelper": "CB, Apple Pay, Google Pay, PayPal, Revolut, SEPA, Open Banking.",
-      "returnOk": "Paiement reçu, livraison de la clé VIP en cours.",
-      "returnKo": "Paiement échoué. Tu peux réessayer ou choisir un autre moyen.",
-      "retry": "Réessayer le paiement",
-      "methodEmpty": "Moyen de paiement choisi sur Payblis",
-      "emailRequired": "Email requis pour Payblis (utilisé pour le reçu)."
+    "donate": {
+      "heroTitle": "Soutiens Movix",
+      "heroText": "Movix est gratuit. Tes dons financent les serveurs, les proxys internes et les nouvelles fonctionnalités. Pour te remercier, on t'offre du VIP à chaque don 💛",
+      "rule": "{{amount}} = {{duration}} de VIP",
+      "costsLink": "Voir ce que Movix coûte chaque mois",
+      "cardTitle": "Faire un don",
+      "amountTitle": "Ton don",
+      "customAmountLabel": "Autre montant",
+      "customAmountRange": "De {{min}} à {{max}}",
+      "customAmountPlaceholder": "Par ex. 15",
+      "amountRangeError": "Choisis un montant entre {{min}} et {{max}}.",
+      "thankYou": "En remerciement : {{duration}} de VIP",
+      "thankYouNoVip": "Merci ! Ce montant est trop petit pour débloquer du VIP.",
+      "methodTitle": "Comment veux-tu donner ?",
+      "methods": {
+        "cryptogate": { "title": "Carte bancaire", "subtitle": "Carte, Apple Pay, Google Pay ou crypto, via CryptoGate" },
+        "giftcard": { "title": "Carte cadeau", "subtitle": "Google Play, Amazon, Paysafecard ou Eneba, sans carte bancaire" },
+        "btc": { "title": "Bitcoin", "subtitle": "Depuis ton portefeuille Bitcoin" },
+        "ltc": { "title": "Litecoin", "subtitle": "Depuis ton portefeuille Litecoin" }
+      },
+      "noMethod": "Aucun moyen de don n'est disponible pour le moment. Repasse un peu plus tard.",
+      "recipientTitle": "Pour qui ?",
+      "recipientSelf": "Pour moi",
+      "recipientGift": "Pour offrir",
+      "recipientSelfHint": "Ta clé VIP s'affichera sur la page de suivi de ton don.",
+      "recipientSelfHintGiftCard": "On t'envoie ta clé VIP par email.",
+      "recipientGiftHint": "Tu recevras un lien cadeau à partager avec la personne de ton choix.",
+      "giftCardNotForGift": "Pour offrir, la carte cadeau n'est pas proposée : elle sert seulement pour ton propre VIP.",
+      "emailLabel": "Ton email",
+      "emailHint": "Pour t'envoyer le reçu de ton don.",
+      "emailError": "Entre une adresse email valide.",
+      "robotCheck": "Vérification anti-robot",
+      "submit": "Faire un don de {{amount}}",
+      "submitNoAmount": "Faire un don",
+      "submitting": "Préparation de ton don…",
+      "newTabNote": "La page de don par carte s'ouvre dans un nouvel onglet.",
+      "afterSubmitSelf": "Tu arriveras sur une page de suivi : ta clé VIP y apparaîtra dès que ton don sera reçu. Tu retrouveras cette page dans « Mes dons ».",
+      "afterSubmitGift": "Tu arriveras sur une page de suivi : ton lien cadeau y apparaîtra dès que ton don sera reçu. Tu retrouveras cette page dans « Mes dons ».",
+      "createError": "Impossible de préparer ton don pour le moment. Réessaie dans un instant.",
+      "loading": "Chargement des options de don…",
+      "giftCard": {
+        "lead": "Pas besoin de carte bancaire : ces cartes se vendent presque partout, au bureau de tabac, au supermarché, en station-service ou en ligne.",
+        "rule": "Le montant que tu veux, avec la même règle : {{rule}}.",
+        "example": "Par exemple, une carte de {{amount}} = {{duration}} de VIP.",
+        "step1Title": "Achète une carte",
+        "step1Text": "En magasin ou en ligne, du montant de ton choix.",
+        "buy": "Acheter",
+        "buyAria": "Acheter une carte {{name}} (nouvel onglet)",
+        "step2Title": "Envoie-nous le code",
+        "step2Text": "En privé, avec le type de carte, le montant, le code et l'email où recevoir ta clé VIP.",
+        "contacts": {
+          "email": "Email",
+          "discord": "Discord, en message privé",
+          "telegram": "Telegram, en message privé",
+          "matrixUser": "Matrix, en message privé",
+          "matrixRoom": "Espace Matrix du groupe ix",
+          "matrixRoomHint": "Pour poser une question. N'y envoie jamais ton code : l'espace est public."
+        },
+        "copyAria": "Copier {{value}}",
+        "write": "Écrire",
+        "writeAria": "Écrire un email déjà prêt à compléter",
+        "open": "Ouvrir",
+        "openAria": "Ouvrir {{label}} (nouvel onglet)",
+        "step3Title": "On t'envoie ta clé VIP par email",
+        "step3Text": "On vérifie ta carte à la main, puis on t'envoie ta clé VIP par email pour te remercier.",
+        "safety": "Nos seuls contacts sont ceux de cette page. N'envoie jamais le code d'une carte ailleurs, même à quelqu'un qui dit faire partie de l'équipe.",
+        "mailSubject": "Don Movix par carte cadeau",
+        "mailBody": "Bonjour,\n\nJe fais un don à Movix avec une carte cadeau.\n\nType de carte : [Google Play, Amazon, Paysafecard ou Eneba]\nMontant : [montant de la carte]\nCode : [code de la carte]\nEmail pour recevoir la clé VIP : [ton email]\n\nMerci !"
+      },
+      "perksTitle": "Ce que ton VIP débloque",
+      "perksSubtitle": "Notre façon de te dire merci, pendant toute la durée de ton VIP.",
+      "perkAvailability": "Selon les disponibilités",
+      "links": {
+        "myDonations": "Mes dons",
+        "haveKey": "Déjà une clé ?",
+        "help": "Besoin d'aide ?",
+        "matrix": "Espace Matrix",
+        "discord": "Discord"
+      },
+      "paused": {
+        "title": "Les dons sont en pause pour le moment",
+        "text": "Merci d'avoir pensé à Movix. Si tu as déjà une clé VIP, tu peux toujours l'activer."
+      }
+    },
+    "track": {
+      "title": "Suivi de ton don",
+      "back": "Retour à la page de don",
+      "loading": "Chargement de ton don…",
+      "notFoundTitle": "Don introuvable",
+      "notFoundText": "Ce lien ne mène à aucun don. Vérifie qu'il est complet, ou retrouve tes dons dans « Mes dons ».",
+      "myDonationsButton": "Voir mes dons",
+      "loadErrorTitle": "Impossible d'afficher ton don",
+      "loadErrorText": "Vérifie ta connexion puis réessaie. Si ça continue, écris-nous.",
+      "retry": "Réessayer",
+      "checkNow": "Vérifier maintenant",
+      "checking": "Vérification…",
+      "checkInProgress": "On vérifie ton don…",
+      "checkResult": "État de ton don : {{status}}",
+      "checkError": "Impossible de vérifier pour l'instant. Réessaie dans un moment.",
+      "autoCheck": "Cette page se met à jour toute seule toutes les 30 secondes.",
+      "validityOver": "Le délai est écoulé.",
+      "linkCopied": "Lien copié",
+      "returnOk": "Merci ! On vérifie ton don, ta clé arrive dans un instant.",
+      "returnKo": "Le paiement n'est pas passé. Tu peux réessayer ou choisir un autre moyen.",
+      "retryPayment": "Réessayer",
+      "time": {
+        "hoursMinutes": "{{hours}} h {{minutes}} min",
+        "hours": "{{hours}} h",
+        "minutes": "{{minutes}} min",
+        "lessThanMinute": "moins d'une minute"
+      },
+      "crypto": {
+        "sendExactly": "Envoie exactement",
+        "sendRemaining": "Il te reste à envoyer exactement",
+        "toAddress": "à cette adresse {{network}}",
+        "fiatEquivalent": "soit {{amount}}",
+        "alreadyReceived": "Déjà reçu : {{received}} sur {{expected}} {{coin}}",
+        "copyAmount": "Copier le montant",
+        "copyAddress": "Copier l'adresse",
+        "qrHint": "Ou scanne ce QR code avec ton portefeuille {{coin}}.",
+        "qrAlt": "QR code pour envoyer ton don en {{coin}}",
+        "qrUnavailable": "QR code indisponible",
+        "validFor": "Montant valable encore {{time}}",
+        "feesHint": "Les frais du réseau s'ajoutent au montant : vérifie que ton portefeuille ne les retire pas de la somme envoyée.",
+        "confirmations": "Validation par le réseau : {{current}} sur {{required}}"
+      },
+      "hosted": {
+        "title": "Finalise ton don sur {{provider}}",
+        "text": "Le paiement se fait sur la page sécurisée de {{provider}}, dans un nouvel onglet.",
+        "openButton": "Continuer sur {{provider}}",
+        "copyLink": "Copier le lien de paiement",
+        "missingLink": "Le lien de paiement n'est pas disponible. Écris-nous, on va t'aider.",
+        "validFor": "Lien valable encore {{time}}",
+        "identityTitle": "Vérification d'identité possible",
+        "identityText": "{{provider}} peut te demander une pièce d'identité ou un selfie avant d'accepter le paiement.",
+        "minimumText": "{{provider}} accepte au minimum {{minimumAmount}} : ton don passe donc de {{originalAmount}} à {{minimumAmount}}. Ton VIP en remerciement ne change pas.",
+        "partialText": "{{provider}} indique un montant trop bas. Si tu penses avoir tout payé, écris-nous."
+      },
+      "waiting": {
+        "title": "Tu n'as plus rien à faire"
+      },
+      "thanks": {
+        "title": "Merci pour ton soutien 💛",
+        "selfText": "Grâce à toi, Movix continue. Voici ta clé pour {{duration}} de VIP.",
+        "giftText": "Grâce à toi, Movix continue. Voici ton lien cadeau pour {{duration}} de VIP : envoie-le à la personne de ton choix.",
+        "missing": "Ta clé n'apparaît pas encore ? Actualise la page dans un instant, ou écris-nous.",
+        "keyLabel": "Ta clé VIP",
+        "giftLinkLabel": "Ton lien cadeau",
+        "copyKey": "Copier la clé",
+        "copyGiftLink": "Copier le lien cadeau",
+        "giftLinkCopied": "Lien cadeau copié",
+        "activateButton": "Activer ma clé maintenant",
+        "activateHint": "Ta clé sera copiée : il te suffira de la coller dans la fenêtre qui s'ouvre.",
+        "giftHint": "La personne ouvre le lien, découvre son cadeau et active son VIP."
+      },
+      "ended": {
+        "text": "Tu peux refaire un don quand tu veux.",
+        "button": "Faire un nouveau don"
+      },
+      "keepLink": {
+        "self": "Garde ce lien : ta clé apparaîtra ici. Il est aussi enregistré dans <link>Mes dons</link> sur cet appareil.",
+        "gift": "Garde ce lien : ton lien cadeau apparaîtra ici. Il est aussi enregistré dans <link>Mes dons</link> sur cet appareil.",
+        "copy": "Copier le lien de cette page"
+      },
+      "summary": {
+        "label": "Résumé de ton don",
+        "amount": "Ton don",
+        "reward": "En remerciement",
+        "rewardValue": "{{duration}} de VIP",
+        "for": "Pour",
+        "forSelf": "Toi",
+        "forGift": "À offrir",
+        "method": "Moyen",
+        "methodCryptoGate": "Carte bancaire (CryptoGate)"
+      },
+      "help": {
+        "title": "Un souci ? Écris-nous",
+        "text": "Une question, ou ton don n'apparaît pas ? On t'aide volontiers.",
+        "button": "Nous écrire",
+        "buttonMatrix": "Nous écrire sur Matrix"
+      }
+    },
+    "myDonations": {
+      "title": "Mes dons",
+      "descriptionConnected": "Tes dons faits sur cet appareil et avec ton compte.",
+      "descriptionGuest": "Tes dons faits sur cet appareil. Connecte-toi pour retrouver aussi ceux liés à ton compte.",
+      "openTitle": "En cours",
+      "doneTitle": "Terminés",
+      "viewButton": "Voir le suivi",
+      "forSelf": "Pour toi",
+      "forGift": "À offrir",
+      "refresh": "Actualiser",
+      "refreshing": "Actualisation…",
+      "loading": "Chargement de tes dons…",
+      "loadError": "Impossible de charger tes dons pour l'instant.",
+      "retry": "Réessayer",
+      "emptyTitle": "Aucun don pour l'instant",
+      "emptyText": "Ton premier don soutient Movix et t'offre du VIP en remerciement.",
+      "emptyButton": "Faire un don"
     },
     "page": {
-      "backHome": "Retour à l'accueil",
       "backVip": "Retour à la page VIP",
-        "badge": "Paiement VIP",
-        "heroTitle": "Soutiens Movix et récupère ta clé VIP",
-        "heroDescription": "Choisis le pack à {{amount}} pour obtenir {{duration}}. Paie en BTC, LTC, ou via le checkout CryptoGate.",
-      "ruleLabel": "Règle",
-      "ruleValue": "{{amount}} EUR = {{duration}}",
-      "stepForWhomTitle": "1. Pour qui",
-      "stepForWhomText": "Choix pour moi ou cadeau",
-      "stepPaymentTitle": "2. Paiement",
-        "stepPaymentText": "Crypto native ou checkout CryptoGate sur tous les packs",
-        "stepPaymentTextAutoBuy": "Crypto native, checkout CryptoGate sur tous les packs, ou invoice AutoBuy dédiée",
-      "stepDeliveryTitle": "3. Livraison",
-      "stepDeliveryText": "Clé VIP ou URL cadeau Movix",
-      "packTitle": "Choisis ton pack",
-      "packDescription": "Chaque pack correspond à une durée VIP précise.",
-      "packFootnote": "Équivalent à {{duration}} selon la règle Movix.",
-        "paymentTitle": "Paiement",
-        "recipientTitle": "Destinataire",
-        "bitcoinPayment": "Paiement BTC",
-        "litecoinPayment": "Paiement LTC",
-        "cryptogatePayment": "Carte bancaire ou cryptomonnaie via le checkout sécurisé CryptoGate",
-        "paygatePayment": "Carte, Apple Pay, Google Pay, SEPA via PayGate.to",
-        "autoBuyPayment": "Paiement via AutoBuy",
-        "paygateUnavailableShort": "Indisponible sur le pack 5 EUR",
-        "selfTitle": "Pour moi",
-        "selfDescription": "La clé VIP sera affichée sur la page d'invoice une fois le paiement confirmé.",
-        "giftTitle": "Cadeau",
-        "giftDescription": "Movix générera une URL cadeau à partager une fois la clé livrée.",
-        "autoBuyTitle": "Invoice AutoBuy",
-        "autoBuyDescription": "Movix crée d'abord ton invoice VIP, puis ouvre le checkout AutoBuy déjà lié au produit correspondant au pack {{amount}}.",
-        "paygateEmailTitle": "Email du payeur",
-        "paygateEmailDescription": "PayGate utilise cet email pour préparer le checkout hébergé. Il est demandé uniquement pour cette méthode.",
-        "paygateEmailPlaceholder": "nom@exemple.com",
-        "paygateEmailHint": "Utilise l'email qui servira pendant le checkout PayGate.",
-        "paygateEmailError": "Entre une adresse email valide pour continuer avec PayGate.",
-        "cryptogateEmailTitle": "Email du payeur",
-        "cryptogateEmailDescription": "CryptoGate utilise cet email pour créer le paiement et afficher le checkout sécurisé.",
-        "cryptogateEmailPlaceholder": "nom@exemple.com",
-        "cryptogateEmailHint": "Cet email sert uniquement à préparer le paiement CryptoGate.",
-        "cryptogateEmailError": "Entre une adresse email valide pour continuer avec CryptoGate.",
-        "paygateKycTitle": "Vérification d'identité possible",
-        "paygateKycDescription": "Selon le provider choisi par PayGate, une vérification KYC peut être demandée avant d'autoriser le paiement : carte d'identité, passeport ou selfie.",
-        "paygateUnavailableTitle": "PayGate indisponible sur 5 EUR",
-        "paygateUnavailableDescription": "Le checkout PayGate n'est pas proposé sur le pack 5 EUR. Utilise BTC/LTC ou passe au pack {{minimumPack}} pour payer par carte.",
-        "paygateMinimumTitle": "Minimum PayGate appliqué",
-        "paygateMinimumDescription": "Pour un paiement PayGate de {{originalAmount}}, le checkout sera ajusté à {{minimumAmount}}, qui correspond au minimum actuel du provider.",
-        "paygateMinimumSummary": "Le pack reste à {{originalAmount}} pour 1 an VIP, mais PayGate facture {{minimumAmount}} car c'est le minimum accepté.",
-        "autoBuyNoticeTitle": "Invoice Movix + checkout AutoBuy",
-        "autoBuyNoticeDescription": "Movix garde une invoice unique. AutoBuy encaisse le checkout, puis tu reviens sur cette invoice pour la livraison de la clé VIP ou du cadeau. Utilise exactement le même email sur Movix et sur AutoBuy.",
-        "saveUrlTitle": "Sauvegarde l'URL de ton invoice dès sa création",
-        "saveUrlDescription": "Cette URL est la seule page qui te permettra de suivre le paiement, récupérer ta clé VIP ou ton lien cadeau. Si tu la perds, il faudra contacter le support sur Telegram.",
-        "summaryTitle": "Résumé",
-        "amountLabel": "Montant",
-        "paymentLabel": "Paiement",
-        "emailLabel": "Email",
-        "emailPending": "À renseigner",
-        "recipientLabel": "Pour",
-        "vipLabel": "VIP",
-        "recipientSelfShort": "Moi",
-        "recipientGiftShort": "Un cadeau",
-        "autoBuySummaryHint": "Movix crée une invoice liée au pack {{amount}}, puis prépare le checkout AutoBuy correspondant.",
-        "autoBuyButton": "Créer l'invoice AutoBuy",
-        "autoBuyOpened": "Checkout AutoBuy ouvert dans un nouvel onglet",
-        "autoBuyMissingUrl": "Configuration AutoBuy manquante côté serveur.",
-        "myInvoicesButton": "Mes invoices VIP",
-        "createButton": "Créer l'invoice VIP",
-        "creatingButton": "Création de l'invoice...",
-        "creatingTitle": "Préparation de ton invoice VIP",
-        "creatingDescription": "Movix verrouille le montant, prépare le moyen de paiement choisi et génère ton suivi sécurisé.",
-        "creatingHint": "Redirection automatique vers le suivi dès que l'invoice est prête.",
-        "nextStepsTitle": "Ce qui se passe ensuite",
-        "nextStep1": "1. Movix crée une invoice unique pour le moyen de paiement choisi.",
-        "nextStep2": "2. Tu paies le montant demandé et tu gardes l'URL de suivi.",
-        "nextStep3": "3. Le backend actualise le statut automatiquement.",
-        "nextStep4": "4. La clé VIP ou l'URL cadeau apparaît dès validation.",
-        "autoBuyNextStep1": "1. Movix crée une invoice AutoBuy unique pour ce pack.",
-        "autoBuyNextStep2": "2. Le checkout AutoBuy prérempli pour {{amount}} s'ouvre dans un nouvel onglet.",
-        "autoBuyNextStep3": "3. Après le paiement, AutoBuy te renvoie vers Movix et l'invoice se revalide.",
-        "autoBuyNextStep4": "4. La clé VIP ou l'URL cadeau apparaît sur cette invoice dès que la commande est détectée.",
-        "supportTitle": "Support",
-        "supportDescription": "Si tu perds l'URL de l'invoice, si le paiement ne remonte pas, ou si tu as besoin d'une validation manuelle, contacte le support Telegram.",
-        "supportButton": "Ouvrir le support Telegram",
-        "turnstileTitle": "Vérification de sécurité",
-        "turnstileDescription": "Complète le Turnstile avant de créer l'invoice."
-      },
+      "giftTitle": "Cadeau",
+      "cryptogateEmailPlaceholder": "nom@exemple.com"
+    },
     "autobuy": {
       "heroEyebrow": "Validation AutoBuy",
       "heroTitle": "Retour AutoBuy vers ton invoice VIP",
@@ -6148,86 +6565,6 @@
       "supportTitle": "Besoin d'aide",
       "supportDescription": "Si AutoBuy ne retrouve pas la commande ou si l'email ne correspond pas, contrôle d'abord le reçu AutoBuy puis contacte le support Movix."
     },
-    "history": {
-      "title": "Mes invoices VIP",
-      "descriptionConnected": "Cette page fusionne les invoices liées à ton compte et celles mémorisées dans ce navigateur pour retrouver les ouvertes comme les anciennes.",
-      "descriptionGuest": "Cette page affiche les invoices mémorisées dans ce navigateur. Connecte-toi aussi à ton compte pour retrouver celles liées à ton profil sur d'autres appareils.",
-      "sourceLocal": "Historique local du navigateur",
-      "sourceAccount": "Invoices liées à ton compte",
-      "openTitle": "Invoices ouvertes",
-      "archivedTitle": "Anciennes invoices",
-      "emptyTitle": "Aucune invoice VIP retrouvée",
-      "emptyDescription": "Crée une première invoice VIP pour commencer à suivre tes paiements et tes livraisons.",
-      "noneOpen": "Aucune invoice ouverte pour le moment.",
-      "noneArchived": "Aucune ancienne invoice à afficher.",
-      "createdAt": "Créée le",
-      "openInvoiceButton": "Ouvrir l'invoice",
-      "refreshButton": "Rafraîchir la liste",
-      "loading": "Chargement de tes invoices VIP...",
-      "loadError": "Impossible de charger tes invoices VIP."
-    },
-    "invoice": {
-      "backVip": "Retour à la sélection VIP",
-      "eyebrow": "Invoice VIP",
-        "paymentTitle": "Paiement {{coin}}",
-        "loadingTitle": "Paiement",
-        "loadingDescription": "Aucun paiement détecté pour le moment. Movix charge les détails de ton invoice.",
-        "saveUrlTitle": "Sauvegarde absolument cette URL",
-        "saveUrlDescription": "Cette page est le suivi officiel de ton invoice. Si tu la perds avant la livraison, il faudra contacter le support Telegram.",
-        "exactAmountTitle": "Montant exact",
-        "exactAmountDescription": "À envoyer précisément",
-        "checkoutAmountTitle": "Montant du checkout",
-        "checkoutAmountDescription": "Montant transmis à {{provider}} pour le paiement hébergé",
-        "checkoutAmountFootnote": "Le checkout {{provider}} affichera le montant exact à régler.",
-        "addressTitle": "Adresse de réception",
-        "loadingAddressDescription": "Adresse en cours de chargement",
-        "addressDescription": "Réseau {{coin}}",
-        "qrUnavailable": "QR code indisponible",
-        "qrAlt": "QR code de paiement VIP",
-        "qrScanTitle": "Scanne avec ton wallet {{coin}}",
-        "qrScanDescription": "Ou copie l'adresse et le montant exact ci-dessus.",
-        "checkoutTitle": "Checkout hébergé {{provider}}",
-        "checkoutDescription": "Le paiement s'effectue sur une page externe sécurisée. Reviens ensuite ici pour suivre la livraison de ta clé VIP.",
-        "paygateKycTitle": "Vérification KYC possible",
-        "paygateKycDescription": "Le provider de paiement peut demander une vérification d'identité avant de finaliser le checkout.",
-        "paygateMinimumTitle": "Minimum PayGate appliqué",
-        "paygateMinimumDescription": "Le pack sélectionné était à {{originalAmount}}, mais le checkout PayGate est ajusté à {{minimumAmount}} car c'est le minimum actuel du provider.",
-        "openCheckoutButton": "Ouvrir le checkout {{provider}}",
-        "copyCheckoutButton": "Copier l'URL du checkout",
-        "autoCheckTitle": "Vérification automatique",
-        "autoCheckDescription": "Nouvelle vérification toutes les 30 secondes",
-        "paygateAutoCheckDescription": "Movix attend le callback {{provider}} et rafraîchit le statut régulièrement",
-        "expirationTitle": "Expiration",
-        "noExpiration": "Aucune expiration",
-        "expiredNow": "Expirée",
-        "currentStatusTitle": "État actuel",
-        "confirmationsLabel": "Confirmations : {{current}}/{{required}}",
-        "receivedLabel": "Reçu : {{amount}} {{coin}}",
-        "verifyButton": "Vérifier le paiement",
-        "refreshButton": "Rafraîchir le statut",
-        "verifyingButton": "Vérification...",
-        "paygatePartialHint": "{{provider}} a signalé un montant insuffisant. Si tu penses avoir payé correctement, contacte le support.",
-        "keyEyebrow": "Clé VIP livrée",
-      "keyTitle": "Ta clé est disponible",
-      "keyDescription": "Garde-la précieusement. Elle sera nécessaire pour activer ton VIP sur Movix.",
-      "giftEyebrow": "Cadeau Movix",
-      "giftTitle": "Lien cadeau prêt à partager",
-      "giftDescription": "Envoie cette URL au destinataire. La page cadeau contient une carte VIP et un bouton Desceller.",
-      "summaryTitle": "Résumé",
-      "recipientSelf": "Pour moi",
-      "recipientGift": "Cadeau",
-      "totalLabel": "Total",
-      "keepPageTitle": "Conserver cette page",
-      "keepPageSubtitle": "Elle sert de reçu et de livraison",
-      "keepPageText1": "Tu peux revenir plus tard avec cette même URL pour reprendre le suivi.",
-      "keepPageText2": "Si tu quittes la page sans la sauvegarder et sans l'historique, le support devra intervenir manuellement.",
-      "supportButton": "Contacter le support Telegram",
-      "notFoundDescription": "Cette URL ne correspond à aucune invoice. Si tu pensais avoir une invoice active, contacte le support.",
-      "loadError": "Impossible de charger cette invoice",
-      "checkInProgress": "Vérification en cours...",
-      "checkStatus": "Statut actuel : {{status}}",
-      "checkError": "Vérification indisponible"
-    },
     "gift": {
       "backVip": "Retour à la page VIP",
       "heroEyebrow": "Cadeau VIP Movix",
@@ -6241,19 +6578,222 @@
       "sealedStatus": "Scellé",
       "unsealedStatus": "Descellé",
       "turnstileTitle": "Vérification de sécurité",
-      "turnstileDescription": "Complète le Turnstile avant de desceller le cadeau.",
+      "turnstileDescription": "Une petite vérification avant d'ouvrir ton cadeau.",
       "unsealButton": "Desceller le cadeau",
       "unsealingButton": "Descellement...",
       "revealedKeyTitle": "Clé VIP révélée",
       "supportEyebrow": "Movix VIP",
       "supportTitle": "À conserver soigneusement",
       "supportText1": "Ne partage jamais cette clé une fois le cadeau descellé.",
-      "supportText2": "Si tu rencontres un souci avec l'activation ou si la page cadeau te semble incorrecte, contacte le support Telegram.",
-      "supportButton": "Support Telegram",
+      "supportText2": "Si tu rencontres un souci avec l'activation ou si la page cadeau te semble incorrecte, contacte le support Matrix.",
+      "supportButton": "Support Matrix",
       "notFoundDescription": "Ce lien cadeau n'existe pas ou n'est plus valide.",
       "loadError": "Impossible de charger ce cadeau",
       "unsealSuccess": "Le cadeau a été descellé.",
       "unsealError": "Impossible de desceller le cadeau"
+    },
+    "settings": {
+      "dashboardTitle": "Réglages des dons VIP",
+      "dashboardDescription": "Ouvrir ou couper les dons, régler les montants, les moyens de paiement, les cartes cadeaux et les contacts",
+      "modified": "Modifié",
+      "loading": "Chargement des réglages des dons...",
+      "loadError": "Impossible de charger les réglages des dons.",
+      "retry": "Réessayer",
+      "overview": {
+        "liveLabel": "En ligne",
+        "open": "Dons ouverts",
+        "paused": "Dons en pause",
+        "visibleMethods_one": "{{count}} moyen de paiement visible",
+        "visibleMethods_other": "{{count}} moyens de paiement visibles",
+        "rate": "1 an de VIP pour {{amount}}",
+        "thankYouShortcut": "Remercier un don par carte cadeau"
+      },
+      "status": {
+        "title": "État des dons",
+        "description": "Coupe tous les dons d'un coup, par exemple pendant une maintenance ou un changement de prestataire.",
+        "toggleLabel": "Dons activés",
+        "enabledHint": "La page de don est ouverte : les visiteurs peuvent faire un don.",
+        "disabledHint": "Les dons sont coupés : plus personne ne peut faire de don.",
+        "pausedNoticeTitle": "Dons en pause",
+        "pausedNoticeText": "La page de don affiche un message de pause à la place du formulaire. Aucun moyen de paiement n'est proposé tant que les dons sont coupés.",
+        "pausedMessageLabel": "Message de pause (facultatif)",
+        "pausedMessageHint": "Affiché aux visiteurs pendant la pause, par exemple pour annoncer la reprise.",
+        "pausedMessagePlaceholder": "Ex. : Les dons reprennent bientôt, merci pour votre patience !"
+      },
+      "rate": {
+        "title": "VIP offert en remerciement",
+        "description": "Chaque don offre du VIP en remerciement, au prorata de son montant.",
+        "label": "1 an de VIP pour",
+        "perMonthHint": "Soit environ {{amount}} par mois de VIP.",
+        "previewTitle": "Ce que reçoivent les donateurs",
+        "previewEmpty": "Renseigne un tarif et des montants valides pour voir l'aperçu.",
+        "lessThanMonth": "moins d'un mois",
+        "minTag": "min",
+        "maxTag": "max",
+        "roundingHint": "Le VIP offert est arrondi au mois supérieur."
+      },
+      "amounts": {
+        "title": "Montants",
+        "description": "Fourchette des dons, montants proposés en un clic et montant présélectionné.",
+        "freeAmountLabel": "Montant libre",
+        "freeAmountOn": "Le donateur peut saisir le montant de son choix entre le minimum et le maximum.",
+        "freeAmountOff": "Seuls les montants suggérés sont proposés. La fourchette sert encore à les encadrer.",
+        "minLabel": "Minimum",
+        "maxLabel": "Maximum",
+        "defaultLabel": "Montant présélectionné",
+        "defaultHintFree": "Sélectionné à l'ouverture de la page de don.",
+        "defaultHintSuggested": "Sans montant libre, il doit faire partie des montants suggérés.",
+        "defaultQuickPick": "Choisir :",
+        "suggestedLabel": "Montants suggérés",
+        "suggestedHint": "De 1 à {{limit}} montants, affichés en boutons sur la page de don.",
+        "suggestedPlaceholder": "Ex. : 15",
+        "suggestedAdd": "Ajouter",
+        "suggestedRemove": "Retirer {{amount}}",
+        "suggestedDefaultTag": "Présélectionné",
+        "suggestedFull": "{{limit}} montants maximum : retire-en un pour en ajouter un autre.",
+        "suggestedDuplicate": "Ce montant est déjà dans la liste.",
+        "suggestedAddOutOfRange": "Choisis un montant entre {{min}} et {{max}}."
+      },
+      "methods": {
+        "title": "Moyens de paiement",
+        "description": "Coupe un moyen sans toucher aux autres, et choisis celui présélectionné sur la page de don.",
+        "legend": "Moyen de paiement présélectionné",
+        "names": {
+          "cryptogate": "Carte bancaire via CryptoGate",
+          "giftcard": "Carte cadeau (manuel)",
+          "btc": "Bitcoin",
+          "ltc": "Litecoin"
+        },
+        "descriptions": {
+          "cryptogate": "Carte bancaire ou cryptomonnaie sur le paiement sécurisé CryptoGate, clé livrée automatiquement.",
+          "giftcard": "Le donateur envoie le code de sa carte à l'équipe, qui lui répond avec une clé VIP.",
+          "btc": "Paiement direct en BTC, vérifié automatiquement sur la blockchain.",
+          "ltc": "Paiement direct en LTC, vérifié automatiquement sur la blockchain."
+        },
+        "defaultLabel": "Par défaut",
+        "badgeVisible": "Visible",
+        "badgeHidden": "Masqué",
+        "badgeUnavailable": "Non configuré sur le serveur",
+        "unavailableHint": "Le serveur n'est pas configuré pour ce moyen : les donateurs ne le voient pas, même s'il est activé ici.",
+        "noneVisible": "Aucun moyen de paiement n'est visible : les donateurs ne pourront pas faire de don.",
+        "defaultHidden": "Le moyen présélectionné n'est pas visible pour les donateurs : choisis-en un autre.",
+        "defaultMoved": "Moyen par défaut déplacé sur {{name}}."
+      },
+      "giftOption": {
+        "title": "Option « pour offrir »",
+        "description": "Permet de faire un don pour offrir le VIP à quelqu'un d'autre.",
+        "label": "Proposer « pour offrir »",
+        "on": "Le donateur peut choisir d'offrir le VIP : il reçoit un lien cadeau à transmettre. La carte cadeau reste réservée au VIP du donateur.",
+        "off": "Le VIP offert revient toujours au donateur lui-même."
+      },
+      "giftCards": {
+        "title": "Cartes cadeaux",
+        "description": "Le donateur achète une carte, envoie son code à l'équipe et reçoit une clé VIP en retour.",
+        "methodDisabled": "Le moyen « Carte cadeau (manuel) » est désactivé : ces cartes ne sont pas proposées pour le moment.",
+        "noneEnabled": "Aucune carte n'est activée : le moyen « Carte cadeau » n'aura rien à proposer.",
+        "urlLabel": "Lien d'achat",
+        "urlEmptyHint": "Sans lien, aucun bouton d'achat n'est affiché pour cette carte.",
+        "open": "Ouvrir",
+        "openAria": "Ouvrir le lien d'achat {{name}}"
+      },
+      "contacts": {
+        "title": "Contacts affichés",
+        "description": "Affichés aux donateurs par carte cadeau pour envoyer leur code. Un champ vide n'est pas affiché.",
+        "emailLabel": "E-mail",
+        "emailPlaceholder": "contact@exemple.com",
+        "discordUsernameLabel": "Pseudo Discord",
+        "discordUsernamePlaceholder": "pseudo",
+        "discordUrlLabel": "Lien du profil Discord",
+        "discordUrlPlaceholder": "https://discord.com/users/...",
+        "telegramUsernameLabel": "Pseudo Telegram",
+        "telegramUsernamePlaceholder": "pseudo",
+        "matrixUserIdLabel": "Identifiant Matrix",
+        "matrixUserIdPlaceholder": "@pseudo:matrix.org",
+        "matrixRoomUrlLabel": "Lien du salon Matrix",
+        "matrixRoomUrlPlaceholder": "https://matrix.to/#/...",
+        "telegramWarning": "Indique seulement le pseudo, sans lien : le lien t.me est créé automatiquement.",
+        "matrixWarning": "Format attendu : @pseudo:serveur, par exemple @mysticsaba:matrix.org.",
+        "testLink": "Tester le lien",
+        "testLinkAria": "Tester le lien : {{field}}",
+        "noContact": "Aucun contact renseigné : les donateurs par carte cadeau ne sauront pas où envoyer leur code."
+      },
+      "saveBar": {
+        "unsaved": "Modifications non enregistrées",
+        "upToDate": "Tout est enregistré",
+        "errorCount_one": "{{count}} champ à corriger",
+        "errorCount_other": "{{count}} champs à corriger",
+        "lastUpdate": "Dernière mise à jour le {{date}} par {{user}}",
+        "lastUpdateNoUser": "Dernière mise à jour le {{date}}",
+        "neverUpdated": "Jamais modifiés : ce sont les valeurs par défaut du serveur.",
+        "save": "Enregistrer",
+        "saving": "Enregistrement...",
+        "discard": "Annuler les modifications",
+        "discardShort": "Annuler",
+        "defaults": "Valeurs par défaut",
+        "saveSuccess": "Réglages des dons enregistrés",
+        "saveError": "Impossible d'enregistrer les réglages des dons.",
+        "fixErrors": "Corrige les champs en rouge avant d'enregistrer.",
+        "discarded": "Modifications annulées",
+        "undo": "Rétablir",
+        "defaultsConfirmTitle": "Revenir aux valeurs par défaut ?",
+        "defaultsConfirmMessage": "Le formulaire sera rempli avec les valeurs par défaut. Rien n'est enregistré tant que tu ne cliques pas sur « Enregistrer ».",
+        "defaultsConfirm": "Remplir le formulaire",
+        "defaultsApplied": "Valeurs par défaut chargées : vérifie puis clique sur « Enregistrer »."
+      },
+      "errors": {
+        "integerRequired": "Indique un nombre entier.",
+        "amountRange": "Doit être compris entre {{min}} et {{max}}.",
+        "maxBelowMin": "Doit être supérieur ou égal au minimum ({{min}}).",
+        "minBelowOneMonth": "Moins d'un mois de VIP à ce montant : il faut au moins {{needed}} avec le tarif actuel.",
+        "suggestedEmpty": "Ajoute au moins un montant suggéré.",
+        "suggestedTooMany": "{{limit}} montants suggérés maximum.",
+        "suggestedInvalid": "Les montants suggérés doivent être des nombres entiers entre {{min}} et {{max}}.",
+        "suggestedDuplicate": "Un montant suggéré apparaît en double.",
+        "suggestedOutOfRange": "Certains montants sont hors de la fourchette : ils doivent être compris entre {{min}} et {{max}}.",
+        "defaultOutOfRange": "Doit être compris entre le minimum ({{min}}) et le maximum ({{max}}).",
+        "defaultNotSuggested": "Sans montant libre, choisis l'un des montants suggérés.",
+        "tooLong": "{{limit}} caractères maximum.",
+        "invalidUrl": "Lien invalide : il doit commencer par http:// ou https://.",
+        "invalidEmail": "Adresse e-mail invalide."
+      },
+      "thankYou": {
+        "title": "Remercier un don par carte cadeau",
+        "description": "Une fois le code de la carte vérifié, génère une clé VIP pour le donateur et envoie-lui le message prêt à l'emploi.",
+        "rateInfo": "Tarif enregistré : 1 an de VIP pour {{amount}}.",
+        "rateDraftNotice": "Le tarif modifié plus haut n'est pas encore enregistré : le calcul utilise le tarif enregistré.",
+        "amountLabel": "Montant de la carte cadeau",
+        "amountPlaceholder": "Ex. : 20",
+        "amountInvalid": "Indique un montant valide, par exemple 20 ou 12,50.",
+        "amountTooHigh": "{{max}} maximum.",
+        "durationLabel": "VIP offert",
+        "durationPending": "Indique le montant pour voir la durée.",
+        "durationTooLow": "Moins d'un mois de VIP : montant trop faible pour générer une clé.",
+        "generate": "Générer la clé",
+        "generating": "Création...",
+        "confirmTitle": "Créer une clé VIP ?",
+        "confirmMessage": "Une vraie clé VIP de {{duration}} va être créée pour un don de {{amount}}. Elle fonctionne dès sa création : ne l'envoie qu'au donateur.",
+        "confirmButton": "Créer la clé",
+        "success": "Clé VIP de {{duration}} créée",
+        "error": "Impossible de créer la clé VIP.",
+        "resultTitle": "Clé VIP de {{duration}} créée pour un don de {{amount}}",
+        "keyWarning": "La clé est déjà active. Après « Nouveau don », elle n'est plus affichée ici : tu la retrouves dans « Gérer les clés VIP ».",
+        "keyLabel": "Clé VIP",
+        "copyKey": "Copier la clé",
+        "keyCopied": "Clé VIP copiée",
+        "messageLabel": "Message à envoyer",
+        "messageHint": "Tu peux le retoucher avant de l'envoyer.",
+        "messageTemplate": "Merci pour ton don à Movix 💛\n\nVoici ta clé VIP ({{duration}}) : {{key}}\n\nPour l'activer : va sur {{siteUrl}}, ouvre le menu de ton profil, clique sur « Devenir VIP » puis colle la clé.\n\nGarde-la précieusement et ne la partage avec personne.\n\nL'équipe Movix",
+        "copyMessage": "Copier le message",
+        "messageCopied": "Message copié",
+        "copyFailed": "Copie impossible",
+        "emailLabel": "E-mail du donateur (facultatif)",
+        "emailPlaceholder": "donateur@exemple.com",
+        "emailInvalid": "Adresse e-mail invalide.",
+        "emailSubject": "Ta clé VIP Movix",
+        "sendEmail": "Écrire l'e-mail",
+        "sendEmailHint": "Ouvre ta messagerie avec l'objet « {{subject}} » et le message déjà remplis.",
+        "newDonation": "Nouveau don"
+      }
     },
     "admin": {
       "dashboardTitle": "Invoices VIP",
@@ -6383,7 +6923,7 @@
           "La partie VIP traite des données de facture et de paiement comme l'identifiant public de facture, l'adresse crypto unique, le montant attendu, l'état, les confirmations, le hash de transaction, les cadeaux et les clés VIP.",
           "Des empreintes IP hachées sont utilisées dans les flux VIP pour la prévention de fraude autour de la création de facture ou de l'ouverture d'un cadeau.",
           "En cas d'erreur opérationnelle, certains éléments techniques de diagnostic peuvent être transmis aux outils internes de support, notamment via des webhooks Discord.",
-          "Si vous utilisez les canaux de support Discord, Telegram ou le bot officiel, vos identifiants, messages, tickets, transcriptions ou références de paiement peuvent être traités dans ce cadre."
+          "Si vous utilisez les canaux de support Discord, Matrix ou le bot officiel, vos identifiants, messages, tickets, transcriptions ou références de paiement peuvent être traités dans ce cadre."
         ]
       },
       "thirdParties": {
@@ -6423,7 +6963,7 @@
         "settings": "Paramètres",
         "terms": "Conditions d'utilisation",
         "email": "Email",
-        "telegram": "Telegram"
+        "telegram": "Matrix"
       }
     },
     "footerNote": "Cette politique reflète le comportement observable du code Movix au 29 mars 2026. Si une future évolution ajoute, retire ou change un flux de données important, cette page devra être alignée à nouveau sur l'implémentation réelle."
@@ -6530,7 +7070,7 @@
       "actions": {
         "privacy": "Confidentialité",
         "contact": "Contacter Movix",
-        "telegram": "Telegram"
+        "telegram": "Matrix"
       }
     },
     "footerNote": "Ces conditions décrivent les règles d'utilisation générales de Movix au 20 septembre 2026. Les comportements frauduleux, abusifs ou techniquement nuisibles peuvent entraîner des restrictions immédiates même si un cas précis n'est pas listé mot pour mot ci-dessus."
@@ -6861,6 +7401,248 @@
     "errorEmpty": "Le pseudo ne peut pas être vide",
     "errorTooLong": "Maximum {{max}} caractères"
   },
+  "tvLink": {
+    "title": "Connecter ta télé",
+    "subtitle": "Relie l'appli Movix TV à ton compte.",
+    "backHome": "Retour à l'accueil",
+    "defaultDeviceName": "ta télé",
+    "footer": "Le code s'affiche sur ta télé, dans Réglages > Compte. Il change toutes les 10 minutes.",
+    "codeBoxLabel": "Caractère {{index}} sur {{total}}",
+    "login": {
+      "description": "Connecte-toi d'abord à ton compte Movix. Ensuite, tu reviens ici pour relier ta télé.",
+      "codeKept": "Code gardé :",
+      "discord": "Se connecter avec Discord",
+      "google": "Se connecter avec Google",
+      "bip39": "Phrase secrète"
+    },
+    "code": {
+      "label": "Code de la télé",
+      "prompt": "Tape le code affiché sur ta télé.",
+      "hint": "5 caractères, lettres et chiffres.",
+      "checking": "Vérification du code…",
+      "expiresIn_one": "Code valable encore {{count}} minute.",
+      "expiresIn_other": "Code valable encore {{count}} minutes."
+    },
+    "confirm": {
+      "question": "Connecter {{name}} ?",
+      "profileLabel": "Profil à utiliser sur la télé",
+      "profilesLoading": "Chargement des profils…",
+      "noProfiles": "Aucun profil trouvé sur ce compte.",
+      "cta": "Connecter la télé",
+      "linking": "Connexion en cours…"
+    },
+    "success": {
+      "title": "Ta télé est connectée.",
+      "subtitle": "Tu peux reposer ton téléphone.",
+      "sessionsHint": "Elle apparaît dans tes sessions, dans Paramètres. Supprime-la là-bas pour la déconnecter.",
+      "home": "Retour à l'accueil",
+      "another": "Connecter une autre télé"
+    },
+    "errors": {
+      "code_invalid": "Ce code est invalide ou a expiré. Vérifie le code affiché sur ta télé.",
+      "profile_not_owned": "Ce profil n'est pas sur ton compte. Choisis-en un autre.",
+      "too_many_attempts": "Trop d'essais. Attends quelques minutes, puis réessaie.",
+      "unauthorized": "Ta session a expiré. Reconnecte-toi pour continuer.",
+      "network": "Connexion impossible. Vérifie ton réseau et réessaie.",
+      "unknown": "Un problème est survenu. Réessaie dans un instant."
+    }
+  },
+  "tvApp": {
+    "footerLink": "Appli TV",
+    "meta": {
+      "title": "Appli TV Movix pour Fire TV, Google TV et Android TV"
+    },
+    "hero": {
+      "title": "Movix sur ta télé",
+      "words": ["Movix", "sur", "ta", "télé"],
+      "subtitle": "L'appli pour Fire TV, Google TV et Android TV, pilotée à la télécommande. Tu reprends où tu t'es arrêté.",
+      "install": "Installer",
+      "apk": "Télécharger l'APK"
+    },
+    "video": {
+      "label": "Présentation de l'appli Movix sur une télé",
+      "play": "Lire la vidéo",
+      "pause": "Mettre la vidéo en pause",
+      "unmute": "Activer le son",
+      "mute": "Couper le son",
+      "fallbackAlt": "Accueil de l'appli Movix sur une télé, avec la rangée Reprendre"
+    },
+    "screens": {
+      "title": "L'appli, écran par écran",
+      "subtitle": "Des captures de l'appli, sans retouche. Change d'écran au clic ou avec les flèches du clavier.",
+      "tabsLabel": "Écrans de l'appli",
+      "items": {
+        "home": {
+          "label": "Accueil",
+          "title": "Accueil",
+          "text": "La rangée Reprendre est la même que sur le site dès que ta télé est reliée à ton compte.",
+          "alt": "Accueil de l'appli : Dune, deuxième partie dans la rangée Reprendre, entouré des crochets rouges du focus"
+        },
+        "search": {
+          "label": "Recherche",
+          "title": "Recherche",
+          "text": "Un clavier fait pour la télécommande. Les résultats s'affichent pendant que tu tapes.",
+          "alt": "Recherche « dune » avec le clavier à l'écran et les affiches des résultats"
+        },
+        "details": {
+          "label": "Fiche",
+          "title": "Fiche",
+          "text": "Lecture, Ma liste, puis les bandes-annonces lues dans l'appli, les titres similaires et la distribution.",
+          "alt": "Fiche du film Masterplan avec les boutons Lecture, Ma liste et Bande-annonce, puis les rangées Bandes-annonces et bonus et Titres similaires"
+        },
+        "sources": {
+          "label": "Lecteurs",
+          "title": "Choix du lecteur",
+          "text": "Les lecteurs du site, avec la qualité et la langue. Le badge VIP marque ceux du serveur Movix.",
+          "alt": "Liste des lecteurs : serveur Movix avec badges VIP, puis Lynx VF et Vidara, à côté des réglages du lecteur"
+        },
+        "extraction": {
+          "label": "Extraction",
+          "title": "Extraction sur la télé",
+          "text": "Les lecteurs externes sont extraits sur la télé, puis lus dans son propre lecteur. Ça marche sans VIP.",
+          "alt": "Lecteurs marqués « extrait sur la télé » : Filmoon, vidsonic, playmogo, Dropload et Mixdrop"
+        },
+        "player": {
+          "label": "Lecture",
+          "title": "Lecteur",
+          "text": "Le lecteur de la télé : qualité, audio, sous-titres, décalage et vitesse se règlent à la télécommande.",
+          "alt": "Lecteur en pause à 39 minutes, avec la barre de progression rouge et les boutons pour reculer ou avancer de 10 secondes"
+        },
+        "web": {
+          "label": "Lecteur web",
+          "title": "Lecteur web",
+          "text": "Si aucun lecteur ne démarre, le lecteur web ouvre la page avec une souris pilotée aux flèches. Le bloqueur coupe les pubs.",
+          "alt": "Lecteur web avec la souris de la télécommande posée sur l'image"
+        }
+      }
+    },
+    "install": {
+      "title": "Installer l'appli",
+      "subtitle": "Ouvre cette page sur ton téléphone et suis les étapes devant ta télé. Compte une dizaine de minutes.",
+      "deviceLegend": "Ta télé",
+      "devices": {
+        "fire": {
+          "name": "Fire TV",
+          "models": "Fire TV Stick 3e génération, Lite, 4K et 4K Max, Fire TV Cube"
+        },
+        "google": {
+          "name": "Google TV et Chromecast",
+          "models": "Chromecast avec Google TV, Google TV Streamer"
+        },
+        "android": {
+          "name": "TV et box Android TV",
+          "models": "Télés Android TV ou Google TV, Mi Box, Nvidia Shield, Freebox Pop et Ultra"
+        }
+      },
+      "incompatible": "Ne marche pas sur : Samsung (Tizen), LG (webOS), Hisense (VIDAA), Panasonic (My Home Screen), Roku, Apple TV, consoles de jeu, Fire TV récentes sous Vega OS, Fire TV Stick 2e génération et plus anciennes.",
+      "minimum": "Il faut Android 7.1 ou plus récent.",
+      "guide": "Guide complet et dépannage",
+      "steps": {
+        "downloader": {
+          "title": "Installe Downloader",
+          "fire": "Sur l'accueil, ouvre la recherche (la loupe) et tape « Downloader ». Installe l'appli à l'icône orange.",
+          "google": "Dans l'onglet Applications, cherche « Downloader » et installe-la.",
+          "android": "Ouvre le Play Store de ta télé ou de ta box, cherche « Downloader » et installe-la.",
+          "caption": "Downloader est gratuite. Elle vient d'AFTVnews et sert à télécharger un fichier sur la télé."
+        },
+        "unlock": {
+          "title": "Autorise Downloader à installer",
+          "fire": "Active le mode développeur : dans À propos, appuie 7 fois sur OK sur le nom de ta Fire TV. Ensuite, autorise Downloader dans les options pour les développeurs.",
+          "google": "Active le mode développeur : dans À propos, appuie 7 fois sur OK sur « Build de l'OS Android TV ». Ensuite, autorise Downloader dans les sources inconnues.",
+          "android": "Autorise Downloader dans les sources inconnues. Si l'option n'apparaît pas, active d'abord le mode développeur : 7 appuis sur « Build », dans À propos.",
+          "devMode": "Mode développeur",
+          "allow": "Autorisation",
+          "brandNote": "Les noms des menus changent un peu selon la marque. Cherche « sources inconnues » dans les paramètres."
+        },
+        "code": {
+          "title": "Tape le code dans Downloader",
+          "titleNoCode": "Tape l'adresse dans Downloader",
+          "body": "Ouvre Downloader et accepte l'accès aux fichiers. Tape ce code dans le champ, puis choisis Go.",
+          "bodyNoCode": "Ouvre Downloader et accepte l'accès aux fichiers. Tape cette adresse dans le champ, puis choisis Go.",
+          "codeLabel": "Code Downloader",
+          "urlLabel": "Adresse de l'APK",
+          "urlLabelOr": "Si le code ne marche pas, tape cette adresse",
+          "copy": "Copier",
+          "copied": "Copié",
+          "copyCode": "Copier le code Downloader",
+          "copyUrl": "Copier l'adresse de l'APK",
+          "file": "Fichier : Movix TV {{version}}, {{size}}.",
+          "fileVersion": "Fichier : Movix TV {{version}}.",
+          "notes": "Nouveautés : {{notes}}"
+        },
+        "install": {
+          "title": "Installe Movix",
+          "fire": "Choisis Installer, puis Ouvrir. Downloader propose ensuite de supprimer le fichier : tu peux accepter.",
+          "google": "Choisis Installer. Si Play Protect affiche « Appli bloquée », choisis Plus de détails, puis Installer quand même.",
+          "android": "Choisis Installer. Si Play Protect affiche « Appli bloquée », choisis Plus de détails, puis Installer quand même.",
+          "noteFire": "Le fichier ne sert plus après l'installation. Le supprimer libère de la place sur la Fire TV.",
+          "notePlayProtect": "Ce message s'affiche pour toute appli installée hors du Play Store. Il ne vise pas Movix en particulier."
+        },
+        "open": {
+          "title": "Ouvre Movix et relie ta télé",
+          "body": "Au premier lancement, la télé affiche un code et un QR. Scanne le QR avec ton téléphone ou tape le code plus bas. Tu peux aussi choisir Plus tard.",
+          "cta": "Relier ma télé",
+          "alt": "Accueil de l'appli Movix sur la télé, avec la rangée Reprendre"
+        }
+      },
+      "paths": {
+        "fire": {
+          "downloader": ["Accueil", "Rechercher", "Downloader"],
+          "devMode": ["Paramètres", "Ma Fire TV", "À propos", "Nom de l'appareil, 7 fois OK"],
+          "allow": ["Ma Fire TV", "Options pour les développeurs", "Installer des applications inconnues", "Downloader"],
+          "install": ["Installer", "Ouvrir"]
+        },
+        "google": {
+          "downloader": ["Applications", "Rechercher des applis", "Downloader", "Installer"],
+          "devMode": ["Paramètres", "Système", "À propos", "Build de l'OS Android TV, 7 fois OK"],
+          "allow": ["Paramètres", "Applications", "Sécurité et restrictions", "Sources inconnues", "Downloader"],
+          "install": ["Installer", "Plus de détails", "Installer quand même"]
+        },
+        "android": {
+          "downloader": ["Play Store", "Rechercher", "Downloader", "Installer"],
+          "devMode": ["Paramètres", "Préférences de l'appareil", "À propos", "Build, 7 fois OK"],
+          "allow": ["Préférences de l'appareil", "Sécurité et restrictions", "Sources inconnues", "Downloader"],
+          "install": ["Installer", "Plus de détails", "Installer quand même"]
+        }
+      }
+    },
+    "link": {
+      "title": "Relie ta télé à ton compte",
+      "body": "Au premier lancement, la télé affiche un code de 5 caractères et un QR. Scanne le QR avec ton téléphone, ou tape le code ici.",
+      "sync": "Ta reprise, ton historique et Ma liste sont les mêmes sur le site et sur la télé. Le VIP du profil choisi passe aussi sur la télé.",
+      "code": "Le code change toutes les 10 minutes. Sur la télé, tu le retrouves dans Réglages › Compte › Connecter mon compte."
+    },
+    "faq": {
+      "title": "Questions fréquentes",
+      "guideLink": "Guide {{device}}",
+      "items": {
+        "free": {
+          "q": "C'est gratuit ? Il faut un compte ?",
+          "a": "C'est gratuit, et l'appli marche sans compte. Relier ta télé sert à retrouver ta reprise, ton historique, Ma liste et ton VIP."
+        },
+        "vip": {
+          "q": "Mon VIP marche sur la télé ?",
+          "a": "Oui. En reliant la télé, tu choisis un profil et son VIP est importé. Tu peux aussi entrer ta clé dans Réglages › Clé VIP."
+        },
+        "update": {
+          "q": "Comment je mets l'appli à jour ?",
+          "a": "L'appli cherche les mises à jour toute seule et affiche un bandeau quand il y en a une. Tu peux aussi passer par Réglages › Mise à jour. Pas besoin de refaire le tuto."
+        },
+        "playProtect": {
+          "q": "Play Protect bloque l'installation.",
+          "a": "« Appli bloquée » s'affiche pour toute appli installée hors du Play Store. Choisis Plus de détails, puis Installer quand même. Les autres messages d'erreur sont expliqués dans les guides."
+        },
+        "safe": {
+          "q": "Installer un APK, c'est risqué ?",
+          "a": "Celui-ci est l'APK officiel de Movix, publié dans le dépôt GitHub MovixOpenSource. Télécharge-le seulement depuis cette page, ou avec le code Downloader donné ici."
+        },
+        "unlink": {
+          "q": "Comment je déconnecte une télé ?",
+          "a": "Sur le site, supprime-la de tes sessions, dans Paramètres. Sur la télé, va dans Réglages › Compte › Se déconnecter."
+        }
+      }
+    }
+  },
   "oauthAuthorize": {
     "eyebrow": "Connexion externe Movix",
     "title": "Autoriser une application externe",
@@ -7156,14 +7938,14 @@
     "otherChangeTonDns": "changetondns.fr — tuto français pas à pas",
     "otherMirrors": "Miroirs actifs — liste sur rentry.co",
     "otherMirrorsMovixHealth": "Miroirs actifs — aussi listés sur movix.online",
-    "otherTelegram": "Support Telegram @ix_annonces",
+    "otherTelegram": "Support Matrix #groupe-ix",
     "backCta": "Retour"
   },
   "help": {
     "common": {
       "back": "Retour au hub",
       "backToHub": "Retour au hub des tutos",
-      "contactTelegram": "Contacter le support sur Telegram"
+      "contactTelegram": "Contacter le support sur Matrix"
     },
     "glossary": {
       "seed": "Phrase secrète de 12 mots (standard BIP39) qui sert de clé unique à ton compte Movix. Personne côté serveur ne la connaît — si tu la perds, le compte est perdu définitivement.",
@@ -7182,7 +7964,7 @@
       "clearSearch": "Effacer la recherche",
       "foundIn": "Trouvé dans :",
       "noResults": "Aucun tuto ne correspond à ta recherche.",
-      "bottomCta": "Tu ne trouves pas ton tuto ? Contacte-nous sur Telegram.",
+      "bottomCta": "Tu ne trouves pas ton tuto ? Contacte-nous sur Matrix.",
       "cardCaMarchePlusTitle": "Ça marche plus chez moi",
       "cardCaMarchePlusSub": "Les 4 causes les plus courantes + les solutions.",
       "cardDnsTitle": "Mon FAI bloque Movix",
@@ -7218,7 +8000,7 @@
       "cardOpenSourceTitle": "Movix est open-source",
       "cardOpenSourceSub": "Tout le code est sur GitHub — front, API, extensions, app, WASM.",
       "cardVipTitle": "Devenir VIP",
-      "cardVipSub": "Packs de 5€ à 20€, paiement BTC, LTC, carte. Débloque débrid, France TV, Live TV.",
+      "cardVipSub": "Un don dès 5 € (carte cadeau, carte bancaire ou crypto) et le VIP en remerciement : lecteurs sans pub, débrideur.",
       "cardDebridTitle": "Débrider des liens 1fichier",
       "cardDebridSub": "Fonction VIP : téléchargement direct sans attente, sans captcha, via Real-Debrid / BestDebrid / Deepbrid.",
       "cardTelechargementTitle": "Télécharger un film / épisode",
@@ -7236,7 +8018,13 @@
       "cardApparenceTitle": "Personnaliser l'apparence",
       "cardApparenceSub": "Style et couleur du fond, smooth scroll, mémorisation du scroll, effets visuels.",
       "cardMcpTitle": "Brancher Movix sur ton IA (MCP)",
-      "cardMcpSub": "Piloter recherches, favoris et listes depuis Claude, ChatGPT, Le Chat ou ton éditeur."
+      "cardMcpSub": "Piloter recherches, favoris et listes depuis Claude, ChatGPT, Le Chat ou ton éditeur.",
+      "cardTvFireTitle": "Movix TV sur Fire TV",
+      "cardTvFireSub": "Fire TV Stick et Fire TV Cube : installer Movix TV avec Downloader et régler les blocages.",
+      "cardTvGoogleTitle": "Movix TV sur Google TV",
+      "cardTvGoogleSub": "Chromecast avec Google TV et Google TV Streamer : installer Movix TV et régler les blocages.",
+      "cardTvAndroidTitle": "Movix TV sur Android TV",
+      "cardTvAndroidSub": "Télés Sony, Philips, TCL, Xiaomi et box Android : installer Movix TV et régler les blocages."
     },
     "changerLecteur": {
       "title": "Changer de lecteur",
@@ -7341,7 +8129,7 @@
       "preventTitle": "Prévention pour maintenant",
       "preventBody": "Si tu as encore ta seed : copie-la dans un gestionnaire de mots de passe (Bitwarden, 1Password, Proton Pass) et imprime-la aussi sur papier. Ne la partage avec personne — pas même le support Movix (on ne te la demandera JAMAIS).",
       "supportTitle": "Support",
-      "supportBody": "Le support Telegram peut t'aider sur des problèmes de session, de login, d'OAuth, mais ne peut RIEN faire contre une seed perdue. Ce n'est pas une politique stricte, c'est une impossibilité technique."
+      "supportBody": "Le support Matrix peut t'aider sur des problèmes de session, de login, d'OAuth, mais ne peut RIEN faire contre une seed perdue. Ce n'est pas une politique stricte, c'est une impossibilité technique."
     },
     "lierCompte": {
       "title": "Lier Discord / Google à ton compte BIP39",
@@ -7460,8 +8248,8 @@
       "cause3CtaMovixHealth": "Voir sur movix.online",
       "cause3CtaRentry": "Voir sur rentry.co",
       "cause4Title": "Bug ou source cassée",
-      "cause4Body": "Si rien ne marche malgré les étapes précédentes, c'est probablement un bug côté Movix ou une source down côté provider. Signale-nous ça sur Telegram.",
-      "cause4Cta": "Support Telegram"
+      "cause4Body": "Si rien ne marche malgré les étapes précédentes, c'est probablement un bug côté Movix ou une source down côté provider. Signale-nous ça sur Matrix.",
+      "cause4Cta": "Support Matrix"
     },
     "premid": {
       "title": "Extension PreMiD (Discord Rich Presence)",
@@ -7512,37 +8300,39 @@
     },
     "vip": {
       "title": "Devenir VIP",
-      "heroSub": "Pack de soutien payable en crypto ou en carte, qui débloque les fonctionnalités avancées de Movix.",
-      "introBody": "Devenir VIP soutient le projet (serveurs, API de metadata, sources payantes, dev) et te débloque en échange un paquet de fonctionnalités exclusives. Achat sur la page <1>/vip/don</1>, valable immédiatement après confirmation du paiement.",
-      "perksTitle": "Ce que VIP débloque",
-      "perksBody": "Lecteurs sans pub (plus d'iframe de pub avant le play), nouveaux lecteurs Nexus et Bravo compatibles <1>WatchParty</1>, demandes de contenu prioritaires auprès de l'équipe, badge VIP dans les commentaires, accès complet à France TV (direct + replay), sources Live TV premium (IPTV, matchs sport internationaux), et surtout le service Débrid intégré pour générer des liens 1fichier directs sans attente ni captcha.",
-      "packsTitle": "Packs disponibles",
-      "packsIntro": "Tous les packs débloquent les mêmes fonctionnalités — la seule différence est la durée. Paiement unique, pas d'abonnement reconductible.",
-      "packsHeaderAmount": "Montant",
-      "packsHeaderDuration": "Durée VIP",
+      "heroSub": "Fais un don pour soutenir Movix : en remerciement, tu reçois du VIP et ses fonctionnalités avancées.",
+      "introBody": "Movix est gratuit. Les dons paient les serveurs, les API de métadonnées, les sources payantes et le développement. Pour te remercier, chaque don t'offre du VIP, qui débloque des fonctionnalités exclusives. Tout se passe sur la page <1>/vip</1>.",
+      "perksTitle": "Ce que ton VIP débloque",
+      "perksBody": "Lecteurs sans pub (plus d'iframe de pub avant le play), nouveaux lecteurs Nexus et Bravo compatibles <1>WatchParty</1>, plus de demandes de contenu auprès de l'équipe, badge VIP dans les commentaires, et le service Débrid intégré pour générer des liens 1fichier directs sans attente ni captcha (selon les disponibilités).",
+      "packsTitle": "Combien de VIP pour ton don ?",
+      "packsIntro": "La règle est simple : 5 € = 1 an de VIP. Tu donnes le montant que tu veux, et la durée est calculée au mois près (arrondie au mois supérieur). La règle en vigueur est toujours affichée sur la page de don. C'est un don unique, sans abonnement.",
+      "packsHeaderAmount": "Ton don",
+      "packsHeaderDuration": "VIP offert",
       "pack5Amount": "5 €",
       "pack5Duration": "1 an",
       "pack7Amount": "7 €",
-      "pack7Duration": "1 an et demi",
+      "pack7Duration": "17 mois",
       "pack10Amount": "10 €",
       "pack10Duration": "2 ans",
       "pack15Amount": "15 €",
       "pack15Duration": "3 ans",
       "pack20Amount": "20 €",
       "pack20Duration": "4 ans",
-      "paymentTitle": "Méthodes de paiement",
-      "paymentBody": "Bitcoin (BTC), Litecoin (LTC) et CryptoGate sont disponibles sur tous les packs. CryptoGate permet de choisir les moyens configurés sur son checkout hébergé, notamment carte bancaire ou cryptomonnaie. Le checkout exige une adresse email valide pour préparer le paiement — elle n'est pas liée à ton compte Movix.",
-      "stepsTitle": "Comment acheter",
-      "step1": "Va sur /vip → « Devenir VIP » (ou directement /vip/don).",
-      "step2": "Choisis un pack (montant + durée), puis la méthode de paiement (BTC, LTC, ou carte).",
-      "step3": "Pour BTC/LTC : scanne le QR ou copie l'adresse + le montant exact. Pour CryptoGate : tu es redirigé vers son checkout hébergé pour choisir carte ou cryptomonnaie.",
-      "step4": "Attends la confirmation (1-3 confirmations blockchain pour crypto, instantané pour carte). Ton statut VIP apparaît sur ton profil dès la validation — refresh si nécessaire.",
-      "giftTitle": "Offrir VIP à quelqu'un",
-      "giftBody": "Depuis <1>/vip/don</1>, tu peux choisir le mode « Cadeau » : au lieu d'activer VIP sur ton compte, Movix te donne un lien unique à envoyer au bénéficiaire. Il se connecte avec ce lien, le token est consommé, et son compte devient VIP. Pratique pour offrir à un pote sans connaître son identifiant Movix.",
-      "invoicesTitle": "Factures et historique",
-      "invoicesBody": "Toutes tes transactions VIP apparaissent sur <1>/vip/invoices</1> — montant, date, méthode, statut (en attente / confirmé / expiré), et lien vers le détail public (/vip/invoice/:publicId) si tu veux partager la preuve de paiement (ex : pour support).",
-      "limitsTitle": "Limites et remboursements",
-      "limitsBody": "Aucun remboursement possible : crypto comme carte, une fois le paiement validé il est définitif. On conseille à tous de toujours commencer par le pack 5€ la première fois — c'est un test à faible coût pour vérifier que le VIP s'active bien sur ton compte avant de partir sur un pack plus long. Si tu veux tester avant de payer, contacte le support Telegram : on peut activer un essai gratuit d'environ 3 jours pour que tu voies ce que le VIP donne sur ton compte avant de te décider."
+      "paymentTitle": "Moyens de don",
+      "paymentBody": "Carte cadeau : Google Play, Amazon, Paysafecard ou Eneba, sans carte bancaire (voir plus bas). Carte bancaire : via CryptoGate (carte, Apple Pay, Google Pay ou crypto). Une adresse email est demandée pour le reçu ; elle n'est pas liée à ton compte Movix. Bitcoin (BTC) et Litecoin (LTC) : envoi direct depuis ton wallet. Les moyens proposés peuvent varier selon les moments.",
+      "stepsTitle": "Comment faire un don",
+      "step1": "Va sur /vip et choisis un montant : la page affiche tout de suite le VIP offert en remerciement.",
+      "step2": "Choisis « Pour moi » ou « Pour offrir », puis le moyen de don (carte cadeau, carte bancaire, BTC ou LTC).",
+      "step3": "Par carte bancaire, tu termines sur la page sécurisée de CryptoGate. En BTC ou LTC, scanne le QR code ou copie l'adresse et le montant exact.",
+      "step4": "Ta page de suivi se met à jour toute seule. Dès que le don est reçu (tout de suite par carte, après 1 à 3 confirmations en crypto), ta clé VIP s'y affiche : il ne reste qu'à l'activer.",
+      "giftCardTitle": "Don par carte cadeau (sans carte bancaire)",
+      "giftCardBody": "Les cartes Google Play, Amazon, Paysafecard et Eneba s'achètent presque partout : bureau de tabac, supermarché, station-service ou en ligne. Achète une carte du montant de ton choix, puis envoie-nous son code via un des contacts affichés sur la page <1>/vip</1> (email, Discord, Telegram ou Matrix). On vérifie la carte à la main, puis on t'envoie ta clé VIP par email, en remerciement. La carte cadeau sert pour ton propre VIP : pour offrir, passe par la carte bancaire ou la crypto. N'envoie jamais un code de carte ailleurs que sur ces contacts.",
+      "giftTitle": "Offrir le VIP à quelqu'un",
+      "giftBody": "Sur la page <1>/vip</1>, choisis « Pour offrir » puis la carte bancaire ou la crypto (la carte cadeau n'est pas proposée pour offrir) : au lieu d'une clé pour toi, Movix te donne un lien cadeau à envoyer. La personne ouvre le lien, descelle sa carte cadeau et récupère sa clé VIP. Pratique pour offrir le VIP sans connaître son compte Movix.",
+      "invoicesTitle": "Mes dons",
+      "invoicesBody": "Tous tes dons apparaissent sur <1>/vip/invoices</1> : montant, date, moyen, état et lien vers leur page de suivi. Garde ce lien : c'est là que ta clé apparaît, et il sert de preuve si tu contactes le support.",
+      "limitsTitle": "Remboursements",
+      "limitsBody": "Un don est définitif : il n'y a pas de remboursement, par carte comme en crypto. Si c'est ta première fois, commence par 5 € pour vérifier que le VIP s'active bien sur ton compte. Tu préfères tester avant ? Écris-nous sur Matrix : on peut activer un essai gratuit d'environ 3 jours."
     },
     "debrid": {
       "title": "Débrider des liens 1fichier",
@@ -7591,11 +8381,11 @@
       "officialListTitle": "Où voir la liste officielle",
       "officialListBody": "Deux endroits publient la liste canonique des miroirs alive : <1>movix.online</1> (statut des domaines avec indicateur up/down en temps réel) et <2>rentry.co/movix</2> (liste brute, éditée par l'équipe Movix, toujours à jour). Si tu doutes d'une URL qui prétend être Movix, vérifie-la sur un de ces deux endroits — tout ce qui n'y figure PAS est un faux (domaines sacrificiels pour tromper les bots anti-piratage ou tentatives de phishing).",
       "newDeviceTitle": "Nouveau téléphone / nouveau navigateur — la redirection marche pas",
-      "newDeviceBody": "Le service worker ne peut te rediriger QUE s'il a été installé au moins une fois avant le blocage. Sur un appareil neuf qui n'a jamais visité {{currentDomain}}, si le domaine est déjà bloqué par ton FAI, tu arriveras sur une page d'erreur du FAI sans aucune redirection. Solution : ouvre movix.online ou rentry.co/movix depuis n'importe quel navigateur (ces pages sont hébergées hors bloc FAI), récupère un miroir alive, et visite-le. Ou rejoins <1>Telegram @ix_annonces</1> où la liste est toujours à jour.",
+      "newDeviceBody": "Le service worker ne peut te rediriger QUE s'il a été installé au moins une fois avant le blocage. Sur un appareil neuf qui n'a jamais visité {{currentDomain}}, si le domaine est déjà bloqué par ton FAI, tu arriveras sur une page d'erreur du FAI sans aucune redirection. Solution : ouvre movix.online ou rentry.co/movix depuis n'importe quel navigateur (ces pages sont hébergées hors bloc FAI), récupère un miroir alive, et visite-le. Ou rejoins <1>Matrix #groupe-ix</1> où la liste est toujours à jour.",
       "reliabilityTitle": "Fréquence des changements",
       "reliabilityBody": "Un domaine peut tomber du jour au lendemain (nouvelle décision ARCOM) ou rester stable des mois. L'équipe tourne plusieurs domaines en parallèle — quand un tombe, un autre prend le relais automatiquement. La liste sur rentry.co est mise à jour dans la journée qui suit un changement.",
       "limitsTitle": "Limites",
-      "limitsBody": "Le service worker a un TTL de 24h sur sa config interne — donc si tu ajoutes un miroir tout neuf sur rentry, les clients existants le verront dans les 24h max. Si ton FAI bloque AUSSI rentry.co ou movix.online (rare mais possible), le fallback casse complètement : passe par Telegram ou utilise un DNS alternatif comme 1.1.1.1 (voir le tuto DNS). Le service worker ne marche pas en navigation privée sur certains navigateurs — utilise un onglet normal."
+      "limitsBody": "Le service worker a un TTL de 24h sur sa config interne — donc si tu ajoutes un miroir tout neuf sur rentry, les clients existants le verront dans les 24h max. Si ton FAI bloque AUSSI rentry.co ou movix.online (rare mais possible), le fallback casse complètement : passe par Matrix ou utilise un DNS alternatif comme 1.1.1.1 (voir le tuto DNS). Le service worker ne marche pas en navigation privée sur certains navigateurs — utilise un onglet normal."
     },
     "liveTv": {
       "title": "Live TV — chaînes et sport en direct",
@@ -7784,6 +8574,120 @@
       "advancedNote": "Le jeton n'est jamais écrit dans la config du client : il vit dans <1>~/.movix-mcp/token.json</1>, en permissions 0600. Quand il expire, relance <1>npm run login</1>.",
       "limitsTitle": "Limites connues",
       "limitsBody": "Tous les clients IA ne gèrent pas encore les serveurs MCP distants avec OAuth : si le tien ne sait déclarer que des commandes locales, passe par la section Avancé. L'accès expire au bout d'un moment — si l'IA te répond qu'elle n'est plus autorisée, reconnecte le connecteur (ou relance <1>npm run login</1> en local). Enfin, le MCP donne accès à tes données Movix et à la recherche, mais il ne lit pas les vidéos : pour regarder, l'IA te renvoie un lien vers le lecteur Movix."
+    },
+    "tvFire": {
+      "title": "Movix TV sur Fire TV",
+      "heroSub": "Installer l'appli télé sur un Fire TV Stick ou un Fire TV Cube, et la dépanner.",
+      "introBody": "Movix TV, l'appli télé de Movix, s'installe avec son fichier <1>APK</1> et l'appli gratuite Downloader. Ce tuto reprend la page <2>Appli TV</2> pas à pas, avec les solutions quand ça bloque.",
+      "beforeTitle": "Avant de commencer",
+      "beforeBody": "Movix TV marche sur le Fire TV Stick 3e génération, le Fire TV Stick Lite, le Fire TV Stick 4K, le Fire TV Stick 4K Max et le Fire TV Cube. Elle ne marche pas sur les Fire TV récentes sous Vega OS, comme le Fire TV Stick 4K Select ou le Fire TV Stick HD de 2026. Elle ne marche pas non plus sur le Fire TV Stick 2e génération et plus ancien. Il faut Android 7.1 minimum. Compte une dizaine de minutes, et garde cette page ouverte sur ton téléphone pour la suivre.",
+      "installTitle": "Installer l'appli",
+      "step1": "Sur l'accueil de ta Fire TV, ouvre la loupe (Rechercher). Cherche « Downloader » et installe l'appli à l'icône orange, de l'éditeur AFTVnews.",
+      "step2": "Va dans Paramètres › Ma Fire TV › À propos. Selon la version, « Ma Fire TV » peut s'appeler « Mon Fire TV » ou « Appareil et logiciels ».",
+      "step3": "Place-toi sur le nom de ton appareil, puis appuie 7 fois sur OK. Un message confirme que le mode développeur est actif.",
+      "step4": "Reviens au menu précédent, puis ouvre Options pour les développeurs › Installer des applications inconnues. Active Downloader.",
+      "step5": "Ouvre Downloader. Au premier lancement, autorise l'accès aux fichiers.",
+      "step6": "Dans le champ, tape le code Downloader indiqué sur la page <1>Appli TV</1>, ou à défaut l'adresse de l'APK. Appuie sur « Go ».",
+      "step7": "Quand le fichier est téléchargé, choisis « Installer », puis « Ouvrir ». Downloader propose ensuite de supprimer le fichier APK : tu peux accepter, l'appli reste installée.",
+      "linkTitle": "Relier ta télé à ton compte",
+      "link1": "Au premier lancement, Movix TV affiche un code à 5 caractères et un QR code. Si tu choisis « Plus tard », tu les retrouves dans Réglages › Compte › « Connecter mon compte ».",
+      "link2": "Scanne le QR code avec ton téléphone, ou tape le code sur la page <1>Appli TV</1> du site. Connecte-toi à ton compte si le site te le demande.",
+      "link3": "Choisis le profil à utiliser sur la télé, puis appuie sur « Connecter la télé ». Le code change toutes les 10 minutes : s'il a expiré, tape celui qui s'affiche maintenant.",
+      "linkBody": "Une fois reliée, la télé synchronise la reprise, l'historique et Ma liste avec le site. Elle importe aussi le VIP du profil choisi. Sans compte, l'appli marche aussi. Autre façon d'avoir le VIP : entre une clé dans Réglages › Clé VIP. Pour déconnecter la télé, supprime-la des sessions de ton compte, dans les <1>Paramètres</1> du site. Tu peux aussi choisir « Se déconnecter » dans Réglages › Compte, sur la télé.",
+      "updateTitle": "Mettre à jour",
+      "updateBody": "Movix TV cherche seule les mises à jour, au plus une fois toutes les 12 heures. Quand une version sort, un bandeau s'affiche. Tu peux aussi vérifier dans Réglages › Mise à jour › « Rechercher une mise à jour ». La première fois, la télé ouvre un écran pour autoriser Movix à installer des applis. Active l'option, reviens dans Movix, puis appuie de nouveau sur « Installer ».",
+      "troubleTitle": "Ça bloque ?",
+      "troubleIntro": "Trouve ton souci ou le message affiché : la solution est juste en dessous.",
+      "causeOptionsTitle": "Je ne trouve pas les options",
+      "causeOptionsBody": "Selon la version, « Ma Fire TV » peut s'appeler « Mon Fire TV » ou « Appareil et logiciels ». Si « Options pour les développeurs » manque, refais les 7 appuis sur OK sur le nom de l'appareil, dans À propos. Sur une ancienne version, active plutôt « Applications de sources inconnues ».",
+      "causeCodeTitle": "Le code Downloader ne marche pas",
+      "causeCodeBody": "Tape plutôt l'adresse de l'APK indiquée sur la page Appli TV. Vérifie chaque caractère : une seule faute bloque le téléchargement.",
+      "causeCodeCta": "Ouvrir la page Appli TV",
+      "causeParseTitle": "« Problème lors de l'analyse du package »",
+      "causeParseBody": "Soit ta Fire TV est trop ancienne : l'appli demande Android 7.1 minimum, et ne marche pas sur le Fire TV Stick 2e génération ou plus ancien. Soit le fichier est incomplet : supprime-le, puis télécharge-le à nouveau avec Downloader.",
+      "causeNotInstalledTitle": "« Application non installée »",
+      "causeNotInstalledBody": "Une ancienne version de Movix TV est peut-être installée avec une autre signature (le tampon numérique de l'appli). Désinstalle-la, puis relance l'installation. Ce message peut aussi venir d'un manque de place : regarde le point suivant.",
+      "causeStorageTitle": "Plus assez de place",
+      "causeStorageBody": "Un Fire TV Stick a peu de stockage. Désinstalle les applis dont tu ne te sers plus, puis relance l'installation. Quand Downloader propose de supprimer le fichier APK, accepte : ça libère aussi de la place.",
+      "causeVideoTitle": "La vidéo ne démarre pas",
+      "causeVideoBody": "Dans le lecteur, ouvre Réglages › Source et choisis un autre lecteur. Fais pareil si tu vois « Format non pris en charge ». Si rien ne démarre, choisis « Ouvrir le lecteur web » : il affiche une souris que tu bouges avec les flèches, et il bloque les pubs. Avec une clé VIP, tu as aussi les sources du serveur Movix.",
+      "causeVideoCta": "Devenir VIP"
+    },
+    "tvGoogle": {
+      "title": "Movix TV sur Google TV",
+      "heroSub": "Installer l'appli télé sur un Chromecast avec Google TV ou un Google TV Streamer, et la dépanner.",
+      "introBody": "Movix TV, l'appli télé de Movix, s'installe hors du Play Store, avec son fichier <1>APK</1> et l'appli gratuite Downloader. Ce tuto reprend la page <2>Appli TV</2> pas à pas, avec les solutions quand ça bloque.",
+      "beforeTitle": "Avant de commencer",
+      "beforeBody": "Ce tuto vaut pour le Chromecast avec Google TV et le Google TV Streamer. Un Chromecast sans télécommande sert seulement à caster : il ne peut pas installer d'appli. Pour une télé de marque sous Google TV (Sony, TCL…), les menus changent un peu : suis plutôt le tuto <1>Android TV</1>. Il faut Android 7.1 minimum. Compte une dizaine de minutes, et garde cette page ouverte sur ton téléphone pour la suivre.",
+      "installTitle": "Installer l'appli",
+      "step1": "Sur l'accueil, ouvre Applications › Rechercher des applis. Cherche « Downloader » et installe l'appli de l'éditeur AFTVnews.",
+      "step2": "Active le mode développeur : va dans Paramètres › Système › À propos, puis appuie 7 fois sur « Build de l'OS Android TV ». Le nom de cette ligne peut varier un peu.",
+      "step3": "Va dans Paramètres › Applications › Sécurité et restrictions › Sources inconnues, puis active Downloader.",
+      "step4": "Ouvre Downloader. Au premier lancement, autorise l'accès aux fichiers.",
+      "step5": "Dans le champ, tape le code Downloader indiqué sur la page <1>Appli TV</1>, ou à défaut l'adresse de l'APK. Appuie sur « Go ».",
+      "step6": "Quand le fichier est téléchargé, choisis « Installer ». Si Play Protect affiche « Appli bloquée », choisis « Plus de détails », puis « Installer quand même ».",
+      "step7": "Choisis « Ouvrir ». Downloader propose ensuite de supprimer le fichier APK : tu peux accepter, l'appli reste installée.",
+      "linkTitle": "Relier ta télé à ton compte",
+      "link1": "Au premier lancement, Movix TV affiche un code à 5 caractères et un QR code. Si tu choisis « Plus tard », tu les retrouves dans Réglages › Compte › « Connecter mon compte ».",
+      "link2": "Scanne le QR code avec ton téléphone, ou tape le code sur la page <1>Appli TV</1> du site. Connecte-toi à ton compte si le site te le demande.",
+      "link3": "Choisis le profil à utiliser sur la télé, puis appuie sur « Connecter la télé ». Le code change toutes les 10 minutes : s'il a expiré, tape celui qui s'affiche maintenant.",
+      "linkBody": "Une fois reliée, la télé synchronise la reprise, l'historique et Ma liste avec le site. Elle importe aussi le VIP du profil choisi. Sans compte, l'appli marche aussi. Autre façon d'avoir le VIP : entre une clé dans Réglages › Clé VIP. Pour déconnecter la télé, supprime-la des sessions de ton compte, dans les <1>Paramètres</1> du site. Tu peux aussi choisir « Se déconnecter » dans Réglages › Compte, sur la télé.",
+      "updateTitle": "Mettre à jour",
+      "updateBody": "Movix TV cherche seule les mises à jour, au plus une fois toutes les 12 heures. Quand une version sort, un bandeau s'affiche. Tu peux aussi vérifier dans Réglages › Mise à jour › « Rechercher une mise à jour ». La première fois, la télé ouvre un écran pour autoriser Movix à installer des applis. Active l'option, reviens dans Movix, puis appuie de nouveau sur « Installer ».",
+      "troubleTitle": "Ça bloque ?",
+      "troubleIntro": "Trouve ton souci ou le message affiché : la solution est juste en dessous.",
+      "causeOptionsTitle": "Je ne trouve pas « Sources inconnues »",
+      "causeOptionsBody": "Si l'option manque, active d'abord le mode développeur : dans Paramètres › Système › À propos, appuie 7 fois sur « Build de l'OS Android TV », ou sur une ligne au nom proche. Retourne ensuite dans Paramètres › Applications › Sécurité et restrictions.",
+      "causeCodeTitle": "Le code Downloader ne marche pas",
+      "causeCodeBody": "Tape plutôt l'adresse de l'APK indiquée sur la page Appli TV. Vérifie chaque caractère : une seule faute bloque le téléchargement.",
+      "causeCodeCta": "Ouvrir la page Appli TV",
+      "causePlayProtectTitle": "Play Protect affiche « Appli bloquée »",
+      "causePlayProtectBody": "C'est normal pour une appli installée hors du Play Store. Choisis « Plus de détails », puis « Installer quand même ».",
+      "causeParseTitle": "« Problème lors de l'analyse du package »",
+      "causeParseBody": "Le fichier est sans doute incomplet : supprime-le, puis télécharge-le à nouveau avec Downloader. Ce message apparaît aussi sur un appareil dont la version d'Android est plus ancienne que 7.1.",
+      "causeNotInstalledTitle": "« Application non installée »",
+      "causeNotInstalledBody": "Une ancienne version de Movix TV est peut-être installée avec une autre signature (le tampon numérique de l'appli). Désinstalle-la, puis relance l'installation. Ce message peut aussi venir d'un manque de place : désinstalle les applis dont tu ne te sers plus.",
+      "causeVideoTitle": "La vidéo ne démarre pas",
+      "causeVideoBody": "Dans le lecteur, ouvre Réglages › Source et choisis un autre lecteur. Fais pareil si tu vois « Format non pris en charge ». Si rien ne démarre, choisis « Ouvrir le lecteur web » : il affiche une souris que tu bouges avec les flèches, et il bloque les pubs. Avec une clé VIP, tu as aussi les sources du serveur Movix.",
+      "causeVideoCta": "Devenir VIP"
+    },
+    "tvAndroid": {
+      "title": "Movix TV sur Android TV",
+      "heroSub": "Installer l'appli télé sur une télé ou une box Android, et la dépanner.",
+      "introBody": "Movix TV, l'appli télé de Movix, s'installe hors du Play Store, avec son fichier <1>APK</1> et l'appli gratuite Downloader. Ce tuto reprend la page <2>Appli TV</2> pas à pas, avec les solutions quand ça bloque.",
+      "beforeTitle": "Avant de commencer",
+      "beforeBody": "Ce tuto vaut pour les télés sous Android TV ou Google TV (Sony, Philips, TCL, Xiaomi…) et pour les box Android : Mi Box, Nvidia Shield, Freebox Pop et Freebox Ultra. Pour un Chromecast avec Google TV, suis plutôt le tuto <1>Google TV</1>. Il faut Android 7.1 minimum. Pas compatibles : les télés Samsung (Tizen), LG (webOS), Hisense (VIDAA) et Panasonic (My Home Screen), Roku, l'Apple TV et les consoles. Les menus changent selon la marque : si un chemin ne colle pas, regarde « Ça bloque ? » en bas. Compte une dizaine de minutes, et garde cette page ouverte sur ton téléphone pour la suivre.",
+      "installTitle": "Installer l'appli",
+      "step1": "Ouvre le Play Store de ta télé ou de ta box. Cherche « Downloader » et installe l'appli de l'éditeur AFTVnews.",
+      "step2": "Va dans Paramètres › Préférences de l'appareil › Sécurité et restrictions › Sources inconnues. C'est le chemin le plus courant sur Android TV 8 à 10. Sinon, regarde « Ça bloque ? » plus bas.",
+      "step3": "Active Downloader dans la liste.",
+      "step4": "Ouvre Downloader. Au premier lancement, autorise l'accès aux fichiers.",
+      "step5": "Dans le champ, tape le code Downloader indiqué sur la page <1>Appli TV</1>, ou à défaut l'adresse de l'APK. Appuie sur « Go ».",
+      "step6": "Quand le fichier est téléchargé, choisis « Installer ». Si Play Protect affiche « Appli bloquée », choisis « Plus de détails », puis « Installer quand même ».",
+      "step7": "Choisis « Ouvrir ». Downloader propose ensuite de supprimer le fichier APK : tu peux accepter, l'appli reste installée.",
+      "linkTitle": "Relier ta télé à ton compte",
+      "link1": "Au premier lancement, Movix TV affiche un code à 5 caractères et un QR code. Si tu choisis « Plus tard », tu les retrouves dans Réglages › Compte › « Connecter mon compte ».",
+      "link2": "Scanne le QR code avec ton téléphone, ou tape le code sur la page <1>Appli TV</1> du site. Connecte-toi à ton compte si le site te le demande.",
+      "link3": "Choisis le profil à utiliser sur la télé, puis appuie sur « Connecter la télé ». Le code change toutes les 10 minutes : s'il a expiré, tape celui qui s'affiche maintenant.",
+      "linkBody": "Une fois reliée, la télé synchronise la reprise, l'historique et Ma liste avec le site. Elle importe aussi le VIP du profil choisi. Sans compte, l'appli marche aussi. Autre façon d'avoir le VIP : entre une clé dans Réglages › Clé VIP. Pour déconnecter la télé, supprime-la des sessions de ton compte, dans les <1>Paramètres</1> du site. Tu peux aussi choisir « Se déconnecter » dans Réglages › Compte, sur la télé.",
+      "updateTitle": "Mettre à jour",
+      "updateBody": "Movix TV cherche seule les mises à jour, au plus une fois toutes les 12 heures. Quand une version sort, un bandeau s'affiche. Tu peux aussi vérifier dans Réglages › Mise à jour › « Rechercher une mise à jour ». La première fois, la télé ouvre un écran pour autoriser Movix à installer des applis. Active l'option, reviens dans Movix, puis appuie de nouveau sur « Installer ».",
+      "troubleTitle": "Ça bloque ?",
+      "troubleIntro": "Trouve ton souci ou le message affiché : la solution est juste en dessous.",
+      "causeOptionsTitle": "Je ne trouve pas « Sources inconnues »",
+      "causeOptionsBody": "Le chemin dépend de la marque. Essaie Paramètres › Applications › Sécurité et restrictions, ou Paramètres › Applications › Accès spécial › Installer des applis inconnues. Si l'option manque partout, active d'abord le mode développeur : dans À propos, appuie 7 fois sur « Build », puis réessaie.",
+      "causeCodeTitle": "Le code Downloader ne marche pas",
+      "causeCodeBody": "Tape plutôt l'adresse de l'APK indiquée sur la page Appli TV. Vérifie chaque caractère : une seule faute bloque le téléchargement.",
+      "causeCodeCta": "Ouvrir la page Appli TV",
+      "causePlayProtectTitle": "Play Protect affiche « Appli bloquée »",
+      "causePlayProtectBody": "C'est normal pour une appli installée hors du Play Store. Choisis « Plus de détails », puis « Installer quand même ».",
+      "causeParseTitle": "« Problème lors de l'analyse du package »",
+      "causeParseBody": "Ta télé ou ta box a peut-être une version d'Android plus ancienne que 7.1 : vérifie dans À propos. Sinon, le fichier est incomplet : supprime-le, puis télécharge-le à nouveau avec Downloader.",
+      "causeNotInstalledTitle": "« Application non installée »",
+      "causeNotInstalledBody": "Une ancienne version de Movix TV est peut-être installée avec une autre signature (le tampon numérique de l'appli). Désinstalle-la, puis relance l'installation. Ce message peut aussi venir d'un manque de place : désinstalle les applis dont tu ne te sers plus.",
+      "causeVideoTitle": "La vidéo ne démarre pas",
+      "causeVideoBody": "Dans le lecteur, ouvre Réglages › Source et choisis un autre lecteur. Fais pareil si tu vois « Format non pris en charge ». Si rien ne démarre, choisis « Ouvrir le lecteur web » : il affiche une souris que tu bouges avec les flèches, et il bloque les pubs. Avec une clé VIP, tu as aussi les sources du serveur Movix.",
+      "causeVideoCta": "Devenir VIP"
     },
     "feedback": {
       "question": "Ce tuto t'a aidé ?",

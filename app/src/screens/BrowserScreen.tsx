@@ -18,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import WebViewBrowser, { type WebViewBrowserRef } from '../components/WebViewBrowser';
 import BrowserToolbar from '../components/BrowserToolbar';
 import IOSBrowserToolbar from '../components/ios/IOSBrowserToolbar';
-import { NativeGlassSurface } from '../components/ios/NativeGlassSurface';
+import AppButton from '../components/AppButton';
 import MiniPill from '../components/MiniPill';
 import MirrorErrorScreen from '../components/MirrorErrorScreen';
 import { setLocalPlaybackAwake } from '../services/playbackAwake';
@@ -226,17 +226,19 @@ export default function BrowserScreen() {
         onRequestClose={closeSettings}>
         <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
           {Platform.OS === 'ios' ? (
-            <NativeGlassSurface interactive style={styles.modalHeaderIOS}>
-              <TouchableOpacity
-                accessibilityRole="button"
+            // Pas de surface en verre sous le bouton : Liquid Glass ne doit
+            // pas s'empiler sur une autre couche de verre.
+            <View style={styles.modalHeaderIOS}>
+              <AppButton
+                title="Fermer"
+                compact
                 accessibilityLabel="Fermer les paramètres"
                 onPress={closeSettings}
-                style={styles.closeButton}>
-                <Text style={styles.closeText}>Fermer</Text>
-              </TouchableOpacity>
+                style={styles.closeButtonIOS}
+              />
               <Text style={styles.modalTitle}>Paramètres</Text>
-              <View style={styles.closeButton} />
-            </NativeGlassSurface>
+              <View style={styles.closeButtonIOS} />
+            </View>
           ) : (
             <View style={styles.modalHeader}>
               <TouchableOpacity onPress={closeSettings} style={styles.closeButton}>
@@ -299,6 +301,9 @@ const styles = StyleSheet.create({
     width: 60,
     minHeight: 44,
     justifyContent: 'center',
+  },
+  closeButtonIOS: {
+    width: 100,
   },
   closeText: {
     color: Platform.OS === 'ios' ? PlatformColor('systemPurpleColor') : '#8b5cf6',

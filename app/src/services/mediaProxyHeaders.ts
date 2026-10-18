@@ -18,12 +18,16 @@ const PROVIDER_SEC_CH_UA_MOBILE = '?0';
 const PROVIDER_SEC_CH_UA_PLATFORM = '"Windows"';
 const PROVIDER_ACCEPT_LANGUAGE = 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7';
 
-// Vidzy exige le token zstd même si l'UA et le Referer sont corrects. q=0
-// demande un corps non compressé, lisible aussi par les transports natifs qui
-// ne décodent pas zstd. Même valeur dans server.py et MediaProxyPolicy.kt.
-// Réservé aux médias : les pages HTML renvoient du zstd même avec q=0.
+// Uqload : q=0 demande un corps non compressé, lisible aussi par les
+// transports natifs qui ne décodent pas zstd. Même valeur dans server.py et
+// MediaProxyPolicy.kt. Réservé aux médias : les pages HTML renvoient du zstd
+// même avec q=0.
 const PROVIDER_MEDIA_ACCEPT_ENCODING =
   'identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0';
+// Fsvid/Vidzy, eux, servent leur playlist leurre (`/e/segN.ts`, la « vidéo
+// troll ») en 200 dès que `gzip;q=0` figure dans la requête — mesuré le
+// 2026-10-15. `identity` seul donne le vrai flux, toujours non compressé.
+const FSVID_VIDZY_MEDIA_ACCEPT_ENCODING = 'identity';
 const PROVIDER_MEDIA_PATH = /\.(?:m3u8|mpd|mp4|m4v|m4s|ts|aac|m4a|vtt|srt|key)$/i;
 
 // User-Agent émis par l'extraction LuluStream/Veev/Vidara. Volontairement
@@ -217,7 +221,13 @@ export function applyMediaProxyHeaderRules(
     // vrai Chromium donne l'inverse : en-tête présent, lecture 200 ; en-tête
     // vide, refus.
     if (PROVIDER_MEDIA_PATH.test(url.split(/[?#]/, 1)[0])) {
-      setCanonicalHeader(headers, 'Accept-Encoding', PROVIDER_MEDIA_ACCEPT_ENCODING);
+      setCanonicalHeader(
+        headers,
+        'Accept-Encoding',
+        isFsvidHost || isVidzyHost
+          ? FSVID_VIDZY_MEDIA_ACCEPT_ENCODING
+          : PROVIDER_MEDIA_ACCEPT_ENCODING,
+      );
     } else {
       // Laisser React Native négocier gzip pour les pages d'extraction : son
       // transport ne décode pas zstd et le parseur recevrait des octets binaires.

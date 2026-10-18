@@ -45,8 +45,34 @@ const { fetchCinestreamMovieData } = require("./cinestream");
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY || "";
 const TMDB_API_URL = "https://api.themoviedb.org/3";
-// Source rotates domains (flemmix.fast -> ...). Override via env, no code change.
-const WIFLIX_BASE_URL = process.env.WIFLIX_BASE_URL || "https://flemmix.fast";
+// Source rotates domains (flemmix.fast -> flemmix.rip -> ...). Override via env, no code change.
+const WIFLIX_BASE_URL = process.env.WIFLIX_BASE_URL || "https://flemmix.rip";
+
+// Les lecteurs portent désormais leur URL dans `data-v` (base64 puis ROT13,
+// cf. decodeStream du site) ; l'ancien `onclick="loadVideo('…')"` reste lu.
+function decodeWiflixStream(value) {
+  if (!value) return null;
+  if (/^(https?:)?\/\//i.test(value)) return value;
+  try {
+    const decoded = Buffer.from(value, "base64").toString("utf8").replace(/[a-zA-Z]/g, (c) => {
+      const base = c <= "Z" ? 65 : 97;
+      return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+    });
+    return /^https?:\/\//i.test(decoded) ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+function wiflixLinkUrl($link) {
+  const fromData = decodeWiflixStream($link.attr("data-v"));
+  if (fromData) return fromData;
+  const match = ($link.attr("onclick") || "").match(/loadVideo\('([^']+)'/);
+  return match ? match[1] : null;
+}
+
+// Le site saute lui-même ces hébergeurs au profit du lien suivant.
+const isSkippedWiflixHost = (url) => /up4fun\.top|up4stream/i.test(url);
 
 // === Cache helpers (local, since getFromCacheNoExpiration is not yet in cacheManager) ===
 const getFromCacheNoExpiration = async (cacheDir, key, bypassMemory = false) => {
@@ -165,6 +191,12 @@ function formatNextUpdate(ms) {
 }
 
 // === Search ===
+// Coupe-circuit Flemmix ouvert (proxyManager) : l'échec est immédiat et
+// attendu, donc sans journal à chaque appel. Il reste une indisponibilité,
+// jamais un « introuvable » : reprise différée, ancien cache conservé.
+const isSourceCircuitOpen = (error) =>
+  error?.code === 'SOURCE_CIRCUIT_OPEN' || error?.isSourceCircuitOpen === true;
+
 async function searchWiflixMovie(title, baseUrl = WIFLIX_BASE_URL) {
   const searchUrl = `${baseUrl}/`;
   const payload = `do=search&subaction=search&story=${encodeURIComponent(title)}`;
@@ -186,7 +218,7 @@ async function searchWiflixMovie(title, baseUrl = WIFLIX_BASE_URL) {
       responseBody = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
       console.log(`[WIFLIX SEARCH] OK via proxy`);
     } catch (err) {
-      console.log(`[WIFLIX SEARCH] Echec: ${err.message}`);
+      if (!isSourceCircuitOpen(err)) console.log(`[WIFLIX SEARCH] Echec: ${err.message}`);
       refreshStep('search_error', { query: title }, err);
       return { url: null, unavailable: true, debugHtml: 'Erreur: service temporairement indisponible' };
     }
@@ -340,7 +372,7 @@ async function extractWiflixPlayers(pageUrl) {
       rawHtml = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
       console.log(`[WIFLIX PLAYERS] OK via proxy`);
     } catch (err) {
-      console.log(`[WIFLIX PLAYERS] Echec: ${err.message}`);
+      if (!isSourceCircuitOpen(err)) console.log(`[WIFLIX PLAYERS] Echec: ${err.message}`);
     }
 
     if (!rawHtml) {
@@ -361,15 +393,14 @@ async function extractWiflixPlayers(pageUrl) {
         if (episodeMatch) {
           const episodeNumber = parseInt(episodeMatch[1]);
           const type = episodeMatch[2] === "vf" ? "VF" : "VOSTFR";
-          $episodeDiv.find("a[onclick]").each((linkIndex, linkElement) => {
+          $episodeDiv.find("a[data-v], a[onclick]").each((linkIndex, linkElement) => {
             const $link = $(linkElement);
-            const onclick = $link.attr("onclick");
+            const linkUrl = wiflixLinkUrl($link);
             // Template dropped the .clichost class (like the movie page) — match any span.
             const $span = $link.find("span");
-            if (onclick && $span.length) {
-              const match = onclick.match(/loadVideo\('([^']+)'/);
-              if (match && match[1]) {
-                let processedUrl = match[1];
+            if (linkUrl && $span.length) {
+              if (!isSkippedWiflixHost(linkUrl)) {
+                let processedUrl = linkUrl;
                 const name = $span.text().trim();
                 if (processedUrl.includes("tipfly.xyz")) {
                   const tipflyMatch = processedUrl.match(
@@ -402,15 +433,14 @@ async function extractWiflixPlayers(pageUrl) {
         }
       });
     } else {
-      const filmLinks = $(".tabs-sel a[onclick]");
+      const filmLinks = $(".tabs-sel a[data-v], .tabs-sel a[onclick]");
       filmLinks.each((index, element) => {
         const $link = $(element);
-        const onclick = $link.attr("onclick");
+        const linkUrl = wiflixLinkUrl($link);
         const $span = $link.find("span");
-        if (onclick && $span.length) {
-          const match = onclick.match(/loadVideo\('([^']+)'/);
-          if (match && match[1]) {
-            let processedUrl = match[1];
+        if (linkUrl && $span.length) {
+          if (!isSkippedWiflixHost(linkUrl)) {
+            let processedUrl = linkUrl;
             const name = $span.text().trim();
             let type = "VF";
             if (name.toLowerCase().includes("vostfr")) type = "VOSTFR";
@@ -456,8 +486,111 @@ async function extractWiflixPlayers(pageUrl) {
 }
 
 // === Data Fetching ===
-// Movie data now comes from cinestream.info (see ./cinestream + updateWiflixCache).
-// flemmix is still scraped for TV below.
+// Movie data comes from cinestream.info first (see ./cinestream + updateWiflixCache);
+// flemmix is the movie fallback and still the only TV source.
+
+function fetchWiflixMovieData(tmdbId, cachedData = null) {
+  return withRefreshDiagnostics({ source: 'Wiflix/Flemmix', type: 'movie', id: tmdbId,
+    cachePresent: Boolean(cachedData) }, redis, () => loadWiflixMovieData(tmdbId, cachedData));
+}
+
+async function loadWiflixMovieData(tmdbId, cachedData) {
+  try {
+    const [tmdbData, english] = await Promise.all([
+      fetchTmdbDetails(TMDB_API_URL, TMDB_API_KEY, tmdbId, 'movie', 'fr-FR'),
+      fetchTmdbDetails(TMDB_API_URL, TMDB_API_KEY, tmdbId, 'movie', 'en-US'),
+    ]);
+    if (!tmdbData) throw new Error('Métadonnées TMDB du film indisponibles');
+    refreshStep('tmdb_result', { title: tmdbData.title, originalTitle: tmdbData.original_title });
+    const verifier = createIdentityVerifier({ apiUrl: TMDB_API_URL, apiKey: TMDB_API_KEY,
+      type: 'movie', details: tmdbData, english });
+    const triedQueries = new Set(), triedUrls = new Set();
+    let searchDebugHtml = null, unavailable = false;
+    // Une recherche ou une fiche en échec signale une source (ou une sortie
+    // réseau) en panne : le titre suivant échouerait de la même façon. On
+    // arrête l'examen ; la reprise différée et l'ancien cache prennent le relais.
+    lookup: for (let pass = 0; pass < 2; pass++) {
+      const titles = pass ? await verifier.aliases() : verifier.titles;
+      for (const title of searchTitles(titles)) {
+        if (triedQueries.has(title) || triedQueries.size >= 8 || triedUrls.size >= 8) continue;
+        triedQueries.add(title);
+        const search = await searchWiflixMovie(title);
+        unavailable ||= search.unavailable === true;
+        searchDebugHtml = search.debugHtml || searchDebugHtml;
+        if (unavailable) break lookup;
+        for (const candidate of search.candidates || []) {
+          if (triedUrls.has(candidate.url) || triedUrls.size >= 8) continue;
+          triedUrls.add(candidate.url);
+          const extraction = await extractWiflixPlayers(candidate.url);
+          if (!extraction.identity) {
+            unavailable = true;
+            refreshStep('candidate_fetch_failed', { url: candidate.url });
+            break lookup;
+          }
+          const identity = await verifier.verify(extraction.identity);
+          refreshStep('candidate_identity', { url: candidate.url, title: candidate.title, ...identity });
+          if (!identity.accepted || !extraction.players.length) continue;
+          const players = { vf: [], vostfr: [] };
+          for (const player of extraction.players) players[player.type === 'VOSTFR' ? 'vostfr' : 'vf'].push(player);
+          return { success: true, tmdb_id: tmdbId, title: tmdbData.title,
+            original_title: tmdbData.original_title, source: 'flemmix',
+            wiflix_url: candidate.url, players, identity: { ...identity, tmdbId: tmdbData.id },
+            cache_timestamp: new Date().toISOString() };
+        }
+      }
+    }
+    if (unavailable) throw new Error('Recherche ou fiche Wiflix temporairement indisponible');
+    reportRefreshFailure('content_not_found', 'Aucune fiche avec lecteurs et identité confirmée après examen des candidats', {
+      title: tmdbData.title, candidatesChecked: triedUrls.size, queries: [...triedQueries],
+    });
+    return { success: false, error: 'Film non trouvé ou identité non confirmée sur Wiflix',
+      tmdb_id: tmdbId, titles_tried: [...triedQueries], debugHtml: searchDebugHtml };
+  } catch (error) {
+    reportRefreshFailure('refresh_exception', error);
+    if (cachedData) return cachedData;
+    return { success: false, unavailable: true, error: 'Wiflix temporairement indisponible', tmdb_id: tmdbId };
+  }
+}
+
+// Films : CineStream et Flemmix en parallèle, lecteurs fusionnés (sans doublon).
+// Une source en panne n'efface rien : sans aucun succès, l'ancien cache reste.
+async function fetchMovieData(tmdbId, existingCache) {
+  const [cinestream, flemmix] = await Promise.allSettled([
+    fetchCinestreamMovieData(tmdbId, null),
+    fetchWiflixMovieData(tmdbId, null),
+  ]);
+  if (cinestream.status === 'rejected' && !cinestream.reason?.code?.startsWith('CINESTREAM_')) {
+    console.error(`[WIFLIX UPDATE] movie ${tmdbId}: CineStream ${cinestream.reason?.message}`);
+  }
+  const results = [flemmix, cinestream]
+    .filter((result) => result.status === 'fulfilled' && result.value?.success)
+    .map((result) => result.value);
+
+  if (results.length > 0) {
+    const players = { vf: [], vostfr: [] };
+    const seen = new Set();
+    for (const result of results) {
+      for (const lang of ['vf', 'vostfr']) {
+        for (const player of result.players?.[lang] || []) {
+          if (!player?.url || seen.has(player.url)) continue;
+          seen.add(player.url);
+          players[lang].push(player);
+        }
+      }
+    }
+    const [main] = results;
+    return { ...main, source: results.map((result) => result.source).join('+'), players,
+      cache_timestamp: new Date().toISOString() };
+  }
+
+  const unavailable = cinestream.status === 'rejected'
+    || flemmix.status === 'rejected' || flemmix.value?.unavailable;
+  if (unavailable) {
+    if (existingCache) return existingCache;
+    throw new Error('CineStream et Flemmix temporairement indisponibles');
+  }
+  return flemmix.value;
+}
 
 function fetchWiflixTvData(tmdbId, season, cachedData = null) {
   return withRefreshDiagnostics({ source: 'Wiflix/Flemmix', type: 'tv', id: tmdbId, season,
@@ -477,7 +610,8 @@ async function loadWiflixTvData(tmdbId, season, cachedData) {
       type: 'tv', details: tmdbData, english, seasonData });
     const triedQueries = new Set(), triedUrls = new Set();
     let searchDebugHtml = null, unavailable = false;
-    for (let pass = 0; pass < 2; pass++) {
+    // Arrêt au premier échec de recherche ou de fiche, comme pour les films.
+    lookup: for (let pass = 0; pass < 2; pass++) {
       const titles = pass ? await verifier.aliases() : verifier.titles;
       for (const title of searchTitles(titles)) {
         if (triedQueries.has(title) || triedQueries.size >= 8 || triedUrls.size >= 8) continue;
@@ -485,6 +619,7 @@ async function loadWiflixTvData(tmdbId, season, cachedData) {
         const search = await searchWiflixMovie(`${title} saison ${season}`);
         unavailable ||= search.unavailable === true;
         searchDebugHtml = search.debugHtml || searchDebugHtml;
+        if (unavailable) break lookup;
         for (const candidate of search.candidates || []) {
           if (triedUrls.has(candidate.url) || triedUrls.size >= 8) continue;
           triedUrls.add(candidate.url);
@@ -492,7 +627,7 @@ async function loadWiflixTvData(tmdbId, season, cachedData) {
           if (!extraction.identity) {
             unavailable = true;
             refreshStep('candidate_fetch_failed', { url: candidate.url });
-            continue;
+            break lookup;
           }
           const identity = await verifier.verify(extraction.identity, { season });
           refreshStep('candidate_identity', { url: candidate.url, title: candidate.title, ...identity });
@@ -519,7 +654,8 @@ async function loadWiflixTvData(tmdbId, season, cachedData) {
   } catch (error) {
     reportRefreshFailure('refresh_exception', error);
     if (cachedData) return cachedData;
-    return { success: false, error: 'Wiflix temporairement indisponible', tmdb_id: tmdbId, season };
+    // Comme pour les films, une panne n'est jamais publiée en cache négatif.
+    return { success: false, unavailable: true, error: 'Wiflix temporairement indisponible', tmdb_id: tmdbId, season };
   }
 }
 
@@ -555,7 +691,7 @@ const updateWiflixCache = async (
 
     let newData;
     if (type === "movie")
-      newData = await fetchCinestreamMovieData(tmdbId, existingCache);
+      newData = await fetchMovieData(tmdbId, existingCache);
     else if (type === "tv")
       newData = await fetchWiflixTvData(tmdbId, season, existingCache);
     else throw new Error(`Type non supporte: ${type}`);
@@ -581,9 +717,10 @@ const updateWiflixCache = async (
       }
       const isFailedResult = newData.success === false;
       // Les extracteurs peuvent également retourner l'ancien objet sur panne.
+      // Une source indisponible ne publie rien : ni cache négatif, ni écrasement.
       if (isFailedResult || newData === existingCache) {
         await refreshState.defer(cacheDir, cacheKey);
-        if (existingCache?.success) return;
+        if (existingCache?.success || newData.unavailable === true) return;
       }
       let saved;
       if (newData.success) {

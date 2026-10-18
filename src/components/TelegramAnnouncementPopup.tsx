@@ -7,11 +7,12 @@ import groupeIxLogo from '@/assets/brand/groupe-ix.svg';
 import { useIntro } from '../context/IntroContext';
 import { readLocalStorage, writeLocalStorage } from '../utils/browserStorage';
 import { getOverlayPortalRoot } from '../utils/overlayPortal';
+import { IX_MATRIX_URL } from '@/config/community';
+import { MatrixIcon } from './brand/MatrixIcon';
 
-export const IX_TELEGRAM_URL = 'https://t.me/ix_annonces';
 // Une fois fermé ou suivi, le popup ne revient plus. Changer la clé pour
 // le remontrer à tout le monde lors d'une prochaine annonce.
-const SEEN_KEY = 'ix_telegram_announcement_seen_v1';
+const SEEN_KEY = 'ix_matrix_announcement_seen_v1';
 const SHOW_DELAY_MS = 1500;
 
 interface TelegramAnnouncementPopupProps {
@@ -20,7 +21,7 @@ interface TelegramAnnouncementPopupProps {
 }
 
 /**
- * Popup d'arrivée qui annonce le nouveau canal Telegram du groupe ix. Il
+ * Popup d'arrivée qui annonce le nouveau canal Matrix du groupe ix. Il
  * attend la fin de l'intro et des routes suspendues avant de s'ouvrir.
  */
 const TelegramAnnouncementPopup: React.FC<TelegramAnnouncementPopupProps> = ({ suspended }) => {
@@ -104,15 +105,13 @@ const TelegramAnnouncementPopup: React.FC<TelegramAnnouncementPopupProps> = ({ s
             <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
               <a
                 ref={joinRef}
-                href={IX_TELEGRAM_URL}
+                href={IX_MATRIX_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={dismiss}
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#229ED9] px-5 py-3 font-semibold text-white transition-colors hover:bg-[#1a8abf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-white px-5 py-3 font-semibold text-black transition-colors hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
               >
-                <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5 shrink-0" aria-hidden="true">
-                  <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19l-9.48 5.99-4.1-1.28c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3L18.24 18.8c-.19.92-.73 1.14-1.48.71l-4.14-3.06-1.99 1.93c-.23.23-.42.42-.85.42z" />
-                </svg>
+                <MatrixIcon className="h-5 w-5 shrink-0" />
                 {t('telegram.announcementJoin')}
               </a>
               <button

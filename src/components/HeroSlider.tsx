@@ -409,6 +409,7 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
                       <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
                         <Link
                           to={`/${item.media_type}/${encodeId(item.id)}`}
+                          data-hero-cta
                           className="inline-flex items-center justify-center gap-2 bg-white/15 hover:bg-white/25 text-white px-5 sm:px-6 md:px-7 py-3 sm:py-3 min-h-[48px] rounded-xl sm:rounded-2xl text-sm sm:text-base font-medium border border-white/20 transition-colors touch-manipulation"
                         >
                           <Info className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -451,10 +452,21 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
         `}
       </style>
       {/* Garder une hauteur explicite en vh pour les WebView sans svh :
-          min-height seul ne dimensionne pas les slides internes à h-full. */}
+          min-height seul ne dimensionne pas les slides internes à h-full.
+          Le clip-path arrondi et `isolate` coupent aussi les slides pendant
+          le glissement : Embla les déplace par transform sur un calque GPU
+          que overflow-hidden + border-radius seuls ne coupent pas (coins
+          carrés visibles pendant le slide, surtout sur WebKit). */}
+      {/* Lueur orange du thème Halloween, derrière le cadre (le clip-path du
+          cadre couperait une ombre posée dessus). Masquée hors thème. */}
+      <div
+        aria-hidden="true"
+        className="halloween-hero-glow pointer-events-none absolute inset-y-0 left-3 right-3 sm:left-6 sm:right-6 md:left-12 md:right-12 lg:left-20 lg:right-20 rounded-2xl sm:rounded-3xl"
+      />
       <div
         ref={imageContainerRef}
-        className="relative w-full h-[55vh] supports-[height:100svh]:h-[55svh] max-h-[620px] rounded-2xl sm:rounded-3xl overflow-hidden border border-white/10 shadow-2xl min-h-[340px] sm:min-h-[400px] md:min-h-[480px]"
+        data-hero-frame
+        className="relative isolate w-full h-[55vh] supports-[height:100svh]:h-[55svh] max-h-[620px] rounded-2xl sm:rounded-3xl overflow-hidden [clip-path:inset(0_round_1rem)] sm:[clip-path:inset(0_round_1.5rem)] border border-white/10 shadow-2xl min-h-[340px] sm:min-h-[400px] md:min-h-[480px]"
       >
         {isMorph && (
           <div className="pointer-events-none absolute inset-0" aria-hidden="true">
@@ -492,7 +504,7 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
             )}
           </div>
         )}
-        <div className="embla__viewport relative h-full w-full overflow-hidden touch-pan-y touch-pinch-zoom" ref={emblaRef}>
+        <div className="embla__viewport relative h-full w-full overflow-hidden rounded-[inherit] touch-pan-y touch-pinch-zoom" ref={emblaRef}>
           <div className="embla__container flex h-full w-full touch-pan-y touch-pinch-zoom">
             {items.map((item, idx) => {
               const isActive = idx === selectedIndex;
@@ -538,6 +550,9 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
             </>
           )}
         </div>
+
+        {/* Lueur intérieure du thème Halloween, sous le texte. Masquée hors thème. */}
+        <div aria-hidden="true" className="halloween-hero-inner pointer-events-none absolute inset-0 z-[15]" />
 
         {/* Bottom controls: dots + progress bar + pause */}
         <div className="absolute bottom-3 sm:bottom-4 md:bottom-6 left-0 right-0 z-30 flex items-center justify-center gap-4 px-3 sm:px-6 pointer-events-none">

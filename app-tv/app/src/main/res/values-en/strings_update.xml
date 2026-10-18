@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="update_title">Update</string>
+    <string name="update_current">Installed version: %1$s</string>
+    <string name="update_check">Check for updates</string>
+    <string name="update_checking">Checking…</string>
+    <string name="update_up_to_date">Movix is up to date.</string>
+    <string name="update_available">Version %1$s available</string>
+    <string name="update_banner_title">Update %1$s available</string>
+    <string name="update_install">Install</string>
+    <string name="update_later">Later</string>
+    <string name="update_cancel">Cancel</string>
+    <string name="update_retry">Try again</string>
+    <string name="update_downloading">Downloading… %1$d%%</string>
+    <string name="update_verifying">Checking the file…</string>
+    <string name="update_needs_permission">Allow Movix to install apps on the screen that just opened, come back here, then press Install again.</string>
+    <string name="update_installing">Confirm the installation on the Android screen.</string>
+    <string name="update_err_network">The update server isn\'t responding. Check the connection.</string>
+    <string name="update_err_manifest">The update information can\'t be read. Try again later.</string>
+    <string name="update_err_checksum">The downloaded file doesn\'t match the published version: it was deleted.</string>
+    <string name="update_err_apk">The downloaded file isn\'t the right version of Movix TV.</string>
+    <string name="update_err_storage">Not enough space on the TV to download the update.</string>
+    <string name="update_err_conflict">This copy of Movix is signed with a different key: uninstall it, then install the new version.</string>
+    <string name="update_err_blocked">The TV is blocking the installation. Allow unknown sources for Movix in the TV settings.</string>
+    <string name="update_err_install">The installation failed. Try again.</string>
+</resources>

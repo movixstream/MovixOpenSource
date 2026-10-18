@@ -8,6 +8,13 @@ const { invalidateVipCache } = require('../checkVip');
 const { fetchAddressTxs, fetchTipHeight } = require('./chainExplorer');
 const vipPaygate = require('./vipPaygate');
 const vipCryptoGate = require('./vipCryptoGate');
+const {
+  VIP_DONATION_ERROR_CODES,
+  isCryptoGateEnabled,
+  resolveDonationAmount,
+  loadVipDonationSettings,
+  ensureVipDonationSettingsTable
+} = require('./vipDonationSettings');
 
 bitcoin.initEccLib(ecc);
 
@@ -30,7 +37,7 @@ const VIP_PAYMENT_METHODS = Object.freeze({
 });
 const VIP_PAYMENT_METHOD_ENUM_SQL = "ENUM('btc', 'ltc', 'cryptogate', 'paygate_hosted', 'autobuy', 'payblis')";
 
-const DEFAULT_SUPPORT_TELEGRAM_URL = 'https://t.me/ix_annonces';
+const DEFAULT_SUPPORT_TELEGRAM_URL = 'https://matrix.to/#/%23groupe-ix:matrix.org';
 const FINAL_STATUSES = new Set(['delivered', 'cancelled']);
 const DEFAULT_EXPIRATION_MINUTES = 210;
 const DEFAULT_PAYGATE_MIN_PAID_RATIO = 0.60;
@@ -175,11 +182,6 @@ function isCryptoGatePaymentMethod(paymentMethod) {
 
 function isPayblisPaymentMethod(paymentMethod) {
   return paymentMethod === 'payblis';
-}
-
-function isCryptoGateEnabled() {
-  const enabled = String(process.env.VIP_CRYPTOGATE_ENABLED || 'false').trim().toLowerCase();
-  return ['1', 'true', 'yes', 'on'].includes(enabled);
 }
 
 function isLegacyPaymentCreationEnabled() {
@@ -1559,8 +1561,8 @@ async function createCryptoGateVipInvoice(pool, payload, context = {}) {
       currency: 'EUR',
       email: normalizedEmail,
       orderId: publicId,
-      label: `Movix VIP ${buildDurationLabel(pack.vipYears)}`,
-      description: `Pack VIP Movix - ${buildDurationLabel(pack.vipYears)}`
+      label: 'Don Movix',
+      description: `Don à Movix - merci : ${buildDurationLabel(pack.vipYears)} de VIP`
     });
   } catch (error) {
     const mapped = createVipInvoiceError(
@@ -1685,7 +1687,8 @@ async function createPayblisVipInvoice(pool, { pack, recipientMode, payerEmail, 
     secretKey,
     sandbox: payblisMod.isPayblisSandbox(),
     amountEur: pack.amountEur,
-    productName: `Movix VIP ${buildDurationLabel(pack.vipYears)}`,
+    // Libellé signé par Payblis : rester en ASCII.
+    productName: `Don Movix - ${buildDurationLabel(pack.vipYears)} de VIP`,
     refOrder,
     payerEmail: normalizedEmail,
     customerName,
@@ -2537,12 +2540,24 @@ async function handleCryptoGateWebhook(pool, request = {}, deps = {}) {
   return FINAL_STATUSES.has(invoice.status) ? invoice : fetchInvoiceById(pool, invoice.id);
 }
 
+// Moyens d'invoice que l'admin peut couper depuis les réglages des dons.
+const DONATION_SETTING_METHODS = new Set(['cryptogate', 'btc', 'ltc']);
+
+function createDonationGateError(message, statusCode, code) {
+  const error = createVipInvoiceError(message, statusCode);
+  error.code = code;
+  return error;
+}
+
 async function createVipInvoice(pool, payload, context = {}) {
-  const pack = resolvePack(payload.packEur);
-  const paymentMethod = normalizePaymentMethod(payload.paymentMethod, payload.coin);
+  // La carte cadeau passe par l'équipe : jamais d'invoice, même avec un `coin`.
+  const isGiftCardRequest = String(payload.paymentMethod || '').trim().toLowerCase() === 'giftcard';
+  const paymentMethod = isGiftCardRequest
+    ? null
+    : normalizePaymentMethod(payload.paymentMethod, payload.coin);
   const recipientMode = normalizeRecipientMode(payload.recipientMode);
 
-  if (!pack || !paymentMethod || !recipientMode) {
+  if (!paymentMethod || !recipientMode) {
     throw createVipInvoiceError('Paramètres d\'invoice invalides');
   }
 
@@ -2557,6 +2572,46 @@ async function createVipInvoice(pool, payload, context = {}) {
     error.code = 'VIP_LEGACY_PAYMENT_RETIRED';
     throw error;
   }
+
+  let settings;
+  try {
+    ({ settings } = await loadVipDonationSettings(pool));
+  } catch (error) {
+    console.error('VIP donation settings unavailable:', error?.message || error);
+    throw createDonationGateError(
+      'Les dons sont momentanément indisponibles. Réessaie dans quelques instants.',
+      503,
+      VIP_DONATION_ERROR_CODES.settingsUnavailable
+    );
+  }
+
+  if (!settings.donationsEnabled) {
+    throw createDonationGateError(
+      'Les dons sont en pause pour le moment.',
+      503,
+      VIP_DONATION_ERROR_CODES.paused
+    );
+  }
+
+  if (DONATION_SETTING_METHODS.has(paymentMethod) && settings.methods[paymentMethod]?.enabled === false) {
+    throw createDonationGateError(
+      'Ce moyen de paiement est désactivé pour le moment.',
+      403,
+      VIP_DONATION_ERROR_CODES.methodDisabled
+    );
+  }
+
+  if (recipientMode === 'gift' && !settings.giftOptionEnabled) {
+    throw createDonationGateError(
+      'L\'option « pour offrir » est désactivée pour le moment.',
+      403,
+      VIP_DONATION_ERROR_CODES.giftOptionDisabled
+    );
+  }
+
+  // `packEur` : ancien nom du champ (anciens clients et apps OAuth).
+  const donation = resolveDonationAmount(payload.amountEur ?? payload.packEur, settings);
+  const pack = { amountEur: donation.amountEur, vipYears: donation.vipYears };
 
   if (isCryptoGatePaymentMethod(paymentMethod)) {
     return createCryptoGateVipInvoice(
@@ -3133,6 +3188,8 @@ async function ensureVipDonationsTables(pool) {
         FOREIGN KEY (invoice_id) REFERENCES vip_invoices(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  await ensureVipDonationSettingsTable(pool);
 
   await pool.execute(
     `INSERT IGNORE INTO vip_derivation_counters (coin, next_index, created_at, updated_at)

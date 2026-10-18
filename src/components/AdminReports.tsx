@@ -205,11 +205,11 @@ const AdminReports: React.FC = () => {
 
     const getTargetTypeIcon = (type: string) => {
         switch (type) {
-            case 'comment': return <MessageSquare className="w-4 h-4" />;
-            case 'reply': return <MessageSquare className="w-4 h-4" />;
-            case 'shared_list': return <List className="w-4 h-4" />;
-            case 'segment': return <Scissors className="w-4 h-4" />;
-            default: return <Flag className="w-4 h-4" />;
+            case 'comment': return <MessageSquare className="w-4 h-4 text-white opacity-50" />;
+            case 'reply': return <MessageSquare className="w-4 h-4 text-white opacity-50" />;
+            case 'shared_list': return <List className="w-4 h-4 text-white opacity-50" />;
+            case 'segment': return <Scissors className="w-4 h-4 text-white opacity-50" />;
+            default: return <Flag className="w-4 h-4 text-white opacity-50" />;
         }
     };
 

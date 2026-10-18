@@ -177,6 +177,7 @@ const EmblaCarouselPlatforms: React.FC<EmblaCarouselPlatformsProps> = ({ title, 
           aria-label={t('common.previous')}
           onClick={handlePrev}
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          data-carousel-arrow="prev"
           className={`group/icon hidden md:flex absolute left-6 md:left-8 top-1/2 z-20
                      w-12 h-32 rounded-2xl items-center justify-center text-white/90 hover:text-white
                      bg-gradient-to-b from-neutral-900/70 via-black/80 to-neutral-900/70 backdrop-blur-md
@@ -195,6 +196,7 @@ const EmblaCarouselPlatforms: React.FC<EmblaCarouselPlatformsProps> = ({ title, 
           aria-label={t('common.next')}
           onClick={handleNext}
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          data-carousel-arrow="next"
           className={`group/icon hidden md:flex absolute right-6 md:right-8 top-1/2 z-20
                      w-12 h-32 rounded-2xl items-center justify-center text-white/90 hover:text-white
                      bg-gradient-to-b from-neutral-900/70 via-black/80 to-neutral-900/70 backdrop-blur-md

@@ -1,255 +1,208 @@
-import React from "react";
-import { motion } from "framer-motion";
-import {
-  Crown,
-  Zap,
-  MessageCircle,
-  Shield,
-  ArrowLeft,
-  Radio,
-  Tv,
-  Heart,
-  Unlock,
-  FolderClock,
-} from "lucide-react";
-import { PrefetchLink as Link } from '@/routing/PrefetchLink';
-import { useTranslation } from "react-i18next";
-import { Button } from "../components/ui/button";
-import { SquareBackground } from "../components/ui/square-background";
-import BlurText from "../components/ui/blur-text";
-import ShinyText from "../components/ui/shiny-text";
-import AnimatedBorderCard from "../components/ui/animated-border-card";
+import React, { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { motion } from 'framer-motion';
+import { ArrowLeft, Crown, Heart } from 'lucide-react';
 
+import AnimatedBorderCard from '@/components/ui/animated-border-card';
+import { SquareBackground } from '@/components/ui/square-background';
+import DonationForm from '@/components/vipDonation/DonationForm';
+import DonationLinks from '@/components/vipDonation/DonationLinks';
+import DonationPerks from '@/components/vipDonation/DonationPerks';
+import { DonationPausedCard, DonationSkeleton } from '@/components/vipDonation/DonationCardStates';
+import {
+  ALL_DONATION_METHODS_AVAILABLE,
+  getDonationRule,
+  isSafeExternalUrl,
+  scrollToDonationCard
+} from '@/components/vipDonation/donationUtils';
+import { IX_MATRIX_URL } from '@/config/community';
+import { useLightMode } from '@/context/LightModeContext';
+import { PrefetchLink as Link } from '@/routing/PrefetchLink';
+import {
+  DEFAULT_VIP_DONATION_SETTINGS,
+  getVipDonationSettings,
+  type VipDonationAvailability,
+  type VipDonationSettings
+} from '@/services/vipDonationsService';
+import { readLocalStorage } from '@/utils/browserStorage';
+
+type DonationSettingsState =
+  | { status: 'loading' }
+  | { status: 'ready'; settings: VipDonationSettings; availability: VipDonationAvailability };
+
+const DONATION_CARD_STYLE = { '--_card-radius': '1.25rem' } as React.CSSProperties;
+const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1];
+const SCROLL_CANCEL_EVENTS = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+
+// Page de don unique, servie sur /vip et /vip/don : pourquoi donner, le
+// montant, le moyen, puis le don. Le VIP est le merci.
 const VipPage: React.FC = () => {
-  const { t } = useTranslation();
-  const features = [
-    {
-      icon: Zap,
-      text: t("vip.adFreePlayers"),
-      desc: t("vip.adFreePlayersDesc"),
-    },
-    {
-      icon: Shield,
-      text: t("vip.noAdBeforeContent"),
-      desc: t("vip.noAdBeforeContentDesc"),
-    },
-    {
-      icon: Crown,
-      text: t("vip.priorityRequests"),
-      desc: t("vip.priorityRequestsDesc"),
-    },
-    {
-      icon: MessageCircle,
-      text: t("vip.vipCommentTag"),
-      desc: t("vip.vipCommentTagDesc"),
-    },
-    {
-      icon: Radio,
-      text: t("vip.franceTvAccess"),
-      desc: t("vip.franceTvAccessDesc"),
-    },
-    {
-      icon: Tv,
-      text: t("vip.liveTvOtherSources"),
-      desc: t("vip.liveTvOtherSourcesDesc"),
-    },
-    {
-      icon: Unlock,
-      text: t("vip.debridService"),
-      desc: t("vip.debridServiceDesc"),
-    },
-  ];
+  const { t, i18n } = useTranslation();
+  const locale = i18n.resolvedLanguage || i18n.language || 'fr';
+  const location = useLocation();
+  const { effectivePrefs } = useLightMode();
+  const donationCardRef = useRef<HTMLDivElement>(null);
+  const transitionsRef = useRef(effectivePrefs.transitions);
+  const [state, setState] = useState<DonationSettingsState>({ status: 'loading' });
+
+  useEffect(() => {
+    transitionsRef.current = effectivePrefs.transitions;
+  }, [effectivePrefs.transitions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getVipDonationSettings()
+      .then(({ settings, availability }) => {
+        if (!cancelled) {
+          setState({ status: 'ready', settings, availability });
+        }
+      })
+      .catch(() => {
+        // API muette : réglages par défaut, pour que le don reste possible.
+        if (!cancelled) {
+          setState({
+            status: 'ready',
+            settings: DEFAULT_VIP_DONATION_SETTINGS,
+            availability: ALL_DONATION_METHODS_AVAILABLE
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const wantsDonationCard = /^\/vip\/don\/?$/.test(location.pathname) || location.hash === '#don';
+
+  useEffect(() => {
+    if (!wantsDonationCard) {
+      return undefined;
+    }
+
+    // Le moindre geste de l'utilisateur annule le défilement automatique.
+    let cancelled = false;
+    const cancel = () => {
+      cancelled = true;
+    };
+    SCROLL_CANCEL_EVENTS.forEach((type) => window.addEventListener(type, cancel, { passive: true }));
+
+    // Laisse d'abord passer le retour en haut de page fait à chaque
+    // changement de route (ScrollToTop dans App.tsx).
+    const timer = window.setTimeout(() => {
+      if (!cancelled) {
+        const smooth = transitionsRef.current && readLocalStorage('settings_smooth_scroll') !== 'false';
+        scrollToDonationCard(donationCardRef.current, smooth);
+      }
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timer);
+      SCROLL_CANCEL_EVENTS.forEach((type) => window.removeEventListener(type, cancel));
+    };
+  }, [wantsDonationCard, location.key]);
+
+  const ready = state.status === 'ready' ? state : null;
+  // Pas de règle affichée pendant une pause : rien ne peut être donné.
+  const rule = ready?.settings.donationsEnabled ? getDonationRule(t, locale, ready.settings) : null;
+  const contacts = (ready?.settings ?? DEFAULT_VIP_DONATION_SETTINGS).contacts;
+  const matrixUrl = isSafeExternalUrl(contacts.matrixRoomUrl) ? contacts.matrixRoomUrl.trim() : IX_MATRIX_URL;
+  const discordUrl = isSafeExternalUrl(contacts.discordUrl) ? contacts.discordUrl.trim() : null;
 
   return (
     <SquareBackground
       squareSize={48}
-      borderColor="rgba(239, 68, 68, 0.2)"
-      className="min-h-screen bg-black text-white"
+      borderColor="rgba(234, 179, 8, 0.12)"
+      // overflow-clip au lieu de overflow-hidden : même découpe du fond, mais
+      // sans créer de conteneur de défilement, sinon la carte de don ne peut
+      // pas rester collée (sticky) sur ordinateur.
+      className="min-h-screen overflow-clip bg-black text-white"
     >
-      <div className="container mx-auto px-6 py-12 relative z-10 h-full overflow-y-auto">
-        {/* Back Button */}
+      <div className="mx-auto w-full max-w-6xl px-4 pb-20 pt-4 sm:px-6 sm:pt-8 lg:px-8">
         <Link
           to="/"
-          className="inline-flex items-center text-white/50 hover:text-white transition-colors mb-8 group/icon"
+          className="group inline-flex items-center gap-2 rounded text-sm text-white/55 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/60"
         >
-          <ArrowLeft className="w-5 h-5 mr-2 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
-          {t("common.backToHome")}
+          {/* Couleur pleine + opacité sur l'icône : avec une couleur
+              translucide, ses deux traits se superposent à la pointe. */}
+          <ArrowLeft className="h-4 w-4 text-white opacity-55 transition-opacity group-hover:opacity-100" aria-hidden="true" />
+          {t('common.backToHome')}
         </Link>
 
-        <div className="max-w-4xl mx-auto text-center space-y-12">
-          {/* Header */}
+        {/* Lignes « auto 1fr » : la carte de don, à cheval sur les deux lignes,
+            ne grandit que la seconde. Changer de moyen (champ email de la carte
+            bancaire) ne fait donc plus bouger la colonne de gauche. */}
+        <div className="mt-8 grid items-start gap-10 lg:mt-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:grid-rows-[auto_1fr] lg:gap-x-14 lg:gap-y-14">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            className="space-y-4"
+            transition={{ duration: 0.45, ease: EASE_OUT }}
+            className="lg:col-start-1 lg:row-start-1 lg:pt-2"
           >
-            <div className="inline-flex items-center justify-center p-3 bg-yellow-500/10 rounded-full mb-4 ring-1 ring-yellow-500/50">
-              <Crown className="w-8 h-8 text-yellow-500" />
-            </div>
-            <BlurText
-              text={t("vip.becomeVip") + " Movix"}
-              delay={300}
-              animateBy="words"
-              direction="top"
-              className="text-4xl md:text-6xl font-bold text-white justify-center"
-            />
-            <p className="text-xl text-white/60 max-w-2xl mx-auto">
-              {t("vip.supportPlatform")}{" "}
-              <ShinyText
-                text={t("vip.yearlyPrice")}
-                speed={2}
-                color="#fbbf24"
-                shineColor="#ffffff"
-                className="font-bold"
-              />
-              .
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-yellow-400/10 ring-1 ring-inset ring-yellow-400/25">
+              <Heart className="h-6 w-6 fill-yellow-400/20 text-yellow-400" aria-hidden="true" />
+            </span>
+            <h1 className="mt-5 text-4xl font-bold tracking-tight text-white sm:text-5xl">
+              {t('vipDonations.donate.heroTitle')}
+            </h1>
+            <p className="mt-4 max-w-xl text-base leading-relaxed text-white/70 sm:text-lg">
+              {t('vipDonations.donate.heroText')}
             </p>
-            <div className="mt-4 max-w-xl mx-auto">
-              <BlurText
-                text={t("vip.perfectOffer")}
-                delay={100}
-                className="text-sm md:text-base text-white/40 italic justify-center"
-              />
+            <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
+              {ready === null ? (
+                <span aria-hidden="true" className="h-[34px] w-44 animate-pulse rounded-full bg-white/[0.06]" />
+              ) : rule && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-yellow-400/25 bg-yellow-400/10 px-3.5 py-1.5 text-sm font-medium text-yellow-100">
+                  <Crown className="h-4 w-4 shrink-0 text-yellow-400" aria-hidden="true" />
+                  {rule}
+                </span>
+              )}
+              <Link
+                to="/frais"
+                className="rounded text-sm text-white/55 underline decoration-white/20 underline-offset-4 transition-colors hover:text-white hover:decoration-white/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400/60"
+              >
+                {t('vipDonations.donate.costsLink')}
+              </Link>
             </div>
           </motion.div>
 
-          {/* Features Grid */}
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="grid md:grid-cols-2 gap-6 text-left"
-          >
-            {features.map((feature, idx) => (
-              <motion.div
-                key={idx}
-                whileHover={{ scale: 1.02 }}
-                className="h-full group"
-              >
+          {/* Sur téléphone, la carte vient juste après l'accroche ; sur
+              ordinateur, elle occupe la colonne de droite et reste en vue. */}
+          <div className="lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+            <motion.div
+              id="don"
+              ref={donationCardRef}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.06, ease: EASE_OUT }}
+              className="scroll-mt-24"
+            >
+              {ready && !ready.settings.donationsEnabled ? (
+                <DonationPausedCard message={ready.settings.pausedMessage} />
+              ) : (
                 <AnimatedBorderCard
-                  highlightColor="234 179 8" // Gold/Yellow
-                  backgroundColor="10 10 10"
-                  className="p-6 h-full backdrop-blur-sm"
+                  highlightColor="234 179 8"
+                  backgroundColor="12 12 12"
+                  animationSpeed={0.5}
+                  style={DONATION_CARD_STYLE}
+                  className="p-5 sm:p-7"
                 >
-                  <div className="flex items-start gap-4">
-                    <div className="p-3 rounded-lg bg-yellow-500/10 group-hover:bg-yellow-500/20 transition-colors">
-                      <feature.icon className="w-6 h-6 text-yellow-500" />
-                    </div>
-                    <div>
-                      <div className="mb-1">
-                        <ShinyText
-                          text={feature.text}
-                          speed={2}
-                          color="#fbbf24"
-                          shineColor="#ffffff"
-                          className="text-lg font-bold"
-                        />
-                      </div>
-                      <BlurText
-                        text={feature.desc}
-                        delay={30 + idx * 20}
-                        className="text-sm text-white/50"
-                      />
-                    </div>
-                  </div>
+                  {ready
+                    ? <DonationForm settings={ready.settings} availability={ready.availability} />
+                    : <DonationSkeleton />}
                 </AnimatedBorderCard>
-              </motion.div>
-            ))}
-          </motion.div>
+              )}
+            </motion.div>
+            <DonationLinks matrixUrl={matrixUrl} discordUrl={discordUrl} />
+          </div>
 
-          {/* Contact / CTA Section */}
           <motion.div
-            initial={{ opacity: 0, y: 30 }}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
+            transition={{ duration: 0.45, delay: 0.12, ease: EASE_OUT }}
+            className="lg:col-start-1 lg:row-start-2"
           >
-            <AnimatedBorderCard
-              highlightColor="234 179 8"
-              backgroundColor="10 10 10"
-              className="p-8 text-center space-y-6 backdrop-blur-sm"
-            >
-              <div>
-                <BlurText
-                  text={t("vip.howToSubscribe")}
-                  delay={150}
-                  className="text-2xl font-bold text-white mb-2 justify-center"
-                />
-                <BlurText
-                  text={t("vip.contactToActivate")}
-                  delay={200}
-                  className="text-white/60 justify-center"
-                />
-              </div>
-
-              <div className="flex flex-col md:flex-row items-center justify-center gap-4">
-                <Link
-                  to="/vip/don"
-                  className="inline-flex h-12 w-full items-center justify-center rounded-lg bg-yellow-500 px-8 text-black transition-colors hover:bg-yellow-400 md:w-auto"
-                >
-                  <Crown className="w-4 h-4 mr-2" />
-                  {t("vip.donate")}
-                </Link>
-                <Link
-                  to="/vip/invoices"
-                  className="inline-flex h-12 w-full items-center justify-center rounded-lg border border-white/15 px-8 text-white transition-colors hover:bg-white/5 md:w-auto"
-                >
-                  <FolderClock className="w-4 h-4 mr-2" />
-                  {t("vipDonations.page.myInvoicesButton")}
-                </Link>
-                <a
-                  href="https://t.me/ix_annonces"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Button className="h-12 px-8 bg-[#229ED9] hover:bg-[#229ED9]/80 text-white w-full md:w-auto">
-                    <Zap className="w-4 h-4 mr-2" />
-                    {t("vip.telegramChannel")}
-                  </Button>
-                </a>
-                <a
-                  href="https://discord.com/users/1516102413835305021"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Button className="h-12 px-8 bg-[#5865F2] hover:bg-[#5865F2]/80 text-white w-full md:w-auto">
-                    <MessageCircle className="w-4 h-4 mr-2" />
-                    {t("vip.discordContact")}
-                  </Button>
-                </a>
-              </div>
-              <div className="pt-4 border-t border-white/10">
-                <p className="text-sm text-white/40">
-                  {t("vip.telegramPersonal")}{" "}
-                  <span className="text-white">@MysticSaba</span>
-                </p>
-              </div>
-            </AnimatedBorderCard>
-          </motion.div>
-
-          {/* Support Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="flex justify-center"
-          >
-            <AnimatedBorderCard
-              backgroundColor="10 10 10"
-              className="p-8 text-center space-y-4 backdrop-blur-sm max-w-2xl"
-              style={
-                {
-                  "--border-color": `conic-gradient(from var(--border-angle, 0deg),
-                                    #ff0000, #ff8000, #ffff00, #00ff00, #0080ff, #8000ff, #ff00ff, #ff0000)`,
-                } as React.CSSProperties
-              }
-            >
-              <div className="inline-flex items-center justify-center p-3 bg-red-500/10 rounded-full ring-1 ring-red-500/50">
-                <Heart className="w-6 h-6 text-red-500" />
-              </div>
-              <p className="text-lg text-white/80 leading-relaxed">
-                {t("vip.supportMessage")}
-              </p>
-            </AnimatedBorderCard>
+            <DonationPerks />
           </motion.div>
         </div>
       </div>

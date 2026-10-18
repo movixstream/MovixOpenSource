@@ -1,0 +1,51 @@
+[package]
+name = "movix_adblock"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bloqueur de pubs du lecteur web de l'appli télé Movix (adblock-rust en JNI)"
+license = "MPL-2.0"
+
+[lib]
+name = "movix_adblock"
+# cdylib : la .so chargée par l'appli ; rlib : pour que l'outil `gen` et les
+# tests réutilisent les mêmes fonctions que le code JNI.
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "gen"
+path = "src/bin/gen.rs"
+# L'outil de génération ne tourne que sur la machine de build.
+required-features = ["gen"]
+
+[features]
+default = []
+# Les ressources uBO sont assemblées par gen/ubo-resources.mjs (Node) : le
+# format module ES récent des scriptlets n'est pas lisible par
+# `adblock/resource-assembler`.
+gen = []
+
+[dependencies]
+# Pas de `single-thread` : le moteur doit être Send + Sync (appels depuis les
+# fils réseau de la WebView). Pas de réseau au runtime : tout vient des assets.
+adblock = { version = "=0.13.3", default-features = false, features = [
+    "embedded-domain-resolver",
+    "full-regex-handling",
+] }
+jni = { version = "0.21.1", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+# « unwind » et non « abort » : avec « abort », `catch_unwind` ne rattrape
+# rien et une panique dans adblock-rust tuerait l'appli entière ; ici elle
+# devient « laisser passer » côté Kotlin.
+panic = "unwind"
+strip = true
+
+# Les tests chargent un moteur de plusieurs Mo : optimiser un peu même en test.
+[profile.test]
+opt-level = 2

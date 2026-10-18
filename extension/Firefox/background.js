@@ -546,6 +546,7 @@ async function setupRules() {
           "movix.men",
           "movix.college",
           "movix.luxe",
+          "movix.dog",
         ],
         resourceTypes: [
           "xmlhttprequest",
@@ -780,10 +781,11 @@ function proxyBytesToBase64(bytes) {
 // BEGIN STREAMED HANDSHAKE
 async function streamedHandshake(embedUrl) {
   if (extractionPrefs.livetv.streamed === false) throw new Error("Source Streamed désactivée");
-  const allowedPages = new Set(["embed.st", "rockystream.st", "embedhd.cc"]);
+  // Pas de liste de domaines : Streamed change souvent de relais.
   const safeUrl = value => {
     const url = new URL(value);
-    if (url.protocol !== "https:" || url.username || url.password || url.port || !allowedPages.has(url.hostname)) {
+    if (url.protocol !== "https:" || url.username || url.password || url.port ||
+      /^(?:\d+\.){3}\d+$|^\[|(?:^|\.)localhost$/.test(url.hostname)) {
       throw new Error("URL Streamed invalide");
     }
     return url;
@@ -816,8 +818,7 @@ async function streamedHandshake(embedUrl) {
           const parts = (await legacy.text()).match(/return\s*\(\s*(\[\s*"[^"]+"(?:\s*,\s*"[^"]+")*\s*\])\.join\(\s*""\s*\)/)?.[1];
           if (!parts) throw new Error("Adresse golf introuvable");
           const media = new URL(JSON.parse(parts).join(""));
-          if (media.protocol !== "https:" || media.username || media.password || media.port ||
-            !(media.hostname === "zohanayaan.com" || media.hostname.endsWith(".zohanayaan.com"))) throw new Error("CDN golf inconnu");
+          if (media.protocol !== "https:" || media.username || media.password || media.port) throw new Error("CDN golf inconnu");
           return { url: media.href, referer: "https://exposestrat.com/" };
         }
         const iframe = html.match(/<iframe\b[^>]*\ssrc\s*=\s*(["'])(.*?)\1/is);

@@ -25,14 +25,8 @@ const {
   DARKINO_PROXIES,
   PROXIES,
   HTTP_PROXIES,
-  CLOUDFLARE_WORKERS_PROXIES,
   withFStreamProxy,
   getDarkinoHttpProxyAgent,
-  getAvailableProxies,
-  markProxyAsErrored,
-  markProxyAsHealthy,
-  buildProxiedUrl,
-  makeRequestWithCorsFallback,
   makeCoflixRequest,
   makeLecteurVideoRequest,
   makeWiflixRequest,
@@ -57,7 +51,7 @@ let deps = {
   incrementFstreamRequestCounter: () => {}
 };
 
-const WIFLIX_BASE_URL = 'https://flemmix.golf';
+const WIFLIX_BASE_URL = process.env.WIFLIX_BASE_URL || 'https://flemmix.rip';
 
 const truncateForLog = (value, maxLength = 300) => {
   if (typeof value !== 'string') return value;
@@ -518,7 +512,22 @@ async function axiosCoflixRequest(config) {
   }
 }
 
-// Fonction utilitaire pour requ\u00eates French-Stream (SPA) via CORS fallback
+// En-têtes navigateur de l'ancien accès direct French-Stream (sans relais).
+const FRENCH_STREAM_BROWSER_HEADERS = {
+  accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+  'accept-language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+  priority: 'u=1, i',
+  'sec-ch-ua': '"Chromium";v="140", "Not=A?Brand";v="24", "Brave";v="140"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"Windows"',
+  'sec-fetch-dest': 'document',
+  'sec-fetch-mode': 'navigate',
+  'sec-fetch-site': 'cross-site',
+  'sec-gpc': '1',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+};
+
+// Requêtes French-Stream (SPA) en direct : les relais Cloudflare ne sont plus utilisés.
 async function axiosFrenchStreamRequest(config) {
   const targetUrl = config.url || '';
   const isAbsolute = /^https?:\/\//i.test(targetUrl);
@@ -533,11 +542,13 @@ async function axiosFrenchStreamRequest(config) {
     ? targetUrl
     : (config.baseURL ? `${config.baseURL.replace(/\/$/, '')}/${targetUrl.replace(/^\//, '')}` : targetUrl);
 
-  return makeRequestWithCorsFallback(absoluteUrl, {
-    headers: { ...(config.headers || {}) },
+  return axios({
+    url: absoluteUrl,
+    method: 'GET',
+    headers: { ...FRENCH_STREAM_BROWSER_HEADERS, ...(config.headers || {}) },
     timeout: config.timeout || 5000,
     decompress: true,
-    responseType: config.responseType
+    responseType: config.responseType,
   });
 }
 
@@ -794,7 +805,7 @@ async function axiosAnimeSamaRequest(config) {
 }
 
 // Fonction utilitaire pour requ\u00eates Wiflix avec proxy
-// D\u00e9l\u00e8gue \u00e0 makeWiflixRequest (free proxies -> Cloudflare Workers -> direct)
+// Délègue à makeWiflixRequest (proxys uniquement, sans relais Cloudflare)
 async function axiosWiflixRequest(config) {
   const urlStr = config.url || '';
 

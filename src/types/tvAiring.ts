@@ -9,8 +9,25 @@ export interface TvEpisodeDate {
   air_date?: string | null;
 }
 
+/** Épisode TVmaze, avec sa propre numérotation (parfois différente de TMDB). */
+export interface TvmazeEpisode {
+  id: number;
+  season: number;
+  number: number;
+  name: string;
+  airdate: string | null;
+  runtime: number | null;
+  image: string | null;
+  summary: string;
+}
+
 export interface TvAiringSchedule {
   sourceUrl: string;
+  episodeList: TvmazeEpisode[];
+  /** Découpage de Netflix (liste alternative TVmaze), quand il existe. */
+  netflixEpisodeList?: TvmazeEpisode[];
+  /** TVmaze indique Netflix comme diffuseur de la série. */
+  onNetflix?: boolean;
   episodes: Record<string, {
     date: string | null;
     /** Instant ISO avec fuseau, uniquement si TVmaze renseigne aussi airtime. */

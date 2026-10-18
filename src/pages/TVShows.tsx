@@ -7,6 +7,7 @@ import CatalogSkeleton from '../components/skeletons/CatalogSkeleton';
 import EmblaCarouselGenres from '../components/EmblaCarouselGenres';
 import LazySection from '../components/LazySection';
 import CarouselTitle from '../components/CarouselTitle';
+import { Flame, Compass } from 'lucide-react';
 
 import TelegramPromotion from '../components/TelegramPromotion';
 import { useWrappedTracker } from '../hooks/useWrappedTracker';
@@ -759,7 +760,7 @@ const TVShows: React.FC = () => {
   }, [hoveredCardIndex]);
 
   const trendingTitle = useMemo(
-    () => <CarouselTitle icon="🔥" iconClass="text-red-600" label={t('home.trendingToday')} />,
+    () => <CarouselTitle icon={Flame} iconClass="text-red-600" label={t('home.trendingToday')} />,
     [t]
   );
 
@@ -769,7 +770,7 @@ const TVShows: React.FC = () => {
   );
 
   const genresTitle = useMemo(
-    () => <CarouselTitle icon="🧭" iconClass="text-white" label={t('genres.findByGenre')} />,
+    () => <CarouselTitle icon={Compass} iconClass="text-white" label={t('genres.findByGenre')} />,
     [t]
   );
 

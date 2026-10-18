@@ -14,6 +14,7 @@ type RawAddressJson = {
   active?: unknown[];
   github?: unknown;
   telegram?: unknown;
+  matrix?: unknown;
 };
 
 const HOSTNAME_RE =
@@ -82,8 +83,14 @@ function parseRentry(text: string): string | null {
 function normalizeAddressJson(raw: RawAddressJson): AddressConfig | null {
   const primaryUrl = raw.primary?.url;
   if (!isString(primaryUrl)) return null;
-  if (!isString(raw.github)) return null;
-  if (!isString(raw.telegram)) return null;
+  // `telegram` a été remplacé par `matrix` dans address.json : ni l'un ni
+  // l'autre n'est obligatoire, sinon tout le fichier serait rejeté.
+  const githubUrl = isString(raw.github) ? raw.github : FALLBACK_CONFIG.GITHUB_URL;
+  const telegramUrl = isString(raw.matrix)
+    ? raw.matrix
+    : isString(raw.telegram)
+      ? raw.telegram
+      : FALLBACK_CONFIG.TELEGRAM_URL;
 
   const active = Array.isArray(raw.active) ? raw.active : [];
   const mirrors: string[] = [];
@@ -97,8 +104,8 @@ function normalizeAddressJson(raw: RawAddressJson): AddressConfig | null {
   return {
     primaryUrl,
     mirrors,
-    githubUrl: raw.github,
-    telegramUrl: raw.telegram,
+    githubUrl,
+    telegramUrl,
   };
 }
 

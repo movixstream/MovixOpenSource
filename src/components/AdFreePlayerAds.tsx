@@ -182,7 +182,7 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
     if (!shouldShow || popupMode !== 'normal') return;
 
     const lenis = (
-      window as Window & { lenis?: { stop: () => void; start: () => void } }
+      window as unknown as { lenis?: { stop: () => void; start: () => void } }
     ).lenis;
     if (lenis) lenis.stop();
 
@@ -380,6 +380,9 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
         <DialogPrimitive.Overlay
           className={cn("fixed inset-0 z-50", effectivePrefs.transitions && POPUP_ANIMATION_CLASS)}
           style={{ background: easterEggFound ? "#000" : "rgba(59,130,246,0.22)" }}
+          // Repère pour l'habillage Halloween (halloween-ui.css) ; l'écran
+          // noir de l'easter egg reste tel quel.
+          data-ad-overlay={easterEggFound ? undefined : ''}
           onClick={(e) => {
             if (e.target === e.currentTarget && hasClicked) {
               handleClose();
@@ -397,6 +400,7 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
             if (!hasClicked) e.preventDefault();
           }}
           data-lenis-prevent
+          data-ad-dialog={easterEggFound ? undefined : ''}
           className={cn(
             easterEggFound
               ? "fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-black px-6 py-8 transition-none"

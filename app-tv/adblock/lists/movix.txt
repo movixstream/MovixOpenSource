@@ -1,0 +1,34 @@
+[Adblock Plus 2.0]
+! Title: Movix — lecteurs web de l'appli télé
+! Description: Compléments aux listes publiques pour les pages des
+!   hébergeurs vidéo (voe, uqload, doodstream, vidmoly…) ouvertes dans le
+!   lecteur web de l'appli télé. Règles prudentes : régies pub et popunders
+!   connus, rien qui touche aux lecteurs eux-mêmes ni à leurs CDN.
+! License: MPL-2.0 (comme le crate movix_adblock)
+!
+! --- Régies popunder / pop-up courantes sur les hébergeurs ---
+! (la plupart figurent déjà dans EasyList ou la liste de Peter Lowe ;
+! les répéter ici les garde même si une liste publique les retire)
+||popads.net^
+||popcash.net^
+||propellerads.com^
+||onclickads.net^
+||exoclick.com^
+||exosrv.com^
+||juicyads.com^
+||hilltopads.net^
+||clickadu.com^
+||adcash.com^
+||ad-maven.com^
+||adsterra.com^
+||monetag.com^
+||popmyads.com^
+||clickaine.com^
+||adspyglass.com^
+||galaksion.com^
+||a-ads.com^
+!
+! --- Fenêtres ouvertes au premier clic sur la vidéo ---
+! `nowoif` neutralise window.open : le lecteur web n'ouvre de toute façon
+! aucune nouvelle fenêtre, seules les pubs s'en servent.
+voe.sx,uqload.*,dood.*,doodstream.*,d000d.*,ds2play.*,vidmoly.*,streamtape.*,filemoon.*,mixdrop.*,supervideo.*,vidoza.net,upstream.to,lulustream.com,streamwish.*,netu.tv,hqq.tv,waaw.tv##+js(nowoif)

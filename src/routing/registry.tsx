@@ -82,6 +82,9 @@ export const ROUTES: RouteEntry[] = [
   { path: '/auth',                    loader: lz(() => import('../components/DiscordAuth')) },
   { path: '/auth/google',             loader: lz(() => import('../components/GoogleAuth')) },
   { path: '/oauth/authorize',         loader: lz(() => import('../pages/OAuthAuthorizePage')) },
+  // Lien du QR de l'appli télé (/tv?code=K7P2Q) : redirige vers /app-tv#relier
+  // en gardant le code. Un seul segment : React Router la sépare de /tv/:id.
+  { path: '/tv',                      loader: lz(() => import('../pages/TvLinkRedirect')) },
   { path: '/profile',                 loader: lz(() => import('../pages/Profile')), guard: 'private' },
   { path: '/profile-management',      loader: lz(() => import('../pages/ProfileManagement')) },
   { path: '/alerts',                  loader: lz(() => import('../pages/AlertsPage')) },
@@ -114,6 +117,7 @@ export const ROUTES: RouteEntry[] = [
   { path: '/suggestion',              loader: lz(() => import('../pages/SuggestionPage')) },
   { path: '/extension',               loader: lz(() => import('../pages/ExtensionPage')) },
   { path: '/app',                     loader: lz(() => import('../pages/AppDownloadPage')) },
+  { path: '/app-tv',                  loader: lz(() => import('../pages/TvAppPage')) },
 ];
 
 /**

@@ -1,1322 +1,789 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
-import { lazyWithRetry } from '@/routing/lazyWithRetry';
-import { createPortal, flushSync } from 'react-dom';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import React, { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Search, X, Star, Film, Tv2, User, GitBranch, ZoomIn, ZoomOut, Maximize2, ArrowLeft, Network, Sparkles, Eye, Loader, HelpCircle, Settings2 } from 'lucide-react';
-import type { ForceGraphMethods } from 'react-force-graph-2d';
-import { forceCollide } from 'd3-force-3d';
-import { bindSingleNodeTouchDrag } from '@/utils/graphTouch';
-
-// Heavy graph renderer (~140 KB minified) — code-split into its own chunk so
-// the page shell loads before the graph engine is fetched.
-const ForceGraph2D = lazy(() => lazyWithRetry(() => import('react-force-graph-2d')));
+import { AnimatePresence, motion } from 'framer-motion';
 import {
-  fetchContentGraph,
-  fetchPersonGraph,
-  searchTMDB,
-  fetchTrending,
-  NODE_COLORS,
-  DEFAULT_GRAPH_OPTIONS,
-  type GraphNode,
-  type GraphLink,
-  type GraphData,
-  type GraphFetchOptions,
-} from '../services/cineGraphService';
-import { encodeId } from '../utils/idEncoder';
-import { SquareBackground } from '../components/ui/square-background';
-import '../styles/cinegraph.css';
+  AlertTriangle,
+  ArrowLeft,
+  ChevronRight,
+  Film,
+  HelpCircle,
+  List,
+  Loader,
+  Map as MapIcon,
+  MousePointerClick,
+  Network,
+  RefreshCw,
+  Search,
+  Shrink,
+  Star,
+  User,
+  X,
+} from 'lucide-react';
+
+import { isChunkLoadError, lazyWithRetry } from '@/routing/lazyWithRetry';
+import { SquareBackground } from '@/components/ui/square-background';
 import { getOverlayPortalRoot } from '@/utils/overlayPortal';
+import { encodeId } from '@/utils/idEncoder';
+import { cn } from '@/lib/utils';
+import { fetchPersonMap, fetchTrending, fetchWorkMap, searchCineGraph } from '@/services/cineGraph/tmdb';
+import type { CineMap, EntityType, MapEntity, SearchHit, ZoneKind } from '@/services/cineGraph/types';
+import CineMapList from '@/components/cinegraph/CineMapList';
+import type { MapViewProps } from '@/components/cinegraph/CineMapCanvas';
+import WhyPanel from '@/components/cinegraph/WhyPanel';
+import { RootCard } from '@/components/cinegraph/cards';
+import { useMediaQuery } from '@/components/cinegraph/useMediaQuery';
+import { ZONE_META, zoneTitle } from '@/components/cinegraph/zones';
+import '@/styles/cinegraph.css';
 
-// ─── Image cache for canvas rendering ────────────────────────────────────────
-
-const imageCache = new Map<string, HTMLImageElement>();
-
-function loadImage(url: string): HTMLImageElement | null {
-  if (imageCache.has(url)) return imageCache.get(url)!;
-  const img = new Image();
-  img.src = url;
-  img.crossOrigin = 'anonymous';
-  img.onload = () => imageCache.set(url, img);
-  return null; // not ready yet
+// La vue « carte » (React Flow) n'est chargée que sur grand écran. Chargement
+// discret : si ce morceau ne vient pas (réseau, cache abîmé), la page garde la
+// vue liste au lieu de se recharger. React.lazy garde un échec en mémoire :
+// chaque nouvel essai demandé par « Réessayer » repart d'un composant neuf.
+type CanvasComponent = React.LazyExoticComponent<React.ComponentType<MapViewProps>>;
+const canvasAttempts = new Map<number, CanvasComponent>();
+function canvasFor(attempt: number): CanvasComponent {
+  let component = canvasAttempts.get(attempt);
+  if (!component) {
+    component = lazy(() => lazyWithRetry(() => import('@/components/cinegraph/CineMapCanvas'), { silent: true }));
+    canvasAttempts.set(attempt, component);
+  }
+  return component;
 }
 
-// ─── Legend items ─────────────────────────────────────────────────────────────
+/** Bascule sur la vue liste si le moteur de carte ne se charge pas. */
+class MapEngineBoundary extends React.Component<
+  { fallback: React.ReactNode; children: React.ReactNode },
+  { error: unknown }
+> {
+  state: { error: unknown } = { error: null };
 
-const LEGEND_ITEMS = [
-  { type: 'movie', labelKey: 'cinegraph.films', color: NODE_COLORS.movie, icon: <Film size={12} /> },
-  { type: 'tv', labelKey: 'cinegraph.series', color: NODE_COLORS.tv, icon: <Tv2 size={12} /> },
-  { type: 'person', labelKey: 'cinegraph.persons', color: NODE_COLORS.person, icon: <User size={12} /> },
-  { type: 'genre', labelKey: 'cinegraph.genresLabel', color: NODE_COLORS.genre, icon: <Sparkles size={12} /> },
-] as const;
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
 
-const LINK_LABELS: Record<string, string> = {
-  actor: 'cinegraph.actor',
-  director: 'cinegraph.director',
-  genre: 'cinegraph.genre',
-  similar: 'cinegraph.similar',
-  recommendation: 'cinegraph.recommendation',
-  company: 'cinegraph.company',
+  componentDidCatch(error: unknown) {
+    if (isChunkLoadError(error)) console.warn('CinéGraph : carte indisponible, affichage en liste', error);
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    // Un vrai bug de rendu doit atteindre l'ErrorBoundary de l'application.
+    if (!isChunkLoadError(this.state.error)) throw this.state.error;
+    return this.props.fallback;
+  }
+}
+
+type ViewMode = 'map' | 'list';
+interface TrailStep {
+  type: EntityType;
+  id: number;
+  title: string;
+}
+
+const VIEW_STORAGE_KEY = 'cinegraph-view';
+const ENTITY_TYPES: readonly EntityType[] = ['movie', 'tv', 'person'];
+const isEntityType = (value: string | null): value is EntityType => ENTITY_TYPES.includes(value as EntityType);
+
+function readViewPreference(): ViewMode {
+  try {
+    return localStorage.getItem(VIEW_STORAGE_KEY) === 'list' ? 'list' : 'map';
+  } catch {
+    return 'map';
+  }
+}
+
+/** Fil d'Ariane de l'exploration : revenir sur un pas coupe la suite. */
+function nextTrail(previous: TrailStep[], map: CineMap, reset: boolean): TrailStep[] {
+  const step = { type: map.root.type, id: map.root.tmdbId, title: map.root.title };
+  if (reset) return [step];
+  const index = previous.findIndex((entry) => entry.type === step.type && entry.id === step.id);
+  if (index >= 0) return previous.slice(0, index + 1);
+  return [...previous, step].slice(-8);
+}
+
+const typeLabelKey: Record<EntityType, string> = {
+  movie: 'cinegraph.filmLabel',
+  tv: 'cinegraph.seriesLabel',
+  person: 'cinegraph.artistLabel',
 };
 
-// ─── CinéGraph Page ──────────────────────────────────────────────────────────
+/** La carte tient dans la fenêtre : la molette n'a pas de page à faire défiler. */
+const MIN_STAGE_HEIGHT = 460;
+const STAGE_BOTTOM_GAP = 16;
+
+interface SearchBoxProps {
+  query: string;
+  results: SearchHit[];
+  searching: boolean;
+  open: boolean;
+  /** Version courte, dans la barre du plein écran. */
+  compact?: boolean;
+  containerRef?: React.Ref<HTMLDivElement>;
+  onQueryChange: (value: string) => void;
+  onFocus: () => void;
+  onClear: () => void;
+  onPick: (hit: SearchHit) => void;
+}
+
+/** Champ de recherche d'un point de départ (film, série ou artiste). */
+function SearchBox({ query, results, searching, open, compact, containerRef, onQueryChange, onFocus, onClear, onPick }: SearchBoxProps) {
+  const { t } = useTranslation();
+  return (
+    <div className={cn('cinegraph-search-container', compact && 'is-compact')} ref={containerRef}>
+      <div className="cinegraph-search-wrapper">
+        <Search size={18} className="cinegraph-search-icon" aria-hidden="true" />
+        <input
+          type="text"
+          className="cinegraph-search-input"
+          placeholder={t('cinegraph.searchPlaceholder')}
+          aria-label={t('cinegraph.searchPlaceholder')}
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          onFocus={onFocus}
+        />
+        {query && (
+          <button type="button" className="cinegraph-search-clear" aria-label={t('cinegraph.clearSearch')} onClick={onClear}>
+            <X size={16} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {open && query.trim().length >= 2 && (
+          <motion.div
+            className="cinegraph-search-results"
+            initial={{ opacity: 0, y: -8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+            onWheel={(event) => event.stopPropagation()}
+            data-lenis-prevent
+          >
+            {searching && results.length === 0 ? (
+              <div className="cg-search-state">
+                <Loader size={20} className="animate-spin" style={{ color: '#e50914' }} aria-hidden="true" />
+              </div>
+            ) : results.length > 0 ? (
+              results.map((hit) => (
+                <button key={`${hit.type}-${hit.id}`} type="button" className="cinegraph-search-result-item" onClick={() => onPick(hit)}>
+                  {hit.img ? (
+                    <img src={hit.img} alt="" className={cn('cinegraph-search-result-poster', hit.type === 'person' && 'is-person')} />
+                  ) : (
+                    <span className="cinegraph-search-result-poster-placeholder">
+                      {hit.type === 'person' ? <User size={16} aria-hidden="true" /> : <Film size={16} aria-hidden="true" />}
+                    </span>
+                  )}
+                  <span className="cinegraph-search-result-info">
+                    <span className="cinegraph-search-result-title">{hit.title}</span>
+                    <span className="cinegraph-search-result-meta">
+                      <span className={`cinegraph-type-badge ${hit.type}`}>{t(typeLabelKey[hit.type])}</span>
+                      {hit.year && <span>{hit.year}</span>}
+                      {!!hit.rating && hit.rating > 0 && (
+                        <span className="cg-search-rating">
+                          <Star size={11} fill="#fbbf24" color="#fbbf24" aria-hidden="true" />
+                          {hit.rating.toFixed(1)}
+                        </span>
+                      )}
+                      {hit.knownFor && <span className="cg-search-known">{hit.knownFor}</span>}
+                    </span>
+                  </span>
+                  <Network size={16} className="cg-search-go" aria-hidden="true" />
+                </button>
+              ))
+            ) : (
+              <div className="cg-search-state">{t('cinegraph.noResultsFound')}</div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 const CineGraphPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const isWide = useMediaQuery('(min-width: 1180px)');
+  const isDocked = useMediaQuery('(min-width: 768px)');
 
-  // Graph data
-  const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
+  const typeParam = searchParams.get('type');
+  const mapType = isEntityType(typeParam) ? typeParam : null;
+  const idParam = Number(searchParams.get('id'));
+  const mapId = mapType && Number.isInteger(idParam) && idParam > 0 ? idParam : null;
+
+  const [map, setMap] = useState<CineMap | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('');
-  const [rootNode, setRootNode] = useState<{ id: number; type: 'movie' | 'tv' | 'person'; title: string } | null>(null);
+  const [error, setError] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [trail, setTrail] = useState<TrailStep[]>([]);
+  const resetTrailRef = useRef(false);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [hiddenZones, setHiddenZones] = useState<ReadonlySet<ZoneKind>>(() => new Set());
+  const [viewPreference, setViewPreference] = useState<ViewMode>(readViewPreference);
+  const view: ViewMode = isWide ? viewPreference : 'list';
+  const [canvasAttempt, setCanvasAttempt] = useState(0);
+  const CineMapCanvas = canvasFor(canvasAttempt);
+  const [fullscreen, setFullscreen] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stageHeight, setStageHeight] = useState<number | null>(null);
 
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
-  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const searchContainerRef = useRef<HTMLDivElement>(null);
-
-  // Trending for home
-  const [trending, setTrending] = useState<any[]>([]);
-
-  // Visual filters
-  const [activeTypes, setActiveTypes] = useState<Set<string>>(new Set(['movie', 'tv', 'person', 'genre']));
-
-  // Tooltip
-  const [tooltip, setTooltip] = useState<{ node: GraphNode; x: number; y: number } | null>(null);
-
-  // Detail panel
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-
-  // Graph ref
-  const graphRef = useRef<ForceGraphMethods>();
-  const [graphReady, setGraphReady] = useState(false);
-  const [enableNodeDrag, setEnableNodeDrag] = useState(true);
-  const setNodeDragForTouch = useCallback((enabled: boolean, immediate: boolean) => {
-    if (immediate) {
-      // react-kapsule transmet les props modifiées au moteur pendant le rendu.
-      // Le subject d3-drag du même touchstart voit donc la valeur désactivée.
-      flushSync(() => setEnableNodeDrag(enabled));
-      return;
-    }
-    setEnableNodeDrag(enabled);
-  }, []);
-  const handleGraphRef = useCallback((instance: ForceGraphMethods | null) => {
-    graphRef.current = instance ?? undefined;
-    setGraphReady(Boolean(instance));
-  }, []);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-
-  // Highlighted node
-  const [highlightedNode, setHighlightedNode] = useState<string | null>(null);
-  const [highlightedLinks, setHighlightedLinks] = useState<Set<string>>(new Set());
-
-  // Help modal
+  const [trending, setTrending] = useState<SearchHit[]>([]);
   const [showHelp, setShowHelp] = useState(false);
-  const [helpClosing, setHelpClosing] = useState(false);
 
-  // Settings modal
-  const [showSettings, setShowSettings] = useState(false);
-  const [settingsClosing, setSettingsClosing] = useState(false);
-  const [graphOptions, setGraphOptions] = useState<GraphFetchOptions>(() => {
-    try {
-      const saved = sessionStorage.getItem('cinegraph-options');
-      if (saved) return { ...DEFAULT_GRAPH_OPTIONS, ...JSON.parse(saved) };
-    } catch {}
-    return { ...DEFAULT_GRAPH_OPTIONS };
-  });
-
-  // Persist options to sessionStorage
-  useEffect(() => {
-    try {
-      sessionStorage.setItem('cinegraph-options', JSON.stringify(graphOptions));
-    } catch {}
-  }, [graphOptions]);
-
-  // Disable body scroll when help modal is open
-  useEffect(() => {
-    if (!showHelp) return;
-    const orig = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = orig; };
-  }, [showHelp]);
-
-  const closeHelp = useCallback(() => {
-    setHelpClosing(true);
-    setTimeout(() => {
-      setShowHelp(false);
-      setHelpClosing(false);
-    }, 300);
-  }, []);
-
-  // Settings modal close
-  useEffect(() => {
-    if (!showSettings) return;
-    const orig = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = orig; };
-  }, [showSettings]);
-
-  const closeSettings = useCallback(() => {
-    setSettingsClosing(true);
-    setTimeout(() => {
-      setShowSettings(false);
-      setSettingsClosing(false);
-    }, 300);
-  }, []);
-
-  // ─── Resize handler ─────────────────────────────────────────────────────────
+  // ─── Chargement de la carte (l'URL fait foi : précédent/suivant marchent) ──
 
   useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        setDimensions({ width: rect.width, height: Math.max(rect.height, window.innerHeight - 280) });
-      } else {
-        setDimensions({ width: window.innerWidth, height: window.innerHeight - 280 });
-      }
-    };
-    updateDimensions();
-    window.addEventListener('resize', updateDimensions);
-    return () => window.removeEventListener('resize', updateDimensions);
-  }, [graphData]);
-
-  // ─── Load trending on mount ─────────────────────────────────────────────────
-
-  useEffect(() => {
-    fetchTrending().then(setTrending);
-  }, []);
-
-  // ─── Configure forces (spacing) ─────────────────────────────────────────────
-
-  useEffect(() => {
-    if (graphRef.current) {
-      graphRef.current.d3Force('charge')?.strength(-180);
-      graphRef.current.d3Force('link')?.distance(75);
-      graphRef.current.d3Force(
-        'collide',
-        forceCollide((n: any) => (n.val || 12) / 2 + 6).strength(1).iterations(2),
-      );
-      graphRef.current.d3ReheatSimulation();
-    }
-  }, [graphData, dimensions]);
-
-
-  // ─── Handle URL params ──────────────────────────────────────────────────────
-
-  useEffect(() => {
-    const type = searchParams.get('type') as 'movie' | 'tv' | 'person' | null;
-    const id = searchParams.get('id');
-    if (type && id) {
-      loadGraph(type, parseInt(id, 10));
-    }
-  }, [searchParams.get('type'), searchParams.get('id')]);
-
-  // ─── Click outside search ──────────────────────────────────────────────────
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
-        setShowResults(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  // ─── Escape key closes detail panel ────────────────────────────────────────
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setSelectedNode(null);
-        setHighlightedNode(null);
-        setHighlightedLinks(new Set());
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, []);
-
-  // ─── Load Graph ─────────────────────────────────────────────────────────────
-
-  const loadGraph = useCallback(async (type: 'movie' | 'tv' | 'person', tmdbId: number, title?: string) => {
-    setLoading(true);
-    setSelectedNode(null);
-    setTooltip(null);
-
-    const phrases = [
-      t('cinegraph.mappingCinematicUniverse'),
-      t('cinegraph.discoveringCreativeNetwork'),
-      t('cinegraph.mappingCinematicUniverse'),
-      t('cinegraph.discoveringCreativeNetwork'),
-      t('cinegraph.mappingCinematicUniverse'),
-    ];
-    let phraseIdx = 0;
-    setLoadingText(phrases[0]);
-    const interval = setInterval(() => {
-      phraseIdx = (phraseIdx + 1) % phrases.length;
-      setLoadingText(phrases[phraseIdx]);
-    }, 2000);
-
-    try {
-      let data: GraphData;
-      if (type === 'person') {
-        data = await fetchPersonGraph(tmdbId, graphOptions);
-      } else {
-        data = await fetchContentGraph(type, tmdbId, graphOptions.depth, graphOptions);
-      }
-
-      setGraphData(data);
-      setRootNode({ id: tmdbId, type, title: title || data.nodes[0]?.label || '' });
-
-      // Update URL
-      setSearchParams({ type, id: String(tmdbId) });
-
-      // Zoom to fit after data loaded
-      setTimeout(() => {
-        graphRef.current?.zoomToFit(600, 60);
-      }, 800);
-    } catch (err) {
-      console.error('Failed to load graph:', err);
-    } finally {
-      clearInterval(interval);
+    if (!mapType || !mapId) {
+      setMap(null);
+      setSelectedKey(null);
+      setError(false);
       setLoading(false);
-    }
-  }, [setSearchParams, graphOptions]);
-
-  // ─── Search handler ─────────────────────────────────────────────────────────
-
-  const handleSearch = useCallback((query: string) => {
-    setSearchQuery(query);
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-
-    if (query.length < 2) {
-      setSearchResults([]);
-      setShowResults(false);
       return;
     }
+    const controller = new AbortController();
+    setLoading(true);
+    setError(false);
+    setSelectedKey(null);
+    const request = mapType === 'person'
+      ? fetchPersonMap(mapId, controller.signal)
+      : fetchWorkMap(mapType, mapId, controller.signal);
+    request
+      .then((next) => {
+        if (controller.signal.aborted) return;
+        setMap(next);
+        // Une zone masquée sur la carte précédente n'a pas de sens pour la suivante.
+        setHiddenZones(new Set());
+        setTrail((previous) => nextTrail(previous, next, resetTrailRef.current));
+        resetTrailRef.current = false;
+      })
+      .catch((err) => {
+        // Seule notre propre annulation se tait : toute autre coupure doit
+        // afficher l'erreur et « Réessayer », jamais une page vide.
+        if (controller.signal.aborted) return;
+        console.error('CinéGraph : impossible de charger la carte', err);
+        // Garder l'ancienne carte sous une URL qui en désigne une autre tromperait.
+        setMap(null);
+        setError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [mapType, mapId, reloadToken]);
 
-    setSearchLoading(true);
-    setShowResults(true);
-
-    searchTimeoutRef.current = setTimeout(async () => {
-      const results = await searchTMDB(query);
-      setSearchResults(results);
-      setSearchLoading(false);
-    }, 350);
-  }, []);
-
-  // ─── Select search result ──────────────────────────────────────────────────
-
-  const handleSelectResult = useCallback((item: any) => {
-    setSearchQuery('');
-    setShowResults(false);
-    setSearchResults([]);
-    loadGraph(item.type, item.id, item.title);
-  }, [loadGraph]);
-
-  // ─── Select trending item ──────────────────────────────────────────────────
-
-  const handleSelectTrending = useCallback((item: any) => {
-    loadGraph(item.type, item.id, item.title);
-  }, [loadGraph]);
-
-  // ─── Filter graph data by active types ─────────────────────────────────────
-
-  const filteredData = useMemo(() => {
-    const nodeIds = new Set(
-      graphData.nodes.filter((n) => activeTypes.has(n.type)).map((n) => n.id)
-    );
-    return {
-      nodes: graphData.nodes.filter((n) => activeTypes.has(n.type)),
-      links: graphData.links.filter(
-        (l) => {
-          const srcId = typeof l.source === 'string' ? l.source : (l.source as any).id;
-          const tgtId = typeof l.target === 'string' ? l.target : (l.target as any).id;
-          return nodeIds.has(srcId) && nodeIds.has(tgtId);
-        }
-      ),
-    };
-  }, [graphData, activeTypes]);
-
-  // ─── Node hover highlighting ───────────────────────────────────────────────
-
-  const handleNodeHover = useCallback((node: any) => {
-    if (!node) {
-      setHighlightedNode(null);
-      setHighlightedLinks(new Set());
-      setTooltip(null);
-      document.body.style.cursor = 'default';
-      return;
-    }
-    document.body.style.cursor = 'pointer';
-
-    setHighlightedNode(node.id);
-    const connectedLinks = new Set<string>();
-    filteredData.links.forEach((l: any) => {
-      const srcId = typeof l.source === 'string' ? l.source : l.source?.id;
-      const tgtId = typeof l.target === 'string' ? l.target : l.target?.id;
-      if (srcId === node.id || tgtId === node.id) {
-        connectedLinks.add(`${srcId}-${tgtId}`);
-      }
-    });
-    setHighlightedLinks(connectedLinks);
-  }, [filteredData.links]);
-
-  // ─── Node click ────────────────────────────────────────────────────────────
-
-  const handleNodeClick = useCallback((node: any) => {
-    setSelectedNode(node as GraphNode);
-    setTooltip(null);
-  }, []);
-
-  // ─── Manual click fallback on the canvas ────────────────────────────────────
-  // react-force-graph's built-in click detection can swallow clicks when the
-  // pointer moves even slightly, or after zoom/pan gestures. We wire our own
-  // click detector on the canvas that walks graph data to find the node under
-  // the pointer.
   useEffect(() => {
-    if (!graphReady || !filteredData.nodes.length) return;
-    const container = containerRef.current;
-    if (!container) return;
-    const canvas = container.querySelector('canvas') as HTMLCanvasElement | null;
-    if (!canvas) return;
+    if (!loading) return;
+    const phrases = [t('cinegraph.mappingCinematicUniverse'), t('cinegraph.discoveringCreativeNetwork')];
+    let index = 0;
+    setLoadingText(phrases[0]);
+    const timer = window.setInterval(() => {
+      index = (index + 1) % phrases.length;
+      setLoadingText(phrases[index]);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [loading, t]);
 
-    const pickNode = (clientX: number, clientY: number): GraphNode | null => {
-      const g = graphRef.current;
-      if (!g) return null;
-      const rect = canvas.getBoundingClientRect();
-      const graphCoords = g.screen2GraphCoords(clientX - rect.left, clientY - rect.top);
-      let best: GraphNode | null = null;
-      let bestDist = Infinity;
-      for (const n of filteredData.nodes as any[]) {
-        if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
-        const dx = n.x - graphCoords.x;
-        const dy = n.y - graphCoords.y;
-        const d = Math.hypot(dx, dy);
-        const size = n.val || 12;
-        const hasImg = n.img && (n.type === 'movie' || n.type === 'tv' || n.type === 'person');
-        const radius = hasImg ? size / 2 + 2 : size / 2 + 1;
-        const hit = Math.max(radius, 12);
-        if (d <= hit && d < bestDist) {
-          best = n;
-          bestDist = d;
-        }
-      }
-      return best;
-    };
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchTrending(controller.signal)
+      .then((hits) => {
+        if (!controller.signal.aborted) setTrending(hits);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
 
-    const releaseTouchGuard = bindSingleNodeTouchDrag(
-      canvas,
-      (x, y) => pickNode(x, y) !== null,
-      setNodeDragForTouch,
-    );
-    let downX = 0;
-    let downY = 0;
-    let lastHoverId: string | null = null;
-    const onDown = (e: PointerEvent) => {
-      downX = e.clientX;
-      downY = e.clientY;
-    };
-    const onUp = (e: PointerEvent) => {
-      if (e.button !== 0) return;
-      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 5) return;
-      const hit = pickNode(e.clientX, e.clientY);
-      if (hit) handleNodeClick(hit);
-    };
-    const onMove = (e: PointerEvent) => {
-      const hit = pickNode(e.clientX, e.clientY);
-      const id = hit ? (hit as GraphNode).id : null;
-      if (id === lastHoverId) return;
-      lastHoverId = id;
-      handleNodeHover(hit);
-    };
-    const onLeave = () => {
-      if (lastHoverId === null) return;
-      lastHoverId = null;
-      handleNodeHover(null);
-    };
-    canvas.addEventListener('pointerdown', onDown);
-    canvas.addEventListener('pointerup', onUp);
-    canvas.addEventListener('pointermove', onMove);
-    canvas.addEventListener('pointerleave', onLeave);
-    return () => {
-      releaseTouchGuard();
-      canvas.removeEventListener('pointerdown', onDown);
-      canvas.removeEventListener('pointerup', onUp);
-      canvas.removeEventListener('pointermove', onMove);
-      canvas.removeEventListener('pointerleave', onLeave);
-    };
-  }, [filteredData, graphReady, handleNodeClick, handleNodeHover, setNodeDragForTouch]);
-
-  // ─── Double-click to explore deeper ────────────────────────────────────────
-
-  const handleNodeDblClick = useCallback((node: any) => {
-    const gNode = node as GraphNode;
-    if (gNode.type === 'movie' || gNode.type === 'tv' || gNode.type === 'person') {
-      loadGraph(gNode.type, gNode.tmdbId, gNode.label);
+  const openMap = useCallback((type: EntityType, id: number, fresh: boolean) => {
+    setShowResults(false);
+    if (type === mapType && id === mapId) {
+      if (fresh) setTrail((previous) => previous.slice(-1));
+      setSelectedKey(null);
+      return;
     }
-  }, [loadGraph]);
+    resetTrailRef.current = fresh;
+    setSearchParams({ type, id: String(id) });
+  }, [mapType, mapId, setSearchParams]);
 
-  // ─── Toggle legend filter ──────────────────────────────────────────────────
+  const closeMap = useCallback(() => {
+    setTrail([]);
+    setSearchParams({});
+  }, [setSearchParams]);
 
-  const toggleType = useCallback((type: string) => {
-    setActiveTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) {
-        if (next.size > 1) next.delete(type);
+  const openEntityPage = useCallback((entity: MapEntity) => {
+    navigate(entity.type === 'person' ? `/person/${entity.tmdbId}` : `/${entity.type}/${encodeId(entity.tmdbId)}`);
+  }, [navigate]);
+
+  const exploreEntity = useCallback((entity: MapEntity) => {
+    openMap(entity.type, entity.tmdbId, false);
+  }, [openMap]);
+
+  const changeView = (next: ViewMode) => {
+    setViewPreference(next);
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, next);
+    } catch {
+      // Préférence de confort : sans stockage, on garde la vue par défaut.
+    }
+  };
+
+  const toggleZone = (kind: ZoneKind) => {
+    setHiddenZones((previous) => {
+      const next = new Set(previous);
+      if (next.has(kind)) {
+        next.delete(kind);
       } else {
-        next.add(type);
+        // Au moins une zone reste visible, sinon la carte se résume au centre.
+        const visible = map?.zones.filter((zone) => !next.has(zone.kind)).length ?? 0;
+        if (visible <= 1) return previous;
+        next.add(kind);
       }
       return next;
     });
+  };
+
+  // ─── Recherche ─────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      searchCineGraph(trimmed, controller.signal)
+        .then((hits) => {
+          if (controller.signal.aborted) return;
+          setResults(hits);
+          setSearching(false);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setSearching(false);
+        });
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setShowResults(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
   }, []);
 
-  // ─── Connections for detail panel ──────────────────────────────────────────
+  const pickHit = (hit: SearchHit) => {
+    setQuery('');
+    setResults([]);
+    openMap(hit.type, hit.id, true);
+  };
 
-  const getNodeConnections = useCallback((nodeId: string) => {
-    return graphData.links
-      .map((l: any) => {
-        const srcId = typeof l.source === 'string' ? l.source : l.source?.id;
-        const tgtId = typeof l.target === 'string' ? l.target : l.target?.id;
-        if (srcId === nodeId) {
-          const target = graphData.nodes.find((n) => n.id === tgtId);
-          return target ? { node: target, link: l } : null;
-        }
-        if (tgtId === nodeId) {
-          const source = graphData.nodes.find((n) => n.id === srcId);
-          return source ? { node: source, link: l } : null;
-        }
-        return null;
-      })
-      .filter(Boolean) as { node: GraphNode; link: GraphLink }[];
-  }, [graphData]);
+  const hasMap = Boolean(map);
+  const visibleZones = map?.zones.filter((zone) => zone.items.length > 0) ?? [];
+  const canFullscreen = isWide && view === 'map' && visibleZones.length > 0;
+  const isFullscreen = fullscreen && canFullscreen;
 
-  // ─── Custom node renderer ─────────────────────────────────────────────────
+  // Échap ferme d'abord ce qui est le plus « au-dessus » : la liste de
+  // résultats, l'aide, le panneau, puis seulement le plein écran.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (showResults) setShowResults(false);
+      else if (showHelp) setShowHelp(false);
+      else if (selectedKey) setSelectedKey(null);
+      else if (isFullscreen) setFullscreen(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [showResults, showHelp, selectedKey, isFullscreen]);
 
-  const paintNode = useCallback(
-    (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
-      if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
-      const gNode = node as GraphNode;
-      const size = gNode.val || 12;
-      const isHighlighted = highlightedNode === gNode.id;
-      const isDimmed = highlightedNode && !isHighlighted && !highlightedLinks.has(`${highlightedNode}-${gNode.id}`) && !highlightedLinks.has(`${gNode.id}-${highlightedNode}`);
+  // Plein écran : la page dessous ne défile plus.
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [isFullscreen]);
 
-      ctx.save();
+  useEffect(() => {
+    if (!canFullscreen) setFullscreen(false);
+  }, [canFullscreen]);
 
-      if (isDimmed) {
-        ctx.globalAlpha = 0.15;
-      }
-
-      // For content (movie/tv) and person nodes with images — draw circular poster
-      if (gNode.img && (gNode.type === 'movie' || gNode.type === 'tv' || gNode.type === 'person')) {
-        const img = loadImage(gNode.img);
-        const radius = size / 2;
-
-        // Outer ring glow
-        if (isHighlighted) {
-          ctx.beginPath();
-          ctx.arc(node.x!, node.y!, radius + 4, 0, 2 * Math.PI);
-          ctx.strokeStyle = gNode.color || '#e50914';
-          ctx.lineWidth = 3;
-          ctx.shadowColor = gNode.color || '#e50914';
-          ctx.shadowBlur = 20;
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-        }
-
-        // Border ring
-        ctx.beginPath();
-        ctx.arc(node.x!, node.y!, radius + 2, 0, 2 * Math.PI);
-        ctx.fillStyle = gNode.color || '#e50914';
-        ctx.fill();
-
-        // Clip circle and draw poster
-        ctx.beginPath();
-        ctx.arc(node.x!, node.y!, radius, 0, 2 * Math.PI);
-        ctx.closePath();
-        ctx.clip();
-
-        if (img) {
-          // Draw image centered & cropped
-          const imgAspect = img.width / img.height;
-          let drawW = radius * 2;
-          let drawH = radius * 2;
-          if (imgAspect > 1) {
-            drawW = drawH * imgAspect;
-          } else {
-            drawH = drawW / imgAspect;
-          }
-          ctx.drawImage(img, node.x! - drawW / 2, node.y! - drawH / 2, drawW, drawH);
-        } else {
-          // Fallback: colored circle
-          ctx.fillStyle = gNode.color || '#333';
-          ctx.fill();
-        }
-
-        ctx.restore();
-        ctx.save();
-        if (isDimmed) ctx.globalAlpha = 0.15;
-
-        // Label below — only when zoomed in enough or highlighted
-        if (isHighlighted || globalScale > 2.5) {
-          const label = gNode.label.length > 20 ? gNode.label.slice(0, 18) + '…' : gNode.label;
-          const fontSize = Math.max(6, Math.min(8, 8 / globalScale));
-          ctx.font = `600 ${fontSize}px Inter, system-ui, -apple-system, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'top';
-
-          // Text background for readability
-          const textW = ctx.measureText(label).width;
-          ctx.fillStyle = 'rgba(0,0,0,0.7)';
-          ctx.beginPath();
-          const bgPad = 3;
-          const bgX = node.x! - textW / 2 - bgPad;
-          const bgY = node.y! + radius + 2;
-          const bgW = textW + bgPad * 2;
-          const bgH = fontSize + bgPad * 2;
-          const bgR = 3;
-          ctx.moveTo(bgX + bgR, bgY);
-          ctx.arcTo(bgX + bgW, bgY, bgX + bgW, bgY + bgH, bgR);
-          ctx.arcTo(bgX + bgW, bgY + bgH, bgX, bgY + bgH, bgR);
-          ctx.arcTo(bgX, bgY + bgH, bgX, bgY, bgR);
-          ctx.arcTo(bgX, bgY, bgX + bgW, bgY, bgR);
-          ctx.fill();
-
-          ctx.fillStyle = '#fff';
-          ctx.fillText(label, node.x!, bgY + bgPad);
-        }
-      }
-
-      // Genre nodes — hexagon-ish shape
-      else if (gNode.type === 'genre') {
-        const r = size / 2;
-
-        if (isHighlighted) {
-          ctx.shadowColor = gNode.color || '#8b5cf6';
-          ctx.shadowBlur = 18;
-        }
-
-        // Draw a rounded hexagon
-        ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-          const angle = (Math.PI / 3) * i - Math.PI / 2;
-          const px = node.x! + r * Math.cos(angle);
-          const py = node.y! + r * Math.sin(angle);
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-
-        // Gradient fill
-        const gradient = ctx.createRadialGradient(node.x!, node.y!, 0, node.x!, node.y!, r);
-        gradient.addColorStop(0, gNode.color || '#8b5cf6');
-        gradient.addColorStop(1, 'rgba(139, 92, 246, 0.3)');
-        ctx.fillStyle = gradient;
-        ctx.fill();
-
-        ctx.strokeStyle = gNode.color || '#8b5cf6';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        // Label — always show inside genre hexagons but smaller
-        if (globalScale > 0.4) {
-          const maxLabelLen = globalScale > 1.5 ? 14 : 8;
-          const label = gNode.label.length > maxLabelLen ? gNode.label.slice(0, maxLabelLen - 1) + '…' : gNode.label;
-          const fontSize = Math.max(5, Math.min(7, 7 / globalScale));
-          ctx.font = `700 ${fontSize}px Inter, system-ui, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#fff';
-          ctx.fillText(label, node.x!, node.y!);
-        }
-      }
-
-      // Fallback circles
-      else {
-        const r = size / 2;
-        ctx.beginPath();
-        ctx.arc(node.x!, node.y!, r, 0, 2 * Math.PI);
-        ctx.fillStyle = gNode.color || '#555';
-        ctx.fill();
-
-        if (isHighlighted) {
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        }
-
-        if (isHighlighted || globalScale > 2.5) {
-          const label = gNode.label.length > 18 ? gNode.label.slice(0, 16) + '…' : gNode.label;
-          const fontSize = Math.max(5, 7 / globalScale);
-          ctx.font = `600 ${fontSize}px Inter, system-ui, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'top';
-          ctx.fillStyle = '#fff';
-          ctx.fillText(label, node.x!, node.y! + r + 3);
-        }
-      }
-
-      ctx.restore();
+  const searchProps = {
+    query,
+    results,
+    searching,
+    onQueryChange: (value: string) => {
+      setQuery(value);
+      setShowResults(true);
     },
-    [highlightedNode, highlightedLinks]
-  );
-
-  // ─── Custom link renderer ─────────────────────────────────────────────────
-
-  const paintLink = useCallback(
-    (link: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
-      if (!Number.isFinite(link.source?.x) || !Number.isFinite(link.source?.y) ||
-          !Number.isFinite(link.target?.x) || !Number.isFinite(link.target?.y)) return;
-      const srcId = typeof link.source === 'object' ? link.source.id : link.source;
-      const tgtId = typeof link.target === 'object' ? link.target.id : link.target;
-      const isHighlighted = highlightedLinks.has(`${srcId}-${tgtId}`) || highlightedLinks.has(`${tgtId}-${srcId}`);
-      const isDimmed = highlightedNode && !isHighlighted;
-
-      const sx = link.source.x || 0;
-      const sy = link.source.y || 0;
-      const tx = link.target.x || 0;
-      const ty = link.target.y || 0;
-
-      ctx.save();
-
-      // Link color based on type
-      const colors: Record<string, string> = {
-        actor: '#f59e0b',
-        director: '#ef4444',
-        genre: '#8b5cf6',
-        similar: '#e50914',
-        recommendation: '#3b82f6',
-        company: '#10b981',
-      };
-
-      const linkColor = colors[link.type] || '#444';
-
-      ctx.globalAlpha = isDimmed ? 0.04 : isHighlighted ? 0.7 : 0.15;
-
-      // Draw line
-      ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(tx, ty);
-      ctx.strokeStyle = linkColor;
-      ctx.lineWidth = isHighlighted ? 2 : 0.8;
-
-      if (link.type === 'similar' || link.type === 'recommendation') {
-        ctx.setLineDash([4, 4]);
-      }
-
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Link label only when highlighted AND really zoomed in
-      if (isHighlighted && globalScale > 2.5) {
-        const midX = (sx + tx) / 2;
-        const midY = (sy + ty) / 2;
-        const label = link.label || t(LINK_LABELS[link.type]) || '';
-
-        ctx.globalAlpha = 0.9;
-        const fontSize = Math.max(7, 8 / globalScale);
-        ctx.font = `500 ${fontSize}px Inter, system-ui, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        // Background pill
-        const textWidth = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgba(0,0,0,0.75)';
-        const padding = 3;
-        ctx.beginPath();
-        const pillW = textWidth + padding * 2;
-        const pillH = fontSize + padding * 2;
-        const pillX = midX - pillW / 2;
-        const pillY = midY - pillH / 2;
-        const pillR = 4;
-        ctx.moveTo(pillX + pillR, pillY);
-        ctx.arcTo(pillX + pillW, pillY, pillX + pillW, pillY + pillH, pillR);
-        ctx.arcTo(pillX + pillW, pillY + pillH, pillX, pillY + pillH, pillR);
-        ctx.arcTo(pillX, pillY + pillH, pillX, pillY, pillR);
-        ctx.arcTo(pillX, pillY, pillX + pillW, pillY, pillR);
-        ctx.fill();
-
-        ctx.fillStyle = linkColor;
-        ctx.fillText(label, midX, midY);
-      }
-
-      ctx.restore();
+    onFocus: () => setShowResults(true),
+    onClear: () => {
+      setQuery('');
+      setResults([]);
     },
-    [highlightedNode, highlightedLinks]
-  );
+    onPick: pickHit,
+  };
 
-  // ─── Stats ─────────────────────────────────────────────────────────────────
-
-  const stats = useMemo(() => {
-    const movies = graphData.nodes.filter((n) => n.type === 'movie').length;
-    const tvShows = graphData.nodes.filter((n) => n.type === 'tv').length;
-    const people = graphData.nodes.filter((n) => n.type === 'person').length;
-    return { nodes: graphData.nodes.length, links: graphData.links.length, movies, tvShows, people };
-  }, [graphData]);
-
-  // ─── Has graph loaded ──────────────────────────────────────────────────────
-
-  const hasGraph = graphData.nodes.length > 0;
-
-  // ─── Render ────────────────────────────────────────────────────────────────
-
-  return (
-    <SquareBackground squareSize={48} borderColor="rgba(229, 9, 20, 0.10)" className="cinegraph-page">
-      <div className="cinegraph-header">
-        <div className="cinegraph-title-container">
-          {hasGraph && (
-            <motion.button
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              onClick={() => {
-                setGraphData({ nodes: [], links: [] });
-                setRootNode(null);
-                setSelectedNode(null);
-                setSearchParams({});
-              }}
-              className="cinegraph-control-btn"
-              style={{ padding: '8px 12px' }}
-            >
-              <ArrowLeft size={16} />
-            </motion.button>
-          )}
-          <h1 className="cinegraph-title">
-            <Network size={36} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 10 }} />
-            {t('cinegraph.title')}
-          </h1>
-          <button className="cinegraph-help-btn" onClick={() => setShowSettings(true)}>
-            <Settings2 size={18} />
-          </button>
-          <button className="cinegraph-help-btn" onClick={() => setShowHelp(true)}>
-            <HelpCircle size={18} />
-          </button>
-        </div>
-        <p className="cinegraph-subtitle">
-          {hasGraph
-            ? t('cinegraph.exploringUniverse', { title: rootNode?.title })
-            : t('cinegraph.exploreHiddenConnections')}
-        </p>
-
-        {/* Search bar */}
-        <div className="cinegraph-search-container" ref={searchContainerRef}>
-          <div className="cinegraph-search-wrapper">
-            <Search size={18} className="cinegraph-search-icon" />
-            <input
-              type="text"
-              className="cinegraph-search-input"
-              placeholder={t('cinegraph.searchPlaceholder')}
-              value={searchQuery}
-              onChange={(e) => handleSearch(e.target.value)}
-              onFocus={() => searchResults.length > 0 && setShowResults(true)}
-            />
-            {searchQuery && (
-              <button
-                className="cinegraph-search-clear"
-                onClick={() => {
-                  setSearchQuery('');
-                  setSearchResults([]);
-                  setShowResults(false);
-                }}
-              >
-                <X size={16} />
+  const trailNav = trail.length > 1 ? (
+    <nav className="cg-trail" aria-label={t('cinegraph.trail')}>
+      {trail.map((step, index) => {
+        const last = index === trail.length - 1;
+        return (
+          <React.Fragment key={`${step.type}-${step.id}`}>
+            {index > 0 && <ChevronRight size={14} className="cg-trail-sep" aria-hidden="true" />}
+            {last ? (
+              <span className="cg-trail-step is-current" aria-current="page">{step.title}</span>
+            ) : (
+              <button type="button" className="cg-trail-step" onClick={() => openMap(step.type, step.id, false)}>
+                {step.title}
               </button>
             )}
-          </div>
+          </React.Fragment>
+        );
+      })}
+    </nav>
+  ) : null;
 
-          <AnimatePresence>
-            {showResults && (
-              <motion.div
-                className="cinegraph-search-results"
-                initial={{ opacity: 0, y: -8, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -8, scale: 0.98 }}
-                transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-                onWheel={(e) => e.stopPropagation()}
-              >
-                {searchLoading ? (
-                  <div style={{ padding: '24px', display: 'flex', justifyContent: 'center' }}>
-                    <Loader size={20} className="animate-spin" style={{ color: '#e50914' }} />
-                  </div>
-                ) : searchResults.length > 0 ? (
-                  searchResults.map((item) => (
-                    <div
-                      key={`${item.type}-${item.id}`}
-                      className="cinegraph-search-result-item"
-                      role="button"
-                      tabIndex={0}
-                      data-interactive
-                      onClick={() => handleSelectResult(item)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          handleSelectResult(item);
-                        }
-                      }}
-                    >
-                      {item.poster ? (
-                        <img src={item.poster} alt="" className="cinegraph-search-result-poster" />
-                      ) : (
-                        <div className="cinegraph-search-result-poster-placeholder">
-                          <Film size={16} />
-                        </div>
-                      )}
-                      <div className="cinegraph-search-result-info">
-                        <div className="cinegraph-search-result-title">{item.title}</div>
-                        <div className="cinegraph-search-result-meta">
-                          <span className={`cinegraph-type-badge ${item.type}`}>
-                            {item.type === 'movie' ? t('cinegraph.filmLabel') : t('cinegraph.seriesLabel')}
-                          </span>
-                          {item.year && <span>{item.year}</span>}
-                          {item.rating > 0 && (
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                              <Star size={11} fill="#fbbf24" color="#fbbf24" />
-                              {item.rating.toFixed(1)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <GitBranch size={16} style={{ color: '#6b7280', flexShrink: 0 }} />
-                    </div>
-                  ))
-                ) : searchQuery.length >= 2 ? (
-                  <div style={{ padding: '24px', textAlign: 'center', color: '#6b7280', fontSize: '0.9rem' }}>
-                    {t('cinegraph.noResultsFound')}
-                  </div>
-                ) : null}
-              </motion.div>
-            )}
-          </AnimatePresence>
+  const zoneChips = map ? (
+    <div className="cg-zone-chips" role="group" aria-label={t('cinegraph.zonesFilter')}>
+      {visibleZones.map((zone) => {
+        const { icon: Icon, color } = ZONE_META[zone.kind];
+        const active = !hiddenZones.has(zone.kind);
+        return (
+          <button
+            key={zone.kind}
+            type="button"
+            className={cn('cg-zone-chip', active ? 'is-active' : 'is-inactive')}
+            style={{ '--zone': color } as CSSProperties}
+            aria-pressed={active}
+            onClick={() => toggleZone(zone.kind)}
+          >
+            <Icon size={13} aria-hidden="true" />
+            {zoneTitle(t, zone, map)}
+            <span className="cg-zone-chip-count">{zone.items.length}</span>
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
+  // Même contenu dans la page ou en plein écran : un seul des deux est monté.
+  const mapList = map ? (
+    <CineMapList map={map} hiddenZones={hiddenZones} selectedKey={selectedKey} panelOpen={false} onSelect={setSelectedKey} />
+  ) : null;
+  const stageContent = map ? (
+    <>
+      {visibleZones.length === 0 ? (
+        <div className="cg-empty">
+          <RootCard map={map} selected={selectedKey === map.root.key} variant="list" onSelect={setSelectedKey} />
+          <p>{t('cinegraph.emptyMap', { title: map.root.title })}</p>
         </div>
-      </div>
+      ) : view === 'map' ? (
+        <MapEngineBoundary
+          key={canvasAttempt}
+          fallback={(
+            <div className="cg-stage-scroll" data-lenis-prevent>
+              <div className="cg-engine-note" role="status">
+                <AlertTriangle size={16} aria-hidden="true" />
+                <span>{t('cinegraph.mapUnavailable')}</span>
+                <button type="button" onClick={() => setCanvasAttempt((attempt) => attempt + 1)}>
+                  <RefreshCw size={14} aria-hidden="true" />
+                  {t('cinegraph.retry')}
+                </button>
+              </div>
+              {mapList}
+            </div>
+          )}
+        >
+          <Suspense
+            fallback={(
+              <div className="cg-stage-fallback">
+                <Loader className="animate-spin" size={28} aria-hidden="true" />
+              </div>
+            )}
+          >
+            <CineMapCanvas
+              key={map.root.key}
+              map={map}
+              hiddenZones={hiddenZones}
+              selectedKey={selectedKey}
+              panelOpen={Boolean(selectedKey) && isDocked}
+              onSelect={setSelectedKey}
+              fullscreen={isFullscreen}
+              onToggleFullscreen={() => setFullscreen((value) => !value)}
+            />
+          </Suspense>
+        </MapEngineBoundary>
+      ) : mapList}
 
-      {/* ─── Loading State ──────────────────────────────────────────────── */}
       <AnimatePresence>
         {loading && (
-          <motion.div
-            className="cinegraph-loading"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
+          <motion.div className="cg-stage-loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <div className="cinegraph-loading-orb" />
             <div className="cinegraph-loading-text">{loadingText}</div>
           </motion.div>
         )}
       </AnimatePresence>
+    </>
+  ) : null;
 
-      {/* ─── Graph View ─────────────────────────────────────────────────── */}
-      {hasGraph && !loading && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.6 }}
-        >
-          {/* Stats bar */}
-          <div className="cinegraph-stats">
-            <div className="cinegraph-stat">
-              <div className="cinegraph-stat-value">{stats.nodes}</div>
-              <div className="cinegraph-stat-label">{t('cinegraph.nodesStat')}</div>
-            </div>
-            <div className="cinegraph-stat">
-              <div className="cinegraph-stat-value">{stats.links}</div>
-              <div className="cinegraph-stat-label">{t('cinegraph.connectionsStat')}</div>
-            </div>
-            <div className="cinegraph-stat">
-              <div className="cinegraph-stat-value">{stats.movies + stats.tvShows}</div>
-              <div className="cinegraph-stat-label">{t('cinegraph.contentsStat')}</div>
-            </div>
-            <div className="cinegraph-stat">
-              <div className="cinegraph-stat-value">{stats.people}</div>
-              <div className="cinegraph-stat-label">{t('cinegraph.artistsStat')}</div>
-            </div>
-          </div>
+  // La carte s'arrête au bas de la fenêtre : la molette sert à la parcourir,
+  // il ne doit rester aucune page à faire défiler pour la voir en entier.
+  useLayoutEffect(() => {
+    if (!hasMap || view !== 'map' || isFullscreen) return;
+    const measure = () => {
+      const stage = stageRef.current;
+      if (!stage) return;
+      const top = stage.getBoundingClientRect().top + window.scrollY;
+      setStageHeight(Math.max(MIN_STAGE_HEIGHT, Math.round(window.innerHeight - top - STAGE_BOTTOM_GAP)));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [hasMap, view, isFullscreen, trail.length, map]);
 
-          {/* Legend / Filters */}
-          <div className="cinegraph-legend">
-            {LEGEND_ITEMS.map((item) => (
-              <button
-                key={item.type}
-                className={`cinegraph-legend-chip ${activeTypes.has(item.type) ? 'active' : 'inactive'}`}
-                style={{ '--chip-color': item.color } as React.CSSProperties}
-                onClick={() => toggleType(item.type)}
-              >
-                <span className="cinegraph-legend-dot" style={{ backgroundColor: item.color }} />
-                {item.icon}
-                {t(item.labelKey)}
-              </button>
-            ))}
-          </div>
-
-          {/* Force Graph */}
-          <div className="cinegraph-graph-container" ref={containerRef}>
-            <Suspense
-              fallback={
-                <div
-                  className="flex items-center justify-center"
-                  style={{ width: dimensions.width, height: dimensions.height }}
-                >
-                  <Loader className="animate-spin text-gray-400" size={32} />
-                </div>
-              }
+  return (
+    <SquareBackground squareSize={48} borderColor="rgba(229, 9, 20, 0.10)" className="cinegraph-page">
+      <div className="cinegraph-header">
+        <div className="cinegraph-title-container">
+          {(hasMap || mapType) && (
+            <motion.button
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              onClick={closeMap}
+              className="cinegraph-control-btn"
+              style={{ padding: '8px 12px' }}
+              aria-label={t('cinegraph.backToStart')}
             >
-              <ForceGraph2D
-                ref={handleGraphRef as any}
-                graphData={filteredData}
-                width={dimensions.width}
-                height={dimensions.height}
-                backgroundColor="rgba(0,0,0,0)"
-                nodeCanvasObject={paintNode}
-                nodePointerAreaPaint={(node: any, color, ctx) => {
-                  const gNode = node as GraphNode;
-                  const size = gNode.val || 12;
-                  let r: number;
-                  if (gNode.img && (gNode.type === 'movie' || gNode.type === 'tv' || gNode.type === 'person')) {
-                    r = size / 2 + 2;
-                  } else {
-                    r = size / 2 + 1;
-                  }
-                  r = Math.max(r, 12);
-                  ctx.beginPath();
-                  ctx.arc(node.x!, node.y!, r, 0, 2 * Math.PI);
-                  ctx.fillStyle = color;
-                  ctx.fill();
-                }}
-                linkCanvasObject={paintLink}
-                onNodeHover={handleNodeHover}
-                onNodeClick={handleNodeClick}
-                onNodeRightClick={handleNodeDblClick}
-                onNodeDragEnd={(node: any, translate: any) => {
-                  const dx = translate?.x ?? 0;
-                  const dy = translate?.y ?? 0;
-                  if (Math.hypot(dx, dy) < 4) {
-                    handleNodeClick(node);
-                    return;
-                  }
-                  node.fx = node.x;
-                  node.fy = node.y;
-                }}
-                d3AlphaDecay={0.05}
-                d3VelocityDecay={0.4}
-                cooldownTicks={80}
-                warmupTicks={50}
-                enableNodeDrag={enableNodeDrag}
-                enableZoomInteraction={true}
-                enablePanInteraction={true}
-                minZoom={0.2}
-                maxZoom={8}
-              />
-            </Suspense>
+              <ArrowLeft size={16} aria-hidden="true" />
+            </motion.button>
+          )}
+          <h1 className="cinegraph-title">
+            <Network size={36} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 10 }} aria-hidden="true" />
+            {t('cinegraph.title')}
+          </h1>
+          <button type="button" className="cinegraph-help-btn" onClick={() => setShowHelp(true)} aria-label={t('cinegraph.howToUse')}>
+            <HelpCircle size={18} aria-hidden="true" />
+          </button>
+        </div>
+        <p className="cinegraph-subtitle">
+          {map ? t('cinegraph.exploringUniverse', { title: map.root.title }) : t('cinegraph.exploreHiddenConnections')}
+        </p>
 
-            {/* Controls */}
-            <div className="cinegraph-controls">
-              <button
-                className="cinegraph-control-btn"
-                onClick={() => graphRef.current?.zoomToFit(400, 60)}
-                title={t('cinegraph.recenter')}
-              >
-                <Maximize2 size={14} />
-                <span>{t('cinegraph.recenter')}</span>
-              </button>
-              <button
-                className="cinegraph-control-btn"
-                onClick={() => {
-                  const zoom = graphRef.current?.zoom();
-                  if (zoom) graphRef.current?.zoom(zoom * 1.5, 300);
-                }}
-                title={t('cinegraph.zoomIn')}
-              >
-                <ZoomIn size={14} />
-              </button>
-              <button
-                className="cinegraph-control-btn"
-                onClick={() => {
-                  const zoom = graphRef.current?.zoom();
-                  if (zoom) graphRef.current?.zoom(zoom / 1.5, 300);
-                }}
-                title={t('cinegraph.zoomOut')}
-              >
-                <ZoomOut size={14} />
-              </button>
+        <SearchBox
+          {...searchProps}
+          // En plein écran, c'est le champ de la barre du haut qui sert.
+          open={showResults && !isFullscreen}
+          containerRef={isFullscreen ? undefined : searchContainerRef}
+        />
+      </div>
+
+      {/* ─── Carte ─────────────────────────────────────────────────────────── */}
+      {map && (
+        <motion.div className="cg-workspace" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}>
+          <div className="cg-toolbar">
+            {trailNav}
+            {zoneChips}
+
+            {isWide && (
+              <div className="cg-view-toggle" role="group" aria-label={t('cinegraph.viewMode')}>
+                <button type="button" className={cn(view === 'map' && 'is-active')} aria-pressed={view === 'map'} onClick={() => changeView('map')}>
+                  <MapIcon size={14} aria-hidden="true" />
+                  {t('cinegraph.mapView')}
+                </button>
+                <button type="button" className={cn(view === 'list' && 'is-active')} aria-pressed={view === 'list'} onClick={() => changeView('list')}>
+                  <List size={14} aria-hidden="true" />
+                  {t('cinegraph.listView')}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <p className="cg-hint">
+            <MousePointerClick size={14} aria-hidden="true" />
+            {t(view === 'map' ? 'cinegraph.hintMap' : 'cinegraph.hint')}
+          </p>
+
+          {!isFullscreen && (
+            <div
+              ref={stageRef}
+              className={cn('cg-stage', view === 'map' ? 'cg-stage--map' : 'cg-stage--list')}
+              style={view === 'map' && stageHeight ? { height: stageHeight } : undefined}
+            >
+              {stageContent}
             </div>
+          )}
+        </motion.div>
+      )}
+
+      {/* ─── Plein écran : la carte occupe toute la fenêtre ────────────────── */}
+      {map && isFullscreen && createPortal(
+        <div className="cg-fullscreen" role="dialog" aria-modal="true" aria-label={t('cinegraph.fullscreen')} data-lenis-prevent>
+          <div className="cg-fullscreen-bar">
+            <span className="cg-fullscreen-title">
+              <Network size={18} aria-hidden="true" />
+              {map.root.title}
+            </span>
+            {trailNav}
+            {zoneChips}
+            <SearchBox {...searchProps} compact open={showResults} containerRef={searchContainerRef} />
+            <button type="button" className="cinegraph-control-btn cg-fullscreen-exit" onClick={() => setFullscreen(false)}>
+              <Shrink size={14} aria-hidden="true" />
+              {t('cinegraph.exitFullscreen')}
+              <kbd>{t('cinegraph.escKey')}</kbd>
+            </button>
+          </div>
+          <div className="cg-stage cg-stage--map cg-stage--fullscreen">{stageContent}</div>
+        </div>,
+        getOverlayPortalRoot(),
+      )}
+
+      {/* ─── Premier chargement et erreurs ─────────────────────────────────── */}
+      {!map && loading && (
+        <div className="cinegraph-loading">
+          <div className="cinegraph-loading-orb" />
+          <div className="cinegraph-loading-text">{loadingText}</div>
+        </div>
+      )}
+
+      {error && !loading && (
+        <div className="cg-error" role="alert">
+          <p>{t('cinegraph.loadError')}</p>
+          <button type="button" className="cinegraph-detail-link secondary" onClick={() => setReloadToken((value) => value + 1)}>
+            <RefreshCw size={16} aria-hidden="true" />
+            {t('cinegraph.retry')}
+          </button>
+        </div>
+      )}
+
+      {/* ─── Écran de départ : tendances ───────────────────────────────────── */}
+      {!map && !loading && !mapType && (
+        <motion.div
+          className="cinegraph-start-grid"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.5 }}
+        >
+          <h2>{t('cinegraph.trendingChoose')}</h2>
+          <div className="cinegraph-start-items">
+            {trending.map((hit) => (
+              <motion.button
+                key={`${hit.type}-${hit.id}`}
+                type="button"
+                className="cinegraph-start-item"
+                onClick={() => openMap(hit.type, hit.id, true)}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+              >
+                {hit.img ? (
+                  <img src={hit.img} alt="" loading="lazy" />
+                ) : (
+                  <span className="cinegraph-start-item-placeholder">
+                    <Film size={28} aria-hidden="true" />
+                  </span>
+                )}
+                <span className="cinegraph-start-item-info">
+                  <span className="cinegraph-start-item-title">{hit.title}</span>
+                  <span className="cinegraph-start-item-meta">
+                    {t(typeLabelKey[hit.type])}
+                    {hit.year && ` • ${hit.year}`}
+                  </span>
+                </span>
+              </motion.button>
+            ))}
           </div>
         </motion.div>
       )}
 
-      {/* ─── Tooltip (portaled to body so global fixed Header can't cover it) ─ */}
+      {/* ─── Panneau « Pourquoi c'est là ? » ───────────────────────────────── */}
       {createPortal(
         <AnimatePresence>
-          {tooltip && (
-            <motion.div
-              className="cinegraph-tooltip"
-              style={{ left: tooltip.x + 12, top: tooltip.y - 12 }}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-            >
-              <div className="cinegraph-tooltip-header">
-                {tooltip.node.img ? (
-                  <img src={tooltip.node.img} alt="" className="cinegraph-tooltip-poster" />
-                ) : (
-                  <div className="cinegraph-tooltip-poster-placeholder">
-                    {tooltip.node.type === 'person' ? <User size={20} /> : <Film size={20} />}
-                  </div>
-                )}
-                <div>
-                  <div className="cinegraph-tooltip-title">{tooltip.node.label}</div>
-                  <div className="cinegraph-tooltip-meta">
-                    <span className={`cinegraph-type-badge ${tooltip.node.type}`}>
-                      {tooltip.node.type === 'movie' ? t('cinegraph.filmLabel') : tooltip.node.type === 'tv' ? t('cinegraph.seriesLabel') : tooltip.node.type === 'person' ? t('cinegraph.artistLabel') : t('cinegraph.genresLabel')}
-                    </span>
-                    {tooltip.node.year && <span>{tooltip.node.year}</span>}
-                    {tooltip.node.rating && tooltip.node.rating > 0 && (
-                      <span className="cinegraph-tooltip-rating">
-                        <Star size={11} fill="#fbbf24" />
-                        {tooltip.node.rating.toFixed(1)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              {tooltip.node.overview && (
-                <p className="cinegraph-tooltip-overview">{tooltip.node.overview}</p>
-              )}
-              <div className="cinegraph-tooltip-action">{t('cinegraph.clickForDetails')}</div>
-            </motion.div>
+          {map && selectedKey && (
+            <WhyPanel
+              key="why"
+              map={map}
+              itemKey={selectedKey}
+              docked={isDocked}
+              onClose={() => setSelectedKey(null)}
+              onSelect={setSelectedKey}
+              onExplore={exploreEntity}
+              onOpen={openEntityPage}
+            />
           )}
         </AnimatePresence>,
-        getOverlayPortalRoot()
+        getOverlayPortalRoot(),
       )}
 
-      {/* ─── Detail Panel (portaled to body so close button & top area are clickable) ─ */}
+      {/* ─── Aide ──────────────────────────────────────────────────────────── */}
       {createPortal(
         <AnimatePresence>
-          {selectedNode && (
+          {showHelp && (
             <motion.div
-              className="cinegraph-detail-panel"
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              onWheel={(e) => e.stopPropagation()}
-            >
-            <div className="cinegraph-detail-backdrop">
-              {selectedNode.backdrop ? (
-                <img src={selectedNode.backdrop} alt="" />
-              ) : selectedNode.img ? (
-                <img src={selectedNode.img} alt="" style={{ objectPosition: 'top' }} />
-              ) : (
-                <div style={{ background: `linear-gradient(135deg, ${selectedNode.color}33, #111)`, width: '100%', height: '100%' }} />
-              )}
-              <button
-                className="cinegraph-detail-close"
-                onClick={() => setSelectedNode(null)}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="cinegraph-detail-content">
-              <h2 className="cinegraph-detail-title">{selectedNode.label}</h2>
-
-              <div className="cinegraph-detail-meta">
-                <span
-                  className={`cinegraph-type-badge ${selectedNode.type}`}
-                  style={{ fontSize: '0.75rem', padding: '3px 10px' }}
-                >
-                  {selectedNode.type === 'movie' ? t('cinegraph.movieType') : selectedNode.type === 'tv' ? t('cinegraph.tvType') : selectedNode.type === 'person' ? t('cinegraph.personType') : t('cinegraph.genreType')}
-                </span>
-                {selectedNode.year && (
-                  <span style={{ color: '#9ca3af', fontSize: '0.85rem' }}>{selectedNode.year}</span>
-                )}
-                {selectedNode.rating && selectedNode.rating > 0 && (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#fbbf24', fontSize: '0.85rem' }}>
-                    <Star size={14} fill="#fbbf24" />
-                    {selectedNode.rating.toFixed(1)}
-                  </span>
-                )}
-              </div>
-
-              {selectedNode.overview && (
-                <p className="cinegraph-detail-overview">{selectedNode.overview}</p>
-              )}
-
-              <div className="cinegraph-detail-links">
-                {(selectedNode.type === 'movie' || selectedNode.type === 'tv') && (
-                  <button
-                    className="cinegraph-detail-link primary"
-                    onClick={() => navigate(`/${selectedNode.type}/${encodeId(selectedNode.tmdbId)}`)}
-                  >
-                    <Eye size={16} />
-                    {t('cinegraph.viewRecord')}
-                  </button>
-                )}
-                {selectedNode.type === 'person' && (
-                  <button
-                    className="cinegraph-detail-link primary"
-                    onClick={() => navigate(`/person/${selectedNode.tmdbId}`)}
-                  >
-                    <User size={16} />
-                    {t('cinegraph.viewProfile')}
-                  </button>
-                )}
-                {(selectedNode.type === 'movie' || selectedNode.type === 'tv' || selectedNode.type === 'person') && (
-                  <button
-                    className="cinegraph-detail-link secondary"
-                    onClick={() => loadGraph(selectedNode.type as any, selectedNode.tmdbId, selectedNode.label)}
-                  >
-                    <Network size={16} />
-                    {t('cinegraph.exploreNetwork')}
-                  </button>
-                )}
-              </div>
-
-              {/* Connections list */}
-              <div className="cinegraph-detail-connections">
-                <h3>
-                  <GitBranch size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }} />
-                  {t('cinegraph.connectionsStat')} ({getNodeConnections(selectedNode.id).length})
-                </h3>
-                {getNodeConnections(selectedNode.id).map(({ node: connNode, link }, i) => (
-                  <div
-                    key={i}
-                    className="cinegraph-connection-item"
-                    role="button"
-                    tabIndex={0}
-                    data-interactive
-                    onClick={() => {
-                      setSelectedNode(connNode);
-                      if (graphRef.current) {
-                        const n = connNode as any;
-                        if (Number.isFinite(n.x) && Number.isFinite(n.y)) {
-                          graphRef.current.centerAt(n.x, n.y, 1000);
-                          graphRef.current.zoom(3, 1000);
-                        }
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setSelectedNode(connNode);
-                        if (graphRef.current) {
-                          const n = connNode as any;
-                          if (Number.isFinite(n.x) && Number.isFinite(n.y)) {
-                            graphRef.current.centerAt(n.x, n.y, 1000);
-                            graphRef.current.zoom(3, 1000);
-                          }
-                        }
-                      }
-                    }}
-                  >
-                    {connNode.img ? (
-                      <img
-                        src={connNode.img}
-                        alt=""
-                        style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', border: `2px solid ${connNode.color}` }}
-                      />
-                    ) : (
-                      <div
-                        style={{
-                          width: 32,
-                          height: 32,
-                          borderRadius: '50%',
-                          background: `${connNode.color}33`,
-                          border: `2px solid ${connNode.color}`,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        {connNode.type === 'person' ? <User size={14} color={connNode.color} /> :
-                          connNode.type === 'genre' ? <Sparkles size={14} color={connNode.color} /> :
-                            <Film size={14} color={connNode.color} />}
-                      </div>
-                    )}
-                    <span className="cinegraph-connection-label">{connNode.label}</span>
-                    <span
-                      className="cinegraph-connection-type"
-                      style={{ background: `${connNode.color}22`, color: connNode.color }}
-                    >
-                      {t(LINK_LABELS[link.type]) || link.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </motion.div>
-        )}
-        </AnimatePresence>,
-        getOverlayPortalRoot()
-      )}
-
-      {/* ─── Help Modal (portaled like WatchPartyTutorial) ──────────────── */}
-      {(showHelp || helpClosing) && createPortal(
-        <AnimatePresence mode="wait">
-          {showHelp && !helpClosing && (
-            <motion.div
+              key="help"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
+              transition={{ duration: 0.25 }}
               className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100000]"
-              onClick={(e) => { if (e.target === e.currentTarget) closeHelp(); }}
-              onWheel={(e) => e.stopPropagation()}
+              onClick={(event) => {
+                if (event.target === event.currentTarget) setShowHelp(false);
+              }}
+              onWheel={(event) => event.stopPropagation()}
             >
               <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="cinegraph-help-title"
+                initial={{ scale: 0.92, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                transition={{ duration: 0.3 }}
+                exit={{ scale: 0.96, opacity: 0 }}
+                transition={{ duration: 0.25 }}
                 className="bg-gray-900 border border-white/10 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col max-h-[85dvh]"
-                onClick={(e) => e.stopPropagation()}
               >
-                {/* Header */}
                 <div className="p-4 md:p-6 border-b border-white/10 flex justify-between items-center shrink-0">
-                  <h3 className="text-lg md:text-xl font-bold text-white flex items-center gap-2">
-                    <HelpCircle className="text-red-500 h-5 w-5 md:h-6 md:w-6" />
+                  <h3 id="cinegraph-help-title" className="text-lg md:text-xl font-bold text-white flex items-center gap-2">
+                    <HelpCircle className="text-red-500 h-5 w-5 md:h-6 md:w-6" aria-hidden="true" />
                     {t('cinegraph.howToUse')}
                   </h3>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={closeHelp}
-                    className="text-white/50 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors group/icon"
+                  <button
+                    type="button"
+                    onClick={() => setShowHelp(false)}
+                    className="text-white/60 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
+                    aria-label={t('cinegraph.close')}
                   >
-                    <X className="w-5 h-5 md:w-6 md:h-6 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
-                  </motion.button>
+                    <X className="w-5 h-5 md:w-6 md:h-6" aria-hidden="true" />
+                  </button>
                 </div>
-
-                {/* Content — scrollable */}
-                <div
-                  className="p-4 md:p-6 flex-1 overflow-y-auto custom-scrollbar overscroll-contain"
-                  style={{ WebkitOverflowScrolling: 'touch' }}
-                  onWheel={(e) => e.stopPropagation()}
-                >
+                <div className="p-4 md:p-6 flex-1 overflow-y-auto custom-scrollbar overscroll-contain" data-lenis-prevent>
                   <p className="text-white/70 text-sm md:text-base mb-5 leading-relaxed text-center">
                     {t('cinegraph.visualizesDescription')}
                   </p>
-
                   <div className="flex flex-col gap-3">
-                    {[
-                      { icon: '🔍', title: t('cinegraph.searchTitle'), desc: t('cinegraph.searchDesc') },
-                      { icon: '🖱️', title: t('cinegraph.interactTitle'), desc: t('cinegraph.interactDesc') },
-                      { icon: '🔎', title: t('cinegraph.navigateTitle'), desc: t('cinegraph.navigateDesc') },
-                      { icon: '🎨', title: t('cinegraph.filterTitle'), desc: t('cinegraph.filterDesc') },
-                      { icon: '📋', title: t('cinegraph.detailPanelTitle'), desc: t('cinegraph.detailPanelDesc') },
-                    ].map((item, i) => (
-                      <div key={i} className="flex gap-3 items-start p-3 md:p-4 rounded-lg bg-white/5 border border-white/5 hover:bg-white/[0.08] transition-colors">
-                        <span className="text-xl md:text-2xl shrink-0 mt-0.5">{item.icon}</span>
+                    {(['start', 'read', 'why', 'explore', 'navigate'] as const).map((step) => (
+                      <div key={step} className="flex gap-3 items-start p-3 md:p-4 rounded-lg bg-white/5 border border-white/5">
+                        <span className="text-xl md:text-2xl shrink-0 mt-0.5" aria-hidden="true">{t(`cinegraph.help.${step}.icon`)}</span>
                         <div>
-                          <h4 className="font-semibold text-white text-sm md:text-base">{item.title}</h4>
-                          <p className="text-white/60 text-xs md:text-sm mt-1 leading-relaxed">{item.desc}</p>
+                          <h4 className="font-semibold text-white text-sm md:text-base">{t(`cinegraph.help.${step}.title`)}</h4>
+                          <p className="text-white/60 text-xs md:text-sm mt-1 leading-relaxed">{t(`cinegraph.help.${step}.desc`)}</p>
                         </div>
                       </div>
                     ))}
@@ -1326,301 +793,7 @@ const CineGraphPage: React.FC = () => {
             </motion.div>
           )}
         </AnimatePresence>,
-        getOverlayPortalRoot()
-      )}
-
-      {/* ─── Settings Modal ─────────────────────────────────────────────── */}
-      {(showSettings || settingsClosing) && createPortal(
-        <AnimatePresence mode="wait">
-          {showSettings && !settingsClosing && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100000]"
-              onClick={(e) => { if (e.target === e.currentTarget) closeSettings(); }}
-              onWheel={(e) => e.stopPropagation()}
-            >
-              <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
-                transition={{ duration: 0.3 }}
-                className="bg-gray-900 border border-white/10 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col max-h-[85dvh]"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {/* Header */}
-                <div className="p-4 md:p-6 border-b border-white/10 flex justify-between items-center shrink-0">
-                  <h3 className="text-lg md:text-xl font-bold text-white flex items-center gap-2">
-                    <Settings2 className="text-red-500 h-5 w-5 md:h-6 md:w-6" />
-                    {t('cinegraph.customizeGraph')}
-                  </h3>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={closeSettings}
-                    className="text-white/50 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors group/icon"
-                  >
-                    <X className="w-5 h-5 md:w-6 md:h-6 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
-                  </motion.button>
-                </div>
-
-                {/* Content — scrollable */}
-                <div
-                  className="p-4 md:p-6 flex-1 overflow-y-auto custom-scrollbar overscroll-contain"
-                  style={{ WebkitOverflowScrolling: 'touch' }}
-                  onWheel={(e) => e.stopPropagation()}
-                >
-                  <p className="text-white/50 text-xs md:text-sm mb-5 text-center">
-                    {t('cinegraph.settingsDescription')}
-                  </p>
-
-                  <div className="flex flex-col gap-4">
-
-                    {/* ── Toggle: Actors ── */}
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/5">
-                      <div className="flex items-center gap-3">
-                        <User size={18} className="text-amber-400 shrink-0" />
-                        <div>
-                          <div className="text-sm font-semibold text-white">{t('cinegraph.actorsCast')}</div>
-                          <div className="text-xs text-white/50">{t('cinegraph.addMainActors')}</div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setGraphOptions(o => ({ ...o, actors: !o.actors }))}
-                        className={`w-11 h-6 rounded-full transition-colors relative ${graphOptions.actors ? 'bg-red-600' : 'bg-white/20'}`}
-                      >
-                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${graphOptions.actors ? 'translate-x-5' : ''}`} />
-                      </button>
-                    </div>
-
-                    {/* Actor limit slider */}
-                    {graphOptions.actors && (
-                      <div className="pl-8 pr-3 -mt-2">
-                        <label className="flex items-center justify-between text-xs text-white/60 mb-1">
-                          <span>{t('cinegraph.maxActors')}</span>
-                          <span className="font-mono text-white/80 bg-white/10 px-2 py-0.5 rounded">{graphOptions.actorLimit}</span>
-                        </label>
-                        <input
-                          type="range"
-                          min={2}
-                          max={20}
-                          value={graphOptions.actorLimit}
-                          onChange={(e) => setGraphOptions(o => ({ ...o, actorLimit: parseInt(e.target.value) }))}
-                          className="w-full accent-red-500 h-1.5"
-                        />
-                        <div className="flex justify-between text-[10px] text-white/30 mt-0.5">
-                          <span>2</span>
-                          <span>20</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── Toggle: Directors ── */}
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/5">
-                      <div className="flex items-center gap-3">
-                        <Film size={18} className="text-red-400 shrink-0" />
-                        <div>
-                          <div className="text-sm font-semibold text-white">{t('cinegraph.directors')}</div>
-                          <div className="text-xs text-white/50">{t('cinegraph.addDirectors')}</div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setGraphOptions(o => ({ ...o, directors: !o.directors }))}
-                        className={`w-11 h-6 rounded-full transition-colors relative ${graphOptions.directors ? 'bg-red-600' : 'bg-white/20'}`}
-                      >
-                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${graphOptions.directors ? 'translate-x-5' : ''}`} />
-                      </button>
-                    </div>
-
-                    {/* ── Toggle: Genres ── */}
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/5">
-                      <div className="flex items-center gap-3">
-                        <Sparkles size={18} className="text-purple-400 shrink-0" />
-                        <div>
-                          <div className="text-sm font-semibold text-white">{t('cinegraph.genresLabel')}</div>
-                          <div className="text-xs text-white/50">{t('cinegraph.addGenreNodes')}</div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setGraphOptions(o => ({ ...o, genres: !o.genres }))}
-                        className={`w-11 h-6 rounded-full transition-colors relative ${graphOptions.genres ? 'bg-red-600' : 'bg-white/20'}`}
-                      >
-                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${graphOptions.genres ? 'translate-x-5' : ''}`} />
-                      </button>
-                    </div>
-
-                    {/* ── Toggle: Similar ── */}
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/5">
-                      <div className="flex items-center gap-3">
-                        <GitBranch size={18} className="text-red-500 shrink-0" />
-                        <div>
-                          <div className="text-sm font-semibold text-white">{t('cinegraph.similarsLabel')}</div>
-                          <div className="text-xs text-white/50">{t('cinegraph.similarContent')}</div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setGraphOptions(o => ({ ...o, similar: !o.similar }))}
-                        className={`w-11 h-6 rounded-full transition-colors relative ${graphOptions.similar ? 'bg-red-600' : 'bg-white/20'}`}
-                      >
-                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${graphOptions.similar ? 'translate-x-5' : ''}`} />
-                      </button>
-                    </div>
-
-                    {/* Similar limit slider */}
-                    {graphOptions.similar && (
-                      <div className="pl-8 pr-3 -mt-2">
-                        <label className="flex items-center justify-between text-xs text-white/60 mb-1">
-                          <span>{t('cinegraph.maxSimilar')}</span>
-                          <span className="font-mono text-white/80 bg-white/10 px-2 py-0.5 rounded">{graphOptions.similarLimit}</span>
-                        </label>
-                        <input
-                          type="range"
-                          min={1}
-                          max={15}
-                          value={graphOptions.similarLimit}
-                          onChange={(e) => setGraphOptions(o => ({ ...o, similarLimit: parseInt(e.target.value) }))}
-                          className="w-full accent-red-500 h-1.5"
-                        />
-                        <div className="flex justify-between text-[10px] text-white/30 mt-0.5">
-                          <span>1</span>
-                          <span>15</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── Toggle: Recommendations ── */}
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/5">
-                      <div className="flex items-center gap-3">
-                        <Star size={18} className="text-blue-400 shrink-0" />
-                        <div>
-                          <div className="text-sm font-semibold text-white">{t('cinegraph.recommendations')}</div>
-                          <div className="text-xs text-white/50">{t('cinegraph.recommendedByTmdb')}</div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setGraphOptions(o => ({ ...o, recommendations: !o.recommendations }))}
-                        className={`w-11 h-6 rounded-full transition-colors relative ${graphOptions.recommendations ? 'bg-red-600' : 'bg-white/20'}`}
-                      >
-                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${graphOptions.recommendations ? 'translate-x-5' : ''}`} />
-                      </button>
-                    </div>
-
-                    {/* Recommendations limit slider */}
-                    {graphOptions.recommendations && (
-                      <div className="pl-8 pr-3 -mt-2">
-                        <label className="flex items-center justify-between text-xs text-white/60 mb-1">
-                          <span>{t('cinegraph.maxRecommendations')}</span>
-                          <span className="font-mono text-white/80 bg-white/10 px-2 py-0.5 rounded">{graphOptions.recommendationLimit}</span>
-                        </label>
-                        <input
-                          type="range"
-                          min={1}
-                          max={15}
-                          value={graphOptions.recommendationLimit}
-                          onChange={(e) => setGraphOptions(o => ({ ...o, recommendationLimit: parseInt(e.target.value) }))}
-                          className="w-full accent-red-500 h-1.5"
-                        />
-                        <div className="flex justify-between text-[10px] text-white/30 mt-0.5">
-                          <span>1</span>
-                          <span>15</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── Depth ── */}
-                    <div className="p-3 rounded-lg bg-white/5 border border-white/5">
-                      <div className="flex items-center gap-3 mb-2">
-                        <Network size={18} className="text-emerald-400 shrink-0" />
-                        <div>
-                          <div className="text-sm font-semibold text-white">{t('cinegraph.explorationDepth')}</div>
-                          <div className="text-xs text-white/50">{t('cinegraph.depthDescription')}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 mt-2">
-                        {[0, 1, 2, 3].map((d) => (
-                          <button
-                            key={d}
-                            onClick={() => setGraphOptions(o => ({ ...o, depth: d }))}
-                            className={`flex-1 py-1.5 rounded-lg text-sm font-bold transition-all ${
-                              graphOptions.depth === d
-                                ? 'bg-red-600 text-white shadow-lg shadow-red-600/30'
-                                : 'bg-white/10 text-white/50 hover:bg-white/15 hover:text-white/80'
-                            }`}
-                          >
-                            {d}
-                          </button>
-                        ))}
-                      </div>
-                      {graphOptions.depth >= 2 && (
-                        <p className="text-[11px] text-amber-400/80 mt-2">
-                          {t('cinegraph.depthWarning')}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* ── Reset ── */}
-                    <button
-                      onClick={() => setGraphOptions({ ...DEFAULT_GRAPH_OPTIONS })}
-                      className="mt-2 w-full py-2.5 rounded-lg border border-white/10 bg-white/5 text-white/70 text-sm font-medium hover:bg-white/10 hover:text-white transition-colors"
-                    >
-                      {t('cinegraph.resetSettings')}
-                    </button>
-
-                  </div>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>,
-        getOverlayPortalRoot()
-      )}
-
-      {/* ─── Trending / Start Screen ────────────────────────────────────── */}
-      {!hasGraph && !loading && (
-        <motion.div
-          className="cinegraph-start-grid"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.5 }}
-        >
-          <h2>{t('cinegraph.trendingChoose')}</h2>
-          <div className="cinegraph-start-items">
-            {trending.map((item) => (
-              <motion.div
-                key={`${item.type}-${item.id}`}
-                className="cinegraph-start-item"
-                role="button"
-                tabIndex={0}
-                data-interactive
-                onClick={() => handleSelectTrending(item)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handleSelectTrending(item);
-                  }
-                }}
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-              >
-                {item.poster ? (
-                  <img src={item.poster} alt={item.title} loading="lazy" />
-                ) : (
-                  <div style={{ aspectRatio: '2/3', background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Film size={28} color="#4b5563" />
-                  </div>
-                )}
-                <div className="cinegraph-start-item-info">
-                  <div className="cinegraph-start-item-title">{item.title}</div>
-                  <div className="cinegraph-start-item-meta">
-                    {item.type === 'movie' ? t('cinegraph.filmLabel') : t('cinegraph.seriesLabel')} {item.year && `• ${item.year}`}
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
+        getOverlayPortalRoot(),
       )}
     </SquareBackground>
   );

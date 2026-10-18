@@ -476,7 +476,10 @@ const Top10Page: React.FC = () => {
                   />
                 )}
                 <span className="relative z-10 flex items-center gap-2">
-                  {tab.icon}
+                  {/* Couleur pleine + opacité : évite les croisements plus clairs du rgba hérité */}
+                  <span className={`flex transition-opacity duration-300 ${activeTab === tab.id ? 'opacity-100' : 'text-white opacity-50'}`}>
+                    {tab.icon}
+                  </span>
                   {t(tab.labelKey)}
                 </span>
               </button>
@@ -511,12 +514,14 @@ const Top10Page: React.FC = () => {
               <button
                 key={a.id}
                 onClick={() => applyFilters(period, a.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                   algo === a.id ? '' : 'text-white/40 hover:text-white/70'
                 }`}
                 style={algo === a.id ? { color: activeTabConfig.color, backgroundColor: `${activeTabConfig.color}15` } : undefined}
               >
-                {a.icon}
+                <span className={`flex transition-opacity ${algo === a.id ? '' : 'text-white opacity-40 group-hover:opacity-70'}`}>
+                  {a.icon}
+                </span>
                 {t(a.labelKey)}
               </button>
             ))}
@@ -597,7 +602,7 @@ const Top10Page: React.FC = () => {
                                 <span>{entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : '🥉'}</span>
                               ) : (
                                 <span className="flex items-center gap-0.5">
-                                  <Hash className="w-3.5 h-3.5 opacity-50" />
+                                  <Hash className="w-3.5 h-3.5 text-white opacity-30" />
                                   {entry.rank}
                                 </span>
                               )}

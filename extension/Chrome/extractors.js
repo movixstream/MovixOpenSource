@@ -455,18 +455,38 @@ function extractM3u8UrlFromDecodedScript(script, embedUrl) {
             const rawDecoded = atob(paddedPayload);
             const byteArray = Array.from(rawDecoded, c => c.charCodeAt(0));
             if (groups.bytes) byteArray.reverse();
-            const decodedBytes = Uint8Array.from(
-                byteArray,
-                (byteVal, index) => byteVal ^ ((parameters.seed + index * parameters.step) & mask),
-            );
             const matchIndex = match.index || 0;
             const matchTail = script.substring(matchIndex);
-            if (!groups.bytes && /\.reverse\(\s*\)\s*\.join/.test(matchTail.substring(0, 500))) {
-                decodedBytes.reverse();
-            }
-            const decoded = new TextDecoder('utf-8', { fatal: false }).decode(decodedBytes);
-            const candidate = normalizeCandidate(decoded);
+            const postReverse = !groups.bytes && /\.reverse\(\s*\)\s*\.join/.test(matchTail.substring(0, 500));
+            const decodeWith = (seed, fatal) => {
+                const decodedBytes = Uint8Array.from(
+                    byteArray,
+                    (byteVal, index) => byteVal ^ ((seed + index * parameters.step) & mask),
+                );
+                if (postReverse) decodedBytes.reverse();
+                try {
+                    return new TextDecoder('utf-8', { fatal }).decode(decodedBytes);
+                } catch {
+                    return '';
+                }
+            };
+            const candidate = normalizeCandidate(decodeWith(parameters.seed, false));
             if (candidate) return candidate;
+
+            // La graine dépend de mesures faites dans le navigateur
+            // (offsetWidth d'un div enfant à 50 % d'un parent en
+            // `calc(1in + Npx)`, somme du hostname…) que la page fait
+            // tourner. Une mesure mal relue donne une clé fausse, donc le
+            // leurre `troll`. La graine n'a que `mask + 1` valeurs
+            // possibles : on les essaie toutes et on n'accepte qu'une URL
+            // m3u8 complète, en ASCII imprimable, hors leurre.
+            for (let alternative = 0; alternative <= mask; alternative++) {
+                if (alternative === (parameters.seed & mask)) continue;
+                const decoded = decodeWith(alternative, true);
+                if (!/^https:\/\/[\x21-\x7e]+$/i.test(decoded)) continue;
+                const fallback = normalizeCandidate(decoded);
+                if (fallback) return fallback;
+            }
         } catch {}
     }
 

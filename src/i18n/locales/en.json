@@ -572,7 +572,14 @@
     "github": "GitHub",
     "githubDesc": "Open-source code",
     "calendar": "Calendar",
-    "calendarDesc": "Upcoming releases, and your own"
+    "calendarDesc": "Upcoming releases, and your own",
+    "groupApps": "Our apps",
+    "appsExtension": "Extension",
+    "appsExtensionDesc": "Movix in your browser",
+    "appsMobile": "Mobile app",
+    "appsMobileDesc": "Movix on your phone",
+    "appsTv": "TV app",
+    "appsTvDesc": "Movix on your TV"
   },
   "calendar": {
     "seoTitle": "Release calendar",
@@ -672,7 +679,9 @@
     "menu": "Menu",
     "notifications": "Notifications",
     "profile": "Profile",
-    "settings": "Settings"
+    "settings": "Settings",
+    "halloweenOn": "Turn on the Halloween theme",
+    "halloweenOff": "Turn off the Halloween theme"
   },
   "footer": {
     "copyright": "© {{year}} Movix. All rights reserved.",
@@ -687,7 +696,7 @@
     "legal": "Legal",
     "contact": "Contact",
     "discord": "Discord",
-    "telegram": "Telegram",
+    "telegram": "Matrix",
     "description": "Your favorite streaming platform",
     "contentTitle": "About the content",
     "contentText": "Movix indexes content available from third-party services. Its availability depends on those services.",
@@ -697,6 +706,29 @@
     "vibeCoded": "Entirely vibe coded"
   },
   "home": {
+    "halloween": {
+      "title": "Halloween Special",
+      "countdown_one": "{{count}} day to Halloween",
+      "countdown_other": "{{count}} days to Halloween",
+      "countdownShort_one": "{{count}} day",
+      "countdownShort_other": "{{count}} days",
+      "tonight": "It's tonight!",
+      "meter": "Fright meter",
+      "moods": {
+        "soft": {
+          "label": "Mild chills",
+          "hint": "Family Halloween: witches, pumpkins and friendly monsters"
+        },
+        "chills": {
+          "label": "Goosebumps",
+          "hint": "Halloween nights, haunted houses and masked killers"
+        },
+        "terror": {
+          "label": "Terror",
+          "hint": "The greatest horror films. Not for the faint of heart"
+        }
+      }
+    },
     "trending": "Trending",
     "trendingMovies": "Trending Movies",
     "trendingSeries": "Trending Series",
@@ -1011,6 +1043,10 @@
     "watchlistBtn": "Watchlist",
     "favoritesBtn": "Favorites",
     "watchedBtn": "Watched",
+    "watchedEstimatedBtn": "Watched (estimated)",
+    "watchedOtherDevice": "Watched on another device",
+    "estimatedShort": "estimated",
+    "otherDeviceShort": "other device",
     "addToAList": "Add to a list",
     "antiSpoilConfig": "Configure anti-spoiler settings",
     "antiSpoil": "Anti-Spoiler",
@@ -1051,9 +1087,6 @@
     "broadcastNetworks": "Networks",
     "imagesCount_one": "{{count}} image",
     "imagesCount_other": "{{count}} images",
-    "part1And2": "Part 1 and 2",
-    "part3And4": "Part 3 and 4",
-    "part5": "Part 5",
     "languages": {
       "vf": "VF",
       "vostfr": "VOSTFR"
@@ -1166,6 +1199,13 @@
     "financialNote": "Note: These estimates are based on industry trends and vary significantly depending on specific production and distribution agreements.",
     "showEpisodeGrid": "Show episode grid",
     "showDropdown": "Show dropdown",
+    "episodeListSource": "List:",
+    "episodeListTvmaze": "TVmaze",
+    "episodeListTmdb": "TMDB",
+    "episodeListNetflix": "Netflix",
+    "seasonLayout": "Season list:",
+    "episodeListTvmazeHint": "TVmaze split ({{count}} episodes instead of {{tmdb}} on TMDB)",
+    "episodeListSwitchHint": "Missing episodes, or an episode that is already out won't play? Switch the list.",
     "standardMode": "Standard mode",
     "animeModeLabel": "Anime mode",
     "standardModeAvailable": "Standard Mode available. Try it if episodes/seasons are missing.",
@@ -1387,7 +1427,7 @@
     "keepFullscreen": "Keep Fullscreen",
     "keepFullscreenDesc": "Stay in fullscreen when switching episodes. The player no longer drops out of fullscreen between episodes, on any browser.",
     "resumePlayback": "Resume Playback",
-    "resumePlaybackDesc": "Automatically resume playback after switching episodes.",
+    "resumePlaybackDesc": "If the video was playing, the next episode starts on its own instead of waiting paused. This setting does not choose where an episode resumes: to rewatch a series from the start, use \"Reset the whole series\" below.",
     "nextContentPopup": "Next Content Popup",
     "pipNotAvailable": "Video element not available",
     "videoNotReady": "Video is not ready yet",
@@ -1557,6 +1597,9 @@
     "reset": "Reset",
     "resetProgress": "Reset progress (this content)",
     "resetProgressDesc": "Resets playback to the beginning for this movie/episode.",
+    "resetSeriesProgress": "Reset the whole series",
+    "resetSeriesProgressDesc": "Clears progress for every episode: each one will start from the beginning.",
+    "resetSeriesProgressDone": "Series progress cleared ({{count}} episode(s))",
     "frenchQuality": "French Quality",
     "frenchFilm": "French Film",
     "french": "French",
@@ -2087,6 +2130,7 @@
     "login": "Login",
     "register": "Sign Up",
     "logout": "Logout",
+    "holdToLogout": "Hold to log out",
     "email": "Email",
     "password": "Password",
     "confirmPassword": "Confirm password",
@@ -2255,6 +2299,7 @@
     "favoriteGenres": "Favorite Genres",
     "accountInfo": "Account Info",
     "connectedWith": "Connected with",
+    "connectedWithSecretPhrase": "Signed in with a secret phrase",
     "memberSince": "Member since",
     "notConnected": "Not connected",
     "connectAccount": "Connect Account",
@@ -2358,7 +2403,7 @@
     "languageSaved": "Language saved",
     "languageChanged": "Language changed successfully",
     "vip": "VIP",
-    "vipDesc": "Manage your premium subscription",
+    "vipDesc": "Manage your VIP access",
     "sessions": "Sessions",
     "sessionsDesc": "Manage your connected devices",
     "activeSessions": "Active Sessions",
@@ -2415,6 +2460,8 @@
     "soundEffectsDesc": "Enables interface sounds, for example during roulette spins.",
     "snowEffect": "Snow effect",
     "snowEffectDesc": "Enables snowflakes falling across the entire site.",
+    "halloweenTheme": "Halloween theme",
+    "halloweenThemeDesc": "Misty night sky, dead trees, pumpkins, candies and orange accents across the site. On by default in October, and also from the pumpkin in the header. The player is not affected.",
     "squareCorners": "Square corners",
     "squareCornersDesc": "Removes all rounded corners from the interface (cards, carousels, buttons, avatars…).",
     "backgroundStyle": "Background style",
@@ -2632,6 +2679,16 @@
     "hideStreamingPlatforms": "Hide streaming platforms",
     "movieReleaseWarnings": "Movie release warnings",
     "movieReleaseWarningsDesc": "Show theatrical and home release dates (digital, DVD/Blu-ray, TV). The playback reminder ends 6 hours before the listed day begins. A CAM or HDTS version may already be available. Off by default.",
+    "episodeListSource": "Default episode list",
+    "episodeListSourceDesc": "TVmaze often follows the platforms' split (e.g. 21 chapters instead of 10 episodes). You can also change it for each series from its page.",
+    "episodeListSourceFilterHelp": "The filter: TVmaze is only used if the series has the same seasons on TVmaze and TMDB, and TVmaze has more episodes (e.g. 21 vs 10). Otherwise, Movix keeps TMDB. This avoids series that TVmaze counts differently, like many anime grouped into a single 500-episode season: sources follow TMDB, so those episodes would not play.",
+    "episodeListSourceTvmaze": "TVmaze with filter",
+    "episodeListSourceTvmazeDesc": "Only when it is safe (default)",
+    "episodeListSourceTvmazeAll": "TVmaze without filter",
+    "episodeListSourceTvmazeAllDesc": "Always TVmaze (titles often in English).",
+    "episodeListSourceTvmazeAllWarning": "Some episodes may not play.",
+    "episodeListSourceTmdb": "TMDB",
+    "episodeListSourceTmdbDesc": "Always the official TMDB list",
     "hideStreamingPlatformsDesc": "Hides the Netflix, Prime Video, and other platforms carousel on the home page.",
     "lowLatency": "Low latency streaming",
     "lowLatencyDesc": "Reduces delay on compatible LL-HLS live streams. Does not improve video quality or speed up on-demand movies.",
@@ -2948,6 +3005,13 @@
   },
   "comments": {
     "title": "Comments",
+    "follow": "Notify me of new comments",
+    "unfollow": "Stop notifying me",
+    "followHint": "Get a notification for every new comment on this title",
+    "unfollowHint": "Stop notifications for new comments on this title",
+    "followEnabled": "You'll be notified of new comments",
+    "followDisabled": "You won't be notified of new comments anymore",
+    "followError": "Couldn't update comment notifications",
     "turnstileNotice": "To fight bots and spam, please complete this verification before each comment or reply.",
     "writeComment": "Write a comment...",
     "addComment": "Add a comment...",
@@ -3862,9 +3926,7 @@
     "noAds": "No ads",
     "priority": "Priority access",
     "exclusiveContent": "Exclusive content",
-    "buyKey": "Buy a VIP key",
-    "donate": "Donate",
-    "donateDescription": "Create a BTC or LTC crypto invoice, pay with the QR code, then automatically receive your VIP key or a gift URL.",
+    "donate": "Make a donation",
     "enterKey": "Enter your VIP key",
     "activateKeyDescription": "Already have a VIP key? Activate it here to unlock your access immediately.",
     "activate": "Activate",
@@ -3883,47 +3945,33 @@
       "multiLangDubs": "Multi-language dubbing",
       "customBadge": "Custom VIP badge"
     },
-    "getVip": "Get Movix VIP",
+    "getVip": "Support Movix",
     "learnMore": "Learn more",
     "activationError": "Error activating VIP key",
     "accessMovixVip": "Access Movix VIP",
-    "noVipKey": "No Movix VIP key?",
-    "accessForPrice": "Access Movix VIP for only 5€/year and enjoy:",
-    "accessForLifePrice": "Access Movix VIP for only 5€ for life and enjoy:",
+    "noVipKey": "No VIP key yet?",
+    "accessForPrice": "Donate to support Movix. As a thank-you, you get VIP and enjoy:",
+    "accessForLifePrice": "Donate to support Movix. As a thank-you, you get VIP and enjoy:",
     "prioritySupport": "Priority support",
     "getAccessClicks": "Get your access in a few clicks:",
-    "joinTelegramForVip": "To get VIP access (5€/year), join our Telegram.",
-    "contactTelegramForVip": "To get VIP access (5€ for life), contact mysticsaba on Telegram.",
-    "donateForKey": "Make a donation to get your Movix VIP key, or contact us on Telegram.",
+    "donateForKey": "By bank card, gift card or crypto: your VIP key is our thank-you for your donation.",
     "quality4k": "Quality up to 4K HDR",
     "multiLangSubtitles": "Multi-language subtitles",
     "multipleLanguages": "Multiple languages available",
     "discoverBenefits": "Discover VIP benefits",
     "youAreVip": "You are VIP",
+    "activeUntil": "VIP until {{date}}",
     "becomeVip": "Become VIP",
     "adFreePlayers": "New ad-free players",
     "adFreePlayersDesc": "Enjoy smooth and instant playback.",
     "noAdBeforeContent": "No ads before a movie or episode",
     "noAdBeforeContentDesc": "Instant launch of your favorite content.",
-    "priorityRequests": "Priority requests",
+    "priorityRequests": "More requests",
     "priorityRequestsDesc": "3 movie/series requests every 48h (vs 1 for free users).",
     "vipCommentTag": "VIP comment tag",
     "vipCommentTagDesc": "Display your unique status in the community space.",
-    "franceTvAccess": "France.tv & Okoo access",
-    "franceTvAccessDesc": "Watch France Télévisions replays with DRM streaming.",
-    "liveTvOtherSources": "Live TV from other sources",
-    "liveTvOtherSourcesDesc": "Access live TV channels from other exclusive sources.",
     "debridService": "Built-in debrider",
     "debridServiceDesc": "Debrid your premium host links directly from Movix, no external account needed.",
-    "supportPlatform": "Support the platform and enjoy the ultimate streaming experience for only",
-    "yearlyPrice": "€5 per year",
-    "perfectOffer": "The perfect offer for those who don't want to bother with ad blocker installation and DNS changes.",
-    "howToSubscribe": "How to subscribe?",
-    "contactToActivate": "Contact us directly to activate your VIP access.",
-    "telegramChannel": "Telegram Channel (t.me/ix_annonces)",
-    "discordContact": "Discord: mysticsaba_alt",
-    "telegramPersonal": "Or on personal Telegram:",
-    "supportMessage": "VIPs keep the site alive! Servers, internal proxies, and testing new features in development... All of this costs money, and every contribution helps us keep going 💛",
     "backToHome": "Back to Home",
     "errors": {
       "verifyKeyError": "Error verifying key",
@@ -4555,73 +4603,175 @@
   "cinegraph": {
     "title": "CineGraph",
     "description": "Explore connections between your favorite content",
-    "explore": "Explore",
-    "films": "Movies",
-    "series": "Series",
-    "persons": "People",
-    "genresLabel": "Genres",
-    "director": "Director",
-    "genre": "Genre",
-    "similar": "Similar",
-    "recommendation": "Recommended",
-    "actor": "Actor",
-    "company": "Studio",
-    "mappingCinematicUniverse": "Mapping the cinematic universe...",
-    "discoveringCreativeNetwork": "Discovering the creative network...",
-    "exploreHiddenConnections": "Explore hidden connections between movies, series and artists",
-    "searchPlaceholder": "Search for a movie, series, actor...",
+    "mappingCinematicUniverse": "Mapping the cinematic universe…",
+    "discoveringCreativeNetwork": "Finding links between titles…",
+    "exploreHiddenConnections": "Pick a movie, a series or an artist: the map shows what is linked to it, and why",
+    "exploringUniverse": "What is linked to \"{{title}}\", and why",
+    "searchPlaceholder": "Search for a movie, a series, an artist…",
+    "clearSearch": "Clear search",
     "filmLabel": "Movie",
     "seriesLabel": "Series",
     "artistLabel": "Artist",
-    "zoomIn": "Zoom +",
-    "zoomOut": "Zoom -",
+    "noResultsFound": "No results found",
+    "trendingChoose": "🔥 Trending — choose a starting point",
+    "backToStart": "Back to choosing a starting point",
+    "trail": "Your path",
+    "zonesFilter": "Visible zones",
+    "viewMode": "Display",
+    "mapView": "Map",
+    "listView": "List",
+    "hint": "Click a thumbnail to see why it is here.",
+    "hintMap": "Click a thumbnail to see why it is here. Wheel: move · Ctrl + wheel: zoom · click a zone title: zoom in on it.",
+    "fullscreen": "Full screen",
+    "exitFullscreen": "Exit full screen",
+    "escKey": "Esc",
+    "focusZone": "Zoom in on this zone",
+    "emptyMap": "Not enough links found around \"{{title}}\".",
+    "loadError": "This map could not be loaded. Check your connection.",
+    "mapUnavailable": "The map view could not load: here are the same links as a list.",
+    "retry": "Retry",
+    "recenter": "Recenter",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "close": "Close",
     "viewRecord": "View details",
     "viewProfile": "View profile",
-    "clickForDetails": "Click to see details • Double-click to explore",
-    "searchTitle": "Search",
-    "searchDesc": "Type the name of a movie, series or artist in the search bar, or choose a trending item.",
-    "interactTitle": "Interact",
-    "interactDesc": "Click on a node to see its details. Right-click to explore its network. Drag nodes to reorganize.",
-    "navigateTitle": "Navigate",
-    "navigateDesc": "Scroll to zoom in/out. Drag the background to move the view. Bottom buttons allow recentering.",
-    "filterTitle": "Filter",
-    "filterDesc": "Use the colored filters (Movies, Series, People, Genres) to show or hide certain types of nodes.",
-    "detailPanelTitle": "Detail panel",
-    "detailPanelDesc": "The panel on the right lists connections. Click on them to zoom to that node on the map.",
-    "directors": "Directors",
-    "addDirectors": "Add directors",
-    "recommendedByTmdb": "Content recommended by TMDB",
-    "trendingChoose": "🔥 Trending — Choose a starting point",
-    "noResultsFound": "No results found",
-    "exploreNetwork": "Explore network",
-    "howToUse": "How to use CinéGraph?",
-    "visualizesDescription": "CinéGraph visualizes the hidden connections between movies, series and artists as an interactive network.",
-    "customizeGraph": "Customize graph",
-    "settingsDescription": "Choose which data to fetch to build the network. Changes will apply on next exploration.",
-    "actorsCast": "Actors / Cast",
-    "addMainActors": "Add main actors",
-    "maxActors": "Max actors",
-    "addGenreNodes": "Add genre nodes",
-    "similarsLabel": "Similar",
-    "similarContent": "Similar content",
-    "maxSimilar": "Max similar",
-    "recommendations": "Recommendations",
-    "maxRecommendations": "Max recommendations",
-    "explorationDepth": "Exploration depth",
-    "depthDescription": "0 = single node, 1 = neighbors, 2 = neighbors of neighbors...",
-    "depthWarning": "⚠️ Depth ≥ 2 can generate many nodes and slow down loading.",
-    "resetSettings": "Reset settings",
-    "movieType": "🎬 Movie",
-    "tvType": "📺 Series",
-    "personType": "🎭 Artist",
-    "genreType": "🏷️ Genre",
-    "exploringUniverse": "Exploring the universe of \"{{title}}\"",
-    "recenter": "Recenter",
-    "nodesStat": "Nodes",
-    "connectionsStat": "Connections",
-    "contentsStat": "Content",
-    "artistsStat": "Artists",
-    "statsConnections": "Connections"
+    "exploreFromHere": "Explore from here",
+    "rootLabel": "At the center",
+    "linked": "linked",
+    "seeMore": "See more (+{{count}})",
+    "seeMoreShort": "See more",
+    "seeLess": "See less",
+    "and": "{{first}} and {{last}}",
+    "andMore_one": "{{names}} and {{count}} other",
+    "andMore_other": "{{names}} and {{count}} others",
+    "howToUse": "How to read CineGraph?",
+    "visualizesDescription": "CineGraph puts your pick at the center and groups what is linked to it by reason: same director, same actors, same saga… Every thumbnail says why it is there.",
+    "help": {
+      "start": {
+        "icon": "🔍",
+        "title": "Pick a starting point",
+        "desc": "Search for a movie, a series or an artist, or pick a trending title."
+      },
+      "read": {
+        "icon": "🧭",
+        "title": "Read the zones",
+        "desc": "Each zone title gives the reason for the link. The colored line under each thumbnail adds the detail: \"with Leonardo DiCaprio\", \"part 2 of 3\"…"
+      },
+      "why": {
+        "icon": "👆",
+        "title": "Click to understand",
+        "desc": "The \"Why is it here?\" panel shows the link as a picture and in plain words. Hover a person to see their other titles on the map."
+      },
+      "explore": {
+        "icon": "🔁",
+        "title": "Keep exploring",
+        "desc": "\"Explore from here\" re-centers the map on that title or artist. The trail at the top takes you back."
+      },
+      "navigate": {
+        "icon": "🖱️",
+        "title": "Move around",
+        "desc": "On the map: scroll or drag to move, Ctrl + scroll or pinch to zoom, click a zone title to zoom in on it, \"Recenter\" to see everything, \"Full screen\" for more room. On phones, zones are shown as a list."
+      }
+    },
+    "department": {
+      "Acting": "Acting",
+      "Directing": "Directing",
+      "Writing": "Writing",
+      "Production": "Production",
+      "Sound": "Sound",
+      "Camera": "Camera",
+      "Editing": "Editing",
+      "Art": "Art",
+      "Crew": "Crew",
+      "Visual Effects": "Visual effects",
+      "Costume & Make-Up": "Costume and make-up",
+      "Lighting": "Lighting"
+    },
+    "zones": {
+      "team": {
+        "title": "The team",
+        "desc": "The people who made \"{{title}}\""
+      },
+      "saga": {
+        "title": "Same saga",
+        "desc": "The other parts of {{saga}}"
+      },
+      "director": {
+        "title": "Same director",
+        "titleCreator": "Same creator",
+        "desc": "Other titles directed by {{names}}",
+        "descCreator": "Other titles created by {{names}}"
+      },
+      "cast": {
+        "title": "Same actors",
+        "desc": "At least one actor in common with \"{{title}}\""
+      },
+      "mood": {
+        "title": "Same mood",
+        "desc": "Themes or genres in common with \"{{title}}\""
+      },
+      "roles": {
+        "title": "Notable roles",
+        "desc": "Movies and series {{name}} plays in"
+      },
+      "crew": {
+        "title": "Behind the camera",
+        "desc": "What {{name}} directs, creates or writes"
+      },
+      "partners": {
+        "title": "Frequent co-stars",
+        "titleCrew": "Regular actors",
+        "desc": "The actors who most often play alongside {{name}}",
+        "descCrew": "The actors who most often appear in {{name}}'s work"
+      },
+      "directors": {
+        "title": "Loyal directors",
+        "desc": "The directors who most often work with {{name}}"
+      }
+    },
+    "chip": {
+      "director": "Director",
+      "creator": "Creator",
+      "writer": "Writer",
+      "plays": "plays {{character}}",
+      "playsNoName": "in the cast",
+      "sagaPart": "part {{part}} of {{parts}}",
+      "saga": "same saga",
+      "by": "by {{name}}",
+      "with": "with {{name}}",
+      "withMore": "with {{name}} +{{count}}",
+      "together_one": "{{count}} title together",
+      "together_other": "{{count}} titles together"
+    },
+    "why": {
+      "title": "Why is it here?",
+      "rootNote": "This is where the map starts: everything else is arranged around it.",
+      "alsoInMap": "Also linked on this map",
+      "crew_director": "Directed \"{{root}}\"",
+      "crew_creator": "Created \"{{root}}\"",
+      "crew_writer": "Wrote \"{{root}}\"",
+      "crewOn_director": "Directed by {{root}}",
+      "crewOn_creator": "Created by {{root}}",
+      "crewOn_writer": "Written by {{root}}",
+      "plays": "Plays {{character}} in \"{{root}}\"",
+      "playsNoName": "In the cast of \"{{root}}\"",
+      "playsRoot": "{{root}} plays {{character}}",
+      "playsRootNoName": "{{root}} is in the cast",
+      "saga": "Part of the same saga: {{saga}}",
+      "sagaPart": "Part {{part}} of {{parts}} in the {{saga}} saga",
+      "sameDirector": "Same director as \"{{root}}\": {{names}}",
+      "sameCreator": "Same creator as \"{{root}}\": {{names}}",
+      "sharedCast": "Cast in common with \"{{root}}\": {{names}}",
+      "themes": "Themes in common: {{list}}",
+      "genres": "Genres in common: {{list}}",
+      "playedWith_one": "Played alongside {{root}} in {{count}} title: {{titles}}",
+      "playedWith_other": "Played alongside {{root}} in {{count}} titles: {{titles}}",
+      "castBy_one": "Appears in {{count}} title by {{root}}: {{titles}}",
+      "castBy_other": "Appears in {{count}} titles by {{root}}: {{titles}}",
+      "directedRoot_one": "Directed {{root}} in {{count}} title: {{titles}}",
+      "directedRoot_other": "Directed {{root}} in {{count}} titles: {{titles}}"
+    }
   },
   "notFound": {
     "backHome": "Back to Home",
@@ -4635,7 +4785,9 @@
     "v4Title": "Spoiler alert",
     "v4Desc": "Plot twist: this page never existed. No one saw it coming.",
     "v5Title": "Misleading trailer",
-    "v5Desc": "This page looked great in the trailer, but it never made it to theaters."
+    "v5Desc": "This page looked great in the trailer, but it never made it to theaters.",
+    "halloweenTitle": "Lost in the mist",
+    "halloweenDesc": "This page may be haunting another address… or it never existed."
   },
   "privacy": {
     "title": "Privacy Policy",
@@ -4680,7 +4832,7 @@
     "rightObjection": "Right to object to processing",
     "contact": "Contact",
     "contactText": "For any questions regarding this privacy policy or to exercise your rights, you can contact us:",
-    "joinTelegram": "Join our Telegram group",
+    "joinTelegram": "Join our Matrix channel",
     "modifications": "Modifications",
     "modificationsText": "We may update this privacy policy from time to time. We will notify you of any significant changes through a notification on our platform. We encourage you to review this page regularly."
   },
@@ -4734,7 +4886,7 @@
     "passionProject": "A passion project",
     "passionProjectDesc": "Movix was started at 14, out of passion for development and streaming. Every feature was designed to simplify users' lives. No marketing budget, just word of mouth.",
     "community": "The community",
-    "communityDesc": "Today, Movix is an active community on Discord and Telegram. User feedback guides every update. It's a living project that constantly evolves.",
+    "communityDesc": "Today, Movix is an active community on Discord and Matrix. User feedback guides every update. It's a living project that constantly evolves.",
     "alwaysFurther": "Always further",
     "alwaysFurtherDesc": "Watch parties, shared lists, CineGraph, release alerts, multiple profiles, browser extension... Movix keeps growing to offer the best free streaming experience.",
     "allYouNeed": "Everything you need",
@@ -4838,7 +4990,7 @@
     "twitter": "Twitter",
     "facebook": "Facebook",
     "whatsapp": "WhatsApp",
-    "telegram": "Telegram",
+    "telegram": "Matrix",
     "reddit": "Reddit",
     "email": "Email"
   },
@@ -5380,13 +5532,13 @@
     "title": "Support",
     "description": "Need help? Contact us!",
     "discord": "Join Discord",
-    "telegram": "Join Telegram",
+    "telegram": "Join Matrix",
     "email": "Send an email",
     "faq": "FAQ",
     "likeOurSite": "Do you like our site?",
     "wantToSupport": "Want to support us?",
     "shareTikTok": "Share the site, make a TikTok video!",
-    "tikTokReward": "If your TikTok video gets 4000+ views, we'll give you a VIP key! Contact us on Telegram or Discord: mysticsaba_alt!"
+    "tikTokReward": "If your TikTok video gets 4000+ views, we'll give you a VIP key! Contact us on Matrix (#groupe-ix), Telegram (MysticSaba) or Discord (mysticsaba_alt)!"
   },
   "markdownToolbar": {
     "guideTitle": "Formatting guide",
@@ -5566,6 +5718,7 @@
     "reportResolvedWithDeletion": "reviewed your report and deleted the content",
     "reportDismissed": "dismissed your report",
     "newNotification": "New notification",
+    "newCommentOnFollowed": "commented on a title you follow",
     "read": "Read",
     "deleteNotification": "Delete this notification",
     "loadMore": "Load more",
@@ -5574,7 +5727,10 @@
     "ignorePermanently": "Ignore permanently",
     "pushBannerTitle": "Get notifications",
     "pushBannerDesc": "Enable notifications to be alerted even when the site is closed.",
-    "enablePush": "Enable"
+    "enablePush": "Enable",
+    "pushLater": "Later",
+    "pushNever": "Don't ask again",
+    "markAsRead": "Mark as read"
   },
   "unavailableContent": {
     "title": "Content Unavailable",
@@ -5591,22 +5747,22 @@
     "clickIfNotRedirected": "Click here if you are not redirected",
     "newAddress": "New address",
     "ourNewAddress": "Our new address is",
-    "joinTelegramNews": "Join our Telegram channel for the latest news."
+    "joinTelegramNews": "Join our Matrix channel for the latest news."
   },
   "telegram": {
-    "promotionTitle": "Join our Telegram channel",
+    "promotionTitle": "Join our Matrix channel",
     "promotionDescription": "Latest news, site updates and real-time announcements.",
     "promotionJoin": "Join",
-    "joinChannel": "Join Telegram",
+    "joinChannel": "Join Matrix",
     "description": "Stay informed about the latest updates",
     "notNow": "Not now",
     "joinCommunity": "Join the community",
-    "officialAnnouncements": "All official announcements, support and discussions are on <strong>Telegram</strong>.",
+    "officialAnnouncements": "All official announcements, support and discussions are on <strong>Matrix</strong>.",
     "joinUsNow": "Join us so you don't miss a thing.",
-    "joinTelegram": "Join Telegram",
-    "announcementTitle": "New Telegram channel",
-    "announcementBody": "Our new Telegram is <strong>t.me/ix_annonces</strong>. A big announcement is waiting for you there: all the new features, the logo change and more.",
-    "announcementJoin": "Join the Telegram",
+    "joinTelegram": "Join Matrix",
+    "announcementTitle": "Movix is now on Matrix",
+    "announcementBody": "Our Telegram channels were banned, including the one we had just recreated. From now on, we meet on Matrix: <strong>#groupe-ix:matrix.org</strong>. All announcements are posted there.",
+    "announcementJoin": "Join on Matrix",
     "announcementLater": "Later"
   },
   "discord": {
@@ -5758,12 +5914,95 @@
   },
   "profilePage": {
     "tabs": {
-      "watchlist": "My Watchlist",
-      "favorites": "My Favorites",
+      "watchlist": "Watchlist",
+      "favorites": "Favorites",
       "watched": "Watched",
-      "inProgress": "In Progress",
-      "alerts": "My Alerts",
-      "customLists": "My Lists"
+      "history": "History",
+      "alerts": "Alerts",
+      "customLists": "Lists",
+      "sessions": "Devices"
+    },
+    "history": {
+      "stats": {
+        "inProgress": "In progress",
+        "finished": "Finished",
+        "watched": "Watched",
+        "movies": "Movies seen",
+        "episodes": "Episodes seen",
+        "fromPositions": "{{time}} based on where you stopped"
+      },
+      "watchedInfo": {
+        "open": "How this time is counted",
+        "title": "Two ways to count",
+        "tracked": "The big number is the real time spent in the player.",
+        "positions": "The small one adds up where you stopped in each movie and episode: it grows when you skip ahead or resume somewhere else, and doesn't count rewatches.",
+        "ok": "Got it"
+      },
+      "statusLabel": "Status",
+      "status": {
+        "inProgress": "In progress",
+        "finished": "Finished",
+        "notStarted": "Not started"
+      },
+      "untitled": "Unknown title",
+      "watchedMark": "Watched",
+      "actions": {
+        "menu": "Actions for “{{title}}”",
+        "markMovie": "Mark as watched",
+        "markEpisode": "Mark episode as watched",
+        "markSeason": "Mark season as watched",
+        "markSeries": "Mark series as watched",
+        "unmark": "Remove from Watched",
+        "marked": "Marked as watched",
+        "unmarked": "Removed from Watched",
+        "already": "Already marked as watched",
+        "notMarked": "This title wasn't in Watched.",
+        "seasonError": "Couldn't load this season's episodes. Try again later.",
+        "loadingSeason": "Loading the season's episodes…",
+        "delete": "Delete from history"
+      },
+      "delete": {
+        "title": "Delete “{{title}}” from your history?",
+        "message": "Its progress, watched episodes and “Watched” marks will be erased. This will also affect your stats (watch time). This can't be undone.",
+        "cancel": "Cancel",
+        "confirm": "Delete",
+        "done": "Deleted from history",
+        "error": "Couldn't delete this title right now. Try again in a moment."
+      },
+      "episodesOf_one": "{{watched}}/{{count}} episode ({{percent}}%)",
+      "episodesOf_other": "{{watched}}/{{count}} episodes ({{percent}}%)",
+      "episodesOfShort_one": "{{watched}}/{{count}} episode",
+      "episodesOfShort_other": "{{watched}}/{{count}} episodes",
+      "episodePercent": "{{percent}}%",
+      "episodesSeen_one": "{{count}} episode watched",
+      "episodesSeen_other": "{{count}} episodes watched",
+      "lastWatched": "Last watched · {{date}}",
+      "disabledTitle": "History is off",
+      "disabledDesc": "You turned history off in settings: nothing is saved for this profile.",
+      "openSettings": "Open settings",
+      "guestTitle": "Sign in to keep your history",
+      "guestDesc": "Your full history is saved on your account, for each profile. It isn't available as a guest.",
+      "unavailableTitle": "History unavailable",
+      "unavailableDesc": "History can't be loaded right now. Try again a little later.",
+      "networkTitle": "Can't reach the server",
+      "networkDesc": "The server isn't responding. Check your connection, then try again.",
+      "sessionTitle": "Session expired",
+      "sessionDesc": "Your session expired or this profile is no longer linked to your account. Sign in again to see your history.",
+      "importingTitle": "Importing your history",
+      "importingDesc": "We're copying what you watched on this device. It takes a few seconds.",
+      "retry": "Try again",
+      "empty": {
+        "inProgressTitle": "Nothing in progress",
+        "inProgressDesc": "Start a movie or an episode: it shows up here until you finish it.",
+        "finishedTitle": "Nothing finished yet",
+        "finishedDesc": "Movies and shows you finish or mark as watched land here.",
+        "notStartedTitle": "Nothing waiting",
+        "notStartedDesc": "Titles you opened but barely started land here."
+      },
+      "pagination": "History pages",
+      "previous": "Previous",
+      "next": "Next",
+      "pageOf": "{{page}} / {{pages}}"
     },
     "dates": {
       "alreadyReleased": "Already released",
@@ -5787,7 +6026,9 @@
       "cancel": "Cancel",
       "editAlert": "Edit alert",
       "deleteAlert": "Delete alert",
-      "errorLoading": "Error loading alerts"
+      "errorLoading": "Error loading alerts",
+      "seasonEpisodeLine": "Season {{season}}, episode {{episode}}",
+      "alertLabelSpaced": "Alert:"
     },
     "sessions": {
       "browser": "Browser",
@@ -5795,6 +6036,10 @@
       "createdOn": "Created on {{date}} at {{time}}",
       "lastActivity": "Last activity: {{time}}",
       "disconnectSession": "Disconnect this session",
+      "lastActivitySpaced": "Last activity: {{time}}",
+      "disconnect": "Sign out",
+      "confirmTitle": "Sign out this session?",
+      "confirmMessage": "The device “{{device}}” will have to sign in again to access your account.",
       "justNow": "Just now",
       "minutesAgo": "{{count}} min ago",
       "hoursAgo": "{{count}}h ago",
@@ -5817,6 +6062,7 @@
     },
     "header": {
       "usernamePlaceholder": "New username",
+      "saveError": "Couldn't save right now. Try again in a moment.",
       "save": "Save",
       "cancel": "Cancel"
     },
@@ -5832,7 +6078,11 @@
       "sharedList": "Shared list",
       "liveTV": "Live TV",
       "delete": "Delete",
-      "loadingMetadata": "Loading metadata..."
+      "loadingMetadata": "Loading metadata...",
+      "removeFrom": "Remove “{{title}}”",
+      "removed": "“{{title}}” removed",
+      "undo": "Undo",
+      "noMatch": "Nothing matches these filters."
     },
     "episodes": {
       "formatEpisode": "Season {{season}}, Episode {{episode}}",
@@ -5848,11 +6098,23 @@
       "noEpisodeInWatchlist": "No episode in your watchlist.",
       "favoritesApplyToSeries": "Favorites apply to the entire series.",
       "seasonEpisodes_one": "Season {{season}} ({{count}} episode)",
-      "seasonEpisodes_other": "Season {{season}} ({{count}} episodes)"
+      "seasonEpisodes_other": "Season {{season}} ({{count}} episodes)",
+      "episodeNumber": "Episode {{episode}}",
+      "watchedHeading": "Watched episodes",
+      "watchlistHeading": "Episodes in your watchlist",
+      "viewDetails": "View details",
+      "closePanel": "Close episodes panel"
     },
     "progress": {
       "continue": "Continue",
-      "inProgressBadge": "In progress"
+      "inProgressBadge": "In progress",
+      "episodeShort": "S{{season}} · E{{episode}}",
+      "lastSeen": "Last watched",
+      "percentSeen": "{{percent}}% watched",
+      "episodeAt": "Episode {{percent}}% in",
+      "estimated": "≈ {{percent}}% · estimated",
+      "started": "Started",
+      "episodesCount": "{{seen}}/{{total}} ep."
     },
     "emptyStates": {
       "watchlistEmpty": "Your watchlist is empty",
@@ -5862,8 +6124,8 @@
       "noFavoritesDesc": "Mark your favorite movies, TV shows, collections, shared lists and live TV channels as favorites to find them here.",
       "historyEmpty": "Your history is empty",
       "historyEmptyDesc": "Movies, TV shows and collections you watch will appear here.",
-      "noSeriesInProgress": "No series in progress",
-      "noSeriesInProgressDesc": "TV shows you start watching will appear here. Continue where you left off!",
+      "noSeriesInProgress": "Nothing in progress",
+      "noSeriesInProgressDesc": "Movies and shows you start watching will appear here, so you can pick up where you left off.",
       "noAlerts": "No alerts configured",
       "noAlertsDesc": "Visit a TV show page and click the alert button on upcoming episodes.",
       "browseSeries": "Browse TV shows"
@@ -5893,7 +6155,7 @@
       "listEmptyDesc": "Add movies, TV shows and collections to this list to find them here."
     },
     "customLists": {
-      "title": "My Custom Lists",
+      "title": "My lists",
       "listCatalog": "List catalog",
       "createList": "Create a list",
       "noCustomLists": "No custom lists",
@@ -5944,6 +6206,51 @@
       "unknownMovie": "Unknown movie",
       "unknownSeries": "Unknown series"
     },
+    "card": {
+      "label": "Membership card",
+      "title": "Membership card",
+      "changeAvatar": "Change avatar",
+      "profileCount_one": "{{count}} profile",
+      "profileCount_other": "{{count}} profiles",
+      "rename": "Edit name",
+      "memberSince": "Member since {{date}}",
+      "switchProfile": "Switch"
+    },
+    "resume": {
+      "label": "Resume",
+      "kicker": "You were here",
+      "episode": "Season {{season}}, episode {{episode}}",
+      "action": "Resume",
+      "details": "View details",
+      "remaining_one": "{{count}} min left",
+      "remaining_other": "{{count}} min left",
+      "emptyTitle": "Nothing in progress",
+      "emptyDesc": "Start a movie or an episode and you can pick it up here in one click."
+    },
+    "library": {
+      "title": "Your library"
+    },
+    "estimate": {
+      "title": "Why “estimated”?",
+      "intro": "Some players don't save where you stopped. For those movies, we work out an approximate progress:",
+      "how": "the time you spent on the movie's page, divided by its runtime.",
+      "limit": "That time also includes pauses, ads and picking a source, so the number is often a bit high.",
+      "rewatch": "If you've already watched the movie, the viewings add up.",
+      "tip": "With the Movix player (HLS), progress is exact.",
+      "ok": "Got it"
+    },
+    "lists": {
+      "back": "Back",
+      "deleteTitle": "Delete this list?",
+      "deleteMessage": "\"{{name}}\" and everything in it will be deleted. This cannot be undone.",
+      "singleItems": "Added movies and shows",
+      "openSaga": "Open saga",
+      "removeSaga": "Remove this saga",
+      "dragItem": "Move {{name}}",
+      "dragList": "Move list {{name}}",
+      "openList": "Open {{name}}",
+      "listActions": "List actions"
+    },
     "editDeleteTooltip": "Left click: Edit | Right click: Delete"
   },
   "vipDonations": {
@@ -5965,9 +6272,7 @@
       "copyVipKeySuccess": "VIP key copied",
       "copyFailed": "Copy failed",
       "turnstileRequired": "Complete the security check.",
-        "loadingInvoice": "Loading VIP invoice...",
         "loadingGift": "Loading VIP gift...",
-        "invoiceNotFound": "Invoice not found",
         "giftNotFound": "Gift not found"
       },
       "payment": {
@@ -5984,129 +6289,238 @@
       },
       "status": {
       "awaiting_payment": {
-        "label": "Waiting",
-        "hint": "No payment detected yet."
+        "label": "Waiting for donation",
+        "hint": "We're waiting for your donation, just one step left."
       },
       "partial_payment": {
-        "label": "Partial payment",
-        "hint": "The received amount is lower than expected."
+        "label": "Incomplete donation",
+        "hint": "The amount received is lower than expected."
       },
       "confirming": {
-        "label": "Confirming",
-        "hint": "Payment detected. Movix is waiting for blockchain confirmation."
+        "label": "Donation received",
+        "hint": "Your donation arrived. It's being confirmed, which can take a few minutes."
       },
       "paid": {
-        "label": "Paid",
-        "hint": "Payment confirmed. Delivery in progress."
+        "label": "Donation confirmed",
+        "hint": "Your donation is confirmed. We're preparing your key."
       },
       "delivered": {
-        "label": "Delivered",
-        "hint": "The VIP key or gift URL is available."
+        "label": "Key ready",
+        "hint": "Thank you! Your key is ready."
       },
       "expired": {
-        "label": "Expired",
-        "hint": "The invoice expired. If you already paid, contact support."
+        "label": "Time ran out",
+        "hint": "The time to send your donation ran out. If you already sent it, write to us."
       },
       "cancelled": {
         "label": "Cancelled",
-        "hint": "This invoice has been cancelled."
+        "hint": "This donation was cancelled. If that's a mistake, write to us."
       }
     },
-    "payblis": {
-      "cardTitle": "Payblis",
-      "cardHelper": "Cards, Apple Pay, Google Pay, PayPal, Revolut, SEPA, Open Banking.",
-      "returnOk": "Payment received — delivering your VIP key.",
-      "returnKo": "Payment failed. You can retry or pick another method.",
-      "retry": "Retry payment",
-      "methodEmpty": "Method chosen on Payblis",
-      "emailRequired": "Email required for Payblis (used for the receipt)."
+    "donate": {
+      "heroTitle": "Support Movix",
+      "heroText": "Movix is free. Your donations fund the servers, internal proxies and new features. To thank you, every donation comes with VIP 💛",
+      "rule": "{{amount}} = {{duration}} of VIP",
+      "costsLink": "See what Movix costs each month",
+      "cardTitle": "Make a donation",
+      "amountTitle": "Your donation",
+      "customAmountLabel": "Other amount",
+      "customAmountRange": "{{min}} to {{max}}",
+      "customAmountPlaceholder": "e.g. 15",
+      "amountRangeError": "Choose an amount between {{min}} and {{max}}.",
+      "thankYou": "As a thank-you: {{duration}} of VIP",
+      "thankYouNoVip": "Thank you! This amount is too small to unlock VIP.",
+      "methodTitle": "How would you like to give?",
+      "methods": {
+        "cryptogate": { "title": "Card", "subtitle": "Card, Apple Pay, Google Pay or crypto, via CryptoGate" },
+        "giftcard": { "title": "Gift card", "subtitle": "Google Play, Amazon, Paysafecard or Eneba, no bank card needed" },
+        "btc": { "title": "Bitcoin", "subtitle": "From your Bitcoin wallet" },
+        "ltc": { "title": "Litecoin", "subtitle": "From your Litecoin wallet" }
+      },
+      "noMethod": "No way to donate is available right now. Please check back a little later.",
+      "recipientTitle": "Who is it for?",
+      "recipientSelf": "For me",
+      "recipientGift": "As a gift",
+      "recipientSelfHint": "Your VIP key will show up on your donation's follow-up page.",
+      "recipientSelfHintGiftCard": "We'll email you your VIP key.",
+      "recipientGiftHint": "You'll get a gift link to share with anyone you like.",
+      "giftCardNotForGift": "Gift cards aren't offered when giving VIP to someone: they only work for your own VIP.",
+      "emailLabel": "Your email",
+      "emailHint": "So we can send you the receipt for your donation.",
+      "emailError": "Enter a valid email address.",
+      "robotCheck": "Anti-bot check",
+      "submit": "Donate {{amount}}",
+      "submitNoAmount": "Donate",
+      "submitting": "Preparing your donation…",
+      "newTabNote": "The card donation page opens in a new tab.",
+      "afterSubmitSelf": "You'll land on a follow-up page: your VIP key will appear there as soon as your donation is received. You'll also find this page in “My donations”.",
+      "afterSubmitGift": "You'll land on a follow-up page: your gift link will appear there as soon as your donation is received. You'll also find this page in “My donations”.",
+      "createError": "We couldn't prepare your donation right now. Please try again in a moment.",
+      "loading": "Loading donation options…",
+      "giftCard": {
+        "lead": "No bank card needed: these cards are sold almost everywhere, at tobacconists, supermarkets, petrol stations or online.",
+        "rule": "Any amount you like, same rule: {{rule}}.",
+        "example": "For example, a {{amount}} card = {{duration}} of VIP.",
+        "step1Title": "Buy a card",
+        "step1Text": "In a shop or online, for any amount you like.",
+        "buy": "Buy",
+        "buyAria": "Buy a {{name}} card (opens in a new tab)",
+        "step2Title": "Send us the code",
+        "step2Text": "Privately, with the card type, the amount, the code and the email where you want your VIP key.",
+        "contacts": {
+          "email": "Email",
+          "discord": "Discord, private message",
+          "telegram": "Telegram, private message",
+          "matrixUser": "Matrix, private message",
+          "matrixRoom": "ix group Matrix space",
+          "matrixRoomHint": "For questions only. Never post your code there: the space is public."
+        },
+        "copyAria": "Copy {{value}}",
+        "write": "Write",
+        "writeAria": "Write a pre-filled email",
+        "open": "Open",
+        "openAria": "Open {{label}} (opens in a new tab)",
+        "step3Title": "We email you your VIP key",
+        "step3Text": "We check your card by hand, then email you your VIP key as a thank-you.",
+        "safety": "Our only contacts are the ones on this page. Never send a card code anywhere else, even to someone who claims to be on the team.",
+        "mailSubject": "Movix gift card donation",
+        "mailBody": "Hi,\n\nI'm donating to Movix with a gift card.\n\nCard type: [Google Play, Amazon, Paysafecard or Eneba]\nAmount: [card amount]\nCode: [card code]\nEmail to receive the VIP key: [your email]\n\nThanks!"
+      },
+      "perksTitle": "What your VIP unlocks",
+      "perksSubtitle": "Our way of saying thank you, for as long as your VIP lasts.",
+      "perkAvailability": "Subject to availability",
+      "links": {
+        "myDonations": "My donations",
+        "haveKey": "Already have a key?",
+        "help": "Need help?",
+        "matrix": "Matrix space",
+        "discord": "Discord"
+      },
+      "paused": {
+        "title": "Donations are paused for now",
+        "text": "Thanks for thinking of Movix. If you already have a VIP key, you can still activate it."
+      }
+    },
+    "track": {
+      "title": "Track your donation",
+      "back": "Back to the donation page",
+      "loading": "Loading your donation…",
+      "notFoundTitle": "Donation not found",
+      "notFoundText": "This link doesn't lead to any donation. Check that it's complete, or find your donations in “My donations”.",
+      "myDonationsButton": "See my donations",
+      "loadErrorTitle": "Couldn't show your donation",
+      "loadErrorText": "Check your connection and try again. If it keeps happening, write to us.",
+      "retry": "Try again",
+      "checkNow": "Check now",
+      "checking": "Checking…",
+      "checkInProgress": "Checking your donation…",
+      "checkResult": "Donation status: {{status}}",
+      "checkError": "Couldn't check right now. Try again in a moment.",
+      "autoCheck": "This page updates on its own every 30 seconds.",
+      "validityOver": "Time's up.",
+      "linkCopied": "Link copied",
+      "returnOk": "Thank you! We're checking your donation, your key is on its way.",
+      "returnKo": "The payment didn't go through. You can try again or pick another method.",
+      "retryPayment": "Try again",
+      "time": {
+        "hoursMinutes": "{{hours}} h {{minutes}} min",
+        "hours": "{{hours}} h",
+        "minutes": "{{minutes}} min",
+        "lessThanMinute": "less than a minute"
+      },
+      "crypto": {
+        "sendExactly": "Send exactly",
+        "sendRemaining": "You still need to send exactly",
+        "toAddress": "to this {{network}} address",
+        "fiatEquivalent": "that's {{amount}}",
+        "alreadyReceived": "Already received: {{received}} of {{expected}} {{coin}}",
+        "copyAmount": "Copy amount",
+        "copyAddress": "Copy address",
+        "qrHint": "Or scan this QR code with your {{coin}} wallet.",
+        "qrAlt": "QR code to send your donation in {{coin}}",
+        "qrUnavailable": "QR code unavailable",
+        "validFor": "Amount valid for another {{time}}",
+        "feesHint": "Network fees come on top: make sure your wallet doesn't take them out of the amount you send.",
+        "confirmations": "Network validation: {{current}} of {{required}}"
+      },
+      "hosted": {
+        "title": "Finish your donation on {{provider}}",
+        "text": "Payment happens on {{provider}}'s secure page, in a new tab.",
+        "openButton": "Continue on {{provider}}",
+        "copyLink": "Copy payment link",
+        "missingLink": "The payment link isn't available. Write to us and we'll help.",
+        "validFor": "Link valid for another {{time}}",
+        "identityTitle": "Identity check possible",
+        "identityText": "{{provider}} may ask for an ID or a selfie before accepting the payment.",
+        "minimumText": "{{provider}} accepts at least {{minimumAmount}}, so your donation goes from {{originalAmount}} to {{minimumAmount}}. Your thank-you VIP stays the same.",
+        "partialText": "{{provider}} reports an amount that's too low. If you think you paid in full, write to us."
+      },
+      "waiting": {
+        "title": "Nothing left for you to do"
+      },
+      "thanks": {
+        "title": "Thank you for your support 💛",
+        "selfText": "Thanks to you, Movix keeps going. Here's your key for {{duration}} of VIP.",
+        "giftText": "Thanks to you, Movix keeps going. Here's your gift link for {{duration}} of VIP: send it to whoever you like.",
+        "missing": "Your key isn't showing yet? Refresh the page in a moment, or write to us.",
+        "keyLabel": "Your VIP key",
+        "giftLinkLabel": "Your gift link",
+        "copyKey": "Copy key",
+        "copyGiftLink": "Copy gift link",
+        "giftLinkCopied": "Gift link copied",
+        "activateButton": "Activate my key now",
+        "activateHint": "Your key will be copied: just paste it into the window that opens.",
+        "giftHint": "They open the link, unwrap their gift and activate their VIP."
+      },
+      "ended": {
+        "text": "You can make a new donation anytime.",
+        "button": "Make a new donation"
+      },
+      "keepLink": {
+        "self": "Keep this link: your key will appear here. It's also saved in <link>My donations</link> on this device.",
+        "gift": "Keep this link: your gift link will appear here. It's also saved in <link>My donations</link> on this device.",
+        "copy": "Copy this page's link"
+      },
+      "summary": {
+        "label": "Donation summary",
+        "amount": "Your donation",
+        "reward": "As a thank-you",
+        "rewardValue": "{{duration}} of VIP",
+        "for": "For",
+        "forSelf": "You",
+        "forGift": "A gift",
+        "method": "Method",
+        "methodCryptoGate": "Bank card (CryptoGate)"
+      },
+      "help": {
+        "title": "Something wrong? Write to us",
+        "text": "A question, or your donation isn't showing up? We're happy to help.",
+        "button": "Write to us",
+        "buttonMatrix": "Write to us on Matrix"
+      }
+    },
+    "myDonations": {
+      "title": "My donations",
+      "descriptionConnected": "Your donations from this device and your account.",
+      "descriptionGuest": "Your donations from this device. Sign in to also find the ones linked to your account.",
+      "openTitle": "In progress",
+      "doneTitle": "Finished",
+      "viewButton": "View status",
+      "forSelf": "For you",
+      "forGift": "A gift",
+      "refresh": "Refresh",
+      "refreshing": "Refreshing…",
+      "loading": "Loading your donations…",
+      "loadError": "Couldn't load your donations right now.",
+      "retry": "Try again",
+      "emptyTitle": "No donations yet",
+      "emptyText": "Your first donation supports Movix and gets you VIP as a thank-you.",
+      "emptyButton": "Make a donation"
     },
     "page": {
-      "backHome": "Back to home",
       "backVip": "Back to VIP page",
-        "badge": "VIP payment",
-        "heroTitle": "Support Movix and get your VIP key",
-        "heroDescription": "Choose the {{amount}} pack to get {{duration}}. Pay with BTC, LTC, or through the CryptoGate checkout.",
-      "ruleLabel": "Rule",
-      "ruleValue": "{{amount}} EUR = {{duration}}",
-      "stepForWhomTitle": "1. For whom",
-      "stepForWhomText": "Choose for me or as a gift",
-      "stepPaymentTitle": "2. Payment",
-        "stepPaymentText": "Native crypto or CryptoGate checkout on every pack",
-        "stepPaymentTextAutoBuy": "Native crypto, CryptoGate checkout on every pack, or a dedicated AutoBuy invoice",
-      "stepDeliveryTitle": "3. Delivery",
-      "stepDeliveryText": "VIP key or Movix gift URL",
-      "packTitle": "Choose your pack",
-      "packDescription": "Each pack maps to a specific VIP duration.",
-      "packFootnote": "Equivalent to {{duration}} according to the Movix rule.",
-        "paymentTitle": "Payment",
-        "recipientTitle": "Recipient",
-        "bitcoinPayment": "BTC payment",
-        "litecoinPayment": "LTC payment",
-        "cryptogatePayment": "Card or cryptocurrency through the secure CryptoGate checkout",
-        "paygatePayment": "Card, Apple Pay, Google Pay, SEPA via PayGate.to",
-        "autoBuyPayment": "Payment via AutoBuy",
-        "paygateUnavailableShort": "Unavailable on the 5 EUR pack",
-        "selfTitle": "For me",
-        "selfDescription": "The VIP key will be shown on the invoice page once the payment is confirmed.",
-        "giftTitle": "Gift",
-        "giftDescription": "Movix will generate a gift URL to share once the key is delivered.",
-        "autoBuyTitle": "AutoBuy invoice",
-        "autoBuyDescription": "Movix first creates your VIP invoice, then opens the AutoBuy checkout already tied to the product that matches the {{amount}} pack.",
-        "paygateEmailTitle": "Payer email",
-        "paygateEmailDescription": "PayGate uses this email to prepare the hosted checkout. It is only required for this payment method.",
-        "paygateEmailPlaceholder": "name@example.com",
-        "paygateEmailHint": "Use the email that will be used during the PayGate checkout.",
-        "paygateEmailError": "Enter a valid email address to continue with PayGate.",
-        "cryptogateEmailTitle": "Payer email",
-        "cryptogateEmailDescription": "CryptoGate uses this email to create the payment and display its secure checkout.",
-        "cryptogateEmailPlaceholder": "name@example.com",
-        "cryptogateEmailHint": "This email is used only to prepare the CryptoGate payment.",
-        "cryptogateEmailError": "Enter a valid email address to continue with CryptoGate.",
-        "paygateKycTitle": "Identity verification may be required",
-        "paygateKycDescription": "Depending on the provider selected by PayGate, a KYC check may be required before the payment is approved: ID card, passport, or selfie.",
-        "paygateUnavailableTitle": "PayGate unavailable on 5 EUR",
-        "paygateUnavailableDescription": "The PayGate checkout is not offered on the 5 EUR pack. Use BTC/LTC or switch to the {{minimumPack}} pack to pay by card.",
-        "paygateMinimumTitle": "PayGate minimum applied",
-        "paygateMinimumDescription": "For a PayGate payment of {{originalAmount}}, the checkout will be adjusted to {{minimumAmount}}, which is the provider's current minimum.",
-        "paygateMinimumSummary": "The pack still grants {{originalAmount}} worth of VIP duration, but PayGate charges {{minimumAmount}} because this is the minimum accepted amount.",
-        "autoBuyNoticeTitle": "Movix invoice + AutoBuy checkout",
-        "autoBuyNoticeDescription": "Movix keeps a single invoice. AutoBuy handles the checkout, then you return to this invoice for the VIP key or gift delivery. Use exactly the same email on Movix and on AutoBuy.",
-        "saveUrlTitle": "Save your invoice URL as soon as it is created",
-        "saveUrlDescription": "This URL is the only page that lets you track the payment, recover your VIP key or your gift link. If you lose it, you will need Telegram support.",
-        "summaryTitle": "Summary",
-        "amountLabel": "Amount",
-        "paymentLabel": "Payment",
-        "emailLabel": "Email",
-        "emailPending": "Missing",
-        "recipientLabel": "For",
-        "vipLabel": "VIP",
-        "recipientSelfShort": "Me",
-        "recipientGiftShort": "A gift",
-        "autoBuySummaryHint": "Movix creates an invoice tied to the {{amount}} pack, then prepares the matching AutoBuy checkout.",
-        "autoBuyButton": "Create AutoBuy invoice",
-        "autoBuyOpened": "AutoBuy checkout opened in a new tab",
-        "autoBuyMissingUrl": "Missing AutoBuy server-side configuration.",
-        "myInvoicesButton": "My VIP invoices",
-        "createButton": "Create VIP invoice",
-        "creatingButton": "Creating invoice...",
-        "creatingTitle": "Preparing your VIP invoice",
-        "creatingDescription": "Movix is locking the amount, preparing the selected payment method, and creating the secure tracker.",
-        "creatingHint": "You will be redirected automatically as soon as the invoice is ready.",
-        "nextStepsTitle": "What happens next",
-        "nextStep1": "1. Movix creates a unique invoice for the selected payment method.",
-        "nextStep2": "2. You pay the requested amount and keep the tracking URL.",
-        "nextStep3": "3. The backend refreshes the status automatically.",
-        "nextStep4": "4. The VIP key or gift URL appears as soon as the payment is validated.",
-        "autoBuyNextStep1": "1. Movix creates a unique AutoBuy invoice for this pack.",
-        "autoBuyNextStep2": "2. The prefilled AutoBuy checkout for {{amount}} opens in a new tab.",
-        "autoBuyNextStep3": "3. After payment, AutoBuy sends you back to Movix and the invoice is rechecked.",
-        "autoBuyNextStep4": "4. The VIP key or gift URL appears on this invoice as soon as the order is detected.",
-        "supportTitle": "Support",
-        "supportDescription": "If you lose the invoice URL, if the payment is not detected, or if you need manual validation, contact Telegram support.",
-      "supportButton": "Open Telegram support",
-      "turnstileTitle": "Security check",
-      "turnstileDescription": "Complete Turnstile before creating the invoice."
+      "giftTitle": "Gift",
+      "cryptogateEmailPlaceholder": "name@example.com"
     },
     "autobuy": {
       "heroEyebrow": "AutoBuy Validation",
@@ -6148,86 +6562,6 @@
       "supportTitle": "Need help",
       "supportDescription": "If AutoBuy does not find the order or if the email does not match, check the AutoBuy receipt first, then contact Movix support."
     },
-    "history": {
-      "title": "My VIP invoices",
-      "descriptionConnected": "This page merges invoices linked to your account with those remembered in this browser so you can find both open and older ones.",
-      "descriptionGuest": "This page shows invoices remembered in this browser. Sign in as well to recover invoices linked to your account on other devices.",
-      "sourceLocal": "Local browser history",
-      "sourceAccount": "Account-linked invoices",
-      "openTitle": "Open invoices",
-      "archivedTitle": "Older invoices",
-      "emptyTitle": "No VIP invoice found",
-      "emptyDescription": "Create your first VIP invoice to start tracking payments and deliveries.",
-      "noneOpen": "No open invoice right now.",
-      "noneArchived": "No older invoice to show.",
-      "createdAt": "Created on",
-      "openInvoiceButton": "Open invoice",
-      "refreshButton": "Refresh list",
-      "loading": "Loading your VIP invoices...",
-      "loadError": "Unable to load your VIP invoices."
-    },
-    "invoice": {
-      "backVip": "Back to VIP selection",
-      "eyebrow": "VIP invoice",
-      "paymentTitle": "{{coin}} payment",
-      "loadingTitle": "Payment",
-      "loadingDescription": "No payment detected yet. Movix is loading your invoice details.",
-      "saveUrlTitle": "Save this URL carefully",
-      "saveUrlDescription": "This page is the official tracker for your invoice. If you lose it before delivery, you will need Telegram support.",
-      "exactAmountTitle": "Exact amount",
-      "exactAmountDescription": "Send this exact amount",
-      "checkoutAmountTitle": "Checkout amount",
-      "checkoutAmountDescription": "Amount sent to {{provider}} for the hosted payment",
-      "checkoutAmountFootnote": "The {{provider}} checkout will display the exact amount to pay.",
-      "addressTitle": "Receiving address",
-      "loadingAddressDescription": "Address loading",
-      "addressDescription": "{{coin}} network",
-      "qrUnavailable": "QR code unavailable",
-      "qrAlt": "VIP payment QR code",
-      "qrScanTitle": "Scan with your {{coin}} wallet",
-      "qrScanDescription": "Or copy the address and the exact amount above.",
-      "checkoutTitle": "Hosted {{provider}} checkout",
-      "checkoutDescription": "Payment happens on a secure external page. Come back here afterward to track your VIP key delivery.",
-      "paygateKycTitle": "KYC verification may be required",
-      "paygateKycDescription": "The payment provider may request identity verification before completing the checkout.",
-      "paygateMinimumTitle": "PayGate minimum applied",
-      "paygateMinimumDescription": "The selected pack was {{originalAmount}}, but the PayGate checkout is adjusted to {{minimumAmount}} because this is the provider's current minimum.",
-      "openCheckoutButton": "Open {{provider}} checkout",
-      "copyCheckoutButton": "Copy checkout URL",
-      "autoCheckTitle": "Automatic verification",
-      "autoCheckDescription": "New verification every 30 seconds",
-      "paygateAutoCheckDescription": "Movix is waiting for the {{provider}} callback and refreshing the status regularly",
-      "expirationTitle": "Expiration",
-      "noExpiration": "No expiration",
-      "expiredNow": "Expired",
-      "currentStatusTitle": "Current status",
-      "confirmationsLabel": "Confirmations: {{current}}/{{required}}",
-      "receivedLabel": "Received: {{amount}} {{coin}}",
-      "verifyButton": "Verify payment",
-      "refreshButton": "Refresh status",
-      "verifyingButton": "Verifying...",
-      "paygatePartialHint": "{{provider}} reported an insufficient amount. If you believe you paid correctly, contact support.",
-      "keyEyebrow": "VIP key delivered",
-      "keyTitle": "Your key is ready",
-      "keyDescription": "Keep it safe. You will need it to activate VIP on Movix.",
-      "giftEyebrow": "Movix gift",
-      "giftTitle": "Gift link ready to share",
-      "giftDescription": "Send this URL to the recipient. The gift page contains a VIP card and an Unseal button.",
-      "summaryTitle": "Summary",
-      "recipientSelf": "For me",
-      "recipientGift": "Gift",
-      "totalLabel": "Total",
-      "keepPageTitle": "Keep this page",
-      "keepPageSubtitle": "It acts as both receipt and delivery page",
-      "keepPageText1": "You can come back later with this same URL to resume tracking.",
-      "keepPageText2": "If you leave without saving it and without browser history, support will have to intervene manually.",
-      "supportButton": "Contact Telegram support",
-      "notFoundDescription": "This URL does not match any invoice. If you expected an active invoice, contact support.",
-      "loadError": "Unable to load this invoice",
-      "checkInProgress": "Verification in progress...",
-      "checkStatus": "Current status: {{status}}",
-      "checkError": "Verification unavailable"
-    },
     "gift": {
       "backVip": "Back to VIP page",
       "heroEyebrow": "Movix VIP gift",
@@ -6241,19 +6575,222 @@
       "sealedStatus": "Sealed",
       "unsealedStatus": "Unsealed",
       "turnstileTitle": "Security check",
-      "turnstileDescription": "Complete Turnstile before unsealing the gift.",
+      "turnstileDescription": "A quick check before opening your gift.",
       "unsealButton": "Unseal the gift",
       "unsealingButton": "Unsealing...",
       "revealedKeyTitle": "VIP key revealed",
       "supportEyebrow": "Movix VIP",
       "supportTitle": "Keep it safe",
       "supportText1": "Never share this key once the gift has been unsealed.",
-      "supportText2": "If you run into an activation issue or if the gift page looks wrong, contact Telegram support.",
-      "supportButton": "Telegram support",
+      "supportText2": "If you run into an activation issue or if the gift page looks wrong, contact Matrix support.",
+      "supportButton": "Matrix support",
       "notFoundDescription": "This gift link does not exist or is no longer valid.",
       "loadError": "Unable to load this gift",
       "unsealSuccess": "The gift has been unsealed.",
       "unsealError": "Unable to unseal the gift"
+    },
+    "settings": {
+      "dashboardTitle": "VIP donation settings",
+      "dashboardDescription": "Open or pause donations, set amounts, payment methods, gift cards and contacts",
+      "modified": "Modified",
+      "loading": "Loading donation settings...",
+      "loadError": "Unable to load donation settings.",
+      "retry": "Retry",
+      "overview": {
+        "liveLabel": "Live",
+        "open": "Donations open",
+        "paused": "Donations paused",
+        "visibleMethods_one": "{{count}} visible payment method",
+        "visibleMethods_other": "{{count}} visible payment methods",
+        "rate": "1 year of VIP for {{amount}}",
+        "thankYouShortcut": "Thank a gift card donation"
+      },
+      "status": {
+        "title": "Donation status",
+        "description": "Turn off all donations at once, for example during maintenance or a provider change.",
+        "toggleLabel": "Donations enabled",
+        "enabledHint": "The donation page is open: visitors can donate.",
+        "disabledHint": "Donations are off: nobody can donate anymore.",
+        "pausedNoticeTitle": "Donations paused",
+        "pausedNoticeText": "The donation page shows a pause message instead of the form. No payment method is offered while donations are off.",
+        "pausedMessageLabel": "Pause message (optional)",
+        "pausedMessageHint": "Shown to visitors during the pause, for example to announce when donations resume.",
+        "pausedMessagePlaceholder": "E.g. Donations will be back soon, thanks for your patience!"
+      },
+      "rate": {
+        "title": "VIP given as a thank-you",
+        "description": "Each donation gives VIP as a thank-you, in proportion to its amount.",
+        "label": "1 year of VIP for",
+        "perMonthHint": "About {{amount}} per month of VIP.",
+        "previewTitle": "What donors get",
+        "previewEmpty": "Enter a valid rate and valid amounts to see the preview.",
+        "lessThanMonth": "less than a month",
+        "minTag": "min",
+        "maxTag": "max",
+        "roundingHint": "The VIP given is rounded up to the month."
+      },
+      "amounts": {
+        "title": "Amounts",
+        "description": "Donation range, one-click amounts and preselected amount.",
+        "freeAmountLabel": "Custom amount",
+        "freeAmountOn": "Donors can enter any amount between the minimum and the maximum.",
+        "freeAmountOff": "Only the suggested amounts are offered. The range still bounds them.",
+        "minLabel": "Minimum",
+        "maxLabel": "Maximum",
+        "defaultLabel": "Preselected amount",
+        "defaultHintFree": "Selected when the donation page opens.",
+        "defaultHintSuggested": "Without a custom amount, it must be one of the suggested amounts.",
+        "defaultQuickPick": "Pick:",
+        "suggestedLabel": "Suggested amounts",
+        "suggestedHint": "From 1 to {{limit}} amounts, shown as buttons on the donation page.",
+        "suggestedPlaceholder": "E.g. 15",
+        "suggestedAdd": "Add",
+        "suggestedRemove": "Remove {{amount}}",
+        "suggestedDefaultTag": "Preselected",
+        "suggestedFull": "{{limit}} amounts maximum: remove one to add another.",
+        "suggestedDuplicate": "This amount is already in the list.",
+        "suggestedAddOutOfRange": "Pick an amount between {{min}} and {{max}}."
+      },
+      "methods": {
+        "title": "Payment methods",
+        "description": "Turn a method off without touching the others, and choose the one preselected on the donation page.",
+        "legend": "Preselected payment method",
+        "names": {
+          "cryptogate": "Bank card via CryptoGate",
+          "giftcard": "Gift card (manual)",
+          "btc": "Bitcoin",
+          "ltc": "Litecoin"
+        },
+        "descriptions": {
+          "cryptogate": "Bank card or crypto on the secure CryptoGate checkout, key delivered automatically.",
+          "giftcard": "The donor sends their card code to the team, who replies with a VIP key.",
+          "btc": "Direct BTC payment, checked automatically on the blockchain.",
+          "ltc": "Direct LTC payment, checked automatically on the blockchain."
+        },
+        "defaultLabel": "Default",
+        "badgeVisible": "Visible",
+        "badgeHidden": "Hidden",
+        "badgeUnavailable": "Not configured on the server",
+        "unavailableHint": "The server is not configured for this method: donors don't see it, even if it is enabled here.",
+        "noneVisible": "No payment method is visible: donors won't be able to donate.",
+        "defaultHidden": "The preselected method is not visible to donors: pick another one.",
+        "defaultMoved": "Default method moved to {{name}}."
+      },
+      "giftOption": {
+        "title": "\"Give as a gift\" option",
+        "description": "Lets donors donate to give VIP to someone else.",
+        "label": "Offer \"give as a gift\"",
+        "on": "Donors can choose to give VIP as a gift: they get a gift link to pass on. Gift cards stay limited to the donor's own VIP.",
+        "off": "The VIP always goes to the donor themselves."
+      },
+      "giftCards": {
+        "title": "Gift cards",
+        "description": "The donor buys a card, sends its code to the team and gets a VIP key in return.",
+        "methodDisabled": "The \"Gift card (manual)\" method is disabled: these cards are not offered for now.",
+        "noneEnabled": "No card is enabled: the \"Gift card\" method will have nothing to offer.",
+        "urlLabel": "Purchase link",
+        "urlEmptyHint": "Without a link, no purchase button is shown for this card.",
+        "open": "Open",
+        "openAria": "Open the {{name}} purchase link"
+      },
+      "contacts": {
+        "title": "Displayed contacts",
+        "description": "Shown to gift card donors so they can send their code. Empty fields are not shown.",
+        "emailLabel": "Email",
+        "emailPlaceholder": "contact@example.com",
+        "discordUsernameLabel": "Discord username",
+        "discordUsernamePlaceholder": "username",
+        "discordUrlLabel": "Discord profile link",
+        "discordUrlPlaceholder": "https://discord.com/users/...",
+        "telegramUsernameLabel": "Telegram username",
+        "telegramUsernamePlaceholder": "username",
+        "matrixUserIdLabel": "Matrix ID",
+        "matrixUserIdPlaceholder": "@username:matrix.org",
+        "matrixRoomUrlLabel": "Matrix room link",
+        "matrixRoomUrlPlaceholder": "https://matrix.to/#/...",
+        "telegramWarning": "Enter only the username, not a link: the t.me link is built automatically.",
+        "matrixWarning": "Expected format: @username:server, for example @mysticsaba:matrix.org.",
+        "testLink": "Test the link",
+        "testLinkAria": "Test the link: {{field}}",
+        "noContact": "No contact filled in: gift card donors won't know where to send their code."
+      },
+      "saveBar": {
+        "unsaved": "Unsaved changes",
+        "upToDate": "Everything is saved",
+        "errorCount_one": "{{count}} field to fix",
+        "errorCount_other": "{{count}} fields to fix",
+        "lastUpdate": "Last updated on {{date}} by {{user}}",
+        "lastUpdateNoUser": "Last updated on {{date}}",
+        "neverUpdated": "Never changed: these are the server defaults.",
+        "save": "Save",
+        "saving": "Saving...",
+        "discard": "Discard changes",
+        "discardShort": "Discard",
+        "defaults": "Default values",
+        "saveSuccess": "Donation settings saved",
+        "saveError": "Unable to save the donation settings.",
+        "fixErrors": "Fix the fields in red before saving.",
+        "discarded": "Changes discarded",
+        "undo": "Undo",
+        "defaultsConfirmTitle": "Reset to default values?",
+        "defaultsConfirmMessage": "The form will be filled with the default values. Nothing is saved until you click \"Save\".",
+        "defaultsConfirm": "Fill the form",
+        "defaultsApplied": "Default values loaded: review them, then click \"Save\"."
+      },
+      "errors": {
+        "integerRequired": "Enter a whole number.",
+        "amountRange": "Must be between {{min}} and {{max}}.",
+        "maxBelowMin": "Must be greater than or equal to the minimum ({{min}}).",
+        "minBelowOneMonth": "Less than a month of VIP at this amount: at least {{needed}} is needed with the current rate.",
+        "suggestedEmpty": "Add at least one suggested amount.",
+        "suggestedTooMany": "{{limit}} suggested amounts maximum.",
+        "suggestedInvalid": "Suggested amounts must be whole numbers between {{min}} and {{max}}.",
+        "suggestedDuplicate": "A suggested amount appears twice.",
+        "suggestedOutOfRange": "Some amounts are outside the range: they must be between {{min}} and {{max}}.",
+        "defaultOutOfRange": "Must be between the minimum ({{min}}) and the maximum ({{max}}).",
+        "defaultNotSuggested": "Without a custom amount, pick one of the suggested amounts.",
+        "tooLong": "{{limit}} characters maximum.",
+        "invalidUrl": "Invalid link: it must start with http:// or https://.",
+        "invalidEmail": "Invalid email address."
+      },
+      "thankYou": {
+        "title": "Thank a gift card donation",
+        "description": "Once the card code is verified, generate a VIP key for the donor and send them the ready-made message.",
+        "rateInfo": "Saved rate: 1 year of VIP for {{amount}}.",
+        "rateDraftNotice": "The rate changed above is not saved yet: the calculation uses the saved rate.",
+        "amountLabel": "Gift card amount",
+        "amountPlaceholder": "E.g. 20",
+        "amountInvalid": "Enter a valid amount, for example 20 or 12.50.",
+        "amountTooHigh": "{{max}} maximum.",
+        "durationLabel": "VIP given",
+        "durationPending": "Enter the amount to see the duration.",
+        "durationTooLow": "Less than a month of VIP: amount too low to generate a key.",
+        "generate": "Generate the key",
+        "generating": "Creating...",
+        "confirmTitle": "Create a VIP key?",
+        "confirmMessage": "A real {{duration}} VIP key will be created for a {{amount}} donation. It works as soon as it is created: only send it to the donor.",
+        "confirmButton": "Create the key",
+        "success": "{{duration}} VIP key created",
+        "error": "Unable to create the VIP key.",
+        "resultTitle": "{{duration}} VIP key created for a {{amount}} donation",
+        "keyWarning": "The key is already active. After \"New donation\", it is no longer shown here: you can find it in \"Manage VIP keys\".",
+        "keyLabel": "VIP key",
+        "copyKey": "Copy the key",
+        "keyCopied": "VIP key copied",
+        "messageLabel": "Message to send",
+        "messageHint": "You can tweak it before sending.",
+        "messageTemplate": "Thank you for your donation to Movix 💛\n\nHere is your VIP key ({{duration}}): {{key}}\n\nTo activate it: go to {{siteUrl}}, open your profile menu, click \"Become VIP\" and paste the key.\n\nKeep it safe and don't share it with anyone.\n\nThe Movix team",
+        "copyMessage": "Copy the message",
+        "messageCopied": "Message copied",
+        "copyFailed": "Copy failed",
+        "emailLabel": "Donor email (optional)",
+        "emailPlaceholder": "donor@example.com",
+        "emailInvalid": "Invalid email address.",
+        "emailSubject": "Your Movix VIP key",
+        "sendEmail": "Write the email",
+        "sendEmailHint": "Opens your mail app with the subject \"{{subject}}\" and the message already filled in.",
+        "newDonation": "New donation"
+      }
     },
     "admin": {
       "dashboardTitle": "VIP invoices",
@@ -6383,7 +6920,7 @@
           "The VIP area processes invoice and payment data such as public invoice identifier, unique crypto address, expected amount, status, confirmations, transaction hash, gifts and VIP keys.",
           "Hashed IP fingerprints are used in VIP flows for fraud prevention around invoice creation or gift opening.",
           "In case of operational errors, some technical diagnostic elements may be sent to internal support tools, especially through Discord webhooks.",
-          "If you use Discord, Telegram or the official bot for support, your identifiers, messages, tickets, transcripts or payment references may be processed in that context."
+          "If you use Discord, Matrix or the official bot for support, your identifiers, messages, tickets, transcripts or payment references may be processed in that context."
         ]
       },
       "thirdParties": {
@@ -6423,7 +6960,7 @@
         "settings": "Settings",
         "terms": "Terms of service",
         "email": "Email",
-        "telegram": "Telegram"
+        "telegram": "Matrix"
       }
     },
     "footerNote": "This policy reflects the observable behavior of the Movix code as of March 29, 2026. If a future change adds, removes or changes a significant data flow, this page should be aligned again with the real implementation."
@@ -6530,7 +7067,7 @@
       "actions": {
         "privacy": "Privacy",
         "contact": "Contact Movix",
-        "telegram": "Telegram"
+        "telegram": "Matrix"
       }
     },
     "footerNote": "These terms describe the general rules governing the use of Movix as of September 20, 2026. Fraudulent, abusive or technically harmful behavior may trigger immediate restrictions even if a precise case is not listed word for word above."
@@ -6861,6 +7398,248 @@
     "errorEmpty": "Nickname cannot be empty",
     "errorTooLong": "Maximum {{max}} characters"
   },
+  "tvLink": {
+    "title": "Connect your TV",
+    "subtitle": "Link the Movix TV app to your account.",
+    "backHome": "Back to home",
+    "defaultDeviceName": "your TV",
+    "footer": "The code is shown on your TV, in Settings > Account. It changes every 10 minutes.",
+    "codeBoxLabel": "Character {{index}} of {{total}}",
+    "login": {
+      "description": "Sign in to your Movix account first. Then come back here to link your TV.",
+      "codeKept": "Code saved:",
+      "discord": "Sign in with Discord",
+      "google": "Sign in with Google",
+      "bip39": "Secret phrase"
+    },
+    "code": {
+      "label": "TV code",
+      "prompt": "Enter the code shown on your TV.",
+      "hint": "5 characters, letters and numbers.",
+      "checking": "Checking the code…",
+      "expiresIn_one": "Code valid for {{count}} more minute.",
+      "expiresIn_other": "Code valid for {{count}} more minutes."
+    },
+    "confirm": {
+      "question": "Connect {{name}}?",
+      "profileLabel": "Profile to use on the TV",
+      "profilesLoading": "Loading profiles…",
+      "noProfiles": "No profile found on this account.",
+      "cta": "Connect the TV",
+      "linking": "Connecting…"
+    },
+    "success": {
+      "title": "Your TV is connected.",
+      "subtitle": "You can put your phone down.",
+      "sessionsHint": "It shows up in your sessions, in Settings. Remove it there to sign it out.",
+      "home": "Back to home",
+      "another": "Connect another TV"
+    },
+    "errors": {
+      "code_invalid": "This code is invalid or has expired. Check the code shown on your TV.",
+      "profile_not_owned": "This profile isn't on your account. Pick another one.",
+      "too_many_attempts": "Too many attempts. Wait a few minutes, then try again.",
+      "unauthorized": "Your session has expired. Sign in again to continue.",
+      "network": "Can't connect. Check your network and try again.",
+      "unknown": "Something went wrong. Try again in a moment."
+    }
+  },
+  "tvApp": {
+    "footerLink": "TV app",
+    "meta": {
+      "title": "Movix TV app for Fire TV, Google TV and Android TV"
+    },
+    "hero": {
+      "title": "Movix on your TV",
+      "words": ["Movix", "on", "your", "TV"],
+      "subtitle": "The app for Fire TV, Google TV and Android TV, built for the remote. Pick up right where you left off.",
+      "install": "Install",
+      "apk": "Download the APK"
+    },
+    "video": {
+      "label": "Presentation of the Movix app on a TV",
+      "play": "Play the video",
+      "pause": "Pause the video",
+      "unmute": "Turn sound on",
+      "mute": "Mute",
+      "fallbackAlt": "Home screen of the Movix app on a TV, with the Continue watching row"
+    },
+    "screens": {
+      "title": "The app, screen by screen",
+      "subtitle": "Unedited captures of the app. Switch screens with a click or the arrow keys.",
+      "tabsLabel": "App screens",
+      "items": {
+        "home": {
+          "label": "Home",
+          "title": "Home",
+          "text": "The Continue watching row matches the website as soon as your TV is linked to your account.",
+          "alt": "App home screen: Dune: Part Two in the Continue watching row, framed by the red focus brackets"
+        },
+        "search": {
+          "label": "Search",
+          "title": "Search",
+          "text": "A keyboard made for the remote. Results show up while you type.",
+          "alt": "Search for “dune” with the on-screen keyboard and the matching posters"
+        },
+        "details": {
+          "label": "Details",
+          "title": "Details",
+          "text": "Play, My list, then trailers played in the app, similar titles and the cast.",
+          "alt": "Masterplan details page with the Play, My list and Trailer buttons, then the Trailers and extras and More like this rows"
+        },
+        "sources": {
+          "label": "Players",
+          "title": "Choosing a player",
+          "text": "The website's players, with quality and language. The VIP badge marks the ones from the Movix server.",
+          "alt": "Player list: Movix server entries with VIP badges, then Lynx VF and Vidara, next to the player settings"
+        },
+        "extraction": {
+          "label": "Extraction",
+          "title": "Extraction on the TV",
+          "text": "External players are extracted on the TV, then played in its own player. No VIP needed.",
+          "alt": "Players marked “extracted on the TV”: Filmoon, vidsonic, playmogo, Dropload and Mixdrop"
+        },
+        "player": {
+          "label": "Playback",
+          "title": "Player",
+          "text": "The TV's own player: quality, audio, subtitles, sync offset and speed, all set with the remote.",
+          "alt": "Player paused at 39 minutes, with the red progress bar and buttons to skip back or forward 10 seconds"
+        },
+        "web": {
+          "label": "Web player",
+          "title": "Web player",
+          "text": "If no player starts, the web player opens the page with a cursor you move with the arrows. The blocker cuts the ads.",
+          "alt": "Web player with the remote-controlled cursor on the picture"
+        }
+      }
+    },
+    "install": {
+      "title": "Install the app",
+      "subtitle": "Open this page on your phone and follow the steps in front of your TV. It takes about ten minutes.",
+      "deviceLegend": "Your TV",
+      "devices": {
+        "fire": {
+          "name": "Fire TV",
+          "models": "Fire TV Stick 3rd gen, Lite, 4K and 4K Max, Fire TV Cube"
+        },
+        "google": {
+          "name": "Google TV and Chromecast",
+          "models": "Chromecast with Google TV, Google TV Streamer"
+        },
+        "android": {
+          "name": "Android TV sets and boxes",
+          "models": "Android TV or Google TV sets, Mi Box, Nvidia Shield, Freebox Pop and Ultra"
+        }
+      },
+      "incompatible": "Doesn't work on: Samsung (Tizen), LG (webOS), Hisense (VIDAA), Panasonic (My Home Screen), Roku, Apple TV, game consoles, recent Fire TV running Vega OS, Fire TV Stick 2nd gen and older.",
+      "minimum": "Android 7.1 or newer is required.",
+      "guide": "Full guide and troubleshooting",
+      "steps": {
+        "downloader": {
+          "title": "Install Downloader",
+          "fire": "On the home screen, open search (the magnifier) and type “Downloader”. Install the app with the orange icon.",
+          "google": "In the Apps tab, search for “Downloader” and install it.",
+          "android": "Open the Play Store on your TV or box, search for “Downloader” and install it.",
+          "caption": "Downloader is free. It comes from AFTVnews and downloads files onto your TV."
+        },
+        "unlock": {
+          "title": "Allow Downloader to install apps",
+          "fire": "Turn on developer mode: in About, press OK 7 times on your Fire TV's name. Then allow Downloader in the developer options.",
+          "google": "Turn on developer mode: in About, press OK 7 times on “Android TV OS build”. Then allow Downloader in unknown sources.",
+          "android": "Allow Downloader in unknown sources. If the option is missing, turn on developer mode first: press “Build” 7 times in About.",
+          "devMode": "Developer mode",
+          "allow": "Permission",
+          "brandNote": "Menu names vary a little by brand. Look for “unknown sources” in the settings."
+        },
+        "code": {
+          "title": "Type the code in Downloader",
+          "titleNoCode": "Type the address in Downloader",
+          "body": "Open Downloader and allow file access. Type this code in the field, then choose Go.",
+          "bodyNoCode": "Open Downloader and allow file access. Type this address in the field, then choose Go.",
+          "codeLabel": "Downloader code",
+          "urlLabel": "APK address",
+          "urlLabelOr": "If the code doesn't work, type this address",
+          "copy": "Copy",
+          "copied": "Copied",
+          "copyCode": "Copy the Downloader code",
+          "copyUrl": "Copy the APK address",
+          "file": "File: Movix TV {{version}}, {{size}}.",
+          "fileVersion": "File: Movix TV {{version}}.",
+          "notes": "What's new: {{notes}}"
+        },
+        "install": {
+          "title": "Install Movix",
+          "fire": "Choose Install, then Open. Downloader then offers to delete the file: you can accept.",
+          "google": "Choose Install. If Play Protect shows “App blocked”, choose More details, then Install anyway.",
+          "android": "Choose Install. If Play Protect shows “App blocked”, choose More details, then Install anyway.",
+          "noteFire": "The file is no longer needed once the app is installed. Deleting it frees space on the Fire TV.",
+          "notePlayProtect": "This message shows up for any app installed outside the Play Store. It isn't about Movix in particular."
+        },
+        "open": {
+          "title": "Open Movix and link your TV",
+          "body": "On first launch, the TV shows a code and a QR code. Scan the QR code with your phone or type the code below. You can also choose Later.",
+          "cta": "Link my TV",
+          "alt": "Movix app home screen on the TV, with the Continue watching row"
+        }
+      },
+      "paths": {
+        "fire": {
+          "downloader": ["Home", "Search", "Downloader"],
+          "devMode": ["Settings", "My Fire TV", "About", "Device name, OK 7 times"],
+          "allow": ["My Fire TV", "Developer options", "Install unknown apps", "Downloader"],
+          "install": ["Install", "Open"]
+        },
+        "google": {
+          "downloader": ["Apps", "Search for apps", "Downloader", "Install"],
+          "devMode": ["Settings", "System", "About", "Android TV OS build, OK 7 times"],
+          "allow": ["Settings", "Apps", "Security & restrictions", "Unknown sources", "Downloader"],
+          "install": ["Install", "More details", "Install anyway"]
+        },
+        "android": {
+          "downloader": ["Play Store", "Search", "Downloader", "Install"],
+          "devMode": ["Settings", "Device Preferences", "About", "Build, OK 7 times"],
+          "allow": ["Device Preferences", "Security & restrictions", "Unknown sources", "Downloader"],
+          "install": ["Install", "More details", "Install anyway"]
+        }
+      }
+    },
+    "link": {
+      "title": "Link your TV to your account",
+      "body": "On first launch, the TV shows a 5-character code and a QR code. Scan the QR code with your phone, or type the code here.",
+      "sync": "Your resume points, history and My list are the same on the website and on the TV. The chosen profile's VIP comes along too.",
+      "code": "The code changes every 10 minutes. On the TV, you'll find it in Settings › Account › Connect my account."
+    },
+    "faq": {
+      "title": "Frequently asked questions",
+      "guideLink": "{{device}} guide",
+      "items": {
+        "free": {
+          "q": "Is it free? Do I need an account?",
+          "a": "It's free, and the app works without an account. Linking your TV brings back your resume points, history, My list and VIP."
+        },
+        "vip": {
+          "q": "Does my VIP work on the TV?",
+          "a": "Yes. When you link the TV, you pick a profile and its VIP is imported. You can also enter your key in Settings › VIP key."
+        },
+        "update": {
+          "q": "How do I update the app?",
+          "a": "The app checks for updates on its own and shows a banner when one is out. You can also go to Settings › Update. No need to redo the guide."
+        },
+        "playProtect": {
+          "q": "Play Protect blocks the install.",
+          "a": "“App blocked” shows up for any app installed outside the Play Store. Choose More details, then Install anyway. Other error messages are covered in the guides."
+        },
+        "safe": {
+          "q": "Is installing an APK risky?",
+          "a": "This is the official Movix APK, published in the MovixOpenSource GitHub repository. Only download it from this page, or with the Downloader code given here."
+        },
+        "unlink": {
+          "q": "How do I disconnect a TV?",
+          "a": "On the website, remove it from your sessions in Settings. On the TV, go to Settings › Account › Sign out."
+        }
+      }
+    }
+  },
   "oauthAuthorize": {
     "eyebrow": "Movix external login",
     "title": "Authorize an external app",
@@ -7156,14 +7935,14 @@
     "otherChangeTonDns": "changetondns.fr — step-by-step tutorial (FR)",
     "otherMirrors": "Active mirrors — list on rentry.co",
     "otherMirrorsMovixHealth": "Active mirrors — also listed on movix.online",
-    "otherTelegram": "Telegram support @ix_annonces",
+    "otherTelegram": "Matrix support #groupe-ix",
     "backCta": "Back"
   },
   "help": {
     "common": {
       "back": "Back to hub",
       "backToHub": "Back to tutorials hub",
-      "contactTelegram": "Contact support on Telegram"
+      "contactTelegram": "Contact support on Matrix"
     },
     "glossary": {
       "seed": "Secret 12-word phrase (BIP39 standard) that serves as the unique key to your Movix account. No one server-side knows it — if you lose it, the account is permanently lost.",
@@ -7182,7 +7961,7 @@
       "clearSearch": "Clear search",
       "foundIn": "Found in:",
       "noResults": "No tutorial matches your search.",
-      "bottomCta": "Can't find what you need? Reach out on Telegram.",
+      "bottomCta": "Can't find what you need? Reach out on Matrix.",
       "cardCaMarchePlusTitle": "Nothing works anymore",
       "cardCaMarchePlusSub": "The 4 most common causes, in the order to try them.",
       "cardDnsTitle": "My ISP is blocking Movix",
@@ -7218,7 +7997,7 @@
       "cardOpenSourceTitle": "Movix is open-source",
       "cardOpenSourceSub": "All the code lives on GitHub — front, API, extensions, app, WASM.",
       "cardVipTitle": "Become VIP",
-      "cardVipSub": "Packs from €5 to €20, pay with BTC, LTC or card. Unlocks debrid, France TV, Live TV.",
+      "cardVipSub": "Donate from €5 (gift card, bank card or crypto) and get VIP as a thank-you: ad-free players, debrider.",
       "cardDebridTitle": "Debrid 1fichier links",
       "cardDebridSub": "VIP feature: direct, full-speed downloads with no wait, no captcha — via Real-Debrid / BestDebrid / Deepbrid.",
       "cardTelechargementTitle": "Download a movie / episode",
@@ -7236,7 +8015,13 @@
       "cardApparenceTitle": "Customize the appearance",
       "cardApparenceSub": "Background style and color, smooth scroll, scroll memory, visual effects.",
       "cardMcpTitle": "Plug Movix into your AI (MCP)",
-      "cardMcpSub": "Drive searches, favorites and lists from Claude, ChatGPT, Le Chat or your editor."
+      "cardMcpSub": "Drive searches, favorites and lists from Claude, ChatGPT, Le Chat or your editor.",
+      "cardTvFireTitle": "Movix TV on Fire TV",
+      "cardTvFireSub": "Fire TV Stick and Fire TV Cube: install Movix TV with Downloader and fix common issues.",
+      "cardTvGoogleTitle": "Movix TV on Google TV",
+      "cardTvGoogleSub": "Chromecast with Google TV and Google TV Streamer: install Movix TV and fix common issues.",
+      "cardTvAndroidTitle": "Movix TV on Android TV",
+      "cardTvAndroidSub": "Sony, Philips, TCL and Xiaomi TVs, Android boxes: install Movix TV and fix common issues."
     },
     "changerLecteur": {
       "title": "Switch players",
@@ -7341,7 +8126,7 @@
       "preventTitle": "Prevent, now",
       "preventBody": "If you still have your seed: copy it into a password manager (Bitwarden, 1Password, Proton Pass) and also print it on paper. Never share with anyone — not even Movix support (we will NEVER ask).",
       "supportTitle": "Support",
-      "supportBody": "Telegram support can help with session issues, login, OAuth, but can do NOTHING about a lost seed. That's not a strict policy, it's a technical impossibility."
+      "supportBody": "Matrix support can help with session issues, login, OAuth, but can do NOTHING about a lost seed. That's not a strict policy, it's a technical impossibility."
     },
     "lierCompte": {
       "title": "Link Discord / Google to your BIP39 account",
@@ -7460,8 +8245,8 @@
       "cause3CtaMovixHealth": "View on movix.online",
       "cause3CtaRentry": "View on rentry.co",
       "cause4Title": "Bug or broken source",
-      "cause4Body": "If nothing works despite the above, it's likely a Movix bug or a source down on the provider side. Report it on Telegram.",
-      "cause4Cta": "Telegram support"
+      "cause4Body": "If nothing works despite the above, it's likely a Movix bug or a source down on the provider side. Report it on Matrix.",
+      "cause4Cta": "Matrix support"
     },
     "premid": {
       "title": "PreMiD extension (Discord Rich Presence)",
@@ -7512,37 +8297,39 @@
     },
     "vip": {
       "title": "Become VIP",
-      "heroSub": "Support pack payable in crypto or by card, unlocks Movix's advanced features.",
-      "introBody": "Becoming VIP supports the project (servers, metadata APIs, paid sources, dev) and unlocks a bundle of exclusive features in return. Purchase on the <1>/vip/don</1> page, active immediately after payment is confirmed.",
-      "perksTitle": "What VIP unlocks",
-      "perksBody": "Ad-free players (no more pre-roll iframe ads), new <1>WatchParty</1>-compatible Nexus and Bravo players, priority requests to the team, VIP badge in comments, full access to France TV (live + replay), premium Live TV sources (IPTV, international sports streams), and most importantly the built-in Debrid service to generate direct 1fichier links with no wait and no captcha.",
-      "packsTitle": "Available packs",
-      "packsIntro": "All packs unlock the same features — the only difference is duration. One-time payment, not a recurring subscription.",
-      "packsHeaderAmount": "Amount",
-      "packsHeaderDuration": "VIP duration",
+      "heroSub": "Donate to support Movix: as a thank-you, you get VIP and its advanced features.",
+      "introBody": "Movix is free. Donations pay for servers, metadata APIs, paid sources and development. To thank you, every donation gives you VIP, which unlocks exclusive features. Everything happens on the <1>/vip</1> page.",
+      "perksTitle": "What your VIP unlocks",
+      "perksBody": "Ad-free players (no more pre-roll iframe ads), new <1>WatchParty</1>-compatible Nexus and Bravo players, more content requests to the team, VIP badge in comments, and the built-in Debrid service to generate direct 1fichier links with no wait and no captcha (subject to availability).",
+      "packsTitle": "How much VIP for your donation?",
+      "packsIntro": "The rule is simple: €5 = 1 year of VIP. Give any amount you like; the duration is counted in whole months (rounded up). The current rule is always shown on the donation page. It's a one-time donation, not a subscription.",
+      "packsHeaderAmount": "Your donation",
+      "packsHeaderDuration": "VIP thank-you",
       "pack5Amount": "€5",
       "pack5Duration": "1 year",
       "pack7Amount": "€7",
-      "pack7Duration": "1.5 years",
+      "pack7Duration": "17 months",
       "pack10Amount": "€10",
       "pack10Duration": "2 years",
       "pack15Amount": "€15",
       "pack15Duration": "3 years",
       "pack20Amount": "€20",
       "pack20Duration": "4 years",
-      "paymentTitle": "Payment methods",
-      "paymentBody": "Bitcoin (BTC), Litecoin (LTC), and CryptoGate are available on every pack. CryptoGate lets you choose from the methods configured on its hosted checkout, including card or cryptocurrency. The checkout requires a valid email to prepare the payment — it is not linked to your Movix account.",
-      "stepsTitle": "How to buy",
-      "step1": "Go to /vip → 'Become VIP' (or straight to /vip/don).",
-      "step2": "Pick a pack (amount + duration), then the payment method (BTC, LTC, or card).",
-      "step3": "For BTC/LTC: scan the QR or copy the address and exact amount. For CryptoGate: you are redirected to its hosted checkout to choose card or cryptocurrency.",
-      "step4": "Wait for confirmation (1-3 blockchain confirmations for crypto, instant for card). Your VIP status shows up on your profile as soon as it's validated — refresh if needed.",
-      "giftTitle": "Gift VIP to someone",
-      "giftBody": "From <1>/vip/don</1>, you can switch to 'Gift' mode: instead of activating VIP on your account, Movix generates a unique link for you to send to the recipient. They log in with that link, the token is consumed, and their account becomes VIP. Handy for gifting to a friend without knowing their Movix handle.",
-      "invoicesTitle": "Invoices and history",
-      "invoicesBody": "All your VIP transactions show up on <1>/vip/invoices</1> — amount, date, method, status (pending / confirmed / expired), and a link to the public detail (/vip/invoice/:publicId) if you want to share proof of payment (e.g. for support).",
-      "limitsTitle": "Limits and refunds",
-      "limitsBody": "No refunds possible: crypto or card, once the payment is validated it's final. We always recommend starting with the €5 pack for your first purchase — it's a low-cost test to confirm VIP activates properly on your account before committing to a longer pack. If you'd rather test before paying, reach out to Telegram support: we can enable a free ~3-day trial so you can see what VIP looks like on your account before deciding."
+      "paymentTitle": "Ways to donate",
+      "paymentBody": "Gift card: Google Play, Amazon, Paysafecard or Eneba, no bank card needed (see below). Bank card: through CryptoGate (card, Apple Pay, Google Pay or crypto). An email is required for the receipt; it isn't linked to your Movix account. Bitcoin (BTC) and Litecoin (LTC): sent straight from your wallet. The available options may change from time to time.",
+      "stepsTitle": "How to donate",
+      "step1": "Go to /vip and pick an amount: the page instantly shows the VIP you get as a thank-you.",
+      "step2": "Pick « For me » or « To offer », then how to donate (gift card, bank card, BTC or LTC).",
+      "step3": "By bank card, you finish on CryptoGate's secure page. In BTC or LTC, scan the QR code or copy the address and the exact amount.",
+      "step4": "Your follow-up page updates on its own. As soon as the donation arrives (instantly by card, after 1 to 3 confirmations in crypto), your VIP key shows up there: just activate it.",
+      "giftCardTitle": "Donate with a gift card (no bank card)",
+      "giftCardBody": "Google Play, Amazon, Paysafecard and Eneba cards are sold almost everywhere: tobacco shops, supermarkets, petrol stations or online. Buy a card of any amount, then send us its code through one of the contacts shown on the <1>/vip</1> page (email, Discord, Telegram or Matrix). We check the card by hand, then email you your VIP key as a thank-you. Gift cards are for your own VIP: to offer VIP, use a bank card or crypto. Never send a card code anywhere other than these contacts.",
+      "giftTitle": "Offer VIP to someone",
+      "giftBody": "On the <1>/vip</1> page, choose « To offer », then a bank card or crypto (gift cards aren't offered for this): instead of a key for you, Movix gives you a gift link to send. The person opens the link, unseals their gift card and gets their VIP key. Handy to offer VIP without knowing their Movix account.",
+      "invoicesTitle": "My donations",
+      "invoicesBody": "All your donations show up on <1>/vip/invoices</1>: amount, date, method, status and a link to their follow-up page. Keep that link: it's where your key appears, and it's your proof if you contact support.",
+      "limitsTitle": "Refunds",
+      "limitsBody": "A donation is final: there are no refunds, by card or in crypto. If it's your first time, start with €5 to check that VIP activates properly on your account. Rather try first? Write to us on Matrix: we can enable a free trial of about 3 days."
     },
     "debrid": {
       "title": "Debrid 1fichier links",
@@ -7591,11 +8378,11 @@
       "officialListTitle": "Where to see the official list",
       "officialListBody": "Two places publish the canonical alive-mirror list: <1>movix.online</1> (domain status with real-time up/down indicator) and <2>rentry.co/movix</2> (raw list, edited by the Movix team, always current). If you doubt a URL claiming to be Movix, check it against one of these — anything NOT on the list is a fake (sacrificial domains designed to fool anti-piracy bots, or phishing attempts).",
       "newDeviceTitle": "New phone / new browser — the redirect doesn't kick in",
-      "newDeviceBody": "The service worker can only redirect you if it's been installed at least once before the block. On a brand-new device that has never visited {{currentDomain}}, if the domain is already ISP-blocked, you'll hit an ISP error page with no redirect. Solution: open movix.online or rentry.co/movix from any browser (those pages are hosted outside the ISP block), grab an alive mirror, and visit it. Or join <1>Telegram @ix_annonces</1> where the list is always up to date.",
+      "newDeviceBody": "The service worker can only redirect you if it's been installed at least once before the block. On a brand-new device that has never visited {{currentDomain}}, if the domain is already ISP-blocked, you'll hit an ISP error page with no redirect. Solution: open movix.online or rentry.co/movix from any browser (those pages are hosted outside the ISP block), grab an alive mirror, and visit it. Or join <1>Matrix #groupe-ix</1> where the list is always up to date.",
       "reliabilityTitle": "How often things change",
       "reliabilityBody": "A domain can go down overnight (new ARCOM order) or stay stable for months. The team rotates multiple domains in parallel — when one goes down, another takes over automatically. The rentry.co list is updated within 24h of any change.",
       "limitsTitle": "Limits",
-      "limitsBody": "The service worker caches its internal config for 24h — so if you add a brand-new mirror on rentry, existing clients see it within 24h max. If your ISP ALSO blocks rentry.co or movix.online (rare but possible), the fallback breaks entirely: route through Telegram or use an alternate DNS like 1.1.1.1 (see the DNS tutorial). The service worker doesn't always work in private browsing — use a regular tab."
+      "limitsBody": "The service worker caches its internal config for 24h — so if you add a brand-new mirror on rentry, existing clients see it within 24h max. If your ISP ALSO blocks rentry.co or movix.online (rare but possible), the fallback breaks entirely: route through Matrix or use an alternate DNS like 1.1.1.1 (see the DNS tutorial). The service worker doesn't always work in private browsing — use a regular tab."
     },
     "liveTv": {
       "title": "Live TV — channels and live sports",
@@ -7784,6 +8571,120 @@
       "advancedNote": "The token is never written into the client config: it lives in <1>~/.movix-mcp/token.json</1>, mode 0600. When it expires, run <1>npm run login</1> again.",
       "limitsTitle": "Known limits",
       "limitsBody": "Not every AI client handles remote MCP servers with OAuth yet: if yours can only declare local commands, use the Advanced section. Access expires after a while — if the AI tells you it's no longer authorized, reconnect the connector (or re-run <1>npm run login</1> locally). And the MCP gives access to your Movix data and to search, but it does not play video: to watch, the AI hands you a link to the Movix player."
+    },
+    "tvFire": {
+      "title": "Movix TV on Fire TV",
+      "heroSub": "Install the TV app on a Fire TV Stick or Fire TV Cube, and troubleshoot it.",
+      "introBody": "Movix TV, the Movix app for TVs, installs from its <1>APK</1> file with the free Downloader app. This guide follows the <2>TV app</2> page step by step, with fixes for when things get stuck.",
+      "beforeTitle": "Before you start",
+      "beforeBody": "Movix TV works on the Fire TV Stick 3rd generation, Fire TV Stick Lite, Fire TV Stick 4K, Fire TV Stick 4K Max and Fire TV Cube. It doesn't work on recent Fire TV devices running Vega OS, such as the Fire TV Stick 4K Select or the 2026 Fire TV Stick HD. It doesn't work on the Fire TV Stick 2nd generation or older either. You need Android 7.1 or later. Allow about ten minutes, and keep this page open on your phone to follow along.",
+      "installTitle": "Install the app",
+      "step1": "On your Fire TV home screen, open the magnifying glass (Search). Look for “Downloader” and install the app with the orange icon, by AFTVnews.",
+      "step2": "Go to Settings › My Fire TV › About. Depending on the version, “My Fire TV” may be called “Device & Software”.",
+      "step3": "Highlight your device name, then press OK 7 times. A message confirms that developer mode is on.",
+      "step4": "Go back to the previous menu, then open Developer Options › Install unknown apps. Turn on Downloader.",
+      "step5": "Open Downloader. On first launch, allow access to files.",
+      "step6": "In the field, type the Downloader code shown on the <1>TV app</1> page, or, failing that, the APK address. Press “Go”.",
+      "step7": "Once the file is downloaded, choose “Install”, then “Open”. Downloader then offers to delete the APK file: you can accept, the app stays installed.",
+      "linkTitle": "Link your TV to your account",
+      "link1": "On first launch, Movix TV shows a 5-character code and a QR code. If you choose “Later”, you'll find them in Settings › Account › “Connect my account”.",
+      "link2": "Scan the QR code with your phone, or type the code on the site's <1>TV app</1> page. Sign in to your account if the site asks you to.",
+      "link3": "Pick the profile to use on the TV, then tap “Connect the TV”. The code changes every 10 minutes: if it has expired, type the one shown now.",
+      "linkBody": "Once linked, the TV syncs resume points, history and My list with the site. It also imports the VIP status of the chosen profile. Without an account, the app works too. Another way to get VIP: enter a key in Settings › VIP key. To sign the TV out, remove it from your account sessions, in the site <1>Settings</1>. You can also choose “Sign out” in Settings › Account on the TV.",
+      "updateTitle": "Update the app",
+      "updateBody": "Movix TV checks for updates on its own, at most once every 12 hours. When a new version is out, a banner appears. You can also check in Settings › Update › “Check for updates”. The first time, the TV opens a screen to allow Movix to install apps. Turn the option on, come back to Movix, then press “Install” again.",
+      "troubleTitle": "Stuck?",
+      "troubleIntro": "Find your problem or the message on screen: the fix is right below.",
+      "causeOptionsTitle": "I can't find the options",
+      "causeOptionsBody": "Depending on the version, “My Fire TV” may be called “Device & Software”. If “Developer Options” is missing, press OK 7 times again on the device name, in About. On older versions, turn on “Apps from Unknown Sources” instead.",
+      "causeCodeTitle": "The Downloader code doesn't work",
+      "causeCodeBody": "Type the APK address shown on the TV app page instead. Check every character: a single typo blocks the download.",
+      "causeCodeCta": "Open the TV app page",
+      "causeParseTitle": "“There was a problem parsing the package”",
+      "causeParseBody": "Either your Fire TV is too old: the app needs Android 7.1 or later, and doesn't work on the Fire TV Stick 2nd generation or older. Or the file is incomplete: delete it, then download it again with Downloader.",
+      "causeNotInstalledTitle": "“App not installed”",
+      "causeNotInstalledBody": "An older version of Movix TV may be installed with a different signature (the app's digital stamp). Uninstall it, then start the installation again. This message can also mean you're out of space: see the next point.",
+      "causeStorageTitle": "Not enough space",
+      "causeStorageBody": "A Fire TV Stick has little storage. Uninstall the apps you no longer use, then start the installation again. When Downloader offers to delete the APK file, accept: that frees up space too.",
+      "causeVideoTitle": "The video won't start",
+      "causeVideoBody": "In the player, open Settings › Source and pick another player. Do the same if you see “Unsupported format”. If nothing starts, choose “Open the web player”: it shows a mouse pointer you move with the arrow keys, and it blocks ads. With a VIP key, you also get the sources from the Movix server.",
+      "causeVideoCta": "Become VIP"
+    },
+    "tvGoogle": {
+      "title": "Movix TV on Google TV",
+      "heroSub": "Install the TV app on a Chromecast with Google TV or a Google TV Streamer, and troubleshoot it.",
+      "introBody": "Movix TV, the Movix app for TVs, installs outside the Play Store, from its <1>APK</1> file with the free Downloader app. This guide follows the <2>TV app</2> page step by step, with fixes for when things get stuck.",
+      "beforeTitle": "Before you start",
+      "beforeBody": "This guide covers the Chromecast with Google TV and the Google TV Streamer. A Chromecast without a remote can only cast: it can't install apps. For a branded TV running Google TV (Sony, TCL…), the menus differ a little: follow the <1>Android TV</1> guide instead. You need Android 7.1 or later. Allow about ten minutes, and keep this page open on your phone to follow along.",
+      "installTitle": "Install the app",
+      "step1": "On the home screen, open Apps › Search for apps. Look for “Downloader” and install the app by AFTVnews.",
+      "step2": "Turn on developer mode: go to Settings › System › About, then press “Android TV OS build” 7 times. The name of this line can vary a little.",
+      "step3": "Go to Settings › Apps › Security & restrictions › Unknown sources, then turn on Downloader.",
+      "step4": "Open Downloader. On first launch, allow access to files.",
+      "step5": "In the field, type the Downloader code shown on the <1>TV app</1> page, or, failing that, the APK address. Press “Go”.",
+      "step6": "Once the file is downloaded, choose “Install”. If Play Protect shows “App blocked”, choose “More details”, then “Install anyway”.",
+      "step7": "Choose “Open”. Downloader then offers to delete the APK file: you can accept, the app stays installed.",
+      "linkTitle": "Link your TV to your account",
+      "link1": "On first launch, Movix TV shows a 5-character code and a QR code. If you choose “Later”, you'll find them in Settings › Account › “Connect my account”.",
+      "link2": "Scan the QR code with your phone, or type the code on the site's <1>TV app</1> page. Sign in to your account if the site asks you to.",
+      "link3": "Pick the profile to use on the TV, then tap “Connect the TV”. The code changes every 10 minutes: if it has expired, type the one shown now.",
+      "linkBody": "Once linked, the TV syncs resume points, history and My list with the site. It also imports the VIP status of the chosen profile. Without an account, the app works too. Another way to get VIP: enter a key in Settings › VIP key. To sign the TV out, remove it from your account sessions, in the site <1>Settings</1>. You can also choose “Sign out” in Settings › Account on the TV.",
+      "updateTitle": "Update the app",
+      "updateBody": "Movix TV checks for updates on its own, at most once every 12 hours. When a new version is out, a banner appears. You can also check in Settings › Update › “Check for updates”. The first time, the TV opens a screen to allow Movix to install apps. Turn the option on, come back to Movix, then press “Install” again.",
+      "troubleTitle": "Stuck?",
+      "troubleIntro": "Find your problem or the message on screen: the fix is right below.",
+      "causeOptionsTitle": "I can't find “Unknown sources”",
+      "causeOptionsBody": "If the option is missing, turn on developer mode first: in Settings › System › About, press “Android TV OS build” 7 times, or a line with a similar name. Then go back to Settings › Apps › Security & restrictions.",
+      "causeCodeTitle": "The Downloader code doesn't work",
+      "causeCodeBody": "Type the APK address shown on the TV app page instead. Check every character: a single typo blocks the download.",
+      "causeCodeCta": "Open the TV app page",
+      "causePlayProtectTitle": "Play Protect shows “App blocked”",
+      "causePlayProtectBody": "That's normal for an app installed outside the Play Store. Choose “More details”, then “Install anyway”.",
+      "causeParseTitle": "“There was a problem parsing the package”",
+      "causeParseBody": "The file is probably incomplete: delete it, then download it again with Downloader. This message also shows up on devices running a version of Android older than 7.1.",
+      "causeNotInstalledTitle": "“App not installed”",
+      "causeNotInstalledBody": "An older version of Movix TV may be installed with a different signature (the app's digital stamp). Uninstall it, then start the installation again. This message can also mean you're out of space: uninstall the apps you no longer use.",
+      "causeVideoTitle": "The video won't start",
+      "causeVideoBody": "In the player, open Settings › Source and pick another player. Do the same if you see “Unsupported format”. If nothing starts, choose “Open the web player”: it shows a mouse pointer you move with the arrow keys, and it blocks ads. With a VIP key, you also get the sources from the Movix server.",
+      "causeVideoCta": "Become VIP"
+    },
+    "tvAndroid": {
+      "title": "Movix TV on Android TV",
+      "heroSub": "Install the TV app on an Android TV or box, and troubleshoot it.",
+      "introBody": "Movix TV, the Movix app for TVs, installs outside the Play Store, from its <1>APK</1> file with the free Downloader app. This guide follows the <2>TV app</2> page step by step, with fixes for when things get stuck.",
+      "beforeTitle": "Before you start",
+      "beforeBody": "This guide covers TVs running Android TV or Google TV (Sony, Philips, TCL, Xiaomi…) and Android boxes: Mi Box, Nvidia Shield, Freebox Pop and Freebox Ultra. For a Chromecast with Google TV, follow the <1>Google TV</1> guide instead. You need Android 7.1 or later. Not compatible: Samsung (Tizen), LG (webOS), Hisense (VIDAA) and Panasonic (My Home Screen) TVs, Roku, Apple TV and game consoles. Menus change from brand to brand: if a path doesn't match, see “Stuck?” at the bottom. Allow about ten minutes, and keep this page open on your phone to follow along.",
+      "installTitle": "Install the app",
+      "step1": "Open the Play Store on your TV or box. Look for “Downloader” and install the app by AFTVnews.",
+      "step2": "Go to Settings › Device Preferences › Security & restrictions › Unknown sources. It's the most common path on Android TV 8 to 10. Otherwise, see “Stuck?” below.",
+      "step3": "Turn on Downloader in the list.",
+      "step4": "Open Downloader. On first launch, allow access to files.",
+      "step5": "In the field, type the Downloader code shown on the <1>TV app</1> page, or, failing that, the APK address. Press “Go”.",
+      "step6": "Once the file is downloaded, choose “Install”. If Play Protect shows “App blocked”, choose “More details”, then “Install anyway”.",
+      "step7": "Choose “Open”. Downloader then offers to delete the APK file: you can accept, the app stays installed.",
+      "linkTitle": "Link your TV to your account",
+      "link1": "On first launch, Movix TV shows a 5-character code and a QR code. If you choose “Later”, you'll find them in Settings › Account › “Connect my account”.",
+      "link2": "Scan the QR code with your phone, or type the code on the site's <1>TV app</1> page. Sign in to your account if the site asks you to.",
+      "link3": "Pick the profile to use on the TV, then tap “Connect the TV”. The code changes every 10 minutes: if it has expired, type the one shown now.",
+      "linkBody": "Once linked, the TV syncs resume points, history and My list with the site. It also imports the VIP status of the chosen profile. Without an account, the app works too. Another way to get VIP: enter a key in Settings › VIP key. To sign the TV out, remove it from your account sessions, in the site <1>Settings</1>. You can also choose “Sign out” in Settings › Account on the TV.",
+      "updateTitle": "Update the app",
+      "updateBody": "Movix TV checks for updates on its own, at most once every 12 hours. When a new version is out, a banner appears. You can also check in Settings › Update › “Check for updates”. The first time, the TV opens a screen to allow Movix to install apps. Turn the option on, come back to Movix, then press “Install” again.",
+      "troubleTitle": "Stuck?",
+      "troubleIntro": "Find your problem or the message on screen: the fix is right below.",
+      "causeOptionsTitle": "I can't find “Unknown sources”",
+      "causeOptionsBody": "The path depends on the brand. Try Settings › Apps › Security & restrictions, or Settings › Apps › Special app access › Install unknown apps. If the option is missing everywhere, turn on developer mode first: in About, press “Build” 7 times, then try again.",
+      "causeCodeTitle": "The Downloader code doesn't work",
+      "causeCodeBody": "Type the APK address shown on the TV app page instead. Check every character: a single typo blocks the download.",
+      "causeCodeCta": "Open the TV app page",
+      "causePlayProtectTitle": "Play Protect shows “App blocked”",
+      "causePlayProtectBody": "That's normal for an app installed outside the Play Store. Choose “More details”, then “Install anyway”.",
+      "causeParseTitle": "“There was a problem parsing the package”",
+      "causeParseBody": "Your TV or box may run a version of Android older than 7.1: check in About. Otherwise, the file is incomplete: delete it, then download it again with Downloader.",
+      "causeNotInstalledTitle": "“App not installed”",
+      "causeNotInstalledBody": "An older version of Movix TV may be installed with a different signature (the app's digital stamp). Uninstall it, then start the installation again. This message can also mean you're out of space: uninstall the apps you no longer use.",
+      "causeVideoTitle": "The video won't start",
+      "causeVideoBody": "In the player, open Settings › Source and pick another player. Do the same if you see “Unsupported format”. If nothing starts, choose “Open the web player”: it shows a mouse pointer you move with the arrow keys, and it blocks ads. With a VIP key, you also get the sources from the Movix server.",
+      "causeVideoCta": "Become VIP"
     },
     "feedback": {
       "question": "Was this tutorial helpful?",

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { createSourceCircuitBreaker, isSourceDownStatus } = require('../sourceCircuitBreaker');
 
 const httpProxy = { host: 'http-proxy.test', port: 8080, auth: 'user:secret' };
 const socksProxy = { host: 'socks-proxy.test', port: 1080, auth: 'user:secret' };
@@ -15,10 +16,15 @@ function fixture({ dedicated = [], shared = [httpProxy], transport }) {
   const calls = [];
   const context = {
     URL,
+    cpasmalProxyCooldowns: new Map(),
+    cpasmalCircuit: createSourceCircuitBreaker({
+      name: 'Cpasmal', neutralCodes: ['CPASMAL_PROXY_COOLDOWN'], logger: { log() {}, warn() {} },
+    }),
+    isSourceDownStatus,
     CHROME_JA3: 'fixture', CHROME_UA: 'fixture',
     MAX_PROXYSCRAPE_PROXY_ATTEMPTS: 2,
     DEDICATED_SOCKS5_PROXIES: dedicated,
-    pickProxyscrapeCandidates: () => ({ proxies: shared, useSocks: false }),
+    pickProxyscrapeCandidates: () => ({ proxies: typeof shared === 'function' ? shared() : shared, useSocks: false }),
     getCycleTLS: async () => async (url, options, method) => {
       calls.push({ url, options, method });
       return transport(url, options, method);
@@ -63,6 +69,29 @@ test('la rotation sur un 403 sans signature Cloudflare conserve un diagnostic sa
   assert.equal(result.cpasmalProxy, 'http://backup.test:8080');
   assert.equal(result.cpasmalUrl, 'https://cpasmal.test/index.php');
   assert.doesNotMatch(JSON.stringify(result), /secret|hidden|private-page-token/);
+});
+
+test('trois refus 403 d’affilée mettent Cpasmal en pause sans nouvel appel CycleTLS', async () => {
+  let next = 0;
+  const f = fixture({
+    shared: () => [{ host: `proxy-${next++}.test`, port: 8080 }],
+    transport: async () => ({ status: 403, body: 'Forbidden' }),
+  });
+  for (let i = 0; i < 3; i++) assert.equal((await f.request('https://cpasmal.test/index.php')).status, 403);
+  assert.equal(f.calls.length, 3);
+  await assert.rejects(f.request('https://cpasmal.test/index.php'), { code: 'SOURCE_CIRCUIT_OPEN' });
+  assert.equal(f.calls.length, 3);
+});
+
+test('une page Cpasmal servie remet le compteur de refus à zéro', async () => {
+  let next = 0;
+  const statuses = [403, 403, 200, 403, 403];
+  const f = fixture({
+    shared: () => [{ host: `proxy-${next++}.test`, port: 8080 }],
+    transport: async () => ({ status: statuses.shift(), body: '<html></html>' }),
+  });
+  for (let i = 0; i < 5; i++) await f.request('https://cpasmal.test/index.php');
+  assert.equal(f.calls.length, 5);
 });
 
 test('sans proxy configuré, Cpasmal garde un seul essai direct et identifie ce chemin', async () => {

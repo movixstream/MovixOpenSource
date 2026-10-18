@@ -1,0 +1,3 @@
+# Pages de 16 Ko : exigées par Android 15+ sur arm64 (et par Google Play).
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

@@ -1,3 +1,4 @@
+import { IX_MATRIX_URL } from '@/config/community';
 import {
   Ban,
   Crown,
@@ -13,7 +14,7 @@ import { useTranslation } from 'react-i18next';
 import LegalDocumentPage, { LegalSection } from '../components/legal/LegalDocumentPage';
 
 const CONTACT_EMAIL = 'movixstreaming@gmail.com';
-const TELEGRAM_URL = 'https://t.me/ix_annonces';
+const TELEGRAM_URL = IX_MATRIX_URL;
 
 const TermsOfService = () => {
   const { t } = useTranslation();

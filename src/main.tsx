@@ -14,8 +14,12 @@ import { installSegmentedSeasons } from './utils/segmentedSeasons'
 import { installManualEpisodes } from './utils/manualEpisodes'
 import './index.css'
 import './styles/light-mode.css'
+import './styles/halloween.css'
+import { HALLOWEEN_ENABLED_ATTR, HALLOWEEN_THEME_CLASS, readHalloweenTheme } from './hooks/useHalloweenTheme'
+import { loadHalloweenTheme } from './utils/halloweenThemeAssets'
 import { initErrorTracking } from './utils/errorTracking'
 import { initFlexGapSupport } from './utils/flexGapSupport'
+import { installResizeObserverFallback } from './utils/resizeObserverFallback'
 
 // Suivi des crashs (GlitchTip) : posé avant tout le reste, les handlers globaux
 // ne voient que ce qui se passe après eux. Inactif en dev et sans DSN.
@@ -24,6 +28,11 @@ initErrorTracking();
 // Détection avant React ; le repli commun suit ensuite les éléments rendus
 // sur les anciennes WebView Android, notamment celles des écrans embarqués.
 initFlexGapSupport();
+
+// Certains Safari arrivent sans ResizeObserver (FRONTEND-FF) : Embla,
+// le lecteur et plusieurs composants l'instancient sans garde. Repli posé
+// avant le premier rendu React.
+installResizeObserverFallback();
 
 type MovixConsoleWarningWindow = Window & {
   __movixConsoleSafetyWarningStarted?: boolean;
@@ -164,6 +173,16 @@ const safeLocalStorageGetItem = (key: string): string | null => {
 // éviter un flash de coins arrondis. Togglé live depuis SettingsPage.
 if (safeLocalStorageGetItem('square_corners_enabled') === '1') {
   document.documentElement.classList.add('square-corners');
+}
+
+// Thème Halloween : même principe, contre un flash de rouge au chargement
+// (réglage choisi, ou octobre par défaut). L'habillage et la police partent
+// tout de suite, en parallèle du reste de l'application. HalloweenAtmosphere
+// prend ensuite le relais (et retire la classe sur les lecteurs).
+if (readHalloweenTheme()) {
+  document.documentElement.classList.add(HALLOWEEN_THEME_CLASS);
+  document.documentElement.setAttribute(HALLOWEEN_ENABLED_ATTR, '');
+  loadHalloweenTheme();
 }
 
 // Register block detection on both the default axios (used by most services)

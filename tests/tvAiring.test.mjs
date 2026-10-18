@@ -23,6 +23,7 @@ const stamp = '2026-09-09T01:00:00Z';
 const schedule = {
   sourceUrl: 'https://www.tvmaze.com/shows/92751',
   episodes: { '1:1': { date: '2026-09-08', timestamp: stamp } },
+  episodeList: [{ id: 0, season: 1, number: 1, name: '', airdate: '2026-09-08', runtime: null, image: null, summary: '' }],
 };
 const apiEpisode = {
   season: 1, number: 1, airdate: '2026-09-08', airtime: '21:00', airstamp: stamp,
@@ -261,6 +262,7 @@ test('IMDb relie la série et deux consommateurs partagent les requêtes et le c
     calls.push(url);
     assert.equal(options.credentials, 'omit');
     if (url.includes('/lookup/shows?imdb=tt1234567')) return response({ id: 92751, externals: { imdb: 'tt1234567' } });
+    if (url.endsWith('/alternatelists')) return response([]);
     assert.equal(url, 'https://api.tvmaze.com/shows/92751/episodes');
     return response([apiEpisode]);
   } });
@@ -269,7 +271,32 @@ test('IMDb relie la série et deux consommateurs partagent les requêtes et le c
   assert.deepEqual(first, schedule);
   assert.deepEqual(second, schedule);
   assert.deepEqual(await getTvAiringSchedule(ids), schedule);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
+});
+
+test('La Casa de Papel : la liste alternative Netflix donne le découpage en parties', async () => {
+  const { getTvAiringSchedule } = service({ fetch: async (url) => {
+    if (url.includes('/lookup/shows?imdb=')) {
+      return response({ id: 27436, externals: { imdb: 'tt6468322' }, network: null, webChannel: { name: 'Netflix' } });
+    }
+    if (url.endsWith('/shows/27436/alternatelists')) {
+      return response([{ id: 17, streaming_premiere: false, webChannel: { name: 'Netflix' } }]);
+    }
+    if (url.includes('/alternatelists/17/alternateepisodes')) {
+      return response([{
+        id: 293, name: 'Episode 1', season: 2, number: 1, airdate: '2018-04-06',
+        _embedded: { episodes: [{ ...apiEpisode, id: 1150976, name: 'Vrai titre', season: 1, number: 14 }] },
+      }]);
+    }
+    return response([apiEpisode]);
+  } });
+  const result = await getTvAiringSchedule({ imdb_id: 'tt6468322' });
+  assert.equal(result.onNetflix, true);
+  assert.equal(result.netflixEpisodeList.length, 1);
+  assert.deepEqual(
+    { ...result.netflixEpisodeList[0], summary: undefined, image: undefined, runtime: undefined },
+    { id: 1150976, season: 2, number: 1, name: 'Vrai titre', airdate: '2018-04-06', summary: undefined, image: undefined, runtime: undefined },
+  );
 });
 
 test('TVDB prend le relais lorsque l’identifiant IMDb est absent de TVmaze', async () => {

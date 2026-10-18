@@ -43,6 +43,31 @@ export const reInitMountedEmbla = (emblaApi: EmblaCarouselType): boolean => {
   }
 };
 
+/**
+ * reInit qui garde la position au pixel près. Le reInit d'Embla repart du cran
+ * sélectionné : au bout d'une rangée en `containScroll`, les derniers crans
+ * sont ramenés à la limite, et après l'ajout de cartes ce même cran se trouve
+ * bien plus loin, ce qui téléportait la rangée sur les nouvelles cartes.
+ */
+export const reInitMountedEmblaKeepingLocation = (emblaApi: EmblaCarouselType): boolean => {
+  if (!isEmblaMounted(emblaApi)) return false;
+  const previous = emblaApi.internalEngine().location.get();
+  if (!reInitMountedEmbla(emblaApi)) return false;
+  const engine = emblaApi.internalEngine();
+  const location = Math.min(engine.limit.max, Math.max(engine.limit.min, previous));
+  for (const vector of [engine.location, engine.previousLocation, engine.offsetLocation, engine.target]) {
+    vector.set(location);
+  }
+  engine.translate.to(location);
+  let nearest = 0;
+  engine.scrollSnapList.forEach((snap, index) => {
+    if (Math.abs(snap - location) < Math.abs(engine.scrollSnapList[nearest] - location)) nearest = index;
+  });
+  engine.index.set(nearest);
+  engine.indexPrevious.set(nearest);
+  return true;
+};
+
 /** Callback stable pour remplacer le reInit automatique de ResizeObserver. */
 export const watchMountedEmblaResize = (emblaApi: EmblaCarouselType): boolean =>
   isEmblaMounted(emblaApi);

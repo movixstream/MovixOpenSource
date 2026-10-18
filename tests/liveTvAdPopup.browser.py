@@ -74,7 +74,9 @@ await require('esbuild').build({{
  }}}}]
 }});
 """, encoding='utf8')
-    (work / 'base.css').write_text('@tailwind base;\n@tailwind components;\n@tailwind utilities;', encoding='utf8')
+    # index.css n'est pas compilé ici : reprendre les ratios des cartes de la
+    # grille, sinon leurs enfants absolus laissent des cartes de hauteur nulle.
+    (work / 'base.css').write_text('@tailwind base;\n@tailwind components;\n@tailwind utilities;\n.media-aspect-poster{aspect-ratio:2/3}\n.media-aspect-video{aspect-ratio:16/9}', encoding='utf8')
     (work / 'index.html').write_text('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/ui.css"><link rel="stylesheet" href="/app.css"></head><body style="background:black;color:white"><div id="root"></div><script type="module" src="/app.js"></script></body></html>', encoding='utf8')
     subprocess.run(['node', str(work / 'build.mjs')], cwd=REPO, check=True)
     subprocess.run(['node', 'node_modules/tailwindcss/lib/cli.js', '-c', 'tailwind.config.js', '-i', str(work / 'base.css'), '-o', str(work / 'ui.css'), '--content', 'src/pages/LiveTV.tsx,src/components/LiveTVPlayer.tsx,src/components/StreamedSourceSelector.tsx,src/components/AdFreePlayerAds.tsx,src/components/AdPopupCinemaRain.tsx,src/components/ui/*.tsx'], cwd=REPO, check=True, capture_output=True)

@@ -1,3 +1,4 @@
+import { IX_MATRIX_URL } from '@/config/community';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getFrembedBase } from '../../utils/frembedConfig';
 import { useTranslation } from 'react-i18next';
@@ -1047,7 +1048,7 @@ const AdminWishboard: React.FC = () => {
 
         setDeletingBatch(true);
         const authToken = localStorage.getItem('auth_token');
-        const rejectionReason = 'Déjà disponible, pour plus d\'assistance : https://t.me/ix_annonces';
+        const rejectionReason = 'Déjà disponible, pour plus d\'assistance : ' + IX_MATRIX_URL;
 
         for (const item of toReject) {
             try {

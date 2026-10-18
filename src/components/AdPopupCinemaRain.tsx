@@ -2,11 +2,20 @@
  * Particules adaptées de P-Stream / Lightbar.tsx, sous AGPL-3.0.
  * Source, licence et adaptations : @/assets/pstream-lightbar/CREDITS.md.
  */
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLightMode } from '@/context/LightModeContext';
-import { createCinemaMotifSequence } from "@/data/cinemaMotifs";
+import { CINEMA_CATALOG, createCinemaMotifSequence, type CinemaMotifCatalog } from "@/data/cinemaMotifs";
+import { readHalloweenTheme } from '@/hooks/useHalloweenTheme';
 import type { CinemaMotif } from "@/types/cinemaMotifs";
 import { fitCanvasBitmapSize, isCanvasInvalidStateError } from '@/utils/canvasSizing';
+import {
+  DEPTH_PLANES,
+  areCinemaRainSpritesReady,
+  cinemaMotifDepth,
+  getCinemaBeam,
+  getCinemaSprite,
+  preloadCinemaRainSprites,
+} from '@/utils/cinemaRainSprites';
 
 interface LightbarOptions {
   motif?: CinemaMotif;
@@ -21,77 +30,10 @@ interface ReadableRegion {
   bottom: number;
 }
 
-const DEPTH_PLANES = [
-  { scale: 0.76, speed: 0.72, opacity: 0.3, blur: 1.4, iconBoost: 1 },
-  { scale: 1, speed: 1, opacity: 0.46, blur: 0.55, iconBoost: 1.2 },
-  { scale: 1.1, speed: 1.12, opacity: 0.6, blur: 0, iconBoost: 1.25 },
-] as const;
 const TEXT_REGION_OPACITY = 0.14;
 const POINT_OPACITY_SCALE = 0.8;
-const imageCache = new Map<string, HTMLImageElement>();
-const spriteCache = new Map<string, Map<number, HTMLCanvasElement>>();
-const beamCache = new Map<string, HTMLCanvasElement>();
-
-const loadImage = (url: string) => {
-  let image = imageCache.get(url);
-  if (!image) {
-    image = new Image();
-    image.decoding = 'async';
-    image.src = url;
-    imageCache.set(url, image);
-  }
-  return image;
-};
-
-// HTMLImageElement.decode manque avant Chrome 64 (WebView et TV anciennes,
-// GlitchTip DK) : attendre alors le chargement classique de l'image.
-const decodeImage = (image: HTMLImageElement): Promise<void> => {
-  if (typeof image.decode === 'function') return image.decode();
-  if (image.complete) {
-    return image.naturalWidth > 0 ? Promise.resolve() : Promise.reject(new Error('Image indisponible'));
-  }
-  return new Promise((resolve, reject) => {
-    image.addEventListener('load', () => resolve(), { once: true });
-    image.addEventListener('error', () => reject(new Error('Image indisponible')), { once: true });
-  });
-};
-
-const prepareBeamSprite = (url: string, image: HTMLImageElement) => {
-  if (!image.complete || !image.naturalWidth) return null;
-  const cached = beamCache.get(url);
-  if (cached) return cached;
-  const sprite = document.createElement("canvas");
-  sprite.width = 512;
-  sprite.height = 256;
-  sprite.dataset.cinemaBeam = 'true';
-  const context = sprite.getContext("2d");
-  if (!context) return null;
-  context.drawImage(image, 0, 0, 512, 256);
-  beamCache.set(url, sprite);
-  return sprite;
-};
-
-// Tous les plans sont rastérisés une fois, y compris le plan net : aucun SVG
-// n'est redessiné pendant l'animation. La résolution couvre aussi les écrans 2x.
-const prepareSprite = (url: string, image: HTMLImageElement, depth: number) => {
-  let planes = spriteCache.get(url);
-  if (!planes) {
-    planes = new Map();
-    spriteCache.set(url, planes);
-  }
-  const cached = planes.get(depth);
-  if (cached) return cached;
-  const sprite = document.createElement("canvas");
-  sprite.width = 128;
-  sprite.height = 128;
-  sprite.dataset.cinemaMotif = image.dataset.cinemaMotif;
-  const context = sprite.getContext("2d");
-  if (!context) return null;
-  context.filter = `blur(${DEPTH_PLANES[depth].blur * 2}px)`;
-  context.drawImage(image, 16, 16, 96, 96);
-  planes.set(depth, sprite);
-  return sprite;
-};
+// Fondu commun des motifs lorsque leurs sprites arrivent après l'ouverture.
+const MOTIF_REVEAL_MS = 280;
 
 const readabilityAt = (x: number, y: number, regions: ReadableRegion[], radius = 0) => {
   let opacity = 1;
@@ -105,6 +47,8 @@ const readabilityAt = (x: number, y: number, regions: ReadableRegion[], radius =
   return opacity;
 };
 
+// `width` est la largeur logique du champ : deux fois celle de la popup,
+// comme le canvas d'origine. Seule sa moitié centrale est visible.
 class Particle {
   x = 0;
 
@@ -124,24 +68,19 @@ class Particle {
 
   options: LightbarOptions;
 
-  pixelRatio: number;
-
   constructor(
-    canvas: HTMLCanvasElement,
+    width: number,
     options: LightbarOptions = {
       sizeRange: [10, 15],
     },
-    pixelRatio = 1,
   ) {
     this.options = options;
-    this.pixelRatio = pixelRatio;
 
-    this.reset(canvas);
-    this.initialize(canvas);
+    this.reset(width);
+    this.initialize(width);
   }
 
-  reset(canvas: HTMLCanvasElement) {
-    const width = canvas.width / this.pixelRatio;
+  reset(width: number) {
     this.x = Math.round((Math.random() * width) / 2 + width / 4);
     this.y = Math.random() * 100 + 5;
 
@@ -163,11 +102,11 @@ class Particle {
     this.ran = 0;
   }
 
-  initialize(canvas: HTMLCanvasElement) {
+  initialize(width: number) {
     this.ran = Math.random() * this.lifetime;
     const baseSpeed = this.speed;
     this.speed = Math.random() * this.lifetime * baseSpeed;
-    this.update(canvas);
+    this.update(width);
     this.speed = baseSpeed;
   }
 
@@ -181,7 +120,7 @@ class Particle {
   }
 
   /** Espacement à la naissance seulement : aucune répulsion ni secousse pendant la chute. */
-  avoidOverlap(canvas: HTMLCanvasElement, particles: readonly Particle[], prefilled: boolean) {
+  avoidOverlap(width: number, particles: readonly Particle[], prefilled: boolean) {
     if (!this.options.motif) return;
     const neighbors = particles.filter(particle => particle !== this && particle.options.motif);
     if (neighbors.length === 0) return;
@@ -205,7 +144,6 @@ class Particle {
       return nearest;
     };
     let best = { x: this.x, y: this.y, clearance: clearance() };
-    const width = canvas.width / this.pixelRatio;
     for (let attempt = 0; attempt < 16 && best.clearance < 0; attempt += 1) {
       const center = this.visualCenter();
       this.x += width / 4 + Math.random() * width / 2 - center.x;
@@ -217,7 +155,7 @@ class Particle {
     this.y = best.y;
   }
 
-  update(canvas: HTMLCanvasElement, delta = 1, particles: readonly Particle[] = []) {
+  update(width: number, delta = 1, particles: readonly Particle[] = []) {
     this.ran += delta;
 
     const addX = this.speed * Math.cos(this.direction);
@@ -226,20 +164,18 @@ class Particle {
     this.y += addY * delta;
 
     if (this.ran > this.lifetime) {
-      this.reset(canvas);
-      this.avoidOverlap(canvas, particles, false);
+      this.reset(width);
+      this.avoidOverlap(width, particles, false);
     }
   }
 
-  render(canvas: HTMLCanvasElement, regions: ReadableRegion[]) {
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
+  render(ctx: CanvasRenderingContext2D, regions: ReadableRegion[], reveal: number) {
     const motif = this.options.motif;
     const depthIndex = this.options.depth ?? 1;
-    const sprite = motif ? spriteCache.get(motif.image)?.get(depthIndex) : null;
-    // La préparation progressive ne bloque ni les points lumineux ni la popup.
-    if (motif && !sprite) return;
+    const sprite = motif ? getCinemaSprite(motif.image, depthIndex) : undefined;
+    // Les motifs attendent leur sprite et apparaissent tous ensemble ; les
+    // points lumineux sont dessinés dès la première image.
+    if (motif && (!sprite || reveal <= 0)) return;
 
     ctx.save();
     ctx.beginPath();
@@ -253,7 +189,7 @@ class Particle {
     // sont reconnaissables, tout en suivant le même mouvement de chute.
     const rotation = this.rotation();
     const center = this.visualCenter();
-    const baseOpacity = Math.max(0, o * 0.8) * depth.opacity;
+    const baseOpacity = Math.max(0, o * 0.8) * depth.opacity * (motif ? reveal : 1);
     const visibility = readabilityAt(
       center.x,
       center.y,
@@ -270,7 +206,7 @@ class Particle {
       const h = w; // Les quinze motifs du catalogue ont un viewBox carré.
       ctx.rotate(rotation);
       const projection = this.options.motif?.projection;
-      const beam = projection ? beamCache.get(projection.image) : null;
+      const beam = projection ? getCinemaBeam(projection.image) : undefined;
       if (projection && beam) {
         // Le cône partage exactement la transformation de l'objectif. Son
         // emprise est atténuée séparément lorsqu'il traverse une zone de texte.
@@ -317,29 +253,51 @@ class Particle {
 const PARTICLE_COUNT = 265;
 const IMAGE_PARTICLE_COUNT = Math.floor(PARTICLE_COUNT / 7.85) + 1;
 
+// Thème Halloween : bonbons, chauves-souris, araignées et lanterne à la place
+// des motifs cinéma. Le catalogue (et ses SVG) n'est téléchargé que si le
+// thème est activé, puis gardé pour la session. On lit le réglage et non la
+// classe du thème : celle-ci est retirée sur la page du lecteur, là même où
+// la popup s'ouvre le plus souvent.
+let halloweenCatalog: CinemaMotifCatalog | null = null;
+const halloweenActive = readHalloweenTheme;
+
 const AdPopupCinemaRain = ({ unlocked = false }: { unlocked?: boolean }) => {
   const { effectivePrefs } = useLightMode();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const measureRef = useRef<(() => void) | null>(null);
+  const [catalogReady, setCatalogReady] = useState(() => !halloweenActive() || halloweenCatalog !== null);
 
   useLayoutEffect(() => { measureRef.current?.(); }, [unlocked]);
 
   useEffect(() => {
-    if (!effectivePrefs.bgAnimations) return;
+    if (catalogReady) return;
+    let cancelled = false;
+    import('@/data/halloweenMotifs')
+      .then(({ HALLOWEEN_CATALOG }) => { halloweenCatalog = HALLOWEEN_CATALOG; })
+      .catch(() => { /* Réseau coupé : pluie cinéma habituelle. */ })
+      .finally(() => { if (!cancelled) setCatalogReady(true); });
+    return () => { cancelled = true; };
+  }, [catalogReady]);
+
+  useEffect(() => {
+    if (!effectivePrefs.bgAnimations || !catalogReady) return;
+    const catalog = halloweenActive() && halloweenCatalog ? halloweenCatalog : CINEMA_CATALOG;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const particles: Particle[] = [];
-    const pendingSprites: { url: string; motifId?: string; depth?: number }[] = [];
     let frame: number | null = null;
-    let preparationFrame: number | null = null;
-    let preparationTimer: number | null = null;
-    let preparationGeneration = 0;
     let previousTime = 0;
-    let pixelRatio = 1;
-    let pixelRatioY = 1;
+    let fieldWidth = 0;
+    let canvasLayout = '';
     let measured = false;
     let regions: ReadableRegion[] = [];
+    let disposed = false;
+    let hasDrawn = false;
+    // Sprites préchargés : motifs visibles dès la première image. Sinon, la
+    // préparation est terminée d'un bloc et tous les motifs entrent ensemble.
+    let motifsRevealedAt: number | null = areCinemaRainSpritesReady(catalog) ? -Infinity : null;
+    let motifsRequested = false;
     const dialog = canvas.closest('[role="dialog"]');
 
     const measure = () => {
@@ -358,82 +316,59 @@ const AdPopupCinemaRain = ({ unlocked = false }: { unlocked?: boolean }) => {
         return;
       }
       const scale = cssWidth / bounds.width;
+      // Le canvas ne couvre que la moitié visible du champ logique : ses
+      // coordonnées sont décalées d'une demi-largeur de popup.
+      const offsetX = cssWidth / 2;
       regions = Array.from(dialog?.querySelectorAll('[data-ad-copy]') ?? []).map(element => {
         const rect = element.getBoundingClientRect();
         return {
-          left: (rect.left - bounds.left) * scale - 16,
-          right: (rect.right - bounds.left) * scale + 16,
+          left: (rect.left - bounds.left) * scale + offsetX - 16,
+          right: (rect.right - bounds.left) * scale + offsetX + 16,
           top: (rect.top - bounds.top) * scale - 20,
           bottom: (rect.bottom - bounds.top) * scale + 16,
         };
       });
-      if (
-        canvas.width !== size.width
-        || canvas.height !== size.height
-        || pixelRatio !== size.scaleX
-        || pixelRatioY !== size.scaleY
-      ) {
-        const previousLogicalWidth = canvas.width / pixelRatio;
-        const scaleX = previousLogicalWidth > 0 ? cssWidth / previousLogicalWidth : 1;
-        for (const particle of particles) {
-          particle.x *= scaleX;
-          particle.pixelRatio = size.scaleX;
+      const nextFieldWidth = cssWidth * 2;
+      const layout = `${size.width}x${size.height}:${cssWidth}x${cssHeight}`;
+      if (layout !== canvasLayout) {
+        if (fieldWidth > 0) {
+          const scaleX = nextFieldWidth / fieldWidth;
+          for (const particle of particles) particle.x *= scaleX;
         }
         try {
           canvas.width = size.width;
           canvas.height = size.height;
           const context = canvas.getContext('2d');
-          context?.setTransform(size.scaleX, 0, 0, size.scaleY, 0, 0);
+          context?.setTransform(size.scaleX, 0, 0, size.scaleY, -offsetX * size.scaleX, 0);
         } catch (error) {
           if (!isCanvasInvalidStateError(error)) throw error;
           canvas.width = 0;
           canvas.height = 0;
+          canvasLayout = '';
           measured = false;
           return;
         }
+        canvasLayout = layout;
       }
-      pixelRatio = size.scaleX;
-      pixelRatioY = size.scaleY;
+      fieldWidth = nextFieldWidth;
       measured = true;
     };
     measureRef.current = measure;
 
     const stop = () => {
       if (frame !== null) cancelAnimationFrame(frame);
-      if (preparationFrame !== null) cancelAnimationFrame(preparationFrame);
-      if (preparationTimer !== null) window.clearTimeout(preparationTimer);
       frame = null;
-      preparationFrame = null;
-      preparationTimer = null;
-      preparationGeneration += 1;
       previousTime = 0;
     };
 
-    // Un seul décodage/rendu de sprite par tour, après que le navigateur a pu
-    // peindre la popup. Ni le montage ni la boucle de dessin ne préparent les SVG.
-    const schedulePreparation = () => {
-      if (pendingSprites.length === 0) return;
-      preparationFrame = requestAnimationFrame(() => {
-        preparationFrame = null;
-        preparationTimer = window.setTimeout(() => {
-          preparationTimer = null;
-          const generation = preparationGeneration;
-          const { url, motifId, depth } = pendingSprites[0];
-          const image = loadImage(url);
-          if (motifId) image.dataset.cinemaMotif = motifId;
-          void decodeImage(image).then(() => {
-            if (generation !== preparationGeneration) return;
-            if (depth === undefined) prepareBeamSprite(url, image);
-            else prepareSprite(url, image, depth);
-          }).catch(() => {
-            // Un asset indisponible ne doit pas bloquer les autres motifs.
-            if (generation === preparationGeneration) imageCache.delete(url);
-          }).finally(() => {
-            if (generation !== preparationGeneration) return;
-            pendingSprites.shift();
-            schedulePreparation();
-          });
-        }, 0);
+    // Secours si la popup s'ouvre avant la fin du préchargement : le reste est
+    // préparé tout de suite, puis les motifs entrent ensemble en fondu (sans
+    // fondu si rien n'a encore été dessiné).
+    const requestMotifs = () => {
+      if (motifsRevealedAt !== null || motifsRequested) return;
+      motifsRequested = true;
+      void preloadCinemaRainSprites({ urgent: true, catalog }).then(() => {
+        if (!disposed) motifsRevealedAt = hasDrawn ? performance.now() : -Infinity;
       });
     };
 
@@ -443,21 +378,31 @@ const AdPopupCinemaRain = ({ unlocked = false }: { unlocked?: boolean }) => {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
-      const delta = previousTime ? Math.min((time - previousTime) / (1000 / 60), 3) : 1;
+      // Le premier dessin est synchrone : la frame suivante peut porter un
+      // horodatage antérieur, d'où le plancher à zéro.
+      const delta = previousTime ? Math.max(0, Math.min((time - previousTime) / (1000 / 60), 3)) : 1;
       previousTime = time;
+      const reveal = motifsRevealedAt === null
+        ? 0
+        : Math.min(1, Math.max(0, (time - motifsRevealedAt) / MOTIF_REVEAL_MS));
       try {
-        ctx.clearRect(0, 0, canvas.width / pixelRatio, canvas.height / pixelRatioY);
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
         for (const particle of particles) {
-          particle.update(canvas, delta, particles);
-          particle.render(canvas, regions);
+          particle.update(fieldWidth, delta, particles);
+          particle.render(ctx, regions, reveal);
         }
       } catch (error) {
         if (!isCanvasInvalidStateError(error)) throw error;
         canvas.width = 0;
         canvas.height = 0;
+        canvasLayout = '';
         measured = false;
         return;
       }
+      hasDrawn = true;
       frame = requestAnimationFrame(particlesLoop);
     };
 
@@ -466,37 +411,24 @@ const AdPopupCinemaRain = ({ unlocked = false }: { unlocked?: boolean }) => {
       if (!measured || document.hidden || reducedMotion.matches || !canvas.getContext("2d")) return;
 
       if (particles.length === 0) {
-        const motifs = createCinemaMotifSequence(IMAGE_PARTICLE_COUNT);
+        const motifs = createCinemaMotifSequence(IMAGE_PARTICLE_COUNT, Math.random, catalog);
         for (let i = 0; i < PARTICLE_COUNT; i += 1) {
           const motif = motifs[i];
-          const particle = new Particle(canvas, {
+          const particle = new Particle(fieldWidth, {
             motif,
             sizeRange: motif?.sizeRange,
-            depth: motif?.projection ? 1 + i % 2 : i % DEPTH_PLANES.length,
-          }, pixelRatio);
-          particle.avoidOverlap(canvas, particles, true);
+            depth: motif ? cinemaMotifDepth(motif, i) : i % DEPTH_PLANES.length,
+          });
+          particle.avoidOverlap(fieldWidth, particles, true);
           particles.push(particle);
         }
         particles.sort((a, b) => (a.options.depth ?? 1) - (b.options.depth ?? 1));
-        const queued = new Set<string>();
-        for (const particle of particles) {
-          const { motif, depth = 1 } = particle.options;
-          if (!motif) continue;
-          const key = `${motif.image}:${depth}`;
-          if (!spriteCache.get(motif.image)?.has(depth) && !queued.has(key)) {
-            queued.add(key);
-            pendingSprites.push({ url: motif.image, motifId: motif.id, depth });
-          }
-          const projection = motif.projection;
-          if (projection && !beamCache.has(projection.image) && !queued.has(projection.image)) {
-            queued.add(projection.image);
-            pendingSprites.push({ url: projection.image });
-          }
-        }
       }
 
-      frame = requestAnimationFrame(particlesLoop);
-      schedulePreparation();
+      requestMotifs();
+      // Appelé depuis le ResizeObserver, ce dessin entre dans la même frame
+      // que le premier rendu de la popup : le décor est là dès l'ouverture.
+      particlesLoop(performance.now());
     };
 
     const handleReducedMotionChange = () => {
@@ -536,6 +468,7 @@ const AdPopupCinemaRain = ({ unlocked = false }: { unlocked?: boolean }) => {
     syncActivity();
 
     return () => {
+      disposed = true;
       stop();
       observer?.disconnect();
       window.removeEventListener('resize', handleWindowResize);
@@ -547,7 +480,7 @@ const AdPopupCinemaRain = ({ unlocked = false }: { unlocked?: boolean }) => {
         legacyReducedMotion.removeListener?.(handleReducedMotionChange);
       }
     };
-  }, [effectivePrefs.bgAnimations]);
+  }, [effectivePrefs.bgAnimations, catalogReady]);
 
   if (!effectivePrefs.bgAnimations) return null;
   return (
@@ -559,8 +492,8 @@ const AdPopupCinemaRain = ({ unlocked = false }: { unlocked?: boolean }) => {
         data-cinema-lightbar
         className="absolute inset-x-0 top-0 h-48 bg-[radial-gradient(ellipse_85%_110%_at_50%_-25%,rgba(96,165,250,0.44),rgba(59,130,246,0.08)_50%,transparent_76%)]"
       />
-      <div className="absolute inset-x-[20%] top-0 h-px bg-gradient-to-r from-transparent via-blue-200/70 to-transparent" />
-      <canvas ref={canvasRef} className="pointer-events-none absolute left-1/2 top-0 h-[300px] w-[200%] -translate-x-1/2 motion-reduce:hidden" />
+      <div data-cinema-line className="absolute inset-x-[20%] top-0 h-px bg-gradient-to-r from-transparent via-blue-200/70 to-transparent" />
+      <canvas ref={canvasRef} className="pointer-events-none absolute inset-x-0 top-0 h-[300px] w-full motion-reduce:hidden" />
       {unlocked && (
         <div
           data-cinema-unlocked

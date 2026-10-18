@@ -54,7 +54,7 @@ function poisonDecodeResponse(id) {
     id: String(id),
     provider: 'direct',
     embed_url: {
-      lien: 'https://t.me/ix_annonces',
+      lien: 'https://matrix.to/#/%23groupe-ix:matrix.org',
       taille: null,
       created_at: null,
     },

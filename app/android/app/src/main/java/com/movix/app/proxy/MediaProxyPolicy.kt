@@ -86,11 +86,16 @@ object MediaProxyPolicy {
     // sur la meme requete.
     const val PLAYBACK_SEC_CH_UA_MOBILE = "?0"
     const val PLAYBACK_SEC_CH_UA_PLATFORM = "\"Windows\""
-    // Le CDN exige le token zstd. q=0 demande identity et conserve les octets
-    // des playlists et des Range : OkHttp ne decompresse plus automatiquement
-    // gzip quand Accept-Encoding est fourni par l'appelant.
+    // Uqload : q=0 demande identity et conserve les octets des playlists et
+    // des Range : OkHttp ne decompresse plus automatiquement gzip quand
+    // Accept-Encoding est fourni par l'appelant.
     private const val PROVIDER_MEDIA_ACCEPT_ENCODING =
         "identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0"
+    // Fsvid/Vidzy servent leur playlist leurre (`/e/segN.ts`, la video troll)
+    // en 200 des que `gzip;q=0` figure dans la requete (mesure le 2026-10-15).
+    // `identity` seul donne le vrai flux, toujours non compresse.
+    private const val FSVID_VIDZY_MEDIA_ACCEPT_ENCODING = "identity"
+    private val providerDecoySegmentPattern = Regex("^/e/seg\\d+\\.ts$")
     private val uqloadHostPattern = Regex("(?:^|\\.)uqload\\.[a-z]{2,24}$")
     private val tokenPattern = Regex("^[A-Za-z0-9_-]{8,128}$")
     private val numericIpv4Pattern = Regex("^\\d{1,3}(?:\\.\\d{1,3}){3}$")
@@ -153,10 +158,27 @@ object MediaProxyPolicy {
     fun playbackAcceptEncoding(rawUrl: String): String? {
         val host = runCatching { URI(rawUrl).host?.lowercase(Locale.US)?.trimEnd('.') }
             .getOrNull() ?: return null
-        val providerHost = PROVIDER_DECOY_HOST_SUFFIXES.any {
-            host == it || host.endsWith(".$it")
-        } || uqloadHostPattern.containsMatchIn(host)
-        return if (providerHost) PROVIDER_MEDIA_ACCEPT_ENCODING else null
+        if (PROVIDER_DECOY_HOST_SUFFIXES.any { host == it || host.endsWith(".$it") }) {
+            return FSVID_VIDZY_MEDIA_ACCEPT_ENCODING
+        }
+        return if (uqloadHostPattern.containsMatchIn(host)) PROVIDER_MEDIA_ACCEPT_ENCODING else null
+    }
+
+    /**
+     * Vrai si l'upstream doit passer par OkHttp plutôt que par Cronet. Seul
+     * Uqload : son profil exige un Accept-Encoding que Cronet réécrit.
+     *
+     * Plus Fsvid/Vidzy : depuis le 2026-10-16 au soir, leur CDN compare
+     * l'empreinte TLS au User-Agent. Un « Chrome Windows » dont le ClientHello
+     * n'est pas celui de Chrome (OkHttp) reçoit un faux master de 177 octets
+     * qui pointe sur `index.m3u8`, lui-même identique (levelParsingError).
+     * Cronet présente le TLS de Chromium et obtient le vrai flux, quel que soit
+     * l'Accept-Encoding (mesuré le 2026-10-17).
+     */
+    fun requiresOkHttpUpstream(rawUrl: String): Boolean {
+        val host = runCatching { URI(rawUrl).host?.lowercase(Locale.US)?.trimEnd('.') }
+            .getOrNull() ?: return false
+        return uqloadHostPattern.containsMatchIn(host)
     }
 
     fun validatePublicHttpsUrl(
@@ -251,8 +273,9 @@ object MediaProxyPolicy {
 
     /**
      * Vrai si l'URL est le flux leurre servi par Fsvid/Vidzy quand ils jugent la
-     * requete illegitime. Leur CDN repond alors 302 vers .../troll/master.m3u8 :
-     * suivre la redirection ferait lire la video troll au lieu d'echouer.
+     * requete illegitime. Leur CDN repond alors 302 vers .../troll/master.m3u8,
+     * ou sert en 200 une playlist de segments `/e/segN.ts` : les relayer ferait
+     * lire la video troll au lieu d'echouer.
      */
     fun isProviderDecoyUrl(rawUrl: String): Boolean {
         val uri = runCatching { URI(rawUrl) }.getOrNull() ?: return false
@@ -262,7 +285,8 @@ object MediaProxyPolicy {
         }
         if (!providerHost) return false
         val path = uri.path?.lowercase(Locale.US) ?: return false
-        return path.split('/').any { it == "troll" }
+        return path.split('/').any { it == "troll" } ||
+            providerDecoySegmentPattern.matches(path)
     }
 
     private val PROVIDER_DECOY_HOST_SUFFIXES =

@@ -1,8 +1,9 @@
-import { Euro, Globe, Info, Puzzle, Scale, Shield, Smartphone, type LucideIcon, type LucideProps } from 'lucide-react';
+import { Euro, Globe, Info, Puzzle, Scale, Shield, Smartphone, Tv, type LucideIcon, type LucideProps } from 'lucide-react';
 import { Trans, useTranslation } from 'react-i18next';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { useLightMode } from '@/context/LightModeContext';
-import telegramLogo from 'bootstrap-icons/icons/telegram.svg';
+import matrixLogo from '@/assets/brand/matrix.svg';
+import { IX_MATRIX_URL } from '@/config/community';
 import githubLogo from 'bootstrap-icons/icons/github.svg';
 import reactLogo from '@/assets/technology-logos/react.svg';
 import typescriptLogo from '@/assets/technology-logos/typescript.svg';
@@ -29,12 +30,12 @@ const createFooterMaskIcon = (logo: string) => ({ className, size = 20 }: Lucide
   />
 );
 
-const TelegramIcon = createFooterMaskIcon(telegramLogo);
+const MatrixIcon = createFooterMaskIcon(matrixLogo);
 const GithubIcon = createFooterMaskIcon(githubLogo);
 
 type FooterLink = {
   label: string;
-  icon: LucideIcon | typeof TelegramIcon;
+  icon: LucideIcon | typeof MatrixIcon;
 } & ({ to: string; href?: never } | { href: string; to?: never });
 
 const linkGroups: { title: string; links: FooterLink[] }[] = [
@@ -43,13 +44,14 @@ const linkGroups: { title: string; links: FooterLink[] }[] = [
     links: [
       { label: 'footer.about', to: '/about', icon: Info },
       { label: 'footer.application', to: '/app', icon: Smartphone },
+      { label: 'tvApp.footerLink', to: '/app-tv', icon: Tv },
       { label: 'nav.extension', to: '/extension', icon: Puzzle },
     ],
   },
   {
     title: 'footer.community',
     links: [
-      { label: 'footer.telegram', href: 'https://t.me/ix_annonces', icon: TelegramIcon },
+      { label: 'footer.telegram', href: IX_MATRIX_URL, icon: MatrixIcon },
       { label: 'footer.sourceCode', href: 'https://github.com/movixstream/MovixOpenSource', icon: GithubIcon },
       { label: 'costs.navLabel', to: '/frais', icon: Euro },
     ],
@@ -87,7 +89,7 @@ const Footer = () => {
   const { effectivePrefs } = useLightMode();
 
   return (
-    <footer className="relative z-10 border-t border-gray-800 bg-black py-8 text-gray-300 sm:py-10">
+    <footer data-site-footer className="relative z-10 border-t border-gray-800 bg-black py-8 text-gray-300 sm:py-10">
       <div className="mx-auto max-w-6xl px-6 text-left sm:px-10 lg:px-12">
         <nav aria-label={t('footer.navigation')} className="grid grid-cols-2 gap-x-6 gap-y-7 sm:grid-cols-3 sm:gap-x-10">
           {linkGroups.map((group, index) => (

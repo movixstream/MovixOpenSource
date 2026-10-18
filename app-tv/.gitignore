@@ -1,0 +1,16 @@
+.gradle/
+.kotlin/
+build/
+/local.properties
+/captures/
+.idea/
+*.iml
+*.apk
+# APK publiée par scripts/release.sh, lue par l'appli et la page /app-tv.
+!/movix-tv.apk
+*.aab
+*.keystore
+*.jks
+# Clé de diffusion et ses mots de passe : sur le disque, jamais dans git.
+/keys/
+/dist/

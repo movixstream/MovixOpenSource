@@ -34,7 +34,7 @@ const CatalogSelect = ({ label, value, options, onChange }: {
                 {!options.some(option => option.value === value) && <option value={value}>{value}</option>}
                 {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
-            <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60" />
+            <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white opacity-60" />
         </span>
     </label>
 );
@@ -234,7 +234,7 @@ const ProviderCatalogPage: React.FC = () => {
                                     return <Link key={nextType} to={catalogLink(nextType, getCatalogGenre(genre, nextType === 'movies' ? 'movie' : 'tv'))}
                                         aria-current={active ? 'page' : undefined}
                                         className={`${buttonClass} flex min-w-0 items-center justify-center gap-2 ${active ? 'border-red-600 bg-red-600 text-white hover:bg-red-500' : 'bg-white/5 text-white/70'}`}>
-                                        <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />
+                                        <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 text-white ${active ? '' : 'opacity-70'}`} />
                                         {t(nextType === 'movies' ? 'providerCatalog.films' : 'providerCatalog.series')}
                                     </Link>;
                                 })}
@@ -278,7 +278,7 @@ const ProviderCatalogPage: React.FC = () => {
                     <div ref={resultsRef} className="scroll-mt-24">
                         <div className="mb-5 flex min-h-11 flex-wrap items-center justify-between gap-3">
                             <p role="status" className="flex items-center gap-2 text-sm text-white/70">
-                                {loading && <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" />}
+                                {loading && <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 text-white opacity-70 animate-spin motion-reduce:animate-none" />}
                                 {loading ? t('providerCatalog.updating') : error ? (data ? t('providerCatalog.previousResults') : t('common.error'))
                                     : t('providerCatalog.resultsAvailable', { total: (data?.totalResults || 0).toLocaleString(i18n.language) })}
                             </p>
@@ -286,9 +286,9 @@ const ProviderCatalogPage: React.FC = () => {
                                 {viewType === 'grid' && screenCols > 2 && <CatalogSelect label={t('genres.itemsPerRow')} value={String(effectivePerRow)} options={gridOptions} onChange={value => setResultsPerRow(Number(value))} />}
                                 <div role="group" aria-label={t('genres.displayType')} className="flex gap-1">
                                     <button type="button" aria-label={t('genres.grid')} aria-pressed={viewType === 'grid'} onClick={() => setViewType('grid')}
-                                        className={`${buttonClass} ${viewType === 'grid' ? 'bg-red-600' : 'bg-white/5 text-white/70'}`}><LayoutGrid aria-hidden="true" className="h-4 w-4" /></button>
+                                        className={`${buttonClass} ${viewType === 'grid' ? 'bg-red-600' : 'bg-white/5 text-white/70'}`}><LayoutGrid aria-hidden="true" className={`h-4 w-4 text-white ${viewType === 'grid' ? '' : 'opacity-70'}`} /></button>
                                     <button type="button" aria-label={t('genres.listView')} aria-pressed={viewType === 'list'} onClick={() => setViewType('list')}
-                                        className={`${buttonClass} ${viewType === 'list' ? 'bg-red-600' : 'bg-white/5 text-white/70'}`}><List aria-hidden="true" className="h-4 w-4" /></button>
+                                        className={`${buttonClass} ${viewType === 'list' ? 'bg-red-600' : 'bg-white/5 text-white/70'}`}><List aria-hidden="true" className={`h-4 w-4 text-white ${viewType === 'list' ? '' : 'opacity-70'}`} /></button>
                                 </div>
                             </div>
                         </div>

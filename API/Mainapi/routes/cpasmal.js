@@ -22,7 +22,8 @@ const { respondWithResolvedSources } = require('../utils/embedExtraction');
 // et une seule route sert film comme épisode : la même bascule couvre les deux.
 const respondWithSources = (req, res, payload) =>
   respondWithResolvedSources(req, res, payload, { movieMapKey: 'links', label: 'CPASMAL' });
-const { fetchTmdbDetails } = require('../utils/tmdbCache');
+const { fetchTmdbDetails, fetchTmdbAlternativeTitles } = require('../utils/tmdbCache');
+const { titleSimilarity } = require('../utils/sourceIdentity');
 const { acquireRedisLock } = require('../utils/redisLock');
 const { createSourceRefresh } = require('../utils/sourceRefresh');
 const { createSharedSourceWork, createSharedSourceLookup } = require('../utils/sharedSourceWork');
@@ -58,7 +59,10 @@ function _createScopedRequest() {
       headers: config.headers || {},
       disableRedirect: config.disableRedirect === true,
     })).catch(error => {
-      if (error.code === 'CPASMAL_PROXY_COOLDOWN') throw cpasmalUpstreamError();
+      // Proxys en quarantaine ou Cpasmal en pause (disjoncteur) : panne temporaire.
+      if (error.code === 'CPASMAL_PROXY_COOLDOWN' || error.code === 'SOURCE_CIRCUIT_OPEN') {
+        throw cpasmalUpstreamError();
+      }
       throw error;
     });
     // CycleTLS, contrairement à axios, ne rejette pas les statuts d'erreur.
@@ -151,7 +155,9 @@ async function saveCpasmalCachePreservingPlayable(cacheKey, candidate, { partial
     if (!candidateIsPlayable) {
       const latestCache = await deps.getFromCacheNoExpiration(CACHE_DIR.CPASMAL, cacheKey);
       const replacingObsoleteTvCache = candidate?._tvCacheVersion === CPASMAL_TV_CACHE_VERSION && isObsoleteTvCache(latestCache);
-      if (hasPlayableCpasmalResult(latestCache) && !replacingObsoleteTvCache) {
+      // La fiche en cache est celle d'un autre film : ses lecteurs ne valent rien.
+      const replacingRejectedFilm = Boolean(candidate?.rejectedCpasmalUrl && latestCache?.cpasmalUrl === candidate.rejectedCpasmalUrl);
+      if (hasPlayableCpasmalResult(latestCache) && !replacingObsoleteTvCache && !replacingRejectedFilm) {
         try {
           const now = new Date();
           await fsp.utimes(cacheFilePath, now, now);
@@ -412,7 +418,7 @@ async function searchCpasmalUncached(title, year, type, requestFn) {
 }
 
 // Helper to extract links from a movie page
-async function extractMovieLinks(url, requestFn) {
+async function extractMovieLinks(url, requestFn, { acceptTitle } = {}) {
   const doRequest = requestFn || _createScopedRequest();
   if (process.env.DEBUG_CPASMAL) console.time(`[Cpasmal] ExtractMovieLinks ${url}`);
   try {
@@ -420,6 +426,10 @@ async function extractMovieLinks(url, requestFn) {
     const $ = cheerio.load(response.data);
     const links = { vf: [], vostfr: [] };
     let cpasmalYear = null;
+    // « Rental Family <span>streaming</span> » : le titre seul, sans le suffixe.
+    const heading = $('h1').first().clone();
+    heading.find('span').remove();
+    const cpasmalTitle = heading.text().replace(/\s+/g, ' ').trim();
 
     // Extraire l'annee de sortie depuis la page cpasmal
     $('article ul li').each((i, el) => {
@@ -446,6 +456,11 @@ async function extractMovieLinks(url, requestFn) {
           }
         }
       });
+    }
+
+    // Une fiche d'un autre film ne doit pas déclencher les appels getxfield.
+    if (acceptTitle && cpasmalTitle && !await acceptTitle(cpasmalTitle)) {
+      return { links, cpasmalYear, cpasmalTitle, titleRejected: true };
     }
 
     const linkElements = $('.liens-c .lien');
@@ -490,7 +505,7 @@ async function extractMovieLinks(url, requestFn) {
       console.timeEnd(`[Cpasmal] ExtractMovieLinks ${url}`);
       console.log(`[Cpasmal] Found ${links.vf.length} VF and ${links.vostfr.length} VOSTFR links`);
     }
-    return { links, cpasmalYear };
+    return { links, cpasmalYear, cpasmalTitle };
   } catch (error) {
     _log403('extractMovieLinks', error);
     throw error;
@@ -641,7 +656,27 @@ async function extractSeriesLinks(seriesUrl, seasonNumber, episodeNumber, reques
 
 // === DATA FETCHING FUNCTIONS ===
 
-async function fetchCpasmalMovieData(tmdbId, throwOnError = true) {
+// « Family » (2026) ne doit pas recevoir la fiche « Rental Family » : le score
+// de recherche tolère un titre partiel, la fiche retenue doit porter le titre
+// TMDB, son titre original ou un titre alternatif FR/US/GB.
+function createCpasmalTitleCheck(tmdbData) {
+  const titles = [tmdbData.title, tmdbData.original_title].filter(Boolean);
+  let aliasesPromise;
+  const matches = (candidate, list) => list.some(title => titleSimilarity(title, candidate) >= 0.8);
+  return async (cpasmalTitle) => {
+    if (matches(cpasmalTitle, titles)) return true;
+    aliasesPromise ||= fetchTmdbAlternativeTitles(deps.TMDB_API_URL, deps.TMDB_API_KEY, tmdbData.id, 'movie')
+      .then(result => (result?.titles || result?.results || [])
+        .filter(item => ['FR', 'US', 'GB'].includes(item.iso_3166_1)).map(item => item.title))
+      .catch(() => null);
+    const aliases = await aliasesPromise;
+    // Sans réponse TMDB, on ne rejette pas une fiche sur le seul titre principal.
+    if (!aliases) return true;
+    return matches(cpasmalTitle, aliases);
+  };
+}
+
+async function fetchCpasmalMovieData(tmdbId, throwOnError = true, knownCpasmalUrl = null) {
   const requestFn = _createScopedRequest();
 
   const tmdbData = await getTmdbDetails(tmdbId, 'movie');
@@ -652,13 +687,23 @@ async function fetchCpasmalMovieData(tmdbId, throwOnError = true) {
 
   const title = tmdbData.title;
   const tmdbYear = tmdbData.release_date ? tmdbData.release_date.split('-')[0] : null;
+  const acceptTitle = createCpasmalTitleCheck(tmdbData);
+  // Le cache peut contenir une fiche acceptée avant ce contrôle : si elle porte
+  // un autre titre, l'indiquer pour qu'elle soit remplacée par le notFound.
+  const notFound = async (message) => {
+    if (throwOnError) throw new Error(message);
+    if (!knownCpasmalUrl) return null;
+    const known = await extractMovieLinks(knownCpasmalUrl, requestFn, { acceptTitle }).catch(() => null);
+    return known?.titleRejected ? { rejectedCpasmalUrl: knownCpasmalUrl } : null;
+  };
 
   const cpasmalUrl = await searchCpasmal(title, tmdbYear, 'movie', requestFn);
-  if (!cpasmalUrl) {
-    if (throwOnError) throw new Error('Movie not found on Cpasmal');
-    return null;
+  if (!cpasmalUrl) return notFound('Movie not found on Cpasmal');
+  let { links, cpasmalYear, titleRejected } = await extractMovieLinks(cpasmalUrl, requestFn, { acceptTitle });
+  if (titleRejected) {
+    if (throwOnError) throw new Error('Movie not found on Cpasmal (title mismatch)');
+    return cpasmalUrl === knownCpasmalUrl ? { rejectedCpasmalUrl: cpasmalUrl } : notFound();
   }
-  let { links, cpasmalYear } = await extractMovieLinks(cpasmalUrl, requestFn);
   let finalCpasmalUrl = cpasmalUrl;
 
   // Validation post-match: reject if year mismatch, retry with explicit year search
@@ -669,19 +714,17 @@ async function fetchCpasmalMovieData(tmdbId, throwOnError = true) {
     const retryResult = await _runCpasmalSearch(searchQueryWithYear, title, tmdbYear, 'movie', normalize, 2, requestFn);
 
     if (retryResult.bestMatch && retryResult.bestMatch !== cpasmalUrl) {
-      const retryExtract = await extractMovieLinks(retryResult.bestMatch, requestFn);
+      const retryExtract = await extractMovieLinks(retryResult.bestMatch, requestFn, { acceptTitle });
       // Accept if year matches or if year is not available on the page
-      if (!retryExtract.cpasmalYear || retryExtract.cpasmalYear === tmdbYear) {
+      if (!retryExtract.titleRejected && (!retryExtract.cpasmalYear || retryExtract.cpasmalYear === tmdbYear)) {
         links = retryExtract.links;
         cpasmalYear = retryExtract.cpasmalYear;
         finalCpasmalUrl = retryResult.bestMatch;
       } else {
-        if (throwOnError) throw new Error('Movie not found on Cpasmal (year mismatch)');
-        return null;
+        return notFound('Movie not found on Cpasmal (year mismatch)');
       }
     } else {
-      if (throwOnError) throw new Error('Movie not found on Cpasmal (year mismatch)');
-      return null;
+      return notFound('Movie not found on Cpasmal (year mismatch)');
     }
   }
 
@@ -763,13 +806,16 @@ const refreshCpasmalCache = (cacheKey, type, ...args) => cpasmalRefresh.run(cach
   if (cached && !cached._cpasmalPartial && !(type === 'tv' && isObsoleteTvCache(cached)) && (cpasmalRefresh.recentlyChecked(cacheKey, checkInterval) ||
       !await deps.shouldUpdateCache(CACHE_DIR.CPASMAL, cacheKey))) return cached;
 
-  const newData = type === 'movie'
-    ? await fetchCpasmalMovieData(args[0], false)
+  const fetched = type === 'movie'
+    ? await fetchCpasmalMovieData(args[0], false, cached?.cpasmalUrl || null)
     : await fetchCpasmalTvData(args[0], args[1], args[2], false, partial =>
       saveCpasmalCachePreservingPlayable(cacheKey, { ...partial, _tvCacheVersion: CPASMAL_TV_CACHE_VERSION, _cpasmalPartial: true }, { partial: true, isCurrent }));
+  const rejectedCpasmalUrl = fetched?.rejectedCpasmalUrl;
+  const newData = rejectedCpasmalUrl ? null : fetched;
   const candidate = newData || {
     notFound: true, tmdbId: args[0],
     ...(type === 'tv' ? { season: args[1], episode: args[2] } : {}),
+    ...(rejectedCpasmalUrl ? { rejectedCpasmalUrl } : {}),
     timestamp: Date.now(),
   };
   if (type === 'tv') candidate._tvCacheVersion = CPASMAL_TV_CACHE_VERSION;

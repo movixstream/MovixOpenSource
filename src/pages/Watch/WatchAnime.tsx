@@ -335,7 +335,8 @@ const WatchAnime: React.FC = () => {
 
       continueWatching.tv = continueWatching.tv.filter((tvShow) => tvShow?.id !== showIdInt);
       continueWatching.tv.unshift(updatedShow);
-      continueWatching.tv = continueWatching.tv.slice(0, 20);
+      // Pas de limite, comme les pages film et série : couper la liste ici
+      // retirait les autres séries de « Reprendre » (et les masquait côté serveur).
       writeLocalStorage('continueWatching', JSON.stringify(continueWatching));
     } catch {
       // L'opt-out inconnu ou un historique illisible interdit toute réécriture.
@@ -1643,7 +1644,7 @@ const WatchAnime: React.FC = () => {
                   className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto pointer-events-auto"
                   data-lenis-prevent
                 >
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.sourcesAndLanguages')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}

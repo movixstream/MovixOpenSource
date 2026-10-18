@@ -140,6 +140,29 @@ i18n
     maybeLoadEnglishBundle(i18n.resolvedLanguage || i18n.language);
   });
 
+// Registre des namespaces utilisés, posé avant le premier useTranslation.
+// react-i18next crée sinon une instance de sa classe ReportNamespaces dont
+// addUsedNamespaces lit `this.usedNamespaces` depuis une fonction fléchée.
+// Sur un téléviseur LG (UA NetCast, moteur Chrome 120, FRONTEND-FQ), ce
+// `this.usedNamespaces` est arrivé undefined et l'application entière est
+// tombée dans l'ErrorBoundary dès le TopProgressBar. Ce registre ne sert
+// qu'au rendu serveur (getInitialProps), inutilisé ici : une version par
+// fermeture, sans `this`, retire le point de rupture sans rien changer.
+const createReportNamespaces = () => {
+  const usedNamespaces: Record<string, true> = {};
+  return {
+    usedNamespaces,
+    addUsedNamespaces(namespaces: string | readonly string[]) {
+      const list = typeof namespaces === 'string' ? [namespaces] : namespaces || [];
+      for (let index = 0; index < list.length; index += 1) {
+        usedNamespaces[list[index]] = true;
+      }
+    },
+    getUsedNamespaces: () => Object.keys(usedNamespaces),
+  };
+};
+(i18n as unknown as { reportNamespaces?: unknown }).reportNamespaces = createReportNamespaces();
+
 // Couvre les changements de langue ultérieurs vers l'anglais (sélecteur de
 // langue via changeLanguage, détection async par IP dans detectInitialLanguage).
 i18n.on('languageChanged', maybeLoadEnglishBundle);

@@ -272,10 +272,10 @@ export default function WrappedExperience({ data, onClose }: { data: WrappedData
                 style={{ '--wrapped-accent': tone.accent, '--wrapped-background': tone.background, backgroundColor: tone.background } as CSSProperties}>
                 <header className="relative z-10 flex shrink-0 items-center justify-between gap-2 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] lg:px-7 lg:pt-5">
                     <button type="button" onClick={details ? () => setDetails(false) : onClose} className={iconButton} aria-label={t(details ? 'wrappedStory.backToStory' : 'wrappedStory.close')}>
-                        {details ? <ArrowLeft className="h-5 w-5" /> : <X className="h-5 w-5" />}
+                        {details ? <ArrowLeft className="h-5 w-5 text-white opacity-90" /> : <X className="h-5 w-5 text-white opacity-90" />}
                     </button>
                     <p className="flex items-center gap-3 text-sm font-bold tracking-tight"><span className="font-['Archivo_Black']">MOVIX</span><span className="h-3 w-px bg-white/25" aria-hidden="true" /><span className="font-normal text-white/60">Wrapped {data.year}</span></p>
-                    <button type="button" className={iconButton} aria-label={t('wrapped.shareWrapped')} onClick={() => { setDetails(false); requestIndex(scenes.length - 1); }}><Share2 className="h-5 w-5" /></button>
+                    <button type="button" className={iconButton} aria-label={t('wrapped.shareWrapped')} onClick={() => { setDetails(false); requestIndex(scenes.length - 1); }}><Share2 className="h-5 w-5 text-white opacity-90" /></button>
                 </header>
                 {!details && <div className="relative z-10 flex shrink-0 gap-1.5 px-6 py-3 lg:px-10 lg:py-4" role="progressbar" aria-label={t('wrappedStory.progress')} aria-valuemin={1} aria-valuemax={scenes.length} aria-valuenow={index + 1}>
                     {scenes.map((item, i) => <div key={item} className={`h-[3px] flex-1 overflow-hidden rounded-full ${i === index ? 'bg-white/30' : 'bg-white/10'}`}><motion.div className="h-full origin-left bg-[var(--wrapped-accent)]" style={{ scaleX: i < index ? 1 : i === index ? progress : 0 }} /></div>)}
@@ -292,12 +292,12 @@ export default function WrappedExperience({ data, onClose }: { data: WrappedData
                 </div>
                 <footer className="relative z-10 flex shrink-0 items-center justify-between gap-3 px-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 lg:px-7 lg:pb-5">
                     {details ? <button type="button" onClick={() => setDetails(false)} className="min-h-11 px-2 text-sm underline underline-offset-4">{t('wrappedStory.backToStory')}</button> : <>
-                        <button type="button" className={iconButton} disabled={index === 0} onClick={() => move(-1)} aria-label={t('wrappedStory.previous')}><ChevronLeft className="h-6 w-6" /></button>
+                        <button type="button" className={iconButton} disabled={index === 0} onClick={() => move(-1)} aria-label={t('wrappedStory.previous')}><ChevronLeft className="h-6 w-6 text-white opacity-90" /></button>
                         {overflowing && moreBelow ? <button type="button" className="flex min-h-11 items-center gap-2 text-xs text-white/70 sm:text-sm" onClick={() => scrollRef.current?.scrollBy({ top: scrollRef.current.clientHeight * 0.65, behavior: reducedMotion ? 'instant' : 'smooth' })}><ChevronDown className="h-4 w-4 text-white opacity-70" aria-hidden="true" />{t('wrappedCinema.scrollForMore')}</button> : scene === 'closing' ? <button type="button" className="flex min-h-11 items-center gap-2 text-sm" onClick={() => { setPicked(null); requestIndex(0); setPlaying(false); }}><RotateCcw className="h-4 w-4" aria-hidden="true" />{t('wrappedStory.replay')}</button> : <button type="button" className="flex min-h-11 items-center gap-2 px-3 text-xs text-white/70 sm:text-sm" aria-pressed={playing} disabled={scene === 'quiz' || overflowing} onClick={() => { if (scene === 'intro') move(1); setPlaying(value => !value); }}>
                             {scene !== 'quiz' && (playing ? <Pause className="h-4 w-4 text-white opacity-70" aria-hidden="true" /> : <Play className="h-4 w-4 text-white opacity-70" aria-hidden="true" />)}{t(scene === 'quiz' ? picked ? 'wrappedFinish.guessAnswered' : 'wrappedStory.quizPaused' : overflowing ? 'wrappedCinema.manualPlayback' : exploring && playing ? 'wrappedCinema.exploring' : playing ? 'wrappedStory.pause' : 'wrappedStory.play')}
                         </button>}
                         <span className="hidden text-xs tabular-nums text-white/60 lg:block">{String(index + 1).padStart(2, '0')} / {String(scenes.length).padStart(2, '0')}</span>
-                        <button type="button" className={iconButton} disabled={index === scenes.length - 1} onClick={() => move(1)} aria-label={t('wrappedStory.next')}><ChevronRight className="h-6 w-6" /></button>
+                        <button type="button" className={iconButton} disabled={index === scenes.length - 1} onClick={() => move(1)} aria-label={t('wrappedStory.next')}><ChevronRight className="h-6 w-6 text-white opacity-90" /></button>
                     </>}
                 </footer>
             </div>

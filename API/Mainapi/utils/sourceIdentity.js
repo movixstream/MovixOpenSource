@@ -1,7 +1,7 @@
 'use strict';
 
 const cheerio = require('cheerio');
-const { fetchTmdbImages, fetchTmdbCredits, fetchTmdbAlternativeTitles } = require('./tmdbCache');
+const { fetchTmdbImages, fetchTmdbCredits, fetchTmdbAlternativeTitles, searchTmdb } = require('./tmdbCache');
 
 const unique = values => [...new Set(values.filter(Boolean))];
 const normalize = value => String(value || '').normalize('NFKD').replace(/\p{M}/gu, '')
@@ -97,12 +97,38 @@ function synopsisSimilarity(left, right) {
   return [...a].filter(word => b.has(word)).length / Math.min(a.size, b.size);
 }
 
+// Autres fiches TMDB du même type, au même titre et de la même année. Le
+// couple titre + année ne désigne alors plus une seule fiche : « Kraken »
+// (2026) est à la fois un film norvégien (1110034) et un film français (1571766).
+async function findTmdbHomonyms({ apiUrl, apiKey, type, id, titles, years }) {
+  const yearParam = type === 'movie' ? 'primary_release_year' : 'first_air_date_year';
+  const searches = titles.slice(0, 3).flatMap(title => years.map(year =>
+    searchTmdb(apiUrl, apiKey, type, title, { [yearParam]: year })));
+  const found = new Map();
+  for (const search of await Promise.all(searches)) {
+    for (const item of search?.results || []) {
+      if (String(item.id) === String(id)) continue;
+      const sameYear = years.includes(yearOf(item.release_date || item.first_air_date));
+      const sameTitle = [item.title, item.name, item.original_title, item.original_name]
+        .some(other => titles.some(title => titleSimilarity(title, other) >= 0.95));
+      if (sameYear && sameTitle) found.set(item.id, item);
+    }
+  }
+  return [...found.values()];
+}
+
+const imageNames = images => [...(images?.posters || []), ...(images?.backdrops || [])]
+  .map(p => typeof p === 'string' ? p : p.file_path?.split('/').pop()).filter(Boolean);
+
 // Chargements supplémentaires partagés par tous les candidats d'une recherche.
 function createIdentityVerifier({ apiUrl, apiKey, type, details, english = null, seasonData = null }) {
   const titles = unique([details.title, details.name, details.original_title, details.original_name,
     english?.title, english?.name]);
   const years = unique([yearOf(details.release_date || details.first_air_date), yearOf(seasonData?.air_date)]);
-  let imagesPromise, creditsPromise, aliasesPromise;
+  let imagesPromise, creditsPromise, aliasesPromise, homonymsPromise;
+  // Sans réponse TMDB, on garde l'ancien comportement (titre + année suffisent).
+  const homonyms = () => (homonymsPromise ||= findTmdbHomonyms({ apiUrl, apiKey, type, id: details.id, titles, years })
+    .catch(() => []));
   const aliases = async () => {
     aliasesPromise ||= fetchTmdbAlternativeTitles(apiUrl, apiKey, details.id, type);
     const result = await aliasesPromise;
@@ -118,7 +144,12 @@ function createIdentityVerifier({ apiUrl, apiKey, type, details, english = null,
     const titleScore = Math.max(0, ...titles.flatMap(a => (candidate.titles || []).map(b => titleSimilarity(a, b))));
     const yearMatches = Boolean(candidate.year && years.includes(Number(candidate.year)));
     Object.assign(result, { titleScore, sourceYear: candidate.year, expectedYears: years, yearMatches });
-    if (titleScore >= 0.95 && yearMatches) return { ...result, accepted: true, reason: 'title_and_year' };
+    // Un homonyme TMDB de la même année : seule une preuve propre à la fiche
+    // (affiche, distribution) peut encore trancher.
+    const sameYearHomonyms = yearMatches ? await homonyms() : [];
+    const ambiguous = sameYearHomonyms.length > 0;
+    if (ambiguous) result.homonyms = sameYearHomonyms.map(item => item.id);
+    if (titleScore >= 0.95 && yearMatches && !ambiguous) return { ...result, accepted: true, reason: 'title_and_year' };
     if (!enrich) return result;
 
     const sourceImages = (candidate.posters || []).map(imagePath).filter(Boolean);
@@ -126,15 +157,22 @@ function createIdentityVerifier({ apiUrl, apiKey, type, details, english = null,
     if (sourceImages.length && !sourceImages.some(p => posters.includes(p))) {
       imagesPromise ||= fetchTmdbImages(apiUrl, apiKey, details.id, type);
       const images = await imagesPromise;
-      posters = [...posters, ...(images?.posters || []), ...(images?.backdrops || [])]
-        .map(p => typeof p === 'string' ? p : p.file_path?.split('/').pop()).filter(Boolean);
+      posters = [...posters, ...imageNames(images)];
     }
     const posterMatch = sourceImages.some(p => posters.includes(p));
     if (posterMatch && titleScore >= 0.3) return { ...result, accepted: true, reason: 'tmdb_image', posterMatch };
+    if (ambiguous && sourceImages.length) {
+      for (const item of sameYearHomonyms) {
+        const own = [item.poster_path, item.backdrop_path].filter(Boolean).map(p => p.split('/').pop());
+        const names = sourceImages.some(p => own.includes(p)) ? own
+          : imageNames(await fetchTmdbImages(apiUrl, apiKey, item.id, type).catch(() => null));
+        if (sourceImages.some(p => names.includes(p))) return { ...result, reason: 'homonym_image', homonymId: item.id };
+      }
+    }
     const expandedTitles = await aliases();
     const expandedScore = Math.max(titleScore, ...expandedTitles.flatMap(a => (candidate.titles || []).map(b => titleSimilarity(a, b))));
     result.titleScore = expandedScore;
-    if (expandedScore >= 0.95 && yearMatches) return { ...result, accepted: true, reason: 'alternative_title_and_year' };
+    if (expandedScore >= 0.95 && yearMatches && !ambiguous) return { ...result, accepted: true, reason: 'alternative_title_and_year' };
     if (expandedScore < 0.8) return { ...result, reason: 'title_mismatch' };
     creditsPromise ||= fetchTmdbCredits(apiUrl, apiKey, details.id, type);
     const credits = await creditsPromise;
@@ -154,4 +192,4 @@ function createIdentityVerifier({ apiUrl, apiKey, type, details, english = null,
   return { titles, years, aliases, verify };
 }
 
-module.exports = { normalize, baseTitle, yearOf, titleSimilarity, searchTitles, parseSourceIdentity, createIdentityVerifier };
+module.exports = { normalize, baseTitle, yearOf, titleSimilarity, searchTitles, parseSourceIdentity, createIdentityVerifier, findTmdbHomonyms };

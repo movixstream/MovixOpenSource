@@ -1,0 +1,12 @@
+{
+  "versionCode": 1,
+  "versionName": "0.1.0",
+  "apkUrl": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app-tv/movix-tv.apk",
+  "apkSize": 8771423,
+  "apkSha256": "3bf3c7bcd3613301a4d537b13cef509f0622870d029b55286724a71613b515b1",
+  "minSdk": 25,
+  "notes": {
+    "fr": "Première version de l'appli Movix TV.",
+    "en": "First release of the Movix TV app."
+  }
+}

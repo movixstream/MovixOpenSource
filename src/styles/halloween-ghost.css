@@ -1,0 +1,48 @@
+/* ─── Thème Halloween : fantôme de la page 404 ───────────────────────────────
+   Chargé avec HalloweenGhost, seulement sur la 404 et thème actif. Taille en
+   em : le fantôme suit la police du « 404 ». La case garde la place du « 0 » ;
+   l'image, plus grande pour le halo et la traîne, déborde autour. Seuls
+   `transform` et `opacity` sont animés, sur un élément HTML : rien à
+   repeindre. Le cycle dure 3,6 s, comme les ailes des chauves-souris du
+   décor : leurs fins de cycle tombent ensemble. */
+.halloween-ghost {
+  position: relative;
+  display: inline-block;
+  width: 0.62em;
+  height: 0.74em;
+  margin: 0 0.03em;
+  vertical-align: middle;
+}
+
+.halloween-ghost-float {
+  position: absolute;
+  left: 50%;
+  top: -0.12em;
+  width: 1.05em;
+  height: 1.4em;
+  margin-left: -0.525em;
+}
+
+.halloween-ghost-body {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Il flotte en se balançant, et sa lueur respire un peu. */
+.halloween-ghost[data-animated='true'] .halloween-ghost-float {
+  animation: halloween-ghost-float 3.6s ease-in-out infinite;
+}
+
+@keyframes halloween-ghost-float {
+  0%, 100% { transform: translateY(0.02em) rotate(-2deg); opacity: 0.86; }
+  50% { transform: translateY(-0.06em) rotate(2deg); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .halloween-ghost[data-animated='true'] .halloween-ghost-float {
+    animation: none;
+  }
+}

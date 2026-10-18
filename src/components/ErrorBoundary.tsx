@@ -103,21 +103,45 @@ class ErrorBoundary extends React.Component<React.PropsWithChildren, ErrorBounda
     return { hasError: true, error, recoverable: isRecoverableError(error, true) };
   }
 
+  /**
+   * Erreurs déjà rattrapées depuis le montage. Chaque setState de
+   * componentDidCatch provoque un rendu synchrone : si l'écran d'erreur ou ce
+   * qui l'entoure relève une erreur à chaque rendu, React finit par lever #185
+   * (GlitchTip FRONTEND-FN, PlayStation 4, rafale de « Invalid character:
+   * '\0' »). Seule la première erreur met à jour l'état et programme le
+   * rechargement ; les suivantes sont seulement journalisées.
+   */
+  private caughtErrors = 0;
+  /** Première erreur traitée : l'écran reste celui de cette erreur. */
+  private firstError: Error | null = null;
+  private firstRecoverable = false;
+
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    this.setState({ errorInfo });
-    if (isRecoverableError(error, true)) {
+    this.caughtErrors += 1;
+    if (this.caughtErrors === 1) {
+      this.firstError = error;
+      this.firstRecoverable = isRecoverableError(error, true);
+    } else {
+      if (!isRecoverableError(error, true)) {
+        console.error('[ErrorBoundary]', error, errorInfo);
+        // Le SDK plafonne déjà les envois par chargement de page.
+        captureCrash(error, errorInfo);
+      }
+      return;
+    }
+    if (this.firstRecoverable) {
       // Not a code bug — recover quietly with a guarded reload (the budget in
       // reloadForChunkFailure caps attempts so this can never loop).
       // Un chunk abîmé détecté au rendu vide d'abord le cache d'assets, sinon
       // le rechargement resservirait la même copie.
       const reloadScheduled = reloadForChunkFailure({ purgeAssetCache: isChunkResponseError(error) });
-      this.setState({ recoverable: true, reloadScheduled });
+      this.setState({ errorInfo, recoverable: true, reloadScheduled });
       return;
     }
     console.error('[ErrorBoundary]', error, errorInfo);
     // Sent automatically to GlitchTip (with the component stack): no button,
     // no user action. Null when tracking is off (dev build, no DSN).
-    this.setState({ eventId: captureCrash(error, errorInfo) });
+    this.setState({ errorInfo, eventId: captureCrash(error, errorInfo) });
   }
 
   handleReload = () => {
@@ -130,6 +154,19 @@ class ErrorBoundary extends React.Component<React.PropsWithChildren, ErrorBounda
 
   render() {
     if (!this.state.hasError) return this.props.children;
+
+    // Une nouvelle erreur après la première vient de cet écran ou de ce qui
+    // l'entoure : rendu minimal, sans composant, pour ne pas la relancer.
+    if (this.caughtErrors > 0 && this.state.error !== this.firstError) {
+      return (
+        <div style={{ minHeight: '100vh', backgroundColor: '#000', color: '#f3f4f6', fontFamily: 'ui-sans-serif, system-ui, sans-serif', padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+          <div>
+            <p style={{ margin: 0, fontSize: 16 }}>Movix doit être rechargé.</p>
+            <button onClick={this.handleReload} style={{ marginTop: 16, padding: '10px 20px', borderRadius: 8, border: 'none', fontWeight: 600, fontSize: 14, cursor: 'pointer', backgroundColor: '#dc2626', color: '#fff' }}>Recharger</button>
+          </div>
+        </div>
+      );
+    }
 
     // Recoverable errors (stale chunk after deploy, translate DOM race, #306):
     // friendly "updating" screen + guarded auto-reload — no crash report.

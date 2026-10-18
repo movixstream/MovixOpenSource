@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Réglages (apparence, sous-titres, accueil, menu, lecture) et « Qui regarde ? ». Fichier séparé de strings.xml pour ne pas croiser les autres chantiers. -->
+<resources>
+    <!-- Qui regarde ? -->
+    <string name="profiles_title">Qui regarde ?</string>
+    <string name="profiles_body">Reprise, historique et Ma liste suivent le profil choisi.</string>
+    <string name="profiles_current">Profil actuel</string>
+    <string name="profiles_loading">Chargement des profils…</string>
+    <string name="profiles_switching">Changement de profil…</string>
+    <string name="profiles_error">Le serveur Movix ne répond pas. Vérifie la connexion.</string>
+    <string name="profiles_retry">Réessayer</string>
+    <string name="profiles_dont_ask">Ne plus demander au lancement</string>
+
+    <!-- Onglets -->
+    <string name="settings_section_appearance">Apparence</string>
+    <string name="settings_section_subtitles">Sous-titres</string>
+    <string name="settings_section_home">Accueil</string>
+    <string name="settings_section_rail">Menu de gauche</string>
+    <string name="settings_section_playback">Lecture</string>
+
+    <!-- Compte -->
+    <string name="settings_account_switch">Changer de profil</string>
+    <string name="settings_account_prompt">Demander « Qui regarde ? » au lancement</string>
+    <string name="settings_account_prompt_body">Seulement si le compte a plusieurs profils.</string>
+
+    <!-- Apparence -->
+    <string name="settings_accent_title">Couleur d\'accent</string>
+    <string name="settings_accent_body">Crochets du focus, progression de lecture et repères du menu.</string>
+    <string name="accent_red">Rouge Movix</string>
+    <string name="accent_blue">Bleu</string>
+    <string name="accent_green">Vert</string>
+    <string name="accent_purple">Violet</string>
+    <string name="accent_orange">Orange</string>
+    <string name="accent_pink">Rose</string>
+    <string name="accent_yellow">Jaune</string>
+
+    <!-- Sous-titres -->
+    <string name="subs_body">S\'applique à toutes les vidéos.</string>
+    <string name="subs_size">Taille</string>
+    <string name="subs_color">Couleur</string>
+    <string name="subs_background">Fond</string>
+    <string name="subs_position">Position</string>
+    <string name="subs_outline">Contour</string>
+    <string name="subs_percent">%1$d %%</string>
+    <string name="subs_color_white">Blanc</string>
+    <string name="subs_color_yellow">Jaune</string>
+    <string name="subs_color_cyan">Cyan</string>
+    <string name="subs_color_green">Vert</string>
+    <string name="subs_font">Police</string>
+    <string name="subs_font_standard">Standard</string>
+    <string name="subs_font_atkinson">Atkinson Hyperlegible</string>
+    <string name="subs_font_lexend">Lexend</string>
+    <string name="subs_font_opendyslexic">OpenDyslexic</string>
+    <string name="subs_font_system">Système</string>
+    <string name="subs_font_serif">Serif</string>
+    <string name="subs_font_monospace">Chasse fixe</string>
+    <string name="subs_bg_none">Aucun</string>
+    <string name="subs_pos_bottom">En bas</string>
+    <string name="subs_pos_raised">Plus haut</string>
+    <string name="subs_yes">Oui</string>
+    <string name="subs_no">Non</string>
+    <string name="subs_preview_line">On se retrouve demain à l\'aube.\nEt cette fois, ne sois pas en retard.</string>
+    <string name="subs_reset">Rétablir le style par défaut</string>
+
+    <!-- Accueil -->
+    <string name="home_rows_title">Rangées de l\'accueil</string>
+    <string name="home_rows_body">OK affiche ou cache une rangée ; ▲ et ▼ changent sa place.</string>
+    <string name="home_row_hidden">Cachée</string>
+    <string name="home_row_up">Monter</string>
+    <string name="home_row_down">Descendre</string>
+    <string name="home_rows_reset">Rétablir l\'ordre par défaut</string>
+    <string name="home_banner_video">Bande-annonce dans le bandeau</string>
+    <string name="home_banner_video_body">Lecture muette derrière le titre mis en avant.</string>
+    <string name="home_screensaver">Écran de veille</string>
+    <string name="home_screensaver_body">Après ce délai sans toucher la télécommande.</string>
+    <string name="home_screensaver_off">Coupé</string>
+    <string name="home_screensaver_min">%1$d min</string>
+
+    <!-- Menu de gauche -->
+    <string name="rail_body">Cache les entrées dont tu ne te sers pas. Réglages reste toujours là.</string>
+    <string name="rail_last">Il faut garder au moins une entrée.</string>
+
+    <!-- Lecture -->
+    <string name="playback_autoplay">Enchaîner l\'épisode suivant</string>
+    <string name="playback_autoplay_body">À la fin d\'un épisode, le suivant démarre tout seul.</string>
+</resources>

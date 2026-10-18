@@ -360,6 +360,16 @@ private enum ResolverFailure: Error {
 }
 
 struct MediaProxyEncodingTests {
+  @Test func recognizesBothProviderDecoyStreams() {
+    #expect(MediaProxyPolicy.isProviderDecoyURL("https://s1.fsvid.lol/troll/master.m3u8"))
+    #expect(MediaProxyPolicy.isProviderDecoyURL("https://s1.fsvid.lol/e/seg0.ts"))
+    #expect(MediaProxyPolicy.isProviderDecoyURL("https://u14.vidzy.cc/e/seg8.ts"))
+    #expect(!MediaProxyPolicy.isProviderDecoyURL(
+      "https://s1.fsvid.lol/hls2/01/00031/id_n/seg-1-v1-a1.ts?t=x"
+    ))
+    #expect(!MediaProxyPolicy.isProviderDecoyURL("https://cdn.example.com/e/seg0.ts"))
+  }
+
   @Test(arguments: [
     "r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org",
     "strm4.uqload.vc", "strm1.uqload.bz", "STRM4.UQLOAD.VC.",
@@ -376,7 +386,11 @@ struct MediaProxyEncodingTests {
     let data = try MediaProxyPinnedHTTPExchange.serialize(request)
     let text = try #require(String(data: data, encoding: .utf8))
     #expect(text.hasPrefix("GET \(path) HTTP/1.1\r\n"))
-    #expect(text.contains("\r\nAccept-Encoding: identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0\r\n"))
+    // `gzip;q=0` fait servir à Fsvid/Vidzy leur playlist leurre `/e/segN.ts`.
+    let encoding = host.lowercased().contains("uqload")
+      ? "identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0"
+      : "identity"
+    #expect(text.contains("\r\nAccept-Encoding: \(encoding)\r\n"))
     #expect(text.contains("\r\nRange: bytes=100-199\r\n"))
   }
 

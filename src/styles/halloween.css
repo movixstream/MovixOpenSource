@@ -1,0 +1,40 @@
+/* ─── Thème Halloween : couleurs (classe `halloween-theme` sur <html>) ───────
+   Seule partie du thème chargée avec l'application : elle doit s'appliquer
+   dès le premier rendu, sans flash rouge. L'habillage de l'interface
+   (halloween-ui.css) et le décor plein écran (halloween-decor.css) ne sont
+   téléchargés que si le thème est actif.
+
+   Les couleurs Tailwind `black`, `gray-700` à `gray-950` et `red-*` lisent
+   des variables `--movix-*`, posées sur :root avec leurs valeurs d'origine
+   (tailwind.config.js). Les redéfinir ici recolore tout le site sans toucher
+   aux composants : le noir reste presque noir (à peine bleuté, comme une
+   nuit), le rouge devient orange citrouille.
+   Format « R G B », celui qu'attend `rgb(var(...) / alpha)`. */
+html.halloween-theme {
+  --movix-black: 8 7 11;
+  --movix-gray-700: 60 56 70;
+  --movix-gray-800: 36 33 44;
+  --movix-gray-900: 22 20 28;
+  --movix-gray-950: 12 11 16;
+
+  /* Échelle orange de Tailwind, nuance pour nuance. */
+  --movix-red-50: 255 247 237;
+  --movix-red-100: 255 237 213;
+  --movix-red-200: 254 215 170;
+  --movix-red-300: 253 186 116;
+  --movix-red-400: 251 146 60;
+  --movix-red-500: 249 115 22;
+  --movix-red-600: 234 88 12;
+  --movix-red-700: 194 65 12;
+  --movix-red-800: 154 52 18;
+  --movix-red-900: 124 45 18;
+  --movix-red-950: 67 20 7;
+
+  /* Rouge vif des barres de chargement (#e50914 hors thème). */
+  --movix-accent: 234 88 12;
+
+  /* Variables posées hors Tailwind dans index.css. */
+  --background-dark: rgb(8 7 11);
+  --primary-color: #ea580c;
+  --primary-hover: #c2410c;
+}

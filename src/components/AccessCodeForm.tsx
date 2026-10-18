@@ -1,7 +1,8 @@
+import { IX_MATRIX_URL } from '@/config/community';
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Crown } from 'lucide-react';
+import { X, Heart } from 'lucide-react';
 import { useVipModal } from '../context/VipModalContext';
 import { useTranslation } from 'react-i18next';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
@@ -158,14 +159,14 @@ const AccessCodeForm: React.FC<AccessCodeFormProps> = ({ isModal = false, hideNo
                     }}
                     className="flex items-center justify-center gap-2 bg-yellow-500 hover:bg-yellow-400 text-black py-3 px-4 rounded-xl font-medium transition-colors duration-200"
                   >
-                    <Crown className="w-4 h-4" />
+                    <Heart className="w-4 h-4" />
                     {t('vip.donate')}
                   </Link>
                   <a
-                    href="https://t.me/ix_annonces"
+                    href={IX_MATRIX_URL}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block text-center bg-[#0088cc] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#006699] transition-colors duration-200"
+                    className="block text-center bg-white text-black py-3 px-4 rounded-xl font-medium hover:bg-gray-200 transition-colors duration-200"
                   >
                     {t('telegram.joinTelegram')}
                   </a>
@@ -274,14 +275,14 @@ const AccessCodeForm: React.FC<AccessCodeFormProps> = ({ isModal = false, hideNo
                     onClick={handleCloseVipInfo}
                     className="flex items-center justify-center gap-2 bg-yellow-500 hover:bg-yellow-400 text-black py-3 px-4 rounded-xl font-medium transition-colors duration-200"
                   >
-                    <Crown className="w-4 h-4" />
+                    <Heart className="w-4 h-4" />
                     {t('vip.donate')}
                   </Link>
                   <a
-                    href="https://t.me/ix_annonces"
+                    href={IX_MATRIX_URL}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block text-center bg-[#0088cc] text-white py-3 px-4 rounded-xl font-medium hover:bg-[#006699] transition-colors duration-200"
+                    className="block text-center bg-white text-black py-3 px-4 rounded-xl font-medium hover:bg-gray-200 transition-colors duration-200"
                   >
                     {t('telegram.joinTelegram')}
                   </a>

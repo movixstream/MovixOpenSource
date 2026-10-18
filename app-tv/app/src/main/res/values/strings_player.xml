@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lecteur : épisodes, enchaînement et style des sous-titres. Fichier séparé de strings.xml pour ne pas croiser les autres chantiers. -->
+<resources>
+    <string name="player_eps_title">Épisodes</string>
+    <string name="player_eps_now">En cours</string>
+    <string name="player_eps_number">%1$d. %2$s</string>
+    <string name="player_next_kicker">Épisode suivant · S%1$d É%2$d</string>
+    <string name="player_still_title">Vous regardez toujours ?</string>
+    <string name="player_still_body">La lecture est en pause après plusieurs épisodes enchaînés sans toucher la télécommande.</string>
+    <string name="player_still_continue">Continuer</string>
+    <string name="player_still_stop">Arrêter</string>
+    <string name="player_st_title">Style des sous-titres</string>
+    <string name="player_st_size">Taille</string>
+    <string name="player_st_color">Couleur</string>
+    <string name="player_st_background">Fond</string>
+    <string name="player_st_position">Position</string>
+    <string name="player_st_outline">Contour</string>
+    <string name="player_st_percent">%1$d %%</string>
+    <string name="player_st_no_background">Sans fond</string>
+    <string name="player_st_bottom">En bas</string>
+    <string name="player_st_raised">Plus haut</string>
+    <string name="player_st_outline_on">Contour noir</string>
+    <string name="player_st_outline_off">Sans contour</string>
+    <string name="player_st_white">Blanc</string>
+    <string name="player_st_yellow">Jaune</string>
+    <string name="player_st_cyan">Cyan</string>
+    <string name="player_st_green">Vert</string>
+</resources>

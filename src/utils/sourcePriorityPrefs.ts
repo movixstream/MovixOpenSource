@@ -419,8 +419,11 @@ export async function pushPriorityToExtension(prefs?: SourcePriorityPrefs): Prom
     if (!isExtensionAvailable()) return;
     await fetchFromExtension('SET_SOURCE_PRIORITY', { prefs: payload });
   } catch (e) {
-    // Extension sans handler → warning silencieux
-    console.debug('[sourcePriorityPrefs] push to extension failed (non-fatal):', e);
+    // Extension sans handler ou module indisponible hors ligne → trace
+    // silencieuse. En chaîne : certaines WebView iOS relaient la console vers
+    // le natif par postMessage et refusent un objet Error (InvalidAccessError,
+    // GlitchTip 5M).
+    console.debug('[sourcePriorityPrefs] push to extension failed (non-fatal):', String(e));
   }
 }
 

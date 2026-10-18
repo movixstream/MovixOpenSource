@@ -8,9 +8,8 @@ const { createSingleFlight } = require('./singleFlight');
 const { isPublicHttpUrl } = require('./mediaSigning');
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36';
-const PAGE_HOSTS = new Set(['embed.st', 'rockystream.st', 'embedhd.cc', 'exposestrat.com']);
-const CDN_SUFFIXES = ['strmd.st', 'tiktokcdn.com', 'tiktokcdn-us.com', 'tiktokcdn-eu.com', 'zohanayaan.com'];
-
+// Pas de liste de domaines : Streamed change souvent de relais et de CDN.
+// Seules les URL https publiques (DNS revalidé dans le transport) passent.
 function publicUrl(value) {
   const url = new URL(value);
   if (url.protocol !== 'https:' || url.username || url.password || url.port || !isPublicHttpUrl(url.href)) {
@@ -20,11 +19,7 @@ function publicUrl(value) {
 }
 
 function mediaUrl(value) {
-  const url = publicUrl(value);
-  if (url.hostname !== 'content.instructables.com' && !CDN_SUFFIXES.some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))) {
-    throw new Error('CDN Streamed inconnu');
-  }
-  return url.href;
+  return publicUrl(value).href;
 }
 
 function parseStreamedEmbed(value) {
@@ -98,10 +93,8 @@ function execStreamedCurl(args, options, config) {
 
 function createStreamedTransport({ pickProxy = async () => null, lookupImpl = lookup,
   execImpl = execStreamedCurl, requestImpl = request, AgentClass = SocksProxyAgent } = {}) {
-  async function destination(url, media) {
+  async function destination(url) {
     const target = publicUrl(url);
-    if (media) mediaUrl(url);
-    else if (!PAGE_HOSTS.has(target.hostname)) throw new Error('Hôte Streamed inconnu');
     const addresses = await lookupImpl(target.hostname, { all: true });
     if (!addresses.length || addresses.some(({ address, family }) => !isPublicHttpUrl(`https://${family === 6 ? `[${address}]` : address}/`))) {
       throw new Error('Destination Streamed non publique');
@@ -130,9 +123,9 @@ function createStreamedTransport({ pickProxy = async () => null, lookupImpl = lo
 
   // Résolution DNS locale validée et épinglée : SOCKS5 ne résout jamais la cible
   // à nouveau. curl conserve l'empreinte HTTP acceptée par le CDN.
-  async function pull(url, referer, media = true) {
+  async function pull(url, referer) {
     for (let hop = 0; hop < 5; hop++) {
-      const { target, address, family } = await destination(url, media);
+      const { target, address, family } = await destination(url);
       const proxy = await nextProxy();
       const quote = value => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
       const config = `proxy = ${quote(proxy.endpoint)}\n${proxy.auth ? `proxy-user = ${quote(proxy.auth)}\n` : ''}`;
@@ -157,7 +150,7 @@ function createStreamedTransport({ pickProxy = async () => null, lookupImpl = lo
 
   async function fetchHandshake(url, options) {
     if (url !== 'https://embed.st/fetch' || options.method !== 'POST') throw new Error('Lecteur Streamed invalide');
-    const { target, address, family } = await destination(url, false);
+    const { target, address, family } = await destination(url);
     const proxy = await nextProxy();
     const agent = new AgentClass(proxy.url, { timeout: 5000 });
     try {
@@ -250,11 +243,11 @@ function createStreamedNativeService({ unlock = unlockStreamed, pickProxy, pull,
       if (slot.source === 'golf') {
         let page = embedUrl; let referer = 'https://embed.st/';
         for (let hop = 0; hop < 4; hop++) {
-          const result = await pull(page, referer, false);
+          const result = await pull(page, referer);
           const html = result.body.toString('utf8');
           const fid = html.match(/\bfid\s*=\s*["']([^"']+)["']/)?.[1];
           if (fid) {
-            const legacy = await pull(`https://exposestrat.com/maestrohd1.php?player=desktop&live=${encodeURIComponent(fid)}`, page, false);
+            const legacy = await pull(`https://exposestrat.com/maestrohd1.php?player=desktop&live=${encodeURIComponent(fid)}`, page);
             const parts = legacy.body.toString('utf8').match(/return\s*\(\s*(\[\s*"[^"]+"(?:\s*,\s*"[^"]+")*\s*\])\.join\(\s*""\s*\)/)?.[1];
             if (!parts) throw new Error('Adresse golf introuvable');
             return { url: mediaUrl(JSON.parse(parts).join('')), referer: 'https://exposestrat.com/' };

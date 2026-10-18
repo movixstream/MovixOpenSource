@@ -25,10 +25,23 @@ function networkFailure(overrides = {}) {
   };
 }
 
+function stalled(overrides = {}) {
+  return {
+    type: ErrorTypes.MEDIA_ERROR, details: ErrorDetails.BUFFER_STALLED_ERROR,
+    fatal: false, buffer: 0, error: new Error('Playback stalling due to low buffer'),
+    ...overrides,
+  };
+}
+
 function playerFixture() {
   const video = Object.assign(new EventTarget(), {
     currentTime: 120, textTracks: [], paused: true, setAttribute: noop,
   });
+  // Intervalles pilotés à la main : un appel de tick() vaut une seconde.
+  const intervals = new Set();
+  const tick = (seconds = 1) => {
+    for (let i = 0; i < seconds; i++) [...intervals].forEach(interval => interval.callback());
+  };
   const hlsRef = { current: null };
   const changes = [];
   const owner = {};
@@ -62,11 +75,13 @@ function playerFixture() {
     currentLevel = 0;
     starts = 0;
     stops = 0;
+    recoveries = 0;
     subtitleTrack = 0;
     loadSource() {}
     attachMedia() {}
     startLoad() { this.starts++; }
     stopLoad() { this.stops++; }
+    recoverMediaError() { this.recoveries++; }
     destroy() { this.removeAllListeners(); }
   }
   const cleanup = sourceEffect('src/components/HLSPlayer.tsx', 'const clearSourceTimeout', {
@@ -75,6 +90,9 @@ function playerFixture() {
     postCastPlaybackSuppressedRef: { current: false }, getLocalPlaybackInitPolicy,
     bufferingTimeoutRef: { current: null }, sourceTimeoutRef: { current: null },
     setTimeout: noop, clearTimeout: noop, setIsLoading: noop, setIsBuffering: noop,
+    setInterval: callback => { const interval = { callback }; intervals.add(interval); return interval; },
+    clearInterval: interval => intervals.delete(interval),
+    setHasFatalPlaybackError: noop,
     requestHlsFallback, src, normalizeUqloadEmbedUrl: url => url,
     kisskhSources: [], isMP4Source: () => false, contentTypeMp4Urls: new Set(),
     createHlsConfig: () => ({}), purstreamSources: [], console: silentConsole, window,
@@ -84,7 +102,7 @@ function playerFixture() {
   })();
   const hls = hlsRef.current;
   return {
-    hls, cleanup, changes, guard,
+    hls, cleanup, changes, guard, video, tick, intervals,
     fail: data => hls.emit(Hls.Events.ERROR, null, data),
     loaded: type => hls.emit(Hls.Events.FRAG_LOADED, null, { frag: { type, sn: 'initSegment' } }),
   };
@@ -213,4 +231,89 @@ test('changer de source repart avec un compteur réseau neuf', () => {
     next.fail(networkFailure());
     assert.equal(next.changes.length, 0);
   } finally { next.cleanup(); }
+});
+
+test('un blocage juste après un saut laisse HLS finir le fragment visé', () => {
+  const fixture = playerFixture();
+  try {
+    fixture.video.paused = false;
+    fixture.fail(stalled());
+    fixture.tick(5);
+    assert.equal(fixture.hls.stops, 0, 'le fragment en cours de chargement n’est pas annulé');
+    assert.equal(fixture.hls.starts, 0);
+    assert.equal(fixture.changes.length, 0);
+  } finally { fixture.cleanup(); }
+});
+
+test('les poussées de HLS et leurs événements playing ne font plus tourner la reprise en boucle', () => {
+  const fixture = playerFixture();
+  try {
+    fixture.video.paused = false;
+    for (let second = 0; second < 16; second++) {
+      // Toutes les deux secondes, HLS avance la tête de lecture d’un dixième,
+      // le navigateur émet playing, puis HLS signale un nouveau blocage.
+      if (second % 2 === 0) {
+        fixture.video.currentTime += 0.1;
+        fixture.video.dispatchEvent(new Event('playing'));
+        fixture.fail(stalled());
+      }
+      fixture.tick();
+      if (second === 7) assert.equal(fixture.hls.starts, 1, 'une seule relance après 8 s figées');
+    }
+    assert.equal(fixture.hls.stops, 0);
+    assert.equal(fixture.hls.starts, 1);
+    assert.deepEqual(fixture.changes, [{
+      type: 'nexus_hls', id: 'nexus_hls_1', url: nextSrc,
+      origin: 'auto-fallback', fromSrc: src,
+    }]);
+    assert.equal(fixture.intervals.size, 0, 'la surveillance s’arrête avec le repli');
+  } finally { fixture.cleanup(); }
+});
+
+test('une vraie reprise ou une pause arrête la surveillance sans relance tardive', () => {
+  const resumed = playerFixture();
+  try {
+    resumed.video.paused = false;
+    resumed.fail(stalled());
+    resumed.tick(7);
+    // La lecture repart juste avant le seuil de relance des 8 s.
+    resumed.video.readyState = 4;
+    for (let second = 0; second < 3; second++) {
+      resumed.video.currentTime += 1;
+      resumed.tick();
+    }
+    assert.equal(resumed.hls.starts, 0, 'aucune relance pendant la reprise');
+    assert.equal(resumed.intervals.size, 0);
+    assert.equal(resumed.changes.length, 0);
+  } finally { resumed.cleanup(); }
+
+  const paused = playerFixture();
+  try {
+    paused.video.paused = false;
+    paused.fail(stalled());
+    paused.tick(3);
+    paused.video.paused = true;
+    paused.tick(20);
+    assert.equal(paused.hls.starts, 0);
+    assert.equal(paused.changes.length, 0);
+  } finally { paused.cleanup(); }
+});
+
+test('un blocage fatal passe par la récupération média de HLS', () => {
+  const fixture = playerFixture();
+  try {
+    fixture.fail(stalled({ fatal: true }));
+    assert.equal(fixture.hls.recoveries, 1);
+    assert.equal(fixture.hls.stops, 0);
+    assert.equal(fixture.intervals.size, 0);
+  } finally { fixture.cleanup(); }
+});
+
+test('quitter la source arrête la surveillance d’un blocage en cours', () => {
+  const fixture = playerFixture();
+  fixture.video.paused = false;
+  fixture.fail(stalled());
+  assert.equal(fixture.intervals.size, 1);
+  fixture.cleanup();
+  assert.equal(fixture.intervals.size, 0);
 });

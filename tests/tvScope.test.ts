@@ -50,7 +50,7 @@ test('les menus et le lecteur masquent les entrées hors périmètre TV', async 
   const profileMenu = await read('components/ProfileMenu.tsx');
   assert.match(profileMenu, /canAccessAdminPanel && !isHiddenOnTv\('\/admin'\)/);
   assert.match(profileMenu, /const showVipButton = isVip \|\| !isHiddenOnTv\('\/vip'\)/);
-  assert.equal(profileMenu.match(/\{showVipButton && \(/g)?.length, 2);
+  assert.equal(profileMenu.match(/showVipButton && \(/g)?.length, 2);
 
   const player = await read('components/HLSPlayer.tsx');
   assert.match(player, /\{!isHiddenOnTv\('\/watchparty\/create'\) && \(\s*<div[^>]*>\s*<button\s*onClick=\{toggleWatchParty\}/);

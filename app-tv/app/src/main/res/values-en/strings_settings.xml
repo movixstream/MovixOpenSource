@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings (appearance, subtitles, home, menu, playback) and "Who's watching?". -->
+<resources>
+    <!-- Who's watching? -->
+    <string name="profiles_title">Who\'s watching?</string>
+    <string name="profiles_body">Continue watching, history and My list follow the chosen profile.</string>
+    <string name="profiles_current">Current profile</string>
+    <string name="profiles_loading">Loading profiles…</string>
+    <string name="profiles_switching">Switching profile…</string>
+    <string name="profiles_error">The Movix server is not responding. Check your connection.</string>
+    <string name="profiles_retry">Try again</string>
+    <string name="profiles_dont_ask">Don\'t ask at launch</string>
+
+    <!-- Tabs -->
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_section_subtitles">Subtitles</string>
+    <string name="settings_section_home">Home</string>
+    <string name="settings_section_rail">Side menu</string>
+    <string name="settings_section_playback">Playback</string>
+
+    <!-- Account -->
+    <string name="settings_account_switch">Switch profile</string>
+    <string name="settings_account_prompt">Ask \"Who\'s watching?\" at launch</string>
+    <string name="settings_account_prompt_body">Only when the account has several profiles.</string>
+
+    <!-- Appearance -->
+    <string name="settings_accent_title">Accent color</string>
+    <string name="settings_accent_body">Focus brackets, playback progress and menu markers.</string>
+    <string name="accent_red">Movix red</string>
+    <string name="accent_blue">Blue</string>
+    <string name="accent_green">Green</string>
+    <string name="accent_purple">Purple</string>
+    <string name="accent_orange">Orange</string>
+    <string name="accent_pink">Pink</string>
+    <string name="accent_yellow">Yellow</string>
+
+    <!-- Subtitles -->
+    <string name="subs_body">Applies to every video.</string>
+    <string name="subs_size">Size</string>
+    <string name="subs_color">Color</string>
+    <string name="subs_background">Background</string>
+    <string name="subs_position">Position</string>
+    <string name="subs_outline">Outline</string>
+    <string name="subs_percent">%1$d %%</string>
+    <string name="subs_color_white">White</string>
+    <string name="subs_color_yellow">Yellow</string>
+    <string name="subs_color_cyan">Cyan</string>
+    <string name="subs_color_green">Green</string>
+    <string name="subs_font">Font</string>
+    <string name="subs_font_standard">Standard</string>
+    <string name="subs_font_atkinson">Atkinson Hyperlegible</string>
+    <string name="subs_font_lexend">Lexend</string>
+    <string name="subs_font_opendyslexic">OpenDyslexic</string>
+    <string name="subs_font_system">System</string>
+    <string name="subs_font_serif">Serif</string>
+    <string name="subs_font_monospace">Monospace</string>
+    <string name="subs_bg_none">None</string>
+    <string name="subs_pos_bottom">Bottom</string>
+    <string name="subs_pos_raised">Higher</string>
+    <string name="subs_yes">On</string>
+    <string name="subs_no">Off</string>
+    <string name="subs_preview_line">See you tomorrow at dawn.\nAnd this time, don\'t be late.</string>
+    <string name="subs_reset">Reset to default style</string>
+
+    <!-- Home -->
+    <string name="home_rows_title">Home rows</string>
+    <string name="home_rows_body">OK shows or hides a row; ▲ and ▼ move it.</string>
+    <string name="home_row_hidden">Hidden</string>
+    <string name="home_row_up">Move up</string>
+    <string name="home_row_down">Move down</string>
+    <string name="home_rows_reset">Reset default order</string>
+    <string name="home_banner_video">Trailer in the banner</string>
+    <string name="home_banner_video_body">Plays muted behind the featured title.</string>
+    <string name="home_screensaver">Screensaver</string>
+    <string name="home_screensaver_body">After this long without touching the remote.</string>
+    <string name="home_screensaver_off">Off</string>
+    <string name="home_screensaver_min">%1$d min</string>
+
+    <!-- Side menu -->
+    <string name="rail_body">Hide the entries you don\'t use. Settings always stays.</string>
+    <string name="rail_last">Keep at least one entry.</string>
+
+    <!-- Playback -->
+    <string name="playback_autoplay">Play next episode automatically</string>
+    <string name="playback_autoplay_body">When an episode ends, the next one starts on its own.</string>
+</resources>

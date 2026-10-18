@@ -259,25 +259,28 @@ async function getTMDBDetails(id, type) {
 // de la carte est une image TMDB : si elle n'appartient pas a la serie demandee
 // mais a un homonyme TMDB, la fiche est rejetee. Sans preuve contraire (pas
 // d'affiche, erreur TMDB, affiche inconnue), on garde le comportement actuel.
+// Les films ont une annee, mais deux homonymes peuvent sortir la meme annee :
+// « Kraken » 2026 (TMDB 1571766, francais) recevait le film norvegien 1110034.
 async function coflixPosterBelongsToOtherShow(coflixResult, id, type) {
   const poster = coflixResult?.poster;
-  if (type !== 'tv' || !poster || coflixResult.year != null) return false;
+  if (!poster || (type === 'tv' && coflixResult.year != null)) return false;
 
   const hasPoster = (images) => Array.isArray(images?.posters) &&
     images.posters.some((p) => p.file_path === poster);
 
   try {
-    const ownImages = await fetchTmdbImages(TMDB_API_URL, TMDB_API_KEY, id, 'tv');
+    const ownImages = await fetchTmdbImages(TMDB_API_URL, TMDB_API_KEY, id, type);
     if (hasPoster(ownImages)) return false;
 
-    const search = await searchTmdb(TMDB_API_URL, TMDB_API_KEY, 'tv', coflixResult.title);
+    const search = await searchTmdb(TMDB_API_URL, TMDB_API_KEY, type, coflixResult.title,
+      type === 'movie' && coflixResult.year ? { primary_release_year: coflixResult.year } : {});
     const homonyms = (search?.results || [])
       .filter((show) => String(show.id) !== String(id))
       .slice(0, 5);
 
     for (const show of homonyms) {
       if (show.poster_path === poster) return true;
-      const images = await fetchTmdbImages(TMDB_API_URL, TMDB_API_KEY, show.id, 'tv');
+      const images = await fetchTmdbImages(TMDB_API_URL, TMDB_API_KEY, show.id, type);
       if (hasPoster(images)) return true;
     }
   } catch (error) {
@@ -549,10 +552,20 @@ router.get('/tmdb/:type/:id', async (req, res) => {
         // Gerer le cas ou aucun resultat n'est trouve sur Coflix
         const similarityThreshold = 0.8;
 
-        const wrongShow = !!coflixResults?.length &&
-          await coflixPosterBelongsToOtherShow(coflixResults[0], id, type);
+        // Premiere fiche dont l'affiche n'appartient pas a un homonyme TMDB.
+        let chosen = null;
+        let wrongShow = false;
+        for (const candidate of (coflixResults || []).filter((r) => r.similarity >= similarityThreshold)) {
+          if (await coflixPosterBelongsToOtherShow(candidate, id, type)) {
+            wrongShow = true;
+            continue;
+          }
+          chosen = candidate;
+          break;
+        }
+        if (chosen) wrongShow = false;
 
-        if (!coflixResults || !coflixResults.length || (coflixResults[0] && coflixResults[0].similarity < similarityThreshold) || wrongShow) {
+        if (!chosen) {
           const unavailableResult = {
             message: 'Contenu non disponible',
             tmdb_id: id,
@@ -570,7 +583,7 @@ router.get('/tmdb/:type/:id', async (req, res) => {
         }
 
         // Utiliser le premier resultat trouve
-        const coflixUrl = coflixResults[0].url;
+        const coflixUrl = chosen.url;
 
         let result = {
           tmdb_details: tmdbDetails
@@ -614,6 +627,8 @@ router.get('/tmdb/:type/:id', async (req, res) => {
           // Un résultat null peut aussi être temporaire ; ne pas publier de cache négatif.
         } else if (updateError && updateError.coflixSiteRateLimited) {
           // Coflix global 429 — announced once by the cooldown; stay silent here.
+        } else if (updateError?.isSourceCircuitOpen) {
+          // Coflix en pause : annoncé une fois par le disjoncteur, rien par titre.
         } else if (updateError && updateError.isAxiosError) {
           const url = updateError.config && updateError.config.url ? updateError.config.url : '';
           console.error(
@@ -643,7 +658,7 @@ router.get('/tmdb/:type/:id', async (req, res) => {
     }
 
   } catch (error) {
-    if (error?.code !== 'TMDB_DETAILS_UNAVAILABLE') {
+    if (error?.code !== 'TMDB_DETAILS_UNAVAILABLE' && !error?.isSourceCircuitOpen) {
       console.error(`Erreur lors de la recuperation des liens TMDB ${id} (${type}):`, error);
     }
     if (!res.headersSent) {

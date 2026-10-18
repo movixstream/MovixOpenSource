@@ -33,16 +33,20 @@
  * parse error raised by a function of an already running chunk
  * (isLazyCompileError). Skip
  * the in-place retries and purge the service worker's asset cache before
- * reloading so it cannot keep serving that response. Other parse errors are
- * not enough evidence to discard the cache or reload.
+ * reloading so it cannot keep serving that response. SystemJS error #2 on one
+ * of our legacy chunks (script loaded without System.register) is treated the
+ * same way. A few ambiguous parse errors raised by the import itself
+ * (LOAD_PARSE_ERROR_PATTERNS) get a single purge/reload per signature. Other
+ * parse errors are not enough evidence to discard the cache or reload.
  *
  * Background prefetch loads (`{ silent: true }`) NEVER reload or surface a
  * crash — a hover-prefetch on a stale chunk must not yank the page out from
  * under the user. They retry quietly and, on failure, reject so the caller's
  * `.catch` can swallow them.
  *
- * On the FIRST successful chunk load the reload budget is cleared, so a future
- * deploy gets a fresh set of recovery attempts.
+ * A successful chunk load clears the reload budget, so a future deploy gets a
+ * fresh set of recovery attempts — except right after a recovery reload, when
+ * a nested chunk may still be failing (see STABLE_AFTER_RELOAD_MS).
  *
  * Also tracks in-flight interactive chunk loads. When the count transitions
  * 0 → 1 a `chunk:load:start` event is dispatched on `window`; when it returns
@@ -57,6 +61,13 @@ const RELOAD_KEY = '__movix_chunk_reload';
 const RELOAD_WINDOW_MS = 120_000; // counter resets after 2 min of no failures
 const MAX_RELOADS = 3; // hard cap within the window — loop guard
 const MIN_RELOAD_SPACING_MS = 3_000; // never reload twice in quick succession
+/**
+ * Un succès juste après un rechargement ne prouve pas que la page est
+ * réparée : la route se recharge bien, puis un chunk qu'elle importe à son
+ * tour (la carte du CinéGraph) échoue encore. Remettre le compteur à zéro à
+ * ce moment-là relançait la page sans fin ; on attend qu'elle soit stable.
+ */
+const STABLE_AFTER_RELOAD_MS = 30_000;
 
 const MAX_IMPORT_RETRIES = 2; // in-place retries before falling back to reload
 const RETRY_BASE_DELAY_MS = 350; // 350ms, then 700ms
@@ -83,10 +94,38 @@ const SYSTEMJS_LOAD_ERROR_PATTERN =
   /\(SystemJS https:\/\/github\.com\/systemjs\/systemjs\/blob\/main\/docs\/errors\.md#3\)$/;
 
 /**
+ * SystemJS lève l'erreur #2 (« module did not instantiate ») quand la balise
+ * <script> du chunk a émis `load` sans exception d'évaluation rattachée à son
+ * URL, mais sans appeler System.register (getOrCreateLoad dans
+ * systemjs/dist/s.js). Nos chunks legacy commencent tous par System.register :
+ * le corps reçu n'était donc pas le nôtre (réponse vide, contenu d'un autre
+ * fichier, script remplacé en route). GlitchTip FRONTEND-FU, Firefox 88. Comme
+ * une réponse au mauvais type MIME, elle impose de vider le cache d'assets
+ * avant de recharger. Limité à nos chunks legacy hashés de la même origine.
+ */
+const SYSTEMJS_NOT_INSTANTIATED_PATTERN =
+  /^(\S+) \(SystemJS https:\/\/github\.com\/systemjs\/systemjs\/blob\/main\/docs\/errors\.md#2\)$/;
+const LEGACY_JS_ASSET_PATTERN = /^\/assets\/[^/]+-legacy-[A-Za-z0-9_-]{8}\.js$/;
+
+const isSystemJsNotInstantiatedError = (err: unknown): boolean => {
+  const url = String((err as Error)?.message || '').match(SYSTEMJS_NOT_INSTANTIATED_PATTERN)?.[1];
+  if (!url) return false;
+  try {
+    const parsed = new URL(url, window.location.href);
+    return parsed.origin === window.location.origin
+      && !parsed.search && !parsed.hash
+      && LEGACY_JS_ASSET_PATTERN.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Notre build est du JavaScript valide pour les moteurs qui le reçoivent : ces
  * erreurs d'analyse désignent un chunk tronqué ou abîmé en route (coupure
  * pendant le téléchargement, cache corrompu), pas une incompatibilité.
- * Messages de JavaScriptCore (Safari) puis de V8 (Chromium).
+ * Messages de JavaScriptCore (Safari), de V8 (Chromium) puis de SpiderMonkey
+ * (Firefox, GlitchTip FRONTEND-G6 : gabarit coupé net en fin de fichier).
  */
 const CORRUPTED_CHUNK_MESSAGES = new Set([
   'Unexpected end of script',
@@ -96,7 +135,27 @@ const CORRUPTED_CHUNK_MESSAGES = new Set([
   "Invalid character: '\0'",
   'Invalid or unexpected token',
   'Unexpected end of input',
+  '`` literal not terminated before end of script',
+  'expected expression, got end of script',
 ]);
+
+/**
+ * Erreurs d'analyse moins univoques, vues au chargement d'une route sur des
+ * navigateurs qui reçoivent un bundle adapté (Firefox 157, Safari 16.1 sur le
+ * bundle legacy transpilé par Babel) : GlitchTip FRONTEND-G5, F9, G0. Un
+ * fichier coupé au milieu d'un appel ou juste après un point, ou mêlé à un
+ * autre contenu, les explique ; le build n'émet aucun décorateur, seul usage
+ * de « @ » hors chaîne, commentaire et regex. Faute de preuve aussi nette
+ * qu'une fin de fichier, elles n'ont droit qu'à une purge et un rechargement
+ * par onglet, release, route et message (reloadForDamagedChunkParse), et
+ * seulement quand elles rejettent l'import lui-même. Si elles reviennent,
+ * l'erreur d'origine reste remontée.
+ */
+const LOAD_PARSE_ERROR_PATTERNS = [
+  /^missing \) after argument list$/,
+  /^missing name after \. operator$/,
+  /^Invalid character: '@'$/,
+];
 
 /**
  * V8 ne compile le corps d'une fonction qu'à son premier appel, mais vérifie
@@ -137,7 +196,7 @@ const isCorruptedChunkError = (err: unknown): boolean =>
 export const isChunkResponseError = (err: unknown): boolean =>
   /is not a valid JavaScript MIME type|'text\/html' is not a valid/i.test(
     String((err as Error)?.message || err || '')
-  ) || isCorruptedChunkError(err);
+  ) || isCorruptedChunkError(err) || isSystemJsNotInstantiatedError(err);
 
 type MissingExportFailure = {
   assetPath: string;
@@ -150,6 +209,7 @@ const SAFARI_MISSING_EXPORT_ERROR_PATTERN =
   /^Importing binding name '([A-Za-z_$][\w$]*)' is not found\.$/;
 const HASHED_JS_ASSET_PATTERN = /^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.js$/;
 const MISSING_EXPORT_RECOVERY_KEY_PREFIX = '__movix_missing_export_recovery:';
+const LOAD_PARSE_RECOVERY_KEY_PREFIX = '__movix_load_parse_recovery:';
 const BUILD_RELEASE = String(import.meta.env.VITE_APP_BUILD_ID || '').trim();
 
 /**
@@ -215,9 +275,15 @@ const readReloadState = (): ReloadState => {
   }
 };
 
-/** Clears the reload budget. Called after any successful chunk load. */
+/**
+ * Clears the reload budget after a successful chunk load, unless a recovery
+ * reload just happened (see STABLE_AFTER_RELOAD_MS): the budget then expires
+ * by itself after RELOAD_WINDOW_MS without failures.
+ */
 export const clearChunkReloadHistory = (): void => {
   try {
+    const state = readReloadState();
+    if (state.n > 0 && Date.now() - state.at < STABLE_AFTER_RELOAD_MS) return;
     sessionStorage.removeItem(RELOAD_KEY);
   } catch {
     // sessionStorage may throw in private/locked-down contexts — ignore
@@ -293,6 +359,33 @@ const reloadForMissingExportFailure = (error: unknown, routeKey?: string): boole
     recoveryKey = `${MISSING_EXPORT_RECOVERY_KEY_PREFIX}safari:${BUILD_RELEASE}:${routeKey}:${exportName}`;
   }
 
+  return reloadOnceFor(recoveryKey);
+};
+
+const getLoadParseErrorMessage = (error: unknown): string | null => {
+  if (String((error as { name?: unknown })?.name || '') !== 'SyntaxError') return null;
+  const message = String((error as Error)?.message || '');
+  return LOAD_PARSE_ERROR_PATTERNS.some((pattern) => pattern.test(message)) ? message : null;
+};
+
+/**
+ * Erreur d'analyse ambiguë qui rejette l'import d'un chunk (voir
+ * LOAD_PARSE_ERROR_PATTERNS) : une purge du cache d'assets et un rechargement,
+ * une seule fois par onglet pour la même release, la même route et le même
+ * message. Les chargements imbriqués, sans route, partagent une clé commune.
+ */
+const reloadForDamagedChunkParse = (error: unknown, routeKey?: string): boolean => {
+  const message = getLoadParseErrorMessage(error);
+  if (!message) return false;
+  return reloadOnceFor(`${LOAD_PARSE_RECOVERY_KEY_PREFIX}${BUILD_RELEASE || 'dev'}:${routeKey || '*'}:${message}`);
+};
+
+/**
+ * Purge et recharge au plus une fois pour cette clé dans l'onglet. Sans
+ * sessionStorage, l'erreur d'origine est conservée plutôt que d'affaiblir la
+ * garde contre les boucles.
+ */
+const reloadOnceFor = (recoveryKey: string): boolean => {
   try {
     if (sessionStorage.getItem(recoveryKey) === 'done') return false;
     sessionStorage.setItem(recoveryKey, 'done');
@@ -303,7 +396,7 @@ const reloadForMissingExportFailure = (error: unknown, routeKey?: string): boole
   if (reloadForChunkFailure({ purgeAssetCache: true })) return true;
 
   // Le budget général peut être épuisé sans qu'aucune reprise ait eu lieu.
-  // Ne pas consommer dans ce cas la tentative réservée à cet export.
+  // Ne pas consommer dans ce cas la tentative réservée à cette signature.
   try { sessionStorage.removeItem(recoveryKey); } catch { /* Stockage devenu indisponible. */ }
   return false;
 };
@@ -386,7 +479,8 @@ export const lazyWithRetry = <T>(
     })
     .catch((err) => {
       settle();
-      if (!silent && reloadForMissingExportFailure(err, opts?.routeKey)) {
+      if (!silent && (reloadForMissingExportFailure(err, opts?.routeKey)
+        || reloadForDamagedChunkParse(err, opts?.routeKey))) {
         return new Promise<T>(() => {}); // never resolves; page is reloading
       }
       if (!isChunkLoadError(err)) throw err;

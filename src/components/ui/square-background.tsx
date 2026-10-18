@@ -2,7 +2,11 @@ import React, { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { useBgPrefs, getBgAccentRgb } from '@/utils/bgPreferences';
 import { useLightMode } from '@/context/LightModeContext';
+import { useHalloweenTheme } from '@/hooks/useHalloweenTheme';
 import { fitCanvasBitmapSize, isCanvasInvalidStateError } from '@/utils/canvasSizing';
+
+// Grille gris brume du thème Halloween, au-dessus du réglage « Forcer la couleur ».
+const HALLOWEEN_GRID_RGB = '130, 120, 150';
 
 type BgMode = 'combined' | 'static' | 'animated';
 
@@ -61,16 +65,17 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
     // l'utilisateur active les flags, on ignore les valeurs hardcodées passées
     // par les pages (Search, Collections, etc.) et on applique le réglage user.
     const prefs = useBgPrefs();
+    const halloween = useHalloweenTheme();
     const { isLightMode, effectivePrefs } = useLightMode();
     const squareSize = normalizeSquareSize(prefs.forceSquareSize ? prefs.squareSize : propSquareSize);
+    const overrideRgb = halloween ? HALLOWEEN_GRID_RGB : prefs.forceColor ? getBgAccentRgb(prefs) : null;
     // Préserve l'alpha de la couleur originale (les pages utilisent 0.10/0.15…)
     // en ne remplaçant que la composante RGB.
-    const borderColor = prefs.forceColor
+    const borderColor = overrideRgb
         ? (() => {
-            const rgb = getBgAccentRgb(prefs);
             const alphaMatch = propBorderColor.match(/rgba?\([^)]*?,\s*([\d.]+)\s*\)$/);
             const alpha = alphaMatch ? alphaMatch[1] : '0.15';
-            return `rgba(${rgb}, ${alpha})`;
+            return `rgba(${overrideRgb}, ${alpha})`;
         })()
         : propBorderColor;
 
@@ -705,6 +710,9 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
         <div
             ref={containerRef}
             className={cn('relative overflow-hidden bg-black', className)}
+            // Thème Halloween : fond rendu transparent (halloween-ui.css)
+            // pour laisser voir le décor peint derrière le site.
+            data-square-bg=""
             {...props}
         >
             {showCssGrid && (

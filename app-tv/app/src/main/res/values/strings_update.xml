@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mise à jour depuis l'appli (phase 7). Fichier séparé de strings.xml pour ne pas croiser les autres chantiers. -->
+<resources>
+    <string name="update_title">Mise à jour</string>
+    <string name="update_current">Version installée : %1$s</string>
+    <string name="update_check">Rechercher une mise à jour</string>
+    <string name="update_checking">Recherche…</string>
+    <string name="update_up_to_date">Movix est à jour.</string>
+    <string name="update_available">Version %1$s disponible</string>
+    <string name="update_banner_title">Mise à jour %1$s disponible</string>
+    <string name="update_install">Installer</string>
+    <string name="update_later">Plus tard</string>
+    <string name="update_cancel">Annuler</string>
+    <string name="update_retry">Réessayer</string>
+    <string name="update_downloading">Téléchargement… %1$d %%</string>
+    <string name="update_verifying">Vérification du fichier…</string>
+    <string name="update_needs_permission">Autorise Movix à installer des applis dans l\'écran qui vient de s\'ouvrir, reviens ici, puis appuie de nouveau sur Installer.</string>
+    <string name="update_installing">Confirme l\'installation sur l\'écran d\'Android.</string>
+    <string name="update_err_network">Le serveur de mise à jour ne répond pas. Vérifie la connexion.</string>
+    <string name="update_err_manifest">Les informations de mise à jour sont illisibles. Réessaie plus tard.</string>
+    <string name="update_err_checksum">Le fichier téléchargé ne correspond pas à la version publiée : il a été supprimé.</string>
+    <string name="update_err_apk">Le fichier téléchargé n\'est pas la bonne version de Movix TV.</string>
+    <string name="update_err_storage">Pas assez de place sur la télé pour télécharger la mise à jour.</string>
+    <string name="update_err_conflict">Cette copie de Movix est signée avec une autre clé : désinstalle-la, puis installe la nouvelle version.</string>
+    <string name="update_err_blocked">La télé bloque l\'installation. Autorise les sources inconnues pour Movix dans les réglages de la télé.</string>
+    <string name="update_err_install">L\'installation a échoué. Réessaie.</string>
+</resources>

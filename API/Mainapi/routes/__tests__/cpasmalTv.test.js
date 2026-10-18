@@ -25,7 +25,7 @@ const episodeHtml = `<div class="liens-c">
   <div class="lien" onclick="getxfield(this, '136435', 'voe_vf', 'serial'); return false;">voe</div>
 </div><script>function getxfield() { turnstile.render('#xf_lock', {}); }</script>`;
 
-function harness({ cached = null, request, tmdb = { name: 'Chicago Fire', first_air_date: '2012-10-10' } } = {}) {
+function harness({ cached = null, request, tmdb = { name: 'Chicago Fire', first_air_date: '2012-10-10' }, stale = false, alternativeTitles = [] } = {}) {
   const cache = new Map();
   const writes = [];
   const requests = [];
@@ -43,11 +43,14 @@ function harness({ cached = null, request, tmdb = { name: 'Chicago Fire', first_
     '../utils/cacheManager': { CACHE_DIR: { CPASMAL: '/fixture/cpasmal' }, generateCacheKey: value => value },
     '../config/redis': { memoryCache: { set: async (key, value) => { cache.set(key.split(':').at(-1), value); } } },
     '../utils/embedExtraction': { respondWithResolvedSources: async (_req, res, data) => res.json(data) },
-    '../utils/tmdbCache': { fetchTmdbDetails: async () => tmdb },
+    '../utils/tmdbCache': { fetchTmdbDetails: async () => tmdb,
+      fetchTmdbAlternativeTitles: async () => ({ titles: alternativeTitles }) },
+    '../utils/sourceIdentity': require('../../utils/sourceIdentity'),
     '../utils/redisLock': { acquireRedisLock: async () => ({ release: async () => {} }) },
     '../utils/sourceRefresh': { createSourceRefresh },
     '../utils/sharedSourceWork': require('../../utils/sharedSourceWork'),
     '../utils/concurrency': require('../../utils/concurrency'),
+    '../utils/sourceRefreshTelemetry': { reportRefreshFailure() {} },
   };
   const filename = path.resolve(__dirname, '../cpasmal.js');
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
@@ -70,7 +73,7 @@ function harness({ cached = null, request, tmdb = { name: 'Chicago Fire', first_
     TMDB_API_URL: 'https://tmdb.test/3',
     TMDB_API_KEY: 'fixture',
     getFromCacheNoExpiration: async (_dir, key) => cache.get(key) ?? cached,
-    shouldUpdateCache: async () => false,
+    shouldUpdateCache: async () => stale,
     require(name) {
       assert.equal(name, './utils/proxyManager');
       return {
@@ -93,6 +96,16 @@ function harness({ cached = null, request, tmdb = { name: 'Chicago Fire', first_
       await routes.get('/tv/:tmdbid/:season/:episode')({
         params: { tmdbid: '44006', season: seasonNumber, episode: episodeNumber }, query: {},
       }, res);
+      return res;
+    },
+    async callMovie(tmdbid = '1229906') {
+      const res = {
+        statusCode: 200,
+        setHeader() {},
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.body = JSON.parse(JSON.stringify(data)); return this; },
+      };
+      await routes.get('/movie/:tmdbid')({ params: { tmdbid }, query: {} }, res);
       return res;
     },
     async retrieve(seasonNumber, episodeNumber) {
@@ -281,4 +294,65 @@ test('un lecteur prioritaire est lisible pendant les autres extractions, bornée
   assert.equal(complete.body.links.vostfr.length, 1);
   assert.equal(complete.body._cpasmalPartial, undefined);
   assert.equal(h.writes.length, 2, 'une publication anticipée, puis la liste complète');
+});
+
+const familyTmdb = { id: 1229906, title: 'Family', original_title: 'Family', release_date: '2026-09-25' };
+const rentalFamilyUrl = `${base}/22399-rental-family.html`;
+const moviePage = title => `<h1>${title} <span>streaming</span></h1>
+  <article><ul><li><span class="info">Date de sortie :</span><span class="infos">2026</span></li></ul></article>
+  <div class="liens-c"><div class="lien" onclick="getxfield('22399', 'voe_vf', 'jeton')"></div></div>`;
+const movieCard = caption => `<div class="thumb">
+  <a class="th-img" href="${rentalFamilyUrl}"><span class="th-Film">Film</span></a>
+  <div class="th-desc"><a class="th-capt">${caption}</a><div class="th-year">2026</div></div>
+</div>`;
+const retrieveMovie = async h => {
+  for (let i = 0; i < 20; i++) {
+    const res = await h.callMovie();
+    if (res.statusCode !== 202) return res;
+    await new Promise(setImmediate);
+  }
+  assert.fail('La récupération simulée doit finir');
+};
+
+test('« Family » ne reçoit pas les lecteurs de la fiche « Rental Family »', async () => {
+  const h = harness({ tmdb: familyTmdb, request: async url => {
+    if (url === `${base}/index.php`) return { status: 200, data: movieCard('Family') };
+    assert.equal(url, rentalFamilyUrl, 'aucun lecteur de la mauvaise fiche ne doit être extrait');
+    return { status: 200, data: moviePage('Rental Family') };
+  } });
+  assert.equal((await retrieveMovie(h)).statusCode, 404);
+  assert.equal(h.writes[0].notFound, true);
+});
+
+test('un ancien cache « Rental Family » est remplacé pour « Family »', async () => {
+  const h = harness({
+    tmdb: familyTmdb, stale: true,
+    cached: { title: 'Family', year: '2026', cpasmalUrl: rentalFamilyUrl,
+      links: { vf: [{ server: 'voe', url: 'https://player.test/wrong-film' }], vostfr: [] } },
+    request: async url => {
+      if (url === `${base}/index.php`) return { status: 200, data: movieCard('Rental Family') };
+      assert.equal(url, rentalFamilyUrl);
+      return { status: 200, data: moviePage('Rental Family') };
+    },
+  });
+  // Le cache est servi, puis l'actualisation en arrière-plan le réfute.
+  assert.equal((await h.callMovie()).statusCode, 200);
+  for (let i = 0; i < 20 && !h.writes.length; i++) await new Promise(setImmediate);
+  assert.equal(h.writes.length, 1);
+  assert.equal(h.writes[0].notFound, true);
+  assert.equal((await h.callMovie()).statusCode, 404);
+});
+
+test('un titre alternatif TMDB suffit à valider la fiche', async () => {
+  const h = harness({
+    tmdb: familyTmdb, alternativeTitles: [{ iso_3166_1: 'FR', title: 'La Famille' }],
+    request: async url => {
+      if (url === `${base}/index.php`) return { status: 200, data: movieCard('Family') };
+      if (url === rentalFamilyUrl) return { status: 200, data: moviePage('La Famille') };
+      return { status: 200, data: '<iframe src="https://player.test/voe"></iframe>' };
+    },
+  });
+  const res = await retrieveMovie(h);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.links.vf, [{ server: 'voe', url: 'https://player.test/voe' }]);
 });

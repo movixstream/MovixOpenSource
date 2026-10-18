@@ -1,9 +1,54 @@
 import type { TFunction } from 'i18next';
 
-import type { VipCoin, VipInvoiceStatus, VipPaymentMethod } from '../services/vipDonationsService';
+import type {
+  VipCoin,
+  VipDonationContacts,
+  VipGiftCardId,
+  VipInvoiceStatus,
+  VipPaymentMethod
+} from '../services/vipDonationsService';
 
 export { TURNSTILE_SITE_KEY } from './turnstileKeys';
 export type VipDisplayedPaymentMethod = VipPaymentMethod;
+
+// Même calcul que le serveur : `eurosPerVipYear` € = 12 mois, arrondi au mois
+// supérieur (7 € à 5 €/an = 17 mois).
+export function getVipMonthsForAmount(amountEur: number, eurosPerVipYear: number): number {
+  if (!Number.isFinite(amountEur) || !Number.isFinite(eurosPerVipYear) || amountEur <= 0 || eurosPerVipYear <= 0) {
+    return 0;
+  }
+  return Math.ceil((amountEur * 12) / eurosPerVipYear - 1e-9);
+}
+
+export const VIP_GIFT_CARD_NAMES: Record<VipGiftCardId, string> = {
+  google_play: 'Google Play',
+  amazon: 'Amazon',
+  paysafecard: 'Paysafecard',
+  eneba: 'Eneba'
+};
+
+export interface VipDonationContactLinks {
+  email: string | null;
+  discord: string | null;
+  telegram: string | null;
+  matrixUser: string | null;
+  matrixRoom: string | null;
+}
+
+export function getVipDonationContactLinks(contacts: VipDonationContacts): VipDonationContactLinks {
+  const telegram = contacts.telegramUsername.trim().replace(/^@/, '');
+  const matrixUser = contacts.matrixUserId.trim();
+
+  return {
+    email: contacts.email.trim() ? `mailto:${contacts.email.trim()}` : null,
+    discord: contacts.discordUrl.trim() || null,
+    telegram: telegram ? `https://t.me/${encodeURIComponent(telegram)}` : null,
+    matrixUser: matrixUser
+      ? `https://matrix.to/#/${matrixUser.startsWith('@') ? matrixUser : `@${matrixUser}`}`
+      : null,
+    matrixRoom: contacts.matrixRoomUrl.trim() || null
+  };
+}
 
 export function getVipDurationLabel(
   t: TFunction,

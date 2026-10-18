@@ -156,10 +156,48 @@ function formatContentForResponse(text) {
   return formatted;
 }
 
-// OpenRouter API Configuration for content moderation (using Gemini 3.8 Flash)
+// OpenRouter API Configuration for content moderation (using Claude Haiku 5.5)
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_MODEL = "google/gemini-3.8-flash";
+const OPENROUTER_MODEL = "anthropic/claude-haiku-5.5";
+
+// Schéma imposé à la réponse : flagged reste un vrai booléen, jamais une chaîne.
+const COMMENT_MODERATION_SCHEMA = {
+  name: "comment_moderation",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      flagged: { type: "boolean" },
+      reason: {
+        anyOf: [
+          {
+            type: "string",
+            enum: [
+              "INSULTES",
+              "EROTIQUE",
+              "DEMANDE_AJOUT",
+              "PSEUDO_INAPPROPRIE",
+            ],
+          },
+          { type: "null" },
+        ],
+      },
+      details: { type: "string" },
+    },
+    required: ["flagged", "reason", "details"],
+    additionalProperties: false,
+  },
+};
+
+// OpenRouter filtre lui-même les entrées envoyées aux modèles Anthropic et répond
+// 403 avec les catégories détectées : ce refus vaut décision de modération.
+function getOpenRouterBlockReasons(error) {
+  const reasons = error?.response?.data?.error?.metadata?.reasons;
+  return error?.response?.status === 403 && Array.isArray(reasons) && reasons.length
+    ? reasons
+    : null;
+}
 
 // Fonction de modération avec OpenRouter (exécutée en background)
 async function moderateContentWithAI(
@@ -191,7 +229,7 @@ Exemples de décisions pour un pseudo neutre :
 - "Une bouse intersidéral !" -> {"flagged":false,"reason":null,"details":"Avis négatif sur une œuvre, autorisé."}
 - "Mais il est mort ta vu le film ou t’es juste con" -> {"flagged":false,"reason":null,"details":"Pique personnelle légère et isolée, tolérée."}
 - "Ce film est nul, je vais te retrouver et te casser la gueule" -> {"flagged":true,"reason":"INSULTES","details":"Menace de violence envers une personne."}
-- "Va te suicider, personne ne veut de toi ici" -> {"flagged":true,"reason":"INSULTES","details":"Incitation au suicide visant une personne."}
+- "T'es une merde, personne ne veut de toi ici, dégage" -> {"flagged":true,"reason":"INSULTES","details":"Humiliation grave visant une personne."}
 
 Réponds UNIQUEMENT avec ce format JSON (sans markdown, sans backticks):
 {"flagged": true/false, "reason": "INSULTES" ou "EROTIQUE" ou "DEMANDE_AJOUT" ou "PSEUDO_INAPPROPRIE" ou null, "details": "explication courte"}
@@ -212,9 +250,13 @@ flagged doit être un booléen. Si flagged=false, reason doit être null. Si fla
           },
         ],
         // Le budget inclut le raisonnement : garder assez de place pour le JSON final.
+        // Pas de temperature : Haiku 5.5 rejette toute valeur non par défaut (400).
         max_tokens: 2048,
         reasoning: { effort: "low" },
-        temperature: 0.1,
+        response_format: {
+          type: "json_schema",
+          json_schema: COMMENT_MODERATION_SCHEMA,
+        },
       },
       {
         headers: {
@@ -225,26 +267,40 @@ flagged doit être un booléen. Si flagged=false, reason doit être null. Si fla
         },
         timeout: 30000,
       },
-    );
+    ).catch((requestError) => {
+      const blockReasons = getOpenRouterBlockReasons(requestError);
+      if (!blockReasons) throw requestError;
+      return { blockReasons };
+    });
 
-    const responseText = response.data?.choices?.[0]?.message?.content || "";
-
-    // Parser la réponse JSON
     let moderationResult;
-    try {
-      // Nettoyer la réponse (enlever les backticks markdown si présents)
-      const cleanedResponse = responseText
-        .replace(/```json\n?|```\n?/g, "")
-        .trim();
-      moderationResult = JSON.parse(cleanedResponse);
-    } catch (parseError) {
-      console.error(
-        "❌ Erreur parsing réponse OpenRouter:",
-        parseError,
-        "Response:",
-        responseText,
-      );
-      return { flagged: false };
+    if (response.blockReasons) {
+      moderationResult = {
+        flagged: true,
+        reason: response.blockReasons.some((r) => r.startsWith("sexual"))
+          ? "EROTIQUE"
+          : "INSULTES",
+        details: `Bloqué par le filtre OpenRouter (${response.blockReasons.join(", ")}).`,
+      };
+    } else {
+      const responseText = response.data?.choices?.[0]?.message?.content || "";
+
+      // Parser la réponse JSON
+      try {
+        // Nettoyer la réponse (enlever les backticks markdown si présents)
+        const cleanedResponse = responseText
+          .replace(/```json\n?|```\n?/g, "")
+          .trim();
+        moderationResult = JSON.parse(cleanedResponse);
+      } catch (parseError) {
+        console.error(
+          "❌ Erreur parsing réponse OpenRouter:",
+          parseError,
+          "Response:",
+          responseText,
+        );
+        return { flagged: false };
+      }
     }
 
     // Une réponse ambiguë ou mal formée ne doit pas supprimer un commentaire.
@@ -754,6 +810,7 @@ async function createNotification(
       like: `${fromUsername} a aimé votre commentaire`,
       reaction: `${fromUsername} a réagi à votre commentaire`,
       mention: `${fromUsername} vous a mentionné`,
+      new_comment: `${fromUsername} a publié un nouveau commentaire`,
       report_resolved: `Votre signalement a été traité`,
       report_resolved_deleted: `Votre signalement a été traité (contenu supprimé)`,
       report_dismissed: `Votre signalement a été rejeté`,
@@ -766,6 +823,77 @@ async function createNotification(
     });
   } catch (error) {
     console.error("Erreur lors de la création de la notification:", error);
+  }
+}
+
+// Abonnements « me prévenir des nouveaux commentaires » d'un film ou d'une série,
+// par profil. Table créée à la volée comme les autres tables de notifications.
+const COMMENT_SUBSCRIPTION_CONTENT_TYPES = new Set(["movie", "tv"]);
+const MAX_COMMENT_SUBSCRIBERS_NOTIFIED = 1000;
+let _commentSubscriptionsTableReady = false;
+async function ensureCommentSubscriptionsTable() {
+  if (_commentSubscriptionsTableReady) return;
+  await getPool().execute(
+    `CREATE TABLE IF NOT EXISTS comment_subscriptions (
+      user_id VARCHAR(255) NOT NULL,
+      user_type VARCHAR(50) NOT NULL,
+      profile_id VARCHAR(255) NOT NULL,
+      content_type VARCHAR(20) NOT NULL,
+      content_id VARCHAR(64) NOT NULL,
+      created_at BIGINT,
+      PRIMARY KEY (user_id, user_type, profile_id, content_type, content_id),
+      INDEX idx_comment_sub_content (content_type, content_id)
+    )`
+  );
+  _commentSubscriptionsTableReady = true;
+}
+
+function isValidSubscriptionTarget(contentType, contentId) {
+  return (
+    COMMENT_SUBSCRIPTION_CONTENT_TYPES.has(contentType) &&
+    typeof contentId === "string" &&
+    /^[A-Za-z0-9_-]{1,64}$/.test(contentId)
+  );
+}
+
+// Prévient les profils abonnés au contenu qu'un nouveau commentaire est publié.
+// Appelé sans attendre : un échec ne doit jamais bloquer la publication.
+async function notifyCommentSubscribers(comment, author) {
+  try {
+    if (!isValidSubscriptionTarget(comment.content_type, String(comment.content_id))) return;
+    await ensureCommentSubscriptionsTable();
+    const [subscribers] = await getPool().execute(
+      `SELECT user_id, user_type, profile_id FROM comment_subscriptions
+       WHERE content_type = ? AND content_id = ?
+       ORDER BY created_at ASC LIMIT ${MAX_COMMENT_SUBSCRIBERS_NOTIFIED}`,
+      [comment.content_type, String(comment.content_id)]
+    );
+    for (const sub of subscribers) {
+      // L'auteur n'est pas prévenu de son propre commentaire, quel que soit le profil.
+      if (
+        String(sub.user_id) === String(author.userId) &&
+        String(sub.user_type) === String(author.userType)
+      ) {
+        continue;
+      }
+      await createNotification(
+        sub.user_id,
+        sub.user_type,
+        sub.profile_id,
+        author.userId,
+        author.profileId,
+        author.username,
+        author.avatar,
+        "new_comment",
+        "comment",
+        comment.id,
+        comment.content_type,
+        String(comment.content_id),
+        String(comment.content || "").substring(0, 100),
+      );
+    }
+  } catch (error) {
+    console.error("Erreur lors de la notification des abonnés aux commentaires:", error);
   }
 }
 
@@ -1515,6 +1643,77 @@ router.delete("/notifications/push/unsubscribe", requireAuth, writeRateLimit, as
 // GET /api/comments/notifications/push/vapid-key - Récupérer la clé publique VAPID
 router.get("/notifications/push/vapid-key", (req, res) => {
   res.json({ publicKey: process.env.VAPID_PUBLIC_KEY });
+});
+
+// ==================== ROUTES ABONNEMENTS AUX COMMENTAIRES ====================
+
+// GET /api/comments/subscriptions/:contentType/:contentId - Le profil suit-il ce contenu ?
+router.get("/subscriptions/:contentType/:contentId", requireAuth, async (req, res) => {
+  try {
+    const { contentType, contentId } = req.params;
+    const { profileId } = req.query;
+    if (!isValidSubscriptionTarget(contentType, contentId)) {
+      return res.status(400).json({ error: "Contenu invalide" });
+    }
+    if (!profileId) {
+      return res.status(400).json({ error: "profileId requis" });
+    }
+    const userProfileIds = await getProfileIds(req.user.userId, req.user.userType);
+    if (!userProfileIds.includes(profileId)) {
+      return res.status(403).json({ error: "Profil non autorisé" });
+    }
+
+    await ensureCommentSubscriptionsTable();
+    const [rows] = await getPool().execute(
+      `SELECT 1 FROM comment_subscriptions
+       WHERE user_id = ? AND user_type = ? AND profile_id = ? AND content_type = ? AND content_id = ?
+       LIMIT 1`,
+      [req.user.userId, req.user.userType, profileId, contentType, contentId]
+    );
+    res.json({ subscribed: rows.length > 0 });
+  } catch (error) {
+    console.error("Erreur lors de la lecture de l'abonnement aux commentaires:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
+// PUT /api/comments/subscriptions/:contentType/:contentId - Suivre ou ne plus suivre
+router.put("/subscriptions/:contentType/:contentId", requireAuth, writeRateLimit, async (req, res) => {
+  try {
+    const { contentType, contentId } = req.params;
+    const { profileId } = req.body || {};
+    const subscribed = req.body?.subscribed === true;
+    if (!isValidSubscriptionTarget(contentType, contentId)) {
+      return res.status(400).json({ error: "Contenu invalide" });
+    }
+    if (!profileId) {
+      return res.status(400).json({ error: "profileId requis" });
+    }
+    const userProfileIds = await getProfileIds(req.user.userId, req.user.userType);
+    if (!userProfileIds.includes(profileId)) {
+      return res.status(403).json({ error: "Profil non autorisé" });
+    }
+
+    await ensureCommentSubscriptionsTable();
+    const pool = getPool();
+    if (subscribed) {
+      await pool.execute(
+        `INSERT IGNORE INTO comment_subscriptions (user_id, user_type, profile_id, content_type, content_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [req.user.userId, req.user.userType, profileId, contentType, contentId, Date.now()]
+      );
+    } else {
+      await pool.execute(
+        `DELETE FROM comment_subscriptions
+         WHERE user_id = ? AND user_type = ? AND profile_id = ? AND content_type = ? AND content_id = ?`,
+        [req.user.userId, req.user.userType, profileId, contentType, contentId]
+      );
+    }
+    res.json({ success: true, subscribed });
+  } catch (error) {
+    console.error("Erreur lors de la mise à jour de l'abonnement aux commentaires:", error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
 });
 
 // ==================== ROUTES RÉACTIONS ====================
@@ -3975,6 +4174,15 @@ router.post("/", requireAuth, writeRateLimit, async (req, res) => {
     }).catch((err) =>
       console.error("Erreur webhook Discord (non bloquant):", err),
     );
+
+    // Prévenir les profils qui suivent ce contenu (en arrière-plan)
+    notifyCommentSubscribers(newComment, {
+      userId: req.user.userId,
+      userType: req.user.userType,
+      profileId,
+      username: userData.username,
+      avatar: userData.avatar,
+    });
 
     // Modération automatique avec l'IA en arrière-plan (ne pas attendre)
     moderateContentWithAI(
