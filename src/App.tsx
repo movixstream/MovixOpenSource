@@ -31,6 +31,7 @@ import { TopProgressBar } from './components/TopProgressBar';
 import SmoothScroll from './components/SmoothScroll';
 import { getProviderCatalogScope, ROUTES, type RouteEntry } from './routing/registry';
 import { IdleRoutePrefetch } from '@/routing/IdleRoutePrefetch';
+import { isTvPlatform } from './utils/tvPlatform';
 import { DelayedSuspense } from './components/DelayedSuspense';
 import { RouteProgressBar } from './components/RouteProgressBar';
 import ScreenSaver from './components/ScreenSaver';
@@ -519,6 +520,13 @@ const ProfileSelectionLazy = lazy(() => import('./pages/ProfileSelection'));
 const AprilFoolsAdminPageLazy = lazy(() => import('./pages/AprilFoolsAdminPage'));
 // IntroAnimation (~38 Ko) est opt-in et off par défaut : chunk séparé (perf)
 const IntroAnimationLazy = lazy(() => import('./components/IntroAnimation'));
+
+// Périmètre V1 sur TV : WatchParty, VIP, admin, Wrapped et CineGraph ne sont
+// pas montés. La plateforme ne change pas en cours de session, donc ce filtre
+// est calculé une fois au chargement du module.
+const VISIBLE_ROUTES: RouteEntry[] = isTvPlatform()
+  ? ROUTES.filter((route) => !route.tvExcluded)
+  : ROUTES;
 
 // Cache module-level des composants Lazy par path. Sans ça, chaque appel à
 // renderRouteEntry (ROUTES.map à chaque render d'App) créerait une nouvelle
@@ -1927,7 +1935,7 @@ const AppWithIntro: React.FC = () => {
             />
 
             {/* Toutes les autres routes — depuis le registry */}
-            {ROUTES.map(renderRouteEntry)}
+            {VISIBLE_ROUTES.map(renderRouteEntry)}
 
             {/* 404 — eager (frequently entered cold) */}
             <Route path="*" element={<NotFound />} />

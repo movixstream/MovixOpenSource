@@ -7,6 +7,7 @@ import { HalloweenBatIcon, HalloweenLantern, HalloweenPumpkinIcon, HalloweenThem
 import { MovixWordmark } from './brand/MovixWordmark';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
+import { isHiddenOnTv } from '@/routing/registry';
 import { Film, Search, X, Star, Tv2, Users, Clapperboard, Bell, Tv, Lightbulb, Network, List, Radio, Unlock, ChevronDown, ExternalLink, LayoutGrid, Settings, Dices, Sparkles, HelpCircle, Github, CalendarDays, Puzzle, Smartphone, MonitorPlay } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ProfileMenu from './ProfileMenu';
@@ -176,7 +177,11 @@ const Header: React.FC = () => {
         { name: t('footer.ourUrls'), path: 'https://movix.online', icon: <ExternalLink size={18} />, desc: t('nav.officialLinksDesc'), external: true },
       ]
     },
-  ].filter(g => g.items.length > 0), [t, isVip]);
+  ]
+    // Sur TV, les entrées hors périmètre V1 (CinéGraph, Watch Party) mèneraient
+    // à <NotFound /> : on les retire, puis on écarte les groupes vidés.
+    .map(g => ({ ...g, items: g.items.filter(item => !isHiddenOnTv(item.path)) }))
+    .filter(g => g.items.length > 0), [t, isVip]);
 
   // Auth
   useEffect(() => {
