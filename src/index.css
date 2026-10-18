@@ -1653,3 +1653,43 @@ body,
   -webkit-text-fill-color: #ffffff;
   background: rgba(239, 68, 68, 0.45);
 }
+
+/* ==========================================================================
+   Mode TV (10-foot) — classe posée sur <html> par App.tsx quand
+   `isTvPlatform()` est vrai. Voir src/utils/tvPlatform.ts et webos/README.md.
+   ========================================================================== */
+
+html.tv-mode {
+  /* Levier principal : Tailwind dimensionne en rem, donc typographie ET
+     espacements grandissent d'un bloc, sans toucher une seule page. */
+  font-size: 20px;
+
+  /* Zone sûre : les dalles TV rognent les bords (overscan). */
+  --tv-safe-area: 48px;
+
+  /* Pas de survol à la télécommande, et une souris USB n'est branchée qu'en
+     dev — le curseur réapparaît au premier mouvement (règle plus bas). */
+  cursor: none;
+}
+
+html.tv-mode body {
+  padding: var(--tv-safe-area);
+  /* Le scroll fluide fait ramer les dalles bas de gamme, et le focus saute
+     déjà d'élément en élément : le rendu instantané est plus lisible. */
+  scroll-behavior: auto;
+}
+
+html.tv-mode.tv-pointer-active,
+html.tv-mode.tv-pointer-active * {
+  cursor: auto;
+}
+
+/* Focus visible : sans survol ni curseur, c'est le seul repère de position.
+   Volontairement plus marqué que le focus desktop. */
+html.tv-mode :focus-visible,
+html.tv-mode :focus {
+  outline: 4px solid #a855f7;
+  outline-offset: 3px;
+  border-radius: 6px;
+  box-shadow: 0 0 0 8px rgba(168, 85, 247, 0.28);
+}

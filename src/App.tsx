@@ -32,6 +32,8 @@ import SmoothScroll from './components/SmoothScroll';
 import { getProviderCatalogScope, ROUTES, type RouteEntry } from './routing/registry';
 import { IdleRoutePrefetch } from '@/routing/IdleRoutePrefetch';
 import { isTvPlatform } from './utils/tvPlatform';
+import { useTvSpatialNav } from './hooks/useTvSpatialNav';
+import { useTvBackKey } from './hooks/useTvBackKey';
 import { DelayedSuspense } from './components/DelayedSuspense';
 import { RouteProgressBar } from './components/RouteProgressBar';
 import ScreenSaver from './components/ScreenSaver';
@@ -1764,6 +1766,26 @@ const AppWithIntro: React.FC = () => {
   const location = useLocation();
   const [showRedirectPopup, setShowRedirectPopup] = useState(false);
   const { showIntro, completeIntro } = useIntro();
+
+  // Couche TV : navigation D-pad, polyfill de la touche Retour et classe
+  // racine qui déclenche le layout 10-foot (voir src/index.css). Tout est
+  // inerte hors TV — aucun listener n'est posé, aucune classe n'est ajoutée.
+  const isTv = isTvPlatform();
+  useTvSpatialNav(isTv);
+  useTvBackKey(isTv);
+  React.useEffect(() => {
+    if (!isTv) return;
+    const root = document.documentElement;
+    root.classList.add('tv-mode');
+    // Le curseur est masqué en mode TV ; une souris USB branchée en dev doit
+    // pouvoir le faire réapparaître (un seul mouvement suffit).
+    const onPointerMove = () => root.classList.add('tv-pointer-active');
+    window.addEventListener('mousemove', onPointerMove, { once: true });
+    return () => {
+      window.removeEventListener('mousemove', onPointerMove);
+      root.classList.remove('tv-mode', 'tv-pointer-active');
+    };
+  }, [isTv]);
 
   // Détecter si on est sur une route /watch ou la page 404
   const isWatchRoute = location.pathname.startsWith('/watch/') || location.pathname.startsWith('/watchparty/room/') || location.pathname.startsWith('/ftv/watch/');

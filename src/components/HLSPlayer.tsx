@@ -191,6 +191,7 @@ import { useExternalSubtitles } from '../hooks/useExternalSubtitles.ts';
 import type { SubtitleTrack } from '../services/subtitles/index.ts';
 import { getEmbeddedSubtitleContent, getEmbeddedSubtitleTracks } from '../utils/embeddedSubtitles.ts';
 import { isHiddenOnTv } from '@/routing/registry';
+import { releaseTvSpatialNav, suppressTvSpatialNav } from '@/utils/tvSpatialNav';
 import type {
   KisskhFallbackTransport,
   KisskhSource,
@@ -8443,6 +8444,14 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   useEffect(() => {
     confirmActivePromptRef.current = confirmActivePrompt;
   });
+
+  // Les flèches appartiennent au lecteur (seek / volume) tant qu'il est monté :
+  // la navigation D-pad du mode TV se met en retrait sur simple déclaration,
+  // sans avoir à sonder le DOM. Voir src/utils/tvSpatialNav.ts.
+  useEffect(() => {
+    suppressTvSpatialNav();
+    return () => releaseTvSpatialNav();
+  }, []);
 
   const handlePlayerKeyDownRef = useRef<(event: KeyboardEvent) => void>(() => {});
 
