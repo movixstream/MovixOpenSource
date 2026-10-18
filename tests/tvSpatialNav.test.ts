@@ -4,10 +4,12 @@ import test from 'node:test';
 import {
   __resetTvSpatialNavSuppression,
   directionFromKey,
+  isInSearchZone,
   isTvBackKey,
   isTvSpatialNavSuppressed,
   pickBestCandidate,
   releaseTvSpatialNav,
+  resolveTvBackAction,
   suppressTvSpatialNav,
   type Rect,
 } from '../src/utils/tvSpatialNav.ts';
@@ -107,4 +109,37 @@ test('directionFromKey ne répond qu’aux flèches', () => {
   assert.equal(directionFromKey('ArrowRight'), 'right');
   assert.equal(directionFromKey('Enter'), null);
   assert.equal(directionFromKey('constructor'), null, 'pas de fuite du prototype');
+});
+
+test('la zone de recherche couvre l’écran suivant, pas au-delà', () => {
+  const vw = 1920;
+  const vh = 1080;
+  const row = (top: number): Rect => ({ left: 100, top, right: 300, bottom: top + 300 });
+  // Rangée entièrement sous la ligne de flottaison : doit rester atteignable,
+  // sinon « bas » ne fait jamais défiler la page.
+  assert.equal(isInSearchZone(row(1200), vw, vh), true);
+  assert.equal(isInSearchZone(row(-1000), vw, vh), true);
+  // Vignette hors champ à droite d'un carrousel.
+  assert.equal(isInSearchZone({ left: 2000, top: 100, right: 2300, bottom: 400 }, vw, vh), true);
+  // Trois écrans plus bas : hors zone.
+  assert.equal(isInSearchZone(row(3300), vw, vh), false);
+});
+
+test('Retour ferme d’abord la surface ouverte, puis le champ, puis revient en arrière', () => {
+  assert.equal(
+    resolveTvBackAction({ hasOpenSurface: true, isEditingText: true, canGoBack: true }),
+    'escape'
+  );
+  assert.equal(
+    resolveTvBackAction({ hasOpenSurface: false, isEditingText: true, canGoBack: true }),
+    'blur'
+  );
+  assert.equal(
+    resolveTvBackAction({ hasOpenSurface: false, isEditingText: false, canGoBack: true }),
+    'back'
+  );
+  assert.equal(
+    resolveTvBackAction({ hasOpenSurface: false, isEditingText: false, canGoBack: false }),
+    'exit'
+  );
 });

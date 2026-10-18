@@ -3,6 +3,7 @@ import Lenis from 'lenis';
 import 'lenis/dist/lenis.css';
 import { useLightMode } from '@/context/LightModeContext';
 import { readLocalStorage } from '@/utils/browserStorage';
+import { isTvPlatform } from '@/utils/tvPlatform';
 
 /**
  * Presets de fluidité Lenis — configurables via
@@ -60,6 +61,10 @@ const isCapableNonTouchDesktop = (): boolean => {
 //   - absent/autre → activé seulement sur desktop non tactile + machine
 //     correcte, sinon scroll natif (même comportement que 'false').
 const getSmoothScrollSetting = (): boolean => {
+  // TV : jamais de Lenis, même si le profil synchronisé l'a activé sur un PC.
+  // Le D-pad déplace le focus et `scrollIntoView` fait défiler — une boucle
+  // rAF d'interpolation par-dessus ne fait que ramer sur le CPU d'une dalle.
+  if (isTvPlatform()) return false;
   const v = typeof window !== 'undefined'
     ? readLocalStorage('settings_smooth_scroll')
     : null;

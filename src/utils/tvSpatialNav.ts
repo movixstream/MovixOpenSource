@@ -107,9 +107,24 @@ function isVisible(el: HTMLElement, rect: DOMRect): boolean {
 }
 
 /**
- * Éléments focusables visibles dans le viewport, avec leur rectangle. On borne
- * au viewport pour ne pas envoyer le focus 40 écrans plus bas dans une grille
- * infinie — le scroll suit le focus, pas l'inverse.
+ * `true` si `rect` est dans la zone de recherche : le viewport élargi d'un
+ * écran dans chaque direction. Borner au seul viewport rendait le scroll
+ * impossible — la rangée suivante, entièrement sous la ligne de flottaison,
+ * n'était jamais candidate, et les vignettes hors champ d'un carrousel non
+ * plus. Au-delà d'un écran, on borne quand même : sinon une grille infinie
+ * enverrait le focus 40 écrans plus bas.
+ */
+export function isInSearchZone(rect: Rect, viewportWidth: number, viewportHeight: number): boolean {
+  return (
+    rect.bottom >= -viewportHeight &&
+    rect.top <= viewportHeight * 2 &&
+    rect.right >= -viewportWidth &&
+    rect.left <= viewportWidth * 2
+  );
+}
+
+/**
+ * Éléments focusables visibles dans la zone de recherche, avec leur rectangle.
  */
 export function getVisibleFocusables(
   root: ParentNode = document
@@ -121,14 +136,7 @@ export function getVisibleFocusables(
   root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR).forEach((el) => {
     const rect = el.getBoundingClientRect();
     if (!isVisible(el, rect)) return;
-    if (
-      rect.bottom < 0 ||
-      rect.top > viewportHeight ||
-      rect.right < 0 ||
-      rect.left > viewportWidth
-    ) {
-      return;
-    }
+    if (!isInSearchZone(rect, viewportWidth, viewportHeight)) return;
     out.push({
       el,
       rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
@@ -137,6 +145,9 @@ export function getVisibleFocusables(
 
   return out;
 }
+
+/** Part du viewport parcourue quand aucun élément n'est atteignable. */
+export const TV_SCROLL_STEP_RATIO = 0.6;
 
 // ---------------------------------------------------------------------------
 // Suppression temporaire — compteur de références.
@@ -200,4 +211,32 @@ const DIRECTION_BY_KEY: Record<string, Direction> = Object.assign(
 
 export function directionFromKey(key: string): Direction | null {
   return DIRECTION_BY_KEY[key] ?? null;
+}
+
+/**
+ * Ce que doit faire la touche Retour, selon l'état de la page.
+ *
+ * `appinfo.json` pose `disableBackHistoryAPI: true` : webOS ne fait plus
+ * lui-même de `history.back()`, c'est au site de tout gérer. Ré-émettre
+ * `Escape` ne suffit pas — la plupart des pages n'écoutent pas `Escape`, et
+ * Retour n'avait alors aucun effet hors des menus.
+ *
+ *  - `escape`  : une surface est ouverte (modale, menu, plein écran) — on la
+ *                ferme via les handlers `Escape` existants ;
+ *  - `blur`    : un champ de saisie a le focus — on rend la main au D-pad
+ *                (le clavier virtuel se replie) ;
+ *  - `back`    : page précédente ;
+ *  - `exit`    : premier écran de la session — on quitte l'application,
+ *                comportement attendu d'une app TV.
+ */
+export type TvBackAction = 'escape' | 'blur' | 'back' | 'exit';
+
+export function resolveTvBackAction(state: {
+  hasOpenSurface: boolean;
+  isEditingText: boolean;
+  canGoBack: boolean;
+}): TvBackAction {
+  if (state.hasOpenSurface) return 'escape';
+  if (state.isEditingText) return 'blur';
+  return state.canGoBack ? 'back' : 'exit';
 }

@@ -4,7 +4,31 @@ import {
   getVisibleFocusables,
   isTvSpatialNavSuppressed,
   pickBestCandidate,
+  TV_SCROLL_STEP_RATIO,
+  type Direction,
 } from '@/utils/tvSpatialNav';
+
+/**
+ * Amène l'élément focalisé à l'écran. En vertical on centre la rangée : avec
+ * `nearest`, elle se collait au bord haut, sous le header fixe.
+ */
+function revealFocused(el: HTMLElement, direction: Direction | null): void {
+  const vertical = direction === 'up' || direction === 'down';
+  el.scrollIntoView({ block: vertical ? 'center' : 'nearest', inline: 'nearest' });
+}
+
+/**
+ * Aucun élément atteignable : on fait défiler la page nous-mêmes. On ne compte
+ * pas sur le scroll natif des flèches — il n'agit que sur le conteneur
+ * scrollable de l'élément focalisé, et rien ne bouge quand ce n'est pas le
+ * document (ou quand le focus est sur un élément sorti de l'écran).
+ */
+function scrollPage(direction: Direction): boolean {
+  if (direction !== 'up' && direction !== 'down') return false;
+  const step = window.innerHeight * TV_SCROLL_STEP_RATIO;
+  window.scrollBy(0, direction === 'down' ? step : -step);
+  return true;
+}
 
 /**
  * Branche la navigation directionnelle globale. Appelé une seule fois, depuis
@@ -38,14 +62,17 @@ export function useTvSpatialNav(enabled: boolean): void {
       }
 
       const focusables = getVisibleFocusables();
-      if (focusables.length === 0) return;
+      if (focusables.length === 0) {
+        if (scrollPage(direction)) event.preventDefault();
+        return;
+      }
 
       // Aucun focus (arrivée sur une page, ou focus perdu après un démontage) :
       // on prend le premier candidat visible plutôt que de ne rien faire.
       if (!(active instanceof HTMLElement) || active === document.body) {
         event.preventDefault();
         focusables[0].el.focus();
-        focusables[0].el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        revealFocused(focusables[0].el, null);
         return;
       }
 
@@ -62,11 +89,18 @@ export function useTvSpatialNav(enabled: boolean): void {
         direction
       );
 
-      if (!best) return; // Bord de l'écran : on laisse le scroll natif agir.
+      if (!best) {
+        // Bord de la zone de recherche (bas d'une longue page, bloc de texte
+        // sans lien) : on défile pour faire apparaître la suite.
+        if (scrollPage(direction)) event.preventDefault();
+        return;
+      }
 
       event.preventDefault();
-      best.el.focus();
-      best.el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      // `preventScroll` : sans lui, Chromium saute brutalement à l'élément
+      // avant que `scrollIntoView` ne le recentre.
+      best.el.focus({ preventScroll: true });
+      revealFocused(best.el, direction);
     };
 
     document.addEventListener('keydown', onKeyDown, true);

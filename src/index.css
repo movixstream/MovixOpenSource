@@ -1670,13 +1670,17 @@ html.tv-mode {
   /* Pas de survol à la télécommande, et une souris USB n'est branchée qu'en
      dev — le curseur réapparaît au premier mouvement (règle plus bas). */
   cursor: none;
+
+  /* Le scroll fluide fait ramer les dalles bas de gamme, et le focus saute
+     déjà d'élément en élément : le rendu instantané est plus lisible. Posé
+     sur <html> et non <body> : c'est <html> qui défile, et la règle globale
+     `html { scroll-behavior: smooth }` l'emportait jusqu'ici. Un défilement
+     animé faussait aussi les rectangles lus à l'appui suivant. */
+  scroll-behavior: auto;
 }
 
 html.tv-mode body {
   padding: var(--tv-safe-area);
-  /* Le scroll fluide fait ramer les dalles bas de gamme, et le focus saute
-     déjà d'élément en élément : le rendu instantané est plus lisible. */
-  scroll-behavior: auto;
 }
 
 html.tv-mode.tv-pointer-active,
