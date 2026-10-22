@@ -794,9 +794,14 @@ const addCandidateSubtree = (root: Element, candidates: Set<Element>): void => {
   for (const element of root.querySelectorAll('*')) visit(element);
 };
 
+const FLEX_GAP_PROFILE_ENABLED = typeof window !== 'undefined'
+  && window.location.search.includes('movixProfileFlexGap=1');
+
 const flush = (): void => {
   animationFrameId = null;
   if (!started) return;
+  const profileStartedAt = FLEX_GAP_PROFILE_ENABLED ? performance.now() : 0;
+  const profileWasFullScan = fullScanPending;
 
   const candidates = new Set<Element>(pendingContainers);
   pendingContainers.clear();
@@ -871,6 +876,16 @@ const flush = (): void => {
     window.dispatchEvent(new CustomEvent<FlexGapUpdatedEventDetail>(FLEX_GAP_UPDATED_EVENT, {
       detail: { containers: changedContainers },
     }));
+  }
+
+  if (FLEX_GAP_PROFILE_ENABLED) {
+    console.debug('[Movix flex-gap profile]', {
+      durationMs: Number((performance.now() - profileStartedAt).toFixed(2)),
+      fullScan: profileWasFullScan,
+      candidates: candidates.size,
+      plans: preparedPlans.length,
+      changedContainers: changedContainers.length,
+    });
   }
 };
 
@@ -962,9 +977,13 @@ const layoutStyleProperties = new Set([
   'transition-timing-function',
 ]);
 
+let inlineStyleScratch: CSSStyleDeclaration | null = null;
+
 const readRelevantInlineStyle = (cssText: string | null): Map<string, string> => {
   const values = new Map<string, string>();
-  const scratch = document.createElement('div').style;
+  // Reuse one detached style declaration instead of allocating a new element
+  // for both sides of every observed inline-style mutation.
+  const scratch = inlineStyleScratch ?? (inlineStyleScratch = document.createElement('div').style);
   scratch.cssText = cssText || '';
 
   for (let index = 0; index < scratch.length; index += 1) {
