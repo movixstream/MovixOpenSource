@@ -801,6 +801,7 @@ const flush = (): void => {
   animationFrameId = null;
   if (!started) return;
   const profileStartedAt = FLEX_GAP_PROFILE_ENABLED ? performance.now() : 0;
+  const profileWasFullScan = fullScanPending;
 
   const candidates = new Set<Element>(pendingContainers);
   pendingContainers.clear();
@@ -880,7 +881,7 @@ const flush = (): void => {
   if (FLEX_GAP_PROFILE_ENABLED) {
     console.debug('[Movix flex-gap profile]', {
       durationMs: Number((performance.now() - profileStartedAt).toFixed(2)),
-      fullScan: !fullScanPending && pendingRoots.size === 0,
+      fullScan: profileWasFullScan,
       candidates: candidates.size,
       plans: preparedPlans.length,
       changedContainers: changedContainers.length,
