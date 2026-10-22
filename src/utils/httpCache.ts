@@ -62,7 +62,7 @@ import axios, {
 import { MAIN_API } from '../config/runtime';
 
 /** Préfixe des clés en `sessionStorage`. Le suffixe de version invalide tout d'un coup. */
-const STORAGE_PREFIX = 'movix:hcache:v2:';
+const STORAGE_PREFIX = 'movix:hcache:v1:';
 
 /** Au-delà, une entrée est jetée même si elle pourrait encore dépanner. */
 const HARD_EXPIRY_MS = 6 * 60 * 60 * 1000;
@@ -180,8 +180,15 @@ const readPersisted = (key: string): CacheEntry | null => {
     const raw = sessionStorage.getItem(STORAGE_PREFIX + key);
     if (!raw) return null;
 
-    // Store metadata as a short prefix instead of JSON-encoding the already
-    // serialized response body a second time.
+    // Read old JSON envelopes for compatibility with cache entries created
+    // before the compact metadata format was introduced.
+    if (raw.startsWith('{')) {
+      const parsed = JSON.parse(raw) as Partial<CacheEntry>;
+      if (typeof parsed.body !== 'string' || typeof parsed.ts !== 'number') return null;
+      return { body: parsed.body, status: parsed.status ?? 200, ts: parsed.ts };
+    }
+
+    // Metadata is a short prefix; the response body is already serialized JSON.
     const firstSeparator = raw.indexOf('|');
     const secondSeparator = raw.indexOf('|', firstSeparator + 1);
     if (firstSeparator <= 0 || secondSeparator <= firstSeparator + 1) return null;
@@ -208,8 +215,17 @@ const evict = (): void => {
       const storageKey = sessionStorage.key(i);
       if (!storageKey?.startsWith(STORAGE_PREFIX)) continue;
       const raw = sessionStorage.getItem(storageKey) || '';
-      const separator = raw.indexOf('|');
-      const parsedTs = separator > 0 ? Number(raw.slice(0, separator)) : 0;
+      let parsedTs = 0;
+      if (raw.startsWith('{')) {
+        try {
+          parsedTs = (JSON.parse(raw) as { ts?: number }).ts ?? 0;
+        } catch {
+          /* entrée illisible : ts = 0, elle partira en premier */
+        }
+      } else {
+        const separator = raw.indexOf('|');
+        parsedTs = separator > 0 ? Number(raw.slice(0, separator)) : 0;
+      }
       // Invalid entries sort first and are removed before valid cache records.
       const ts = Number.isFinite(parsedTs) ? parsedTs : 0;
       entries.push({ storageKey, ts });
