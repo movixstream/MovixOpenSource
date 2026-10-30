@@ -1,12 +1,12 @@
 {
-  "versionCode": 7,
-  "versionName": "0.2.5",
+  "versionCode": 8,
+  "versionName": "0.2.6",
   "apkUrl": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app-tv/movix-tv.apk",
-  "apkSize": 9889020,
-  "apkSha256": "d71aee21b63cfd8b0956ef8842c6fd34be13bb5a0238b928903d5f4857c85964",
+  "apkSize": 13574038,
+  "apkSha256": "c615bfe2596a7a1a6ecb01f298c5e5fa38f3f82429b516aef01fa30c9a141dfc",
   "minSdk": 25,
   "notes": {
-    "fr": "Fsvid et Vidzy se lisent de nouveau sur la télé.",
-    "en": "Fsvid and Vidzy play again on the TV."
+    "fr": "Fsvid et Vidzy se lisent à nouveau sur la télé : le lecteur se présente maintenant à ces sites comme un vrai navigateur Chrome.",
+    "en": "Fsvid and Vidzy play again on the TV: the player now presents itself to these sites as a real Chrome browser."
   }
 }
