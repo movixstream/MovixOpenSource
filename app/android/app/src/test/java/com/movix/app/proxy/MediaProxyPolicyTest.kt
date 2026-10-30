@@ -264,12 +264,21 @@ class MediaProxyPolicyTest {
     }
 
     @Test
-    fun keepsFsvidVidzyOnCronetForTheChromeTlsFingerprint() {
-        // Leur CDN exige l'Accept-Encoding exact de Chrome, que Cronet reecrit.
-        for (host in listOf("r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org")) {
-            assertTrue(MediaProxyPolicy.requiresOkHttpUpstream("https://$host/master.m3u8"))
+    fun routesFsvidVidzyToTheBrowserImpersonation() {
+        // Leur CDN exige le TLS d'un navigateur ET l'Accept-Encoding exact de
+        // Chrome : ni Cronet ni OkHttp, seul libcurl-impersonate.
+        for (host in listOf("r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org", "V6.VIDZY.CC.")) {
+            assertTrue(MediaProxyPolicy.requiresBrowserImpersonation("https://$host/master.m3u8"))
+            assertFalse(MediaProxyPolicy.requiresOkHttpUpstream("https://$host/master.m3u8"))
         }
-        assertFalse(MediaProxyPolicy.requiresOkHttpUpstream("https://vidzy.cc.attacker.example/m.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("https://vidzy.cc.attacker.example/m.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("https://notfsvid.lol/m.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("https://strm4.uqload.vc/m.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("not-a-url"))
+    }
+
+    @Test
+    fun keepsOnlyUqloadOnOkHttp() {
         for (host in listOf("strm4.uqload.vc", "STRM4.UQLOAD.VC.")) {
             assertTrue(MediaProxyPolicy.requiresOkHttpUpstream("https://$host/master.m3u8"))
         }

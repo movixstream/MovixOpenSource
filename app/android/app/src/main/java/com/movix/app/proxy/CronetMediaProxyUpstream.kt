@@ -77,9 +77,10 @@ internal fun decodedManualResponse(
  * Accept-Encoding. Cronet controle cet en-tete et ignore addHeader ;
  * activer Brotli seul ne suffit donc pas. OkHttp permet de le fixer tout en
  * demandant identity pour conserver les octets des playlists et des Range.
- * Fsvid/Vidzy aussi depuis le 2026-10-26 : leur CDN exige l'Accept-Encoding
- * exact de Chrome, avec zstd, que Cronet réécrit en « gzip, deflate, br »
- * (voir [MediaProxyPolicy.requiresOkHttpUpstream]).
+ * Fsvid/Vidzy passent par [impersonated] : leur CDN exige à la fois le TLS
+ * d'un navigateur et l'Accept-Encoding exact de Chrome, avec zstd, que
+ * Cronet réécrit en « gzip, deflate, br »
+ * (voir [MediaProxyPolicy.requiresBrowserImpersonation]).
  *
  * Cronet est asynchrone (callbacks) alors que [MediaProxyUpstream.execute] est
  * synchrone et rend un flux. Le pont est fait par [CronetResponseBody] : le
@@ -101,6 +102,9 @@ internal class CronetMediaProxyUpstream(
     // joint a la fois le Chromecast et Internet (comme le socketFactory
     // network-bound d'okhttp). Null pour la lecture in-app (egress systeme).
     private val boundNetwork: Network? = null,
+    // Imitation complète de Chrome (libcurl-impersonate) pour Fsvid/Vidzy ;
+    // [fallback] s'il n'est pas fourni.
+    private val impersonated: MediaProxyUpstream? = null,
 ) : MediaProxyUpstream {
 
     @Volatile
@@ -144,6 +148,9 @@ internal class CronetMediaProxyUpstream(
     ): MediaProxyUpstreamResponse {
         if (MediaProxyPolicy.isProviderDecoyUrl(target.upstreamUrl)) {
             throw IllegalStateException("Upstream returned a decoy stream")
+        }
+        if (MediaProxyPolicy.requiresBrowserImpersonation(target.upstreamUrl)) {
+            return (impersonated ?: fallback).execute(target, localRequestHeaders)
         }
         if (MediaProxyPolicy.requiresOkHttpUpstream(target.upstreamUrl)) {
             return fallback.execute(target, localRequestHeaders)

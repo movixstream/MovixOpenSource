@@ -12,6 +12,20 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
+// libcurl-impersonate (github.com/lexiforest/curl-impersonate) : la pile TLS et
+// HTTP/2 de curl_cffi, que le relais Python utilise deja. Le proxy media s'en
+// sert pour imiter un vrai Chrome face a Fsvid/Vidzy (voir
+// ImpersonateMediaProxyUpstream). Les archives de la release sont telechargees
+// au build et verifiees par SHA-256 ; CMake empaquette la .so avec notre pont.
+def curlImpersonateVersion = "2.3.1"
+def curlImpersonateArchives = [
+    "arm64-v8a"  : ["aarch64", "fd8a9ba3386d10f8519fcff3b50f655a41fd38e5e5a2fb8eabcac6085587bcbf"],
+    "armeabi-v7a": ["armv7", "a3ca8c80d74fcc6ba4dd92bedb0c9a82bb2246806e5116294196351cfd8fbede"],
+    "x86"        : ["x86", "22bc873b2ba2eae98367a34155107df6c6b221b707e5b8be0bc4746db25ea389"],
+    "x86_64"     : ["x86_64", "d7f7d00b3bd0eae23eb7440e374ffbbbf978be782f8ebddccf888a1677282513"],
+]
+def curlImpersonateDir = layout.buildDirectory.dir("curl-impersonate/${curlImpersonateVersion}")
+
 android {
     namespace "com.movix.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -69,7 +83,68 @@ android {
     testOptions {
         unitTests.includeAndroidResources = true
     }
+
+    // Pont JNI vers libcurl-impersonate (src/main/cpp), pour le proxy media.
+    ndkVersion rootProject.ext.ndkVersion
+    defaultConfig {
+        externalNativeBuild {
+            cmake {
+                // C pur : pas de libc++ a nous. Celle que demande
+                // libcurl-impersonate.so (libc++_shared.so) vient de React Native.
+                arguments "-DANDROID_STL=none",
+                    "-DCURL_IMPERSONATE_ROOT=${curlImpersonateDir.get().asFile.absolutePath.replace('\\', '/')}"
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
 }
+
+def sha256Of = { File file ->
+    def digest = java.security.MessageDigest.getInstance("SHA-256")
+    file.withInputStream { input ->
+        byte[] buffer = new byte[65536]
+        int read
+        while ((read = input.read(buffer)) > 0) digest.update(buffer, 0, read)
+    }
+    digest.digest().encodeHex().toString()
+}
+
+def prepareCurlImpersonate = tasks.register("prepareCurlImpersonate") {
+    def outputDir = curlImpersonateDir.get().asFile
+    inputs.property("version", curlImpersonateVersion)
+    inputs.property("archives", curlImpersonateArchives.toString())
+    outputs.dir(outputDir)
+    doLast {
+        curlImpersonateArchives.each { abi, spec ->
+            def (triple, expectedSha) = spec
+            def name = "libcurl-impersonate-v${curlImpersonateVersion}.${triple}-linux-android.tar.gz"
+            def archive = new File(outputDir, name)
+            if (!archive.exists() || sha256Of(archive) != expectedSha) {
+                archive.parentFile.mkdirs()
+                def url = "https://github.com/lexiforest/curl-impersonate/releases/download/v${curlImpersonateVersion}/${name}"
+                new URL(url).withInputStream { input -> archive.withOutputStream { it << input } }
+            }
+            def actualSha = sha256Of(archive)
+            if (actualSha != expectedSha) {
+                archive.delete()
+                throw new GradleException("SHA-256 inattendu pour ${name} : ${actualSha}")
+            }
+            def abiDir = new File(outputDir, abi)
+            project.delete(abiDir)
+            project.copy {
+                from(tarTree(resources.gzip(archive)))
+                include("include/**", "libcurl-impersonate.so", "LICENSE*")
+                into(abiDir)
+            }
+        }
+    }
+}
+preBuild.dependsOn(prepareCurlImpersonate)
 
 dependencies {
     implementation("com.facebook.react:react-android")

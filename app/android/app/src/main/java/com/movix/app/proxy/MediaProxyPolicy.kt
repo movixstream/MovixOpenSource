@@ -171,26 +171,28 @@ object MediaProxyPolicy {
     /**
      * Vrai si l'upstream doit passer par OkHttp plutôt que par Cronet. Seul
      * Uqload : son profil exige un Accept-Encoding que Cronet réécrit.
-     *
-     * Plus Fsvid/Vidzy : depuis le 2026-10-16 au soir, leur CDN compare
-     * l'empreinte TLS au User-Agent. Un « Chrome Windows » dont le ClientHello
-     * n'est pas celui de Chrome (OkHttp) reçoit un faux master de 177 octets
-     * qui pointe sur `index.m3u8`, lui-même identique (levelParsingError).
-     * Cronet présente le TLS de Chromium et obtient le vrai flux, quel que soit
-     * l'Accept-Encoding (mesuré le 2026-10-17).
-     *
-     * Le 2026-10-26 au soir, c'est l'inverse : le CDN ne regarde plus le TLS
-     * mais exige l'Accept-Encoding exact de Chrome (« gzip, deflate, br,
-     * zstd »). Cronet réécrit cet en-tête en « gzip, deflate, br » (relevé sur
-     * l'appareil via httpbin) et reçoit le faux master ; OkHttp envoie la
-     * valeur fixée et obtient le vrai, décompressé par decodedManualResponse.
-     * Fsvid/Vidzy repassent donc par OkHttp.
      */
     fun requiresOkHttpUpstream(rawUrl: String): Boolean {
         val host = runCatching { URI(rawUrl).host?.lowercase(Locale.US)?.trimEnd('.') }
             .getOrNull() ?: return false
-        return uqloadHostPattern.containsMatchIn(host) ||
-            PROVIDER_DECOY_HOST_SUFFIXES.any { host == it || host.endsWith(".$it") }
+        return uqloadHostPattern.containsMatchIn(host)
+    }
+
+    /**
+     * Vrai si l'upstream doit imiter un vrai Chrome (libcurl-impersonate, voir
+     * [ImpersonateMediaProxyUpstream]) : Fsvid/Vidzy.
+     *
+     * Leur CDN a d'abord trié sur l'empreinte TLS (2026-10-17, OkHttp refusé,
+     * Cronet accepté), puis sur l'Accept-Encoding exact de Chrome (2026-10-26,
+     * Cronet refusé car il réécrit cet en-tête, OkHttp accepté). Depuis le
+     * 2026-10-30, il exige les deux : un ClientHello qui propose
+     * X25519MLKEM768 et « gzip, deflate, br, zstd ». Aucune des deux piles
+     * Android ne les réunit ; seul un profil de navigateur complet le fait.
+     */
+    fun requiresBrowserImpersonation(rawUrl: String): Boolean {
+        val host = runCatching { URI(rawUrl).host?.lowercase(Locale.US)?.trimEnd('.') }
+            .getOrNull() ?: return false
+        return PROVIDER_DECOY_HOST_SUFFIXES.any { host == it || host.endsWith(".$it") }
     }
 
     fun validatePublicHttpsUrl(
