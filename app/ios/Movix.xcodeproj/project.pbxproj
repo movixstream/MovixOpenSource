@@ -688,7 +688,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Movix/Movix.entitlements;
-				CURRENT_PROJECT_VERSION = 49;
+				CURRENT_PROJECT_VERSION = 50;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Movix/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
@@ -696,7 +696,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.6.12;
+				MARKETING_VERSION = 2.6.13;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -719,14 +719,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Movix/Movix.entitlements;
-				CURRENT_PROJECT_VERSION = 49;
+				CURRENT_PROJECT_VERSION = 50;
 				INFOPLIST_FILE = Movix/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.6.12;
+				MARKETING_VERSION = 2.6.13;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
