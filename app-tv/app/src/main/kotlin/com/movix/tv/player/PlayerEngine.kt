@@ -27,8 +27,9 @@ import java.util.concurrent.Executors
  *
  * Chaîne réseau d'une requête du lecteur (manifeste, segments, clés) :
  * Cronet (empreinte TLS de Chrome ; OkHttp si les services Google manquent,
- * cas des Fire TV) → en-têtes par hôte ([MediaHeaders]) → déballage des
- * segments PNG+MPEG-TS ([PngTsDataSource]).
+ * cas des Fire TV), libcurl-impersonate pour Fsvid/Vidzy
+ * ([CurlImpersonateDataSource]) → en-têtes par hôte ([MediaHeaders]) →
+ * déballage des segments PNG+MPEG-TS ([PngTsDataSource]).
  */
 class PlayerEngine(private val context: Context, private val http: OkHttpClient, private val lowRam: Boolean) {
     private val cronetExecutor by lazy { Executors.newFixedThreadPool(4) }
@@ -61,8 +62,14 @@ class PlayerEngine(private val context: Context, private val http: OkHttpClient,
                 .setConnectionTimeoutMs(8_000)
                 .setReadTimeoutMs(20_000)
                 .setHandleSetCookieRequests(true)
-        } ?: return okHttp
-        return HostRoutingDataSource.Factory(cronetFactory, okHttp, HostRoutingDataSource::needsExactChromeEncoding)
+        }
+        // Fsvid/Vidzy : profil Chrome complet ; OkHttp si la bibliothèque manque.
+        val impersonated = if (CurlImpersonate.available) CurlImpersonateDataSource.Factory(context) else okHttp
+        return HostRoutingDataSource.Factory(
+            cronetFactory ?: okHttp,
+            impersonated,
+            HostRoutingDataSource::needsBrowserImpersonation,
+        )
     }
 
     private val playbackHttp: OkHttpClient by lazy {

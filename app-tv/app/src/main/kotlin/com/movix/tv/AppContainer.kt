@@ -148,7 +148,7 @@ class AppContainer(context: Context) {
     /** Langue de l'appli (« fr », « en ») : ses sous-titres passent devant. */
     fun uiLanguage(): String = appContext.resources.configuration.locales[0].language
 
-    val streamProbe = StreamProbe(http)
+    val streamProbe = StreamProbe(http, context.applicationContext)
     val codecSupport = CodecSupport(context.applicationContext)
 
     val playerEngine = PlayerEngine(context.applicationContext, http, (context.applicationContext as? MovixApp)?.lowRam ?: false)

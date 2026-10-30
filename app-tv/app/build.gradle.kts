@@ -1,4 +1,7 @@
+import java.net.URI
+import java.security.MessageDigest
 import java.util.Properties
+import javax.inject.Inject
 
 plugins {
     alias(libs.plugins.android.application)
@@ -53,6 +56,20 @@ fun releaseStoreFile(): File {
     val sibling = releaseSigningFile?.parentFile?.resolve(declared.name)
     return if (sibling != null && sibling.exists()) sibling else declared
 }
+
+// libcurl-impersonate (github.com/lexiforest/curl-impersonate) : la pile TLS et
+// HTTP/2 de curl_cffi, comme le relais Python et l'app mobile. Le lecteur s'en
+// sert pour imiter un vrai Chrome face à Fsvid/Vidzy (voir
+// CurlImpersonateDataSource). Archives de la release téléchargées au build et
+// vérifiées par SHA-256 ; CMake empaquette la .so avec notre pont.
+val curlImpersonateVersion = "2.3.1"
+val curlImpersonateArchives = mapOf(
+    "arm64-v8a" to ("aarch64" to "fd8a9ba3386d10f8519fcff3b50f655a41fd38e5e5a2fb8eabcac6085587bcbf"),
+    "armeabi-v7a" to ("armv7" to "a3ca8c80d74fcc6ba4dd92bedb0c9a82bb2246806e5116294196351cfd8fbede"),
+    "x86" to ("x86" to "22bc873b2ba2eae98367a34155107df6c6b221b707e5b8be0bc4746db25ea389"),
+    "x86_64" to ("x86_64" to "d7f7d00b3bd0eae23eb7440e374ffbbbf978be782f8ebddccf888a1677282513"),
+)
+val curlImpersonateDir = layout.buildDirectory.dir("curl-impersonate/$curlImpersonateVersion")
 
 android {
     namespace = "com.movix.tv"
@@ -141,7 +158,98 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+
+    // Pont JNI vers libcurl-impersonate (src/main/cpp), pour Fsvid/Vidzy.
+    ndkVersion = "26.1.10909125"
+    defaultConfig {
+        externalNativeBuild {
+            cmake {
+                // libcurl-impersonate.so demande libc++_shared.so : la livrer.
+                arguments += listOf(
+                    "-DANDROID_STL=c++_shared",
+                    "-DCURL_IMPERSONATE_ROOT=${curlImpersonateDir.get().asFile.absolutePath.replace('\\', '/')}",
+                )
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+    packaging {
+        // Un autre module natif peut aussi embarquer la libc++ du NDK.
+        jniLibs.pickFirsts += "**/libc++_shared.so"
+    }
 }
+
+/** Télécharge, vérifie et déballe libcurl-impersonate (compatible avec le cache de configuration). */
+abstract class PrepareCurlImpersonate : DefaultTask() {
+    @get:Input
+    abstract val releaseVersion: Property<String>
+
+    /** ABI → « triplet:sha256 » de l'archive de la release. */
+    @get:Input
+    abstract val archives: MapProperty<String, String>
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @get:Inject
+    abstract val fileOps: FileSystemOperations
+
+    @get:Inject
+    abstract val archiveOps: ArchiveOperations
+
+    @TaskAction
+    fun prepare() {
+        val out = outputDir.get().asFile
+        val version = releaseVersion.get()
+        for ((abi, spec) in archives.get()) {
+            val (triple, expectedSha) = spec.split(':')
+            val name = "libcurl-impersonate-v$version.$triple-linux-android.tar.gz"
+            val archive = File(out, name)
+            if (!archive.exists() || sha256(archive) != expectedSha) {
+                archive.parentFile.mkdirs()
+                val url = "https://github.com/lexiforest/curl-impersonate/releases/download/v$version/$name"
+                URI(url).toURL().openStream().use { input -> archive.outputStream().use { output -> input.copyTo(output) } }
+            }
+            val actualSha = sha256(archive)
+            if (actualSha != expectedSha) {
+                archive.delete()
+                throw GradleException("SHA-256 inattendu pour $name : $actualSha")
+            }
+            val abiDir = File(out, abi)
+            fileOps.delete { delete(abiDir) }
+            fileOps.copy {
+                from(archiveOps.tarTree(archiveOps.gzip(archive)))
+                include("include/**", "libcurl-impersonate.so", "LICENSE*")
+                into(abiDir)
+            }
+        }
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(65_536)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+    }
+}
+
+val prepareCurlImpersonate = tasks.register<PrepareCurlImpersonate>("prepareCurlImpersonate") {
+    releaseVersion.set(curlImpersonateVersion)
+    archives.set(curlImpersonateArchives.mapValues { (_, spec) -> "${spec.first}:${spec.second}" })
+    outputDir.set(curlImpersonateDir)
+}
+tasks.named("preBuild") { dependsOn(prepareCurlImpersonate) }
 
 kotlin {
     jvmToolchain(17)

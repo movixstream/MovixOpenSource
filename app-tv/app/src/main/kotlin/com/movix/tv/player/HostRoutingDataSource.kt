@@ -6,27 +6,27 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 
 /**
- * Envoie chaque requête vers [okHttp] ou [primary] selon son hôte.
+ * Envoie chaque requête vers [alternate] ou [primary] selon son hôte.
  *
- * Fsvid/Vidzy exigent l'Accept-Encoding exact de Chrome (« gzip, deflate,
- * br, zstd ») : Cronet le réécrit en « gzip, deflate, br » (relevé le
- * 2026-10-26) et reçoit leur faux master. Leurs requêtes passent donc par
- * OkHttp, le reste garde Cronet.
+ * Fsvid/Vidzy exigent un vrai profil de navigateur : TLS qui propose
+ * X25519MLKEM768 (OkHttp ne le fait pas) et Accept-Encoding exact de Chrome
+ * (Cronet le réécrit). Leurs requêtes passent donc par libcurl-impersonate
+ * ([CurlImpersonateDataSource]), le reste garde Cronet.
  */
 class HostRoutingDataSource(
     private val primary: DataSource,
-    private val okHttp: DataSource,
-    private val useOkHttp: (Uri) -> Boolean,
+    private val alternate: DataSource,
+    private val useAlternate: (Uri) -> Boolean,
 ) : DataSource {
     private var current: DataSource? = null
 
     override fun addTransferListener(transferListener: TransferListener) {
         primary.addTransferListener(transferListener)
-        okHttp.addTransferListener(transferListener)
+        alternate.addTransferListener(transferListener)
     }
 
     override fun open(dataSpec: DataSpec): Long {
-        val source = if (useOkHttp(dataSpec.uri)) okHttp else primary
+        val source = if (useAlternate(dataSpec.uri)) alternate else primary
         current = source
         return source.open(dataSpec)
     }
@@ -48,18 +48,16 @@ class HostRoutingDataSource(
 
     class Factory(
         private val primary: DataSource.Factory,
-        private val okHttp: DataSource.Factory,
-        private val useOkHttp: (Uri) -> Boolean,
+        private val alternate: DataSource.Factory,
+        private val useAlternate: (Uri) -> Boolean,
     ) : DataSource.Factory {
         override fun createDataSource(): DataSource =
-            HostRoutingDataSource(primary.createDataSource(), okHttp.createDataSource(), useOkHttp)
+            HostRoutingDataSource(primary.createDataSource(), alternate.createDataSource(), useAlternate)
     }
 
     companion object {
-        /** Hôtes dont le CDN exige l'Accept-Encoding exact de Chrome. */
-        fun needsExactChromeEncoding(uri: Uri): Boolean {
-            val host = uri.host?.lowercase()?.trimEnd('.') ?: return false
-            return listOf("fsvid.lol", "vidzy.cc", "vidzy.org").any { host == it || host.endsWith(".$it") }
-        }
+        /** Hôtes dont le CDN exige un vrai profil de navigateur. */
+        fun needsBrowserImpersonation(uri: Uri): Boolean =
+            BrowserImpersonation.requiresImpersonation(uri.toString())
     }
 }

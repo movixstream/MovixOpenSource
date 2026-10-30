@@ -1,9 +1,15 @@
 package com.movix.tv.data.movix
 
+import android.content.Context
+import com.movix.tv.player.BrowserImpersonation
+import com.movix.tv.player.CurlImpersonate
+import com.movix.tv.player.CurlImpersonateDataSource
 import com.movix.tv.player.MediaHeaders
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Call
@@ -29,7 +35,12 @@ data class Variant(val height: Int?, val codecs: List<String> = emptyList())
  * la taille de l'image et les codecs. Quelques petites requêtes par
  * candidat, en parallèle.
  */
-class StreamProbe(http: OkHttpClient) {
+class StreamProbe(
+    http: OkHttpClient,
+    // Fsvid/Vidzy servent un faux master « 720p » à OkHttp : leur sonde passe
+    // par libcurl-impersonate, comme le lecteur. Null dans les tests JVM.
+    private val context: Context? = null,
+) {
     private val client = http.newBuilder()
         .callTimeout(PER_CALL_MS, TimeUnit.MILLISECONDS)
         .build()
@@ -60,7 +71,17 @@ class StreamProbe(http: OkHttpClient) {
      * `null` si erreur. Un serveur qui ignore `Range` n'est lu qu'au début
      * du fichier. Annuler la coroutine coupe la requête.
      */
-    private suspend fun fetch(url: String, headers: Map<String, String>, offset: Long, length: Int, ranged: Boolean): ByteArray? = suspendCancellableCoroutine { cont ->
+    private suspend fun fetch(url: String, headers: Map<String, String>, offset: Long, length: Int, ranged: Boolean): ByteArray? {
+        val appContext = context
+        if (appContext != null && BrowserImpersonation.requiresImpersonation(url) && CurlImpersonate.available) {
+            return runInterruptible(Dispatchers.IO) {
+                CurlImpersonateDataSource.readPrefix(appContext, url, headers, offset, length, ranged)
+            }
+        }
+        return fetchWithOkHttp(url, headers, offset, length, ranged)
+    }
+
+    private suspend fun fetchWithOkHttp(url: String, headers: Map<String, String>, offset: Long, length: Int, ranged: Boolean): ByteArray? = suspendCancellableCoroutine { cont ->
         val request = Request.Builder().url(url).apply {
             // Mêmes en-têtes que le lecteur (Referer de SwiftFlux, d'une extraction…).
             MediaHeaders.apply(url, headers).forEach { (k, v) -> header(k, v) }

@@ -53,3 +53,10 @@ l'APK signée et réécrit ces deux fichiers.
 
 Bricolage Grotesque et Instrument Sans, sous licence SIL Open Font License 1.1,
 réduites aux caractères latins (`app/src/main/res/font/`).
+
+## Réseau du lecteur
+
+Certains hébergeurs n'acceptent qu'un vrai navigateur : le lecteur passe alors
+par [libcurl-impersonate](https://github.com/lexiforest/curl-impersonate)
+(licence MIT), téléchargée et vérifiée au build (NDK 26.1 et CMake 3.22
+requis).
