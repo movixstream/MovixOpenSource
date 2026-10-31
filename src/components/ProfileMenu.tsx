@@ -6,6 +6,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeftRight, Check, ChevronDown, Crown, KeyRound, List, LogOut, Settings, Shield, Star, User } from 'lucide-react';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { cn } from '@/lib/utils';
+import { isHiddenOnTv } from '@/routing/registry';
 import { googleAuth } from '../services/googleAuth';
 import { discordAuth } from '../services/discordAuth';
 import { useVipModal } from '../context/VipModalContext';
@@ -278,6 +279,8 @@ const ProfileMenu: React.FC = () => {
   };
 
   // Fonction pour ouvrir la modal VIP
+  const showVipButton = isVip || !isHiddenOnTv('/vip');
+
   const handleOpenVipModal = () => {
     setIsOpen(false); // Fermer le menu de profil
     if (openVipModal) {
@@ -377,7 +380,7 @@ const ProfileMenu: React.FC = () => {
             <span>{t('settings.title')}</span>
           </Link>
         </MenuItem>
-        {canAccessAdminPanel && (
+        {canAccessAdminPanel && !isHiddenOnTv('/admin') && (
           <MenuItem variant={variant} value="/admin">
             <Link to="/admin" onClick={close} className={rowClass(variant)}>
               <Shield className={ICON_CLASS} aria-hidden="true" />
@@ -387,7 +390,9 @@ const ProfileMenu: React.FC = () => {
         )}
       </MenuList>
 
-      {!isVip && (
+      {/* L'invitation « Devenir VIP » mène à /vip, hors périmètre V1 sur TV ;
+          le statut VIP, lui, reste affiché. */}
+      {!isVip && showVipButton && (
         <div data-sheet-item className="px-1 pt-2">
           {becomeVipButton}
         </div>
@@ -448,9 +453,11 @@ const ProfileMenu: React.FC = () => {
           </Link>
         </MenuItem>
       </MenuList>
-      <div data-sheet-item className="pt-2">
-        {isVip ? vipLine('justify-center py-2') : becomeVipButton}
-      </div>
+      {showVipButton && (
+        <div data-sheet-item className="pt-2">
+          {isVip ? vipLine('justify-center py-2') : becomeVipButton}
+        </div>
+      )}
     </div>
   );
 
