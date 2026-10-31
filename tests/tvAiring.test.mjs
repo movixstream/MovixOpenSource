@@ -11,8 +11,10 @@ const load = (path, globals = {}) => {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText;
   const mod = { exports: {} };
+  // Les imports `@/…` du module visé sont chargés de la même façon.
+  const requireModule = (id) => (id.startsWith('@/') ? load(`src/${id.slice(2)}.ts`) : require(id));
   new Function('require', 'module', 'exports', ...Object.keys(globals), js)(
-    require, mod, mod.exports, ...Object.values(globals),
+    requireModule, mod, mod.exports, ...Object.values(globals),
   );
   return mod.exports;
 };
