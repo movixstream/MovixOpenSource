@@ -34,6 +34,7 @@ Les README sont publiés tels quels sur le GitHub public MovixOpenSource. Ils s�
 - Comparer Chrome MV3 et Firefox MV2 pour les changements partagés. Le userscript est aussi embarqué dans l’app : vérifier le bridge et régénérer avec `node app/scripts/build-userscript.js` si nécessaire.
 - Une modification de Sync Pro concerne serveur, hook, worker et Rust ; régénérer `public/wasm/watchparty-sync/` et conserver le repli JavaScript.
 - Le service worker est le fichier personnalisé `public/sw.js`, enregistré par `src/main.tsx`. Vérifier son code et `src/services/blockDetection.ts` pour les miroirs ; ne pas supposer un TTL ou un domaine historique.
+- Périmètre TV : les routes hors V1 portent `tvExcluded` dans `src/routing/registry.tsx` ; les menus les masquent via `isHiddenOnTv(href)` (`src/routing/tvScope.ts`), jamais une liste recopiée. Le marqueur de plateforme vient de `src/utils/tvPlatform.ts`.
 - Plusieurs hébergements sont possibles (`build:cf`, `build:coolify`, `server/index.js`) : vérifier la cible du déploiement demandé.
 
 ## Vérifier selon le risque
