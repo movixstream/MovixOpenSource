@@ -61,7 +61,11 @@ function domainRestriction(req, res, next) {
     'movix.date',
     'movix.show',
     'movix.fun',
-    'movix.men'
+    'movix.men',
+    'movix.college',
+    'movix.luxe',
+    'movix.dog',
+    'movix.miami'
   ];
 
   const origin = req.get('origin');
