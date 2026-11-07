@@ -1,5 +1,5 @@
 export const CONFIG = {
-  SITE_URL: 'https://movix.dog',
+  SITE_URL: 'https://movix.miami',
   DNS_PRIMARY: '1.1.1.1',
   DNS_SECONDARY: '1.0.0.1',
   DNS_DOH_URL: 'https://cloudflare-dns.com/dns-query',
@@ -21,8 +21,9 @@ export const UPDATE_CHECK = {
 // « active » de address.json.
 export const FALLBACK_CONFIG = {
   RESOLVER_HOSTS: ['movix.online'],
-  PRIMARY_URL: 'https://movix.dog',
+  PRIMARY_URL: 'https://movix.miami',
   MIRRORS: [
+    'https://movix.dog',
     'https://movix.luxe',
     'https://movix.college',
     'https://movix.men',

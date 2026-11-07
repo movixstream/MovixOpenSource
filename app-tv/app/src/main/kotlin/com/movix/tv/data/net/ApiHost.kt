@@ -104,8 +104,8 @@ class ApiHostResolver(context: Context, base: OkHttpClient, private val json: Js
         private const val KEY = "host"
         private const val TAG = "MovixApiHost"
         private val RESOLVER_HOSTS = listOf("movix.online")
-        // Si rentry et address.json sont injoignables : ordre de address.json au 2026-10-15.
-        private val FALLBACK_DOMAINS = listOf("movix.dog", "movix.luxe", "movix.college", "movix.men", "movix.fun", "movix.cash")
+        // Si rentry et address.json sont injoignables : ordre de address.json au 2026-11-07.
+        private val FALLBACK_DOMAINS = listOf("movix.miami", "movix.dog","movix.luxe", "movix.college", "movix.men", "movix.fun", "movix.cash")
     }
 }
 
