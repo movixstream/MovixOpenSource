@@ -24,6 +24,54 @@ function maybeUseLocalApi(sender) {
         : PROD_API_BASE_URL;
   } catch (e) {}
 }
+
+// Domaines du site. Seules leurs pages peuvent piloter l'extension : sans ce
+// contrôle, n'importe quel site visité pouvait lui faire lire localhost et le
+// réseau local (PROXY_HTTP) ou poser des règles d'en-têtes sur d'autres
+// sites. Même liste que `content_scripts.matches` dans manifest.json.
+const MOVIX_SITE_DOMAINS = [
+  "localhost",
+  "127.0.0.1",
+  "movix.cash",
+  "movix.cloud",
+  "movix.tax",
+  "movix.club",
+  "movix.chat",
+  "movix.golf",
+  "movix.date",
+  "movix.fun",
+  "movix.show",
+  "movix.men",
+  "movix.college",
+  "movix.luxe",
+  "movix.dog",
+  "movix.miami",
+];
+
+function isMovixSiteUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    const host = url.hostname.toLowerCase();
+    const isLocal = host === "localhost" || host === "127.0.0.1";
+    if (url.protocol !== "https:" && !(isLocal && url.protocol === "http:")) {
+      return false;
+    }
+    return MOVIX_SITE_DOMAINS.some(
+      (domain) => host === domain || host.endsWith("." + domain),
+    );
+  } catch (e) {
+    return false;
+  }
+}
+
+// Une page de l'extension (popup) ou le script de contenu d'une page Movix.
+function isTrustedSender(sender) {
+  if (!sender || sender.id !== browserAPI.runtime.id) return false;
+  const url = typeof sender.url === "string" ? sender.url : "";
+  if (url.startsWith(browserAPI.runtime.getURL(""))) return true;
+  return isMovixSiteUrl(url);
+}
+
 const STREAM_PROXY_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -531,24 +579,7 @@ async function setupRules() {
       },
       condition: {
         urlFilter: "*",
-        initiatorDomains: [
-          "localhost",
-          "127.0.0.1",
-          "movix.cash",
-          "movix.cloud",
-          "movix.tax",
-          "movix.club",
-          "movix.chat",
-          "movix.golf",
-          "movix.date",
-          "movix.fun",
-          "movix.show",
-          "movix.men",
-          "movix.college",
-          "movix.luxe",
-          "movix.dog",
-          "movix.miami",
-        ],
+        initiatorDomains: MOVIX_SITE_DOMAINS,
         resourceTypes: [
           "xmlhttprequest",
           "other",
@@ -598,6 +629,10 @@ function isEmbedAllowed(type) {
 
 // Handle messages
 browserAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!isTrustedSender(sender)) {
+    sendResponse({ error: "Origine non autorisée" });
+    return false;
+  }
   maybeUseLocalApi(sender);
   handleMessage(message)
     .then(sendResponse)

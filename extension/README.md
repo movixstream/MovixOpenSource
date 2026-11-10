@@ -60,6 +60,8 @@ Ces permissions servent à :
 - exécuter des extractions dans le contexte adapté
 - permettre la communication avec Movix sur ses domaines autorisés
 
+L'extension n'écoute que les pages de ces domaines. Pour en ajouter un, complète `content_scripts.matches` dans le manifest et `MOVIX_SITE_DOMAINS` dans `background.js`, pour Chrome et Firefox.
+
 ## Notes de contribution
 
 - Si tu modifies la logique partagée, compare toujours `Chrome/` et `Firefox/`.
