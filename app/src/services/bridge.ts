@@ -1511,6 +1511,36 @@ export function isTrustedMovixBridgeUrl(
   });
 }
 
+// Requêtes réservées à la page Movix : GM_FETCH est un client HTTP natif, sans
+// CORS ni filtre d'adresse, et GM_*_VALUE est le stockage du userscript.
+const GM_TRUSTED_ONLY_TYPES: ReadonlySet<string> = new Set([
+  'GM_FETCH',
+  'GM_GET_VALUE',
+  'GM_SET_VALUE',
+  'GM_DELETE_VALUE',
+]);
+
+/**
+ * Vrai si le message vient du document Movix de premier niveau.
+ *
+ * Le pont est injecté dans toute page que la WebView charge : une publicité
+ * ou un lecteur tiers qui prend l'onglet entier pouvait donc lire le réseau
+ * local de l'utilisateur avec GM_FETCH. Android indique toujours le cadre
+ * d'origine, on exige le premier niveau ; iOS ne le transmet pas, on s'y
+ * contente de l'origine de la page et on refuse un cadre connu comme interne.
+ */
+function isTrustedGmDocument(context: BridgeMessageContext | undefined): boolean {
+  if (
+    !context
+    || !isTrustedMovixBridgeUrl(context.sourceUrl, context.trustedOrigins)
+  ) {
+    return false;
+  }
+  return Platform.OS === 'android'
+    ? context.isTopFrame === true
+    : context.isTopFrame !== false;
+}
+
 function registerIOSMediaProxyCapability(
   message: Record<string, unknown>,
   webViewRef: RefObject<WebView | null>,
@@ -1924,6 +1954,17 @@ export async function handleBridgeMessage(
 
   const req = parsed as BridgeRequest;
   if (!req.type || !req.id) return;
+
+  if (GM_TRUSTED_ONLY_TYPES.has(req.type) && !isTrustedGmDocument(context)) {
+    // Réponse explicite : la promesse côté page échoue tout de suite au lieu
+    // d'attendre son délai.
+    sendToWebView(webViewRef, {
+      id: String(req.id).slice(0, 128),
+      success: false,
+      error: 'Bridge unavailable on this page',
+    });
+    return;
+  }
 
   let response: BridgeResponse;
 
