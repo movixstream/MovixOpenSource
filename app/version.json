@@ -1,13 +1,13 @@
 {
-  "version": "2.6.13",
-  "buildNumber": 50,
+  "version": "2.6.14",
+  "buildNumber": 51,
   "apkUrl": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app/movix-android.apk",
-  "apkSizeBytes": 79465796,
-  "apkSha256": "220ea12763f3ed990688e2b14fdee0a4e3eda8420a13f536f3b151491d9e9773",
+  "apkSizeBytes": 79347535,
+  "apkSha256": "ce6b21e1f5a84234e85b384ba058b33ed601b903b8f79c6789829b92977764b2",
   "mandatory": false,
-  "releasedAt": "2026-10-30T13:35:43.000Z",
+  "releasedAt": "2026-11-10T13:38:06.000Z",
   "releaseNotes": {
-    "fr": "Fsvid et Vidzy se lisent à nouveau. L'app se présente maintenant à ces sites comme un vrai navigateur Chrome, ce qui devrait tenir bien plus longtemps.",
-    "en": "Fsvid and Vidzy play again. The app now presents itself to these sites as a real Chrome browser, which should hold up much longer."
+    "fr": "La sécurité de l'app a été améliorée. Mise à jour conseillée.",
+    "en": "The app's security has been improved. Update recommended."
   }
 }
