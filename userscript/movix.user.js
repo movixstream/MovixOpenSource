@@ -1,15 +1,11 @@
 // ==UserScript==
 // @name         Movix Proxy Extension (Tampermonkey)
 // @namespace    https://movix.cash
-// @version      1.7.7
+// @version      1.7.8
 // @description  Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus - version userscript Tampermonkey
 // @author       Movix
 // @updateURL    https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
 // @downloadURL  https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
-// @match        http://localhost/*
-// @match        http://127.0.0.1/*
-// @match        https://localhost/*
-// @match        https://127.0.0.1/*
 // @match        https://movix.cash/*
 // @match        https://*.movix.cash/*
 // @match        https://movix.club/*
@@ -429,7 +425,7 @@
 
   const USERSCRIPT_MANIFEST = {
     name: "Movix Proxy Extension",
-    version: "1.7.7",
+    version: "1.7.8",
     description:
       "Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus",
   };
@@ -870,6 +866,9 @@
           url: requestUrl,
           headers,
           ...(cookieHeader ? { cookie: headers[cookieHeader] } : {}),
+          // `anonymous` : sans les cookies du navigateur. Demandé par
+          // PROXY_HTTP, que la page appelle avec l'URL de son choix.
+          ...(init.anonymous === true ? { anonymous: true } : {}),
           data: body,
           responseType: "arraybuffer",
           timeout: init.timeout ?? 30000,
@@ -5911,7 +5910,10 @@
         }
       }
 
-      const response = await fetch(url, { headers });
+      // Sans cookies, comme l'extension : la page choisit l'URL et reçoit le
+      // corps de la réponse, elle ne doit pas lire un site où l'utilisateur
+      // est connecté.
+      const response = await fetch(url, { headers, anonymous: true });
       const buffer = await response.arrayBuffer();
       const base64 = proxyBytesToBase64(new Uint8Array(buffer));
 
