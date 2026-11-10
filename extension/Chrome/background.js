@@ -19,13 +19,29 @@ function maybeUseLocalApi(sender) {
   } catch (e) {}
 }
 
+// BEGIN SITE DOMAINS
 // Domaines du site. Seules leurs pages peuvent piloter l'extension : sans ce
 // contrôle, n'importe quel site visité pouvait lui faire lire localhost et le
 // réseau local (PROXY_HTTP) ou poser des règles d'en-têtes sur d'autres
-// sites. Même liste que `content_scripts.matches` dans manifest.json.
-const MOVIX_SITE_DOMAINS = [
-  "localhost",
-  "127.0.0.1",
+// sites.
+//
+// La liste vient de movix.online (address.json, champ « active ») et reste en
+// cache : un nouveau domaine marche sans mise à jour de l'extension, un
+// domaine retiré n'est plus écouté. La liste intégrée ne sert que tant que
+// movix.online n'a jamais répondu.
+const SITE_DOMAINS_API = chrome;
+const SITE_DOMAINS_URL = "https://movix.online/address.json";
+const SITE_DOMAINS_STORAGE_KEY = "siteDomains";
+const SITE_DOMAINS_ALARM = "movix-site-domains";
+const SITE_DOMAINS_SCRIPT_ID = "movix-site-domains";
+const SITE_DOMAINS_REFRESH_MINUTES = 60;
+const SITE_DOMAINS_RETRY_MINUTES = 15;
+const SITE_DOMAINS_TIMEOUT_MS = 10000;
+const SITE_DOMAINS_MAX = 50;
+const SITE_DOMAIN_RE =
+  /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+const LOCAL_SITE_HOSTS = ["localhost", "127.0.0.1"];
+const BUILTIN_SITE_DOMAINS = [
   "movix.cash",
   "movix.cloud",
   "movix.tax",
@@ -41,6 +57,222 @@ const MOVIX_SITE_DOMAINS = [
   "movix.dog",
   "movix.miami",
 ];
+
+// Liste reçue de movix.online, ou null tant qu'elle n'est jamais arrivée.
+let remoteSiteDomains = null;
+let MOVIX_SITE_DOMAINS = [...LOCAL_SITE_HOSTS, ...BUILTIN_SITE_DOMAINS];
+let siteDomainsNextCheckAt = 0;
+let siteDomainsCheckedAt = 0;
+let siteDomainsRefresh = null;
+let siteDomainsSyncQueue = Promise.resolve();
+
+function normalizeSiteDomains(list) {
+  if (!Array.isArray(list)) return null;
+  const domains = [];
+  for (const entry of list) {
+    if (typeof entry !== "string") continue;
+    const domain = entry.trim().toLowerCase();
+    if (domain.length > 253 || !SITE_DOMAIN_RE.test(domain)) continue;
+    if (!domains.includes(domain)) domains.push(domain);
+    if (domains.length >= SITE_DOMAINS_MAX) break;
+  }
+  return domains.length ? domains : null;
+}
+
+// address.json : { active: [{ url: "https://movix.miami" }, …] }
+function parseSiteDomainsPayload(payload) {
+  if (!payload || !Array.isArray(payload.active)) return null;
+  const hosts = [];
+  for (const entry of payload.active) {
+    try {
+      const url = new URL(entry && entry.url);
+      if (url.protocol !== "https:" || url.port) continue;
+      if (url.username || url.password) continue;
+      hosts.push(url.hostname);
+    } catch (e) {}
+  }
+  return normalizeSiteDomains(hosts);
+}
+
+function setRemoteSiteDomains(domains) {
+  remoteSiteDomains = domains;
+  MOVIX_SITE_DOMAINS = [
+    ...LOCAL_SITE_HOSTS,
+    ...(domains || BUILTIN_SITE_DOMAINS),
+  ];
+}
+
+// Le service worker redémarre souvent : la liste en cache doit être relue
+// avant de juger l'expéditeur d'un message ou de poser la règle CORS.
+const siteDomainsReady = (async () => {
+  try {
+    const result = await SITE_DOMAINS_API.storage.local.get(
+      SITE_DOMAINS_STORAGE_KEY,
+    );
+    const stored = result && result[SITE_DOMAINS_STORAGE_KEY];
+    if (!stored) return;
+    setRemoteSiteDomains(normalizeSiteDomains(stored.domains));
+    if (Number.isFinite(stored.nextCheckAt)) {
+      // Une horloge reculée ne doit pas geler la liste.
+      siteDomainsNextCheckAt = Math.min(
+        stored.nextCheckAt,
+        Date.now() + SITE_DOMAINS_REFRESH_MINUTES * 60000,
+      );
+    }
+  } catch (e) {}
+})();
+
+// Les domaines que le manifest ne couvre pas reçoivent le script de contenu
+// par enregistrement dynamique. Ceux du manifest sont sautés : deux
+// injections répondraient deux fois à chaque message de la page.
+function syncSiteContentScripts() {
+  const run = async () => {
+    const scripting = SITE_DOMAINS_API.scripting;
+    if (!scripting || !scripting.registerContentScripts) return;
+
+    const manifestDomains = (
+      SITE_DOMAINS_API.runtime.getManifest().content_scripts || []
+    )
+      .flatMap((entry) => entry.matches || [])
+      .map((pattern) => /^\*:\/\/(?:\*\.)?([^/*]+)\/\*$/.exec(pattern))
+      .filter(Boolean)
+      .map((match) => match[1]);
+    const matches = MOVIX_SITE_DOMAINS.filter(
+      (domain) =>
+        !LOCAL_SITE_HOSTS.includes(domain) &&
+        !manifestDomains.some(
+          (covered) => domain === covered || domain.endsWith("." + covered),
+        ),
+    ).flatMap((domain) => [`https://${domain}/*`, `https://*.${domain}/*`]);
+
+    const registered = (await scripting.getRegisteredContentScripts()).find(
+      (script) => script.id === SITE_DOMAINS_SCRIPT_ID,
+    );
+    const current = registered ? registered.matches || [] : [];
+    if (
+      current.length === matches.length &&
+      matches.every((pattern) => current.includes(pattern))
+    ) {
+      return;
+    }
+    if (registered) {
+      await scripting.unregisterContentScripts({
+        ids: [SITE_DOMAINS_SCRIPT_ID],
+      });
+    }
+    if (matches.length) {
+      await scripting.registerContentScripts([
+        {
+          id: SITE_DOMAINS_SCRIPT_ID,
+          matches,
+          js: ["content.js"],
+          runAt: "document_start",
+          persistAcrossSessions: true,
+        },
+      ]);
+    }
+  };
+  siteDomainsSyncQueue = siteDomainsSyncQueue.then(run).catch(() => {});
+  return siteDomainsSyncQueue;
+}
+
+// Ne remplace que la règle CORS (id 1) : setupRules() effacerait aussi les
+// règles d'en-têtes d'une lecture en cours. Absente = extension coupée.
+async function refreshSiteCorsRule() {
+  const dnr = SITE_DOMAINS_API.declarativeNetRequest;
+  const rule = (await dnr.getDynamicRules()).find((entry) => entry.id === 1);
+  if (!rule) return;
+  await dnr.updateDynamicRules({
+    removeRuleIds: [1],
+    addRules: [
+      {
+        ...rule,
+        condition: { ...rule.condition, initiatorDomains: MOVIX_SITE_DOMAINS },
+      },
+    ],
+  });
+}
+
+function refreshSiteDomains() {
+  if (siteDomainsRefresh) return siteDomainsRefresh;
+  siteDomainsRefresh = (async () => {
+    await siteDomainsReady;
+
+    let domains = null;
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      SITE_DOMAINS_TIMEOUT_MS,
+    );
+    try {
+      const response = await fetch(SITE_DOMAINS_URL, {
+        cache: "no-store",
+        credentials: "omit",
+        signal: controller.signal,
+      });
+      if (response.ok) {
+        domains = parseSiteDomainsPayload(await response.json());
+      }
+    } catch (e) {
+    } finally {
+      clearTimeout(timer);
+    }
+
+    // Réponse absente ou illisible : on garde la liste en place et on
+    // réessaie plus tôt.
+    const previous = MOVIX_SITE_DOMAINS.join();
+    if (domains) setRemoteSiteDomains(domains);
+    siteDomainsCheckedAt = Date.now();
+    siteDomainsNextCheckAt =
+      siteDomainsCheckedAt +
+      (domains ? SITE_DOMAINS_REFRESH_MINUTES : SITE_DOMAINS_RETRY_MINUTES) *
+        60000;
+    try {
+      await SITE_DOMAINS_API.storage.local.set({
+        [SITE_DOMAINS_STORAGE_KEY]: {
+          domains: remoteSiteDomains,
+          nextCheckAt: siteDomainsNextCheckAt,
+        },
+      });
+    } catch (e) {}
+
+    if (MOVIX_SITE_DOMAINS.join() !== previous) {
+      try {
+        await refreshSiteCorsRule();
+      } catch (e) {}
+    }
+    await syncSiteContentScripts();
+  })().finally(() => {
+    siteDomainsRefresh = null;
+  });
+  return siteDomainsRefresh;
+}
+
+siteDomainsReady.then(() => {
+  // Après une mise à jour, le manifest peut couvrir un domaine jusque-là
+  // enregistré dynamiquement.
+  void syncSiteContentScripts();
+  if (Date.now() >= siteDomainsNextCheckAt) {
+    void refreshSiteDomains().catch(() => {});
+  }
+});
+
+// Créée une seule fois : la recréer à chaque réveil du service worker
+// repousserait sans fin son échéance.
+Promise.resolve(SITE_DOMAINS_API.alarms.get(SITE_DOMAINS_ALARM))
+  .then((alarm) => {
+    if (alarm) return;
+    return SITE_DOMAINS_API.alarms.create(SITE_DOMAINS_ALARM, {
+      periodInMinutes: SITE_DOMAINS_REFRESH_MINUTES,
+    });
+  })
+  .catch(() => {});
+SITE_DOMAINS_API.alarms.onAlarm.addListener((alarm) => {
+  if (alarm && alarm.name === SITE_DOMAINS_ALARM) {
+    void refreshSiteDomains().catch(() => {});
+  }
+});
+// END SITE DOMAINS
 
 function isMovixSiteUrl(rawUrl) {
   try {
@@ -541,6 +773,8 @@ chrome.runtime.onStartup.addListener(() => {
 
 // Configure DNR rules for CORS and Headers
 async function setupRules() {
+  await siteDomainsReady;
+
   // Clear existing dynamic rules to prevent accumulation
   const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
   const ruleIds = existingRules.map((rule) => rule.id);
@@ -602,13 +836,22 @@ async function setupRules() {
 
 // Handle messages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!isTrustedSender(sender)) {
-    sendResponse({ error: "Origine non autorisée" });
-    return false;
-  }
-  maybeUseLocalApi(sender);
-  handleMessage(message)
-    .then(sendResponse)
+  // La liste des domaines en cache doit être relue avant de juger
+  // l'expéditeur : au réveil du service worker, elle n'est pas encore là.
+  siteDomainsReady
+    .then(() => {
+      if (!isTrustedSender(sender)) {
+        sendResponse({ error: "Origine non autorisée" });
+        return;
+      }
+      // Ouvrir le popup relit la liste des domaines : pratique juste après
+      // un changement d'adresse, sans attendre la prochaine échéance.
+      if (!sender.tab && Date.now() - siteDomainsCheckedAt > 60000) {
+        void refreshSiteDomains().catch(() => {});
+      }
+      maybeUseLocalApi(sender);
+      return handleMessage(message).then(sendResponse);
+    })
     .catch((err) => sendResponse({ error: err.message }));
   return true; // Keep channel open for async response
 });

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Movix Proxy Extension",
-  "version": "1.6.7",
+  "version": "1.6.8",
   "description": "Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus",
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
@@ -24,6 +24,7 @@
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess",
     "alarms",
+    "scripting",
     "storage"
   ],
   "host_permissions": ["<all_urls>", "http://*/*", "https://*/*"],
@@ -68,39 +69,6 @@
       "run_at": "document_start"
     }
   ],
-  "externally_connectable": {
-    "matches": [
-      "*://localhost/*",
-      "*://movix.cash/*",
-      "*://*.movix.cash/*",
-      "*://movix.cloud/*",
-      "*://*.movix.cloud/*",
-      "*://movix.tax/*",
-      "*://*.movix.tax/*",
-      "*://movix.club/*",
-      "*://*.movix.club/*",
-      "*://movix.golf/*",
-      "*://*.movix.golf/*",
-      "*://movix.chat/*",
-      "*://*.movix.chat/*",
-      "*://movix.date/*",
-      "*://*.movix.date/*",
-      "*://movix.fun/*",
-      "*://*.movix.fun/*",
-      "*://movix.show/*",
-      "*://*.movix.show/*",
-      "*://movix.men/*",
-      "*://*.movix.men/*",
-      "*://movix.college/*",
-      "*://*.movix.college/*",
-      "*://movix.luxe/*",
-      "*://*.movix.luxe/*",
-      "*://movix.dog/*",
-      "*://*.movix.dog/*",
-      "*://movix.miami/*",
-      "*://*.movix.miami/*"
-    ]
-  },
   "web_accessible_resources": [
     {
       "resources": [

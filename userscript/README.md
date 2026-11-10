@@ -25,6 +25,7 @@ Sur Firefox, l'extension native reste généralement le choix le plus propre.
 - s'appuie sur `GM_xmlhttpRequest` et le stockage Tampermonkey
 - reproduit une partie des mécanismes de réécriture de requêtes et d'extraction locale
 - se charge très tôt dans la page (`document-start`)
+- ne s'active que sur les domaines du site, lus sur `https://movix.online/address.json` (champ `active`)
 
 ## Fichiers à connaître
 

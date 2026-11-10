@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Movix Proxy Extension (Tampermonkey)
 // @namespace    https://movix.cash
-// @version      1.7.8
+// @version      1.7.9
 // @description  Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus - version userscript Tampermonkey
 // @author       Movix
 // @updateURL    https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
@@ -34,6 +34,7 @@
 // @match        https://*.movix.dog/*
 // @match        https://movix.miami/*
 // @match        https://*.movix.miami/*
+// @include      /^https:\/\/([a-z0-9-]+\.)*movix\.[a-z]{2,63}\/.*$/
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -48,6 +49,241 @@
 
 (() => {
   "use strict";
+
+  // BEGIN SITE DOMAINS
+  // Les domaines du site viennent de movix.online (address.json, champ
+  // « active ») et restent en cache : un nouveau domaine marche sans mise à
+  // jour du script, un domaine retiré n'est plus servi. La liste intégrée ne
+  // sert que tant que movix.online n'a jamais répondu.
+  //
+  // L'en-tête couvre donc tout « movix.<extension> ». Sous un gestionnaire de
+  // userscripts, le script s'arrête ici sur un domaine absent de la liste.
+  // Dans l'app mobile (pas de GM_info), c'est l'app qui choisit les pages :
+  // pas d'arrêt.
+  const SITE_DOMAINS_URL = "https://movix.online/address.json";
+  const SITE_DOMAINS_STORAGE_KEY = "movix_site_domains";
+  const SITE_DOMAINS_RELOAD_KEY = "movix_userscript_site_domains_reload";
+  const SITE_DOMAINS_REFRESH_MS = 60 * 60 * 1000;
+  const SITE_DOMAINS_POLL_MS = 5 * 60 * 1000;
+  const SITE_DOMAINS_RETRY_MS = 15 * 60 * 1000;
+  const SITE_DOMAINS_UNKNOWN_HOST_RETRY_MS = 5 * 60 * 1000;
+  const SITE_DOMAINS_TIMEOUT_MS = 10000;
+  const SITE_DOMAINS_MAX = 50;
+  const SITE_DOMAIN_RE =
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+  const BUILTIN_SITE_DOMAINS = [
+    "movix.cash",
+    "movix.club",
+    "movix.cloud",
+    "movix.tax",
+    "movix.golf",
+    "movix.chat",
+    "movix.date",
+    "movix.fun",
+    "movix.show",
+    "movix.men",
+    "movix.college",
+    "movix.luxe",
+    "movix.dog",
+    "movix.miami",
+  ];
+
+  // Liste reçue de movix.online, ou null tant qu'elle n'est jamais arrivée.
+  let remoteSiteDomains = null;
+  let siteDomains = BUILTIN_SITE_DOMAINS;
+  let siteDomainsCheckedAt = 0;
+  let siteDomainsLastCheckFailed = false;
+
+  function normalizeSiteDomains(list) {
+    if (!Array.isArray(list)) return null;
+    const domains = [];
+    for (const entry of list) {
+      if (typeof entry !== "string") continue;
+      const domain = entry.trim().toLowerCase();
+      if (domain.length > 253 || !SITE_DOMAIN_RE.test(domain)) continue;
+      if (!domains.includes(domain)) domains.push(domain);
+      if (domains.length >= SITE_DOMAINS_MAX) break;
+    }
+    return domains.length ? domains : null;
+  }
+
+  // address.json : { active: [{ url: "https://movix.miami" }, …] }
+  function parseSiteDomainsPayload(payload) {
+    if (!payload || !Array.isArray(payload.active)) return null;
+    const hosts = [];
+    for (const entry of payload.active) {
+      try {
+        const url = new URL(entry && entry.url);
+        if (url.protocol !== "https:" || url.port) continue;
+        if (url.username || url.password) continue;
+        hosts.push(url.hostname);
+      } catch {}
+    }
+    return normalizeSiteDomains(hosts);
+  }
+
+  function setRemoteSiteDomains(domains) {
+    remoteSiteDomains = domains;
+    siteDomains = domains || BUILTIN_SITE_DOMAINS;
+  }
+
+  function isSiteHost(hostname) {
+    const host = String(hostname || "").toLowerCase();
+    return siteDomains.some(
+      (domain) => host === domain || host.endsWith("." + domain),
+    );
+  }
+
+  function applyStoredSiteDomains(stored) {
+    if (!stored || typeof stored !== "object") return;
+    setRemoteSiteDomains(normalizeSiteDomains(stored.domains));
+    if (Number.isFinite(stored.checkedAt)) {
+      // Une horloge reculée ne doit pas geler la liste.
+      siteDomainsCheckedAt = Math.min(stored.checkedAt, Date.now());
+    }
+    siteDomainsLastCheckFailed = stored.failed === true;
+  }
+
+  function readStoredSiteDomains() {
+    try {
+      if (typeof GM_getValue === "function") {
+        return GM_getValue(SITE_DOMAINS_STORAGE_KEY, null);
+      }
+      if (
+        typeof GM !== "undefined" &&
+        GM &&
+        typeof GM.getValue === "function"
+      ) {
+        return GM.getValue(SITE_DOMAINS_STORAGE_KEY, null);
+      }
+    } catch {}
+    return null;
+  }
+
+  // Résout à true quand movix.online a rendu une liste valable. Réponse
+  // absente ou illisible : on garde la liste en place.
+  function refreshSiteDomains() {
+    return new Promise((resolve) => {
+      let request;
+      try {
+        request = getGMRequest();
+      } catch {
+        resolve(false);
+        return;
+      }
+
+      let settled = false;
+      const finish = (payload) => {
+        if (settled) return;
+        settled = true;
+        const domains = payload ? parseSiteDomainsPayload(payload) : null;
+        if (domains) setRemoteSiteDomains(domains);
+        siteDomainsCheckedAt = Date.now();
+        siteDomainsLastCheckFailed = !domains;
+        Promise.resolve()
+          .then(() =>
+            gmSetValueCompat(SITE_DOMAINS_STORAGE_KEY, {
+              domains: remoteSiteDomains,
+              checkedAt: siteDomainsCheckedAt,
+              failed: siteDomainsLastCheckFailed,
+            }),
+          )
+          .then(
+            () => resolve(Boolean(domains)),
+            () => resolve(Boolean(domains)),
+          );
+      };
+
+      try {
+        request({
+          method: "GET",
+          url: SITE_DOMAINS_URL,
+          timeout: SITE_DOMAINS_TIMEOUT_MS,
+          anonymous: true,
+          onload: (response) => {
+            let payload = null;
+            try {
+              if (response && response.status === 200) {
+                payload = JSON.parse(response.responseText);
+              }
+            } catch {}
+            finish(payload);
+          },
+          onerror: () => finish(null),
+          ontimeout: () => finish(null),
+          onabort: () => finish(null),
+        });
+      } catch {
+        finish(null);
+      }
+    });
+  }
+
+  function refreshSiteDomainsIfOlderThan(maxAgeMs) {
+    if (Date.now() - siteDomainsCheckedAt < maxAgeMs) {
+      return Promise.resolve(false);
+    }
+    return refreshSiteDomains();
+  }
+
+  // Relit d'abord le cache : un autre onglet a peut-être déjà fait la
+  // requête de l'heure.
+  function refreshSiteDomainsWhenDue() {
+    return Promise.resolve(readStoredSiteDomains())
+      .then((stored) => {
+        applyStoredSiteDomains(stored);
+        return refreshSiteDomainsIfOlderThan(
+          siteDomainsLastCheckFailed
+            ? SITE_DOMAINS_RETRY_MS
+            : SITE_DOMAINS_REFRESH_MS,
+        );
+      })
+      .catch(() => false);
+  }
+
+  // Un seul rechargement par onglet : sans stockage de session pour s'en
+  // souvenir, on ne recharge pas.
+  function reloadOnceForSiteDomains() {
+    try {
+      if (sessionStorage.getItem(SITE_DOMAINS_RELOAD_KEY)) return;
+      sessionStorage.setItem(SITE_DOMAINS_RELOAD_KEY, "1");
+    } catch {
+      return;
+    }
+    location.reload();
+  }
+
+  const siteDomainsHostname =
+    typeof location !== "undefined" && location ? location.hostname : "";
+  const storedSiteDomains = readStoredSiteDomains();
+  const storedSiteDomainsPending =
+    storedSiteDomains && typeof storedSiteDomains.then === "function";
+  if (!storedSiteDomainsPending) applyStoredSiteDomains(storedSiteDomains);
+
+  if (typeof GM_info !== "undefined" && !isSiteHost(siteDomainsHostname)) {
+    // Domaine inconnu : peut-être une adresse toute neuve. On relit la liste
+    // et, si elle le contient maintenant, on recharge la page pour démarrer
+    // le script normalement, dès le début du chargement. Un stockage
+    // asynchrone ne permet pas de le savoir à temps : la liste intégrée
+    // décide seule.
+    if (!storedSiteDomainsPending) {
+      refreshSiteDomainsIfOlderThan(SITE_DOMAINS_UNKNOWN_HOST_RETRY_MS)
+        .then((updated) => {
+          if (updated && isSiteHost(siteDomainsHostname)) {
+            reloadOnceForSiteDomains();
+          }
+        })
+        .catch(() => {});
+    }
+    return;
+  }
+
+  // La liste est relue toutes les heures, même si la page reste ouverte.
+  refreshSiteDomainsWhenDue();
+  if (typeof setInterval === "function") {
+    setInterval(refreshSiteDomainsWhenDue, SITE_DOMAINS_POLL_MS);
+  }
+  // END SITE DOMAINS
 
   // BEGIN KISSKH FALLBACK
   const KISSKH_REQUEST_TIMEOUT_MS = 10000;
@@ -425,7 +661,7 @@
 
   const USERSCRIPT_MANIFEST = {
     name: "Movix Proxy Extension",
-    version: "1.7.8",
+    version: "1.7.9",
     description:
       "Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus",
   };
@@ -5544,24 +5780,7 @@
         },
         condition: {
           urlFilter: "*",
-          initiatorDomains: [
-            "localhost",
-            "127.0.0.1",
-            "movix.cash",
-            "movix.club",
-            "movix.cloud",
-            "movix.tax",
-            "movix.golf",
-            "movix.chat",
-            "movix.date",
-            "movix.fun",
-            "movix.show",
-            "movix.men",
-            "movix.college",
-            "movix.luxe",
-            "movix.dog",
-            "movix.miami",
-          ],
+          initiatorDomains: ["localhost", "127.0.0.1", ...siteDomains],
           resourceTypes: [
             "xmlhttprequest",
             "other",
@@ -6144,36 +6363,7 @@
       const currentOrigin = pageWindow.location?.origin;
       const currentHostname = pageWindow.location?.hostname ?? "";
 
-      if (
-        currentHostname === "movix.cash" ||
-        currentHostname.endsWith(".movix.cash") ||
-        currentHostname === "movix.club" ||
-        currentHostname.endsWith(".movix.club") ||
-        currentHostname === "movix.cloud" ||
-        currentHostname.endsWith(".movix.cloud") ||
-        currentHostname === "movix.tax" ||
-        currentHostname.endsWith(".movix.tax") ||
-        currentHostname === "movix.golf" ||
-        currentHostname === "movix.chat" ||
-        currentHostname.endsWith(".movix.chat") ||
-        currentHostname === "movix.date" ||
-        currentHostname.endsWith(".movix.date") ||
-        currentHostname === "movix.fun" ||
-        currentHostname.endsWith(".movix.fun") ||
-        currentHostname === "movix.show" ||
-        currentHostname.endsWith(".movix.show") ||
-        currentHostname === "movix.men" ||
-        currentHostname.endsWith(".movix.men") ||
-        currentHostname === "movix.college" ||
-        currentHostname.endsWith(".movix.college") ||
-        currentHostname === "movix.luxe" ||
-        currentHostname.endsWith(".movix.luxe") ||
-        currentHostname === "movix.dog" ||
-        currentHostname.endsWith(".movix.dog") ||
-        currentHostname === "movix.miami" ||
-        currentHostname.endsWith(".movix.miami") ||
-        currentHostname.endsWith(".movix.golf")
-      ) {
+      if (isSiteHost(currentHostname)) {
         return (currentOrigin || "https://movix.fun").replace(/\/$/, "");
       }
     } catch {}

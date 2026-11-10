@@ -50,6 +50,7 @@ Les manifests déclarent notamment :
 
 - `declarativeNetRequest`
 - `declarativeNetRequestWithHostAccess`
+- `scripting`
 - `storage`
 - des `host_permissions` larges
 
@@ -60,7 +61,7 @@ Ces permissions servent à :
 - exécuter des extractions dans le contexte adapté
 - permettre la communication avec Movix sur ses domaines autorisés
 
-L'extension n'écoute que les pages de ces domaines. Pour en ajouter un, complète `content_scripts.matches` dans le manifest et `MOVIX_SITE_DOMAINS` dans `background.js`, pour Chrome et Firefox.
+L'extension n'écoute que les pages des domaines du site. Leur liste est lue sur `https://movix.online/address.json` (champ `active`) et gardée en cache : un nouveau domaine ne demande pas de nouvelle version. `BUILTIN_SITE_DOMAINS` dans `background.js` sert de repli.
 
 ## Notes de contribution
 
