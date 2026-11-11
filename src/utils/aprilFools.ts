@@ -1,4 +1,5 @@
 import { readSessionStorage } from './browserStorage';
+import { getNumericDateParts } from './dateParts';
 
 const APRIL_FOOLS_TIMEZONE = 'Europe/Paris';
 const APRIL_FOOLS_PREVIEW_QUERY = 'apriladmin';
@@ -13,9 +14,7 @@ const aprilFoolsFormatter = new Intl.DateTimeFormat('en-GB', {
 export const APRIL_FOOLS_ADMIN_PATH = '/admin-control-center';
 
 const getMonthDay = (date: Date) => {
-  const parts = aprilFoolsFormatter.formatToParts(date);
-  const day = parts.find((part) => part.type === 'day')?.value ?? '';
-  const month = parts.find((part) => part.type === 'month')?.value ?? '';
+  const { day = '', month = '' } = getNumericDateParts(aprilFoolsFormatter, date);
 
   return { day, month };
 };
