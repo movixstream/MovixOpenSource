@@ -31,6 +31,9 @@ import { TopProgressBar } from './components/TopProgressBar';
 import SmoothScroll from './components/SmoothScroll';
 import { getProviderCatalogScope, ROUTES, type RouteEntry } from './routing/registry';
 import { IdleRoutePrefetch } from '@/routing/IdleRoutePrefetch';
+import { isTvPlatform } from './utils/tvPlatform';
+import { useTvSpatialNav } from './hooks/useTvSpatialNav';
+import { useTvBackKey } from './hooks/useTvBackKey';
 import { DelayedSuspense } from './components/DelayedSuspense';
 import { RouteProgressBar } from './components/RouteProgressBar';
 import ScreenSaver from './components/ScreenSaver';
@@ -519,6 +522,13 @@ const ProfileSelectionLazy = lazy(() => import('./pages/ProfileSelection'));
 const AprilFoolsAdminPageLazy = lazy(() => import('./pages/AprilFoolsAdminPage'));
 // IntroAnimation (~38 Ko) est opt-in et off par défaut : chunk séparé (perf)
 const IntroAnimationLazy = lazy(() => import('./components/IntroAnimation'));
+
+// Périmètre V1 sur TV : WatchParty, VIP, admin, Wrapped et CineGraph ne sont
+// pas montés. La plateforme ne change pas en cours de session, donc ce filtre
+// est calculé une fois au chargement du module.
+const VISIBLE_ROUTES: RouteEntry[] = isTvPlatform()
+  ? ROUTES.filter((route) => !route.tvExcluded)
+  : ROUTES;
 
 // Cache module-level des composants Lazy par path. Sans ça, chaque appel à
 // renderRouteEntry (ROUTES.map à chaque render d'App) créerait une nouvelle
@@ -1757,6 +1767,26 @@ const AppWithIntro: React.FC = () => {
   const [showRedirectPopup, setShowRedirectPopup] = useState(false);
   const { showIntro, completeIntro } = useIntro();
 
+  // Couche TV : navigation D-pad, polyfill de la touche Retour et classe
+  // racine qui déclenche le layout 10-foot (voir src/index.css). Tout est
+  // inerte hors TV — aucun listener n'est posé, aucune classe n'est ajoutée.
+  const isTv = isTvPlatform();
+  useTvSpatialNav(isTv);
+  useTvBackKey(isTv);
+  React.useEffect(() => {
+    if (!isTv) return;
+    const root = document.documentElement;
+    root.classList.add('tv-mode');
+    // Le curseur est masqué en mode TV ; une souris USB branchée en dev doit
+    // pouvoir le faire réapparaître (un seul mouvement suffit).
+    const onPointerMove = () => root.classList.add('tv-pointer-active');
+    window.addEventListener('mousemove', onPointerMove, { once: true });
+    return () => {
+      window.removeEventListener('mousemove', onPointerMove);
+      root.classList.remove('tv-mode', 'tv-pointer-active');
+    };
+  }, [isTv]);
+
   // Détecter si on est sur une route /watch ou la page 404
   const isWatchRoute = location.pathname.startsWith('/watch/') || location.pathname.startsWith('/watchparty/room/') || location.pathname.startsWith('/ftv/watch/');
   const isScreensaverDisabledRoute = isWatchRoute || location.pathname.startsWith('/live-tv');
@@ -1927,7 +1957,7 @@ const AppWithIntro: React.FC = () => {
             />
 
             {/* Toutes les autres routes — depuis le registry */}
-            {ROUTES.map(renderRouteEntry)}
+            {VISIBLE_ROUTES.map(renderRouteEntry)}
 
             {/* 404 — eager (frequently entered cold) */}
             <Route path="*" element={<NotFound />} />

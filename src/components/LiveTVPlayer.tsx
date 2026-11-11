@@ -52,6 +52,7 @@ import StreamedSourceSelector from '@/components/StreamedSourceSelector';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { getVipHeaders, isUserVip } from '../utils/vipUtils';
+import { releaseTvSpatialNav, suppressTvSpatialNav } from '@/utils/tvSpatialNav';
 import {
     initializeCastApi,
     requestCastSession,
@@ -2078,6 +2079,14 @@ const LiveTVPlayer: React.FC<LiveTVPlayerProps> = ({
     };
 
     const clampVolume = (v: number) => Math.max(0, Math.min(1, Math.round(v * 100) / 100));
+
+    // Les flèches appartiennent au lecteur (seek / volume) tant qu'il est monté :
+    // la navigation D-pad du mode TV se met en retrait sur simple déclaration,
+    // sans avoir à sonder le DOM. Voir src/utils/tvSpatialNav.ts.
+    useEffect(() => {
+        suppressTvSpatialNav();
+        return () => releaseTvSpatialNav();
+    }, []);
 
     // Keyboard shortcuts (e.code, pattern HLSPlayer)
     useEffect(() => {
