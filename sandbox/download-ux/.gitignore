@@ -1,0 +1,6 @@
+# Local download output (sandbox CLI)
+tmp-downloads/
+.env
+.env.*
+!.env.example
+.DS_Store
