@@ -343,6 +343,46 @@ function slugOfUrl(url) {
   return isSlug(slug) ? slug : null;
 }
 
+// Chemin d'une adresse anime-sama, sans hôte ni paramètres.
+const pathOfUrl = url => String(url || '').replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]+/i, '').split(/[?#]/)[0];
+
+// Page d'une saison ou d'une langue (`/catalogue/<œuvre>/saison2/vf/`), pas
+// la fiche de l'œuvre. D'anciens caches de recherche en gardent : lue comme
+// une fiche, elle est illisible, et son nom déduit de l'adresse vaut « vf ».
+const isSeasonPageUrl = url => /\/catalogue\/[^/]+\/[^/]+/.test(pathOfUrl(url));
+
+// Adresse de la fiche de l'œuvre d'une page anime-sama, ou null sans slug sûr.
+function ficheUrlOf(url) {
+  const slug = slugOfUrl(url);
+  return slug ? `${deps.ANIME_SAMA_URL}catalogue/${slug}/` : null;
+}
+
+// Nom d'une œuvre donnée par une page de saison : un nom qui n'est qu'un
+// segment de l'adresse (« vf », « saison2 ») est remplacé par le slug.
+function titleNameFor(url, name) {
+  const text = String(name || '').trim();
+  if (!isSeasonPageUrl(url)) return text;
+  const segments = pathOfUrl(url).toLowerCase().split('/').filter(Boolean);
+  return text && !segments.includes(text.toLowerCase()) ? text : (slugOfUrl(url) || text);
+}
+
+// Entrée de recherche ramenée à la fiche de son œuvre.
+function repairSearchEntry(entry) {
+  if (!entry || !isSeasonPageUrl(entry.url) || !ficheUrlOf(entry.url)) return entry;
+  return { ...entry, url: ficheUrlOf(entry.url), name: titleNameFor(entry.url, entry.name) };
+}
+
+// Une œuvre une seule fois (la fiche et une de ses saisons ramenée à la fiche).
+function uniqueTitles(entries) {
+  const seen = new Set();
+  return entries.filter((entry) => {
+    const key = slugOfUrl(entry?.url) || entry?.url;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function cachePathsFor(anime) {
   const slug = slugOfUrl(anime.url);
   const safeName = safeFilename(String(anime.name || ''));
@@ -627,7 +667,10 @@ class Catalogue {
     }
     // La recherche d'anime-sama rend parfois l'adresse sans barre finale.
     if (!this.url.includes('?') && !this.url.endsWith('/')) this.url += '/';
-    this.name = name || url.split('/').slice(-2)[0];
+    // Une page de saison (ancien cache) se lit depuis la fiche de son œuvre.
+    const seasonPage = isSeasonPageUrl(this.url) && ficheUrlOf(this.url);
+    this.name = (seasonPage ? titleNameFor(this.url, name) : name) || url.split('/').slice(-2)[0];
+    if (seasonPage) this.url = seasonPage;
     this.siteUrl = url.split('/').slice(0, 3).join('/') + '/';
     this.client = client || deps.axiosAnimeSama;
     this.slug = slugOfUrl(this.url);
@@ -807,8 +850,8 @@ class AnimeSama {
 
         if (mainTitle) {
           results.push({
-            url: href,
-            name: mainTitle,
+            url: ficheUrlOf(href) && isSeasonPageUrl(href) ? ficheUrlOf(href) : href,
+            name: titleNameFor(href, mainTitle),
             image: imageUrl,
             alternative_names: altNamesArray,
             alternative_names_string: alternativeNames
@@ -819,7 +862,7 @@ class AnimeSama {
       }
 
       if (DEBUG_ANIMESAMA) console.log(`[AnimeSama Parse] iterations=${iterations} kept=${results.length}`);
-      return results;
+      return uniqueTitles(results);
     } catch (error) {
       console.error('[AnimeSama Parse] Error:', error.message);
       return [];
@@ -1198,18 +1241,23 @@ router.get('/search/:query', async (req, res) => {
     const cacheKey = generateCacheKey(query);
     const animeCacheDir = ANIME_SAMA_CACHE_DIR;
     let cachedResults = await deps.getFromCacheNoExpiration(animeCacheDir, cacheKey);
+    // Ancien cache qui garde une page de saison au lieu d'une fiche : la
+    // recherche est refaite sur le site. Sans réponse du site, les entrées
+    // sont ramenées à leur fiche.
+    const staleEntries = Array.isArray(cachedResults) && cachedResults.some(entry => isSeasonPageUrl(entry?.url));
 
-    if (!cachedResults || !Array.isArray(cachedResults) || cachedResults.length === 0) {
+    if (!cachedResults || !Array.isArray(cachedResults) || cachedResults.length === 0 || staleEntries) {
       try {
         const client = new AnimeSama(deps.ANIME_SAMA_URL);
-        const searchResults = await client.search(query, false);
-        const serializedResults = searchResults.map(cat => ({
+        const searchResults = await client.search(query, staleEntries);
+        let serializedResults = searchResults.map(cat => ({
           url: cat.url,
           name: cat.name,
           image: cat.image,
           alternative_names: cat.alternative_names,
           alternative_names_string: cat.alternative_names_string
         }));
+        if (staleEntries && !serializedResults.length) serializedResults = uniqueTitles(cachedResults.map(repairSearchEntry));
         await deps.saveToCache(animeCacheDir, cacheKey, serializedResults);
         cachedResults = serializedResults;
       } catch (err) {
