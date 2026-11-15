@@ -15,6 +15,11 @@ sealed interface Route {
     data class Details(val type: MediaType, val id: Int, val preview: MediaItem? = null) : Route
     /** Acteur ouvert depuis une fiche : nom et photo déjà connus, montrés pendant le chargement. */
     data class Person(val id: Int, val name: String, val profilePath: String? = null) : Route
+    /**
+     * « Voir tout » d'une rangée du registre (`rowId`). `openedAt` distingue deux
+     * ouvertures : chacune repart du début, le retour d'une fiche garde la même.
+     */
+    data class Collection(val rowId: String, val openedAt: Long = System.nanoTime()) : Route
     data class Player(val target: PlayTarget) : Route
     /** Liaison au compte (code à 5 caractères). */
     data object Link : Route

@@ -31,14 +31,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,6 +62,7 @@ import androidx.tv.material3.Text
 import com.movix.tv.R
 import com.movix.tv.container
 import com.movix.tv.data.local.ContinueEntry
+import com.movix.tv.data.tmdb.Genres
 import com.movix.tv.data.tmdb.MediaItem
 import com.movix.tv.data.tmdb.MediaType
 import com.movix.tv.data.tmdb.RowLayout
@@ -75,6 +79,7 @@ import com.movix.tv.ui.theme.MovixColors
 import com.movix.tv.ui.theme.MovixType
 import com.movix.tv.ui.update.UpdateBanner
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 /** Ce que montre la bannière : le titre sélectionné, ou une carte « Reprendre ». */
@@ -92,15 +97,18 @@ data class HeroInfo(
 
 private fun MediaItem.hero() = HeroInfo(id, title, type, backdropPath, overview, rating, year, null)
 
-private val ContentStart = 84.dp
+internal val ContentStart = 84.dp
 // Bord gauche des rangées : une affiche qui défile à gauche disparaît juste
 // avant le crochet de la carte sélectionnée, au lieu de dépasser dessous ou
 // de passer sous les icônes du rail (l'affiche précédente s'arrête 18 dp
 // avant la carte, le bord est à 15 dp, le crochet à 11 dp).
-private val RailWidth = 69.dp
-private val RowInset = ContentStart - RailWidth
+internal val RailWidth = 69.dp
+internal val RowInset = ContentStart - RailWidth
 private const val HERO_DEBOUNCE_MS = 160L
 private val HeroHeight = 390.dp
+// Clés de focus (`lastKey`) d'une affiche de la grille de genre et d'une puce de genre.
+private const val GRID_PREFIX = "grid|"
+private const val GENRE_PREFIX = "genres|"
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -110,6 +118,8 @@ fun BrowseScreen(
     onOpenSettings: () -> Unit,
     onResume: (ContinueEntry) -> Unit,
     modifier: Modifier = Modifier,
+    // « Voir tout » d'une rangée (identifiant du registre).
+    onOpenCollection: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val values by context.container.store.values.collectAsStateWithLifecycle()
@@ -129,6 +139,22 @@ fun BrowseScreen(
     LaunchedEffect(specs) { vm.setSpecs(specs) }
     val state by vm.state.collectAsStateWithLifecycle()
     val continueRow by vm.continueRow.collectAsStateWithLifecycle()
+
+    // Barre de genres (Films, Séries, Animés) : « Tout » montre les rangées, un
+    // genre sa grille paginée. Genre sauvegardé : gardé au retour d'une fiche.
+    val genrePage = section.genrePage()
+    var genre by rememberSaveable { mutableIntStateOf(GENRE_ALL) }
+    val genreVm: TitlePagerViewModel? = if (genrePage == null) null else {
+        viewModel(key = "genre:${section.name}") { TitlePagerViewModel(context.container.catalog) }
+    }
+    // Ouverte avant la première lecture de l'état : jamais une image de la grille d'un autre genre.
+    val genreSession = "${section.name}:$genre"
+    remember(genre) {
+        if (genrePage != null && genre != GENRE_ALL) genreVm?.open(genreSession, Genres.spec(genrePage, genre))
+    }
+    val genreTitles = genreVm?.state?.collectAsStateWithLifecycle()?.value?.titlesFor(genreSession) ?: PagedTitles()
+    val showGrid = genrePage != null && genre != GENRE_ALL
+    val columns = rememberGridColumns()
 
     // La bannière suit le focus, mais avec un léger délai : parcourir une rangée
     // vite ne doit pas lancer le chargement d'une image de fond par carte.
@@ -152,10 +178,13 @@ fun BrowseScreen(
         onDispose { vm.setVisible(false) }
     }
     var contentFocused by remember { mutableStateOf(false) }
-    LaunchedEffect(focusedHero, bannerVideo, resumed, contentFocused) {
+    // Focus sur une puce de genre ou sur « Voir tout » : le bandeau garde le
+    // dernier titre, mais sa bande-annonce ne part pas (le focus a quitté la carte).
+    var heroPaused by remember { mutableStateOf(false) }
+    LaunchedEffect(focusedHero, bannerVideo, resumed, contentFocused, heroPaused) {
         trailer.stop()
         val h = focusedHero ?: return@LaunchedEffect
-        if (!bannerVideo || !resumed || !contentFocused) return@LaunchedEffect
+        if (!bannerVideo || !resumed || !contentFocused || heroPaused) return@LaunchedEffect
         delay(BANNER_TRAILER_DELAY_MS)
         trailer.play(h)
     }
@@ -178,6 +207,33 @@ fun BrowseScreen(
     val restore = remember { FocusRequester() }
     LaunchedEffect(Unit) {
         if (focusedOnce && lastKey != null) { delay(48); runCatching { restore.requestFocus() } }
+    }
+
+    // Position des rangées (ou de la grille) gardée au retour d'une fiche.
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val chipRequester = remember { FocusRequester() }
+    // Genre choisi : le bandeau prend son premier titre dès qu'il arrive.
+    var genreHeroPending by remember { mutableStateOf(false) }
+    val selectGenre = { id: Int ->
+        if (id != genre) {
+            genre = id
+            // Nouvelle liste sous la barre : elle repart du haut.
+            scope.launch { runCatching { listState.scrollToItem(0) } }
+            if (id == GENRE_ALL) {
+                genreHeroPending = false
+                state.rows.firstOrNull()?.items?.firstOrNull()?.let { focusedHero = it.hero() }
+            } else {
+                genreHeroPending = true
+            }
+        }
+    }
+    val genreFirst = if (showGrid) genreTitles.items.firstOrNull() else null
+    LaunchedEffect(genreFirst?.key) {
+        if (genreHeroPending && genreFirst != null) {
+            genreHeroPending = false
+            focusedHero = genreFirst.hero()
+        }
     }
 
     Box(modifier.onFocusChanged { contentFocused = it.hasFocus }.background(MovixColors.Ink)) {
@@ -203,10 +259,32 @@ fun BrowseScreen(
                 CompositionLocalProvider(LocalBringIntoViewSpec provides columnSpec) {
                     LazyColumn(
                         Modifier.fillMaxSize().padding(top = 252.dp),
+                        state = listState,
                         contentPadding = PaddingValues(bottom = 120.dp),
                         verticalArrangement = Arrangement.spacedBy(22.dp),
                     ) {
-                        if (continueRow.isNotEmpty()) {
+                        // Genre choisi : sa grille paginée remplace les rangées.
+                        if (showGrid) posterGrid(
+                            titles = genreTitles,
+                            columns = columns,
+                            firstRequester = if (!focusedOnce) firstCard else null,
+                            restoreKey = lastKey?.takeIf { it.startsWith(GRID_PREFIX) }?.removePrefix(GRID_PREFIX),
+                            restoreRequester = restore,
+                            onFocus = { index, item ->
+                                focusedHero = item.hero()
+                                heroPaused = false
+                                lastKey = GRID_PREFIX + item.key
+                                genreVm?.onFocus(index)
+                            },
+                            onOpen = onOpen,
+                            onRetry = {
+                                // Le bouton disparaît pendant le chargement : le focus attend sur
+                                // la dernière affiche (ou la puce), pas dans le vide.
+                                if (runCatching { restore.requestFocus() }.isFailure) runCatching { chipRequester.requestFocus() }
+                                genreVm?.retry()
+                            },
+                        )
+                        if (continueRow.isNotEmpty() && !showGrid) {
                             item(key = "continue", contentType = "continue") {
                                 CompositionLocalProvider(LocalBringIntoViewSpec provides rowSpec) {
                                     ContinueRow(
@@ -214,14 +292,14 @@ fun BrowseScreen(
                                         firstRequester = if (!focusedOnce) firstCard else null,
                                         restoreKey = lastKey,
                                         restoreRequester = restore,
-                                        onFocus = { key, h -> focusedHero = h; lastKey = key },
+                                        onFocus = { key, h -> focusedHero = h; heroPaused = false; lastKey = key },
                                         // « Reprendre » relance directement la lecture.
                                         onOpen = onResume,
                                     )
                                 }
                             }
                         }
-                        itemsIndexed(state.rows, key = { _, r -> r.spec.id }, contentType = { _, r -> r.spec.layout }) { index, row ->
+                        if (!showGrid) itemsIndexed(state.rows, key = { _, r -> r.spec.id }, contentType = { _, r -> r.spec.layout }) { index, row ->
                             CompositionLocalProvider(LocalBringIntoViewSpec provides rowSpec) {
                                 MediaRow(
                                     title = row.spec.title,
@@ -230,19 +308,34 @@ fun BrowseScreen(
                                     firstRequester = if (index == 0 && continueRow.isEmpty() && !focusedOnce) firstCard else null,
                                     restoreKey = lastKey?.removePrefix("${row.spec.id}|")?.takeIf { lastKey?.startsWith("${row.spec.id}|") == true },
                                     restoreRequester = restore,
-                                    onFocus = { focusedHero = it.hero(); lastKey = "${row.spec.id}|${it.key}" },
+                                    onFocus = { focusedHero = it.hero(); heroPaused = false; lastKey = "${row.spec.id}|${it.key}" },
                                     onOpen = onOpen,
+                                    // Rangée qui porte une vraie collection : sa liste complète, paginée.
+                                    onSeeAll = if (row.spec.collection) ({ onOpenCollection(row.spec.id) }) else null,
+                                    onSeeAllFocus = { heroPaused = true; lastKey = "${row.spec.id}|$SEE_ALL_KEY" },
                                 )
                             }
                         }
                     }
                 }
                 // Premier affichage : focus sur la première carte, une seule fois.
-                LaunchedEffect(state.rows.isNotEmpty() || continueRow.isNotEmpty()) {
-                    if (!focusedOnce && (state.rows.isNotEmpty() || continueRow.isNotEmpty())) {
+                val contentReady = if (showGrid) genreTitles.items.isNotEmpty() else state.rows.isNotEmpty() || continueRow.isNotEmpty()
+                LaunchedEffect(contentReady) {
+                    if (!focusedOnce && contentReady) {
                         delay(32)
                         if (runCatching { firstCard.requestFocus() }.isSuccess) focusedOnce = true
                     }
+                }
+                if (genrePage != null) {
+                    GenreBar(
+                        page = genrePage,
+                        selected = genre,
+                        onSelect = selectGenre,
+                        onFocus = { id -> heroPaused = true; lastKey = GENRE_PREFIX + id },
+                        selectedRequester = chipRequester,
+                        restoreKey = lastKey?.takeIf { it.startsWith(GENRE_PREFIX) }?.removePrefix(GENRE_PREFIX),
+                        restoreRequester = restore,
+                    )
                 }
             }
         }
@@ -322,6 +415,8 @@ private fun MediaRow(
     restoreRequester: FocusRequester,
     onFocus: (MediaItem) -> Unit,
     onOpen: (MediaItem) -> Unit,
+    onSeeAll: (() -> Unit)? = null,
+    onSeeAllFocus: () -> Unit = {},
 ) {
     Column {
         Text(title, style = MovixType.Row, modifier = Modifier.padding(start = ContentStart, bottom = 10.dp))
@@ -342,6 +437,16 @@ private fun MediaRow(
                         .then(if (index == 0 && firstRequester != null) Modifier.focusRequester(firstRequester) else Modifier)
                         .then(if (item.key == restoreKey) Modifier.focusRequester(restoreRequester) else Modifier),
                 )
+            }
+            // « Voir tout » en dernière carte : au retour de la liste complète, le focus y revient.
+            if (onSeeAll != null) {
+                item(key = SEE_ALL_KEY, contentType = SEE_ALL_KEY) {
+                    SeeAllCard(
+                        onClick = onSeeAll,
+                        onFocused = onSeeAllFocus,
+                        modifier = if (restoreKey == SEE_ALL_KEY) Modifier.focusRequester(restoreRequester) else Modifier,
+                    )
+                }
             }
         }
     }

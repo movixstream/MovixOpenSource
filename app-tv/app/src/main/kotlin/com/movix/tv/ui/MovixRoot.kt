@@ -46,6 +46,7 @@ import kotlinx.coroutines.launch
 import com.movix.tv.ui.details.DetailsScreen
 import com.movix.tv.ui.person.PersonScreen
 import com.movix.tv.ui.home.BrowseScreen
+import com.movix.tv.ui.home.CollectionScreen
 import com.movix.tv.ui.home.WatchlistScreen
 import com.movix.tv.ui.nav.Navigator
 import com.movix.tv.ui.nav.Route
@@ -108,6 +109,7 @@ fun MovixRoot(onExit: () -> Unit) {
                 is Route.Main -> "main"
                 is Route.Details -> "details:${r.type}:${r.id}"
                 is Route.Person -> "person:${r.id}"
+                is Route.Collection -> "collection:${r.rowId}:${r.openedAt}"
                 is Route.Player -> "player"
                 Route.Link -> "link"
             }
@@ -143,6 +145,8 @@ fun MovixRoot(onExit: () -> Unit) {
                                 nav.push(Route.Player(PlayTarget(PlayRequest(e.type, e.id, e.season, e.episode), e.meta?.title.orEmpty(), e.meta?.backdropPath)))
                             },
                             modifier = contentModifier,
+                            // Ignoré si un écran est déjà par-dessus (double appui sur OK pendant le fondu).
+                            onOpenCollection = { if (nav.current is Route.Main) nav.push(Route.Collection(it)) },
                         )
                     }
                 }
@@ -178,6 +182,14 @@ fun MovixRoot(onExit: () -> Unit) {
                         else nav.push(Route.Details(m.type, m.id, m))
                     },
                     onBack = { if (nav.current == route) nav.pop() },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            is Route.Collection -> saveable.SaveableStateProvider("collection:${route.rowId}:${route.openedAt}") {
+                CollectionScreen(
+                    rowId = route.rowId,
+                    session = "${route.rowId}:${route.openedAt}",
+                    onOpen = { nav.push(Route.Details(it.type, it.id, it)) },
                     modifier = Modifier.fillMaxSize(),
                 )
             }

@@ -17,10 +17,10 @@ enum class RowLayout { POSTER, STILL, RANK }
  *   retirer le n° 3 parce qu'il figure dans la sélection juste au-dessus décalerait tous les
  *   rangs suivants. Les titres de la rangée sont néanmoins enregistrés comme vus, pour les
  *   rangées qui suivent.
- * @property collection ouvre une page de collection paginée et fait apparaître la carte
- *   « Voir plus » en fin de rangée. Volontairement absent des instantanés (tendances,
- *   sélection, Top 10) et des rangées génériques : réservée aux rangées qui portent une vraie
- *   collection, elle devient une information.
+ * @property collection fait apparaître la carte « Voir tout » en fin de rangée, qui ouvre la
+ *   liste complète de la rangée, paginée (`Route.Collection`, `CollectionScreen`). Volontairement
+ *   absent des instantanés (tendances, sélection, Top 10) et des rangées génériques : réservée
+ *   aux rangées qui portent une vraie collection, elle devient une information.
  */
 data class RowSpec(
     val id: String,
