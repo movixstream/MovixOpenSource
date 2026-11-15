@@ -152,6 +152,7 @@ import { applySelectedTextTrackMode } from '../utils/subtitleTrackSelection';
 import {
   HLS_PLAYER_ROOT_ATTRIBUTE,
   KEEP_FULLSCREEN_PREF_KEY,
+  KEEP_PIP_PREF_KEY,
   PLAYER_FULLSCREEN_FILL_CLASS,
   RESUME_PLAYBACK_PREF_KEY,
   enterPlayerFullscreen,
@@ -160,10 +161,12 @@ import {
   isEpisodeAutoplaySuppressed,
   isHostFullscreenActive,
   isKeepFullscreenEnabled,
+  isKeepPipEnabled,
   isResumePlaybackEnabled,
   readEpisodeHandoff,
   restoreEpisodeHandoff,
   setKeepFullscreenEnabled,
+  setKeepPipEnabled,
   setResumePlaybackEnabled,
 } from '../utils/playerFullscreenPersistence';
 import { getPointerKind, getServerPointerKind, subscribePointerKind } from '../utils/pointerKind';
@@ -190,6 +193,8 @@ import {
 import { useExternalSubtitles } from '../hooks/useExternalSubtitles.ts';
 import type { SubtitleTrack } from '../services/subtitles/index.ts';
 import { getEmbeddedSubtitleContent, getEmbeddedSubtitleTracks } from '../utils/embeddedSubtitles.ts';
+import { isHiddenOnTv } from '@/routing/registry';
+import { releaseTvSpatialNav, suppressTvSpatialNav } from '@/utils/tvSpatialNav';
 import type {
   KisskhFallbackTransport,
   KisskhSource,
@@ -4636,6 +4641,9 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   const [resumePlaybackOnEpisodeChange, setResumePlaybackOnEpisodeChange] = useState(
     () => isResumePlaybackEnabled(),
   );
+  const [keepPipOnEpisodeChange, setKeepPipOnEpisodeChange] = useState(
+    () => isKeepPipEnabled(),
+  );
 
   useEffect(() => {
     setKeepFullscreenEnabled(keepFullscreenOnEpisodeChange);
@@ -4645,6 +4653,10 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     setResumePlaybackEnabled(resumePlaybackOnEpisodeChange);
   }, [resumePlaybackOnEpisodeChange]);
 
+  useEffect(() => {
+    setKeepPipEnabled(keepPipOnEpisodeChange);
+  }, [keepPipOnEpisodeChange]);
+
   // Garder les réglages synchronisés entre plusieurs lecteurs / onglets
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
@@ -4652,6 +4664,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         setKeepFullscreenOnEpisodeChange(isKeepFullscreenEnabled());
       } else if (event.key === RESUME_PLAYBACK_PREF_KEY) {
         setResumePlaybackOnEpisodeChange(isResumePlaybackEnabled());
+      } else if (event.key === KEEP_PIP_PREF_KEY) {
+        setKeepPipOnEpisodeChange(isKeepPipEnabled());
       }
     };
 
@@ -4667,6 +4681,19 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
    */
   const isEpisodicPlayer = Boolean(tvShowId || isAnime);
 
+  /**
+   * La demande de PiP est publiée ici plutôt que passée directement au mécanisme
+   * de reprise : celle-ci retente sur `loadedmetadata` / `canplay` / `playing` et
+   * au premier geste, donc bien après le rendu qui l'a créée. Et la fonction
+   * change d'identité dès que les sous-titres bougent. Passer par une ref lui
+   * garantit d'appeler toujours l'implémentation courante.
+   */
+  const pipRequestRef = useRef<(() => Promise<boolean>) | null>(null);
+
+  useEffect(() => {
+    pipRequestRef.current = requestVideoPip;
+  });
+
   useEffect(() => {
     if (!isEpisodicPlayer) return;
     const state = readEpisodeHandoff();
@@ -4677,6 +4704,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       getContainer: () => containerRef.current,
       getVideo: () => videoRef.current,
       useHost: fullscreenTarget === 'page',
+      requestPip: async () => (await pipRequestRef.current?.()) ?? false,
     });
   }, [isEpisodicPlayer, src, fullscreenTarget]);
 
@@ -6329,6 +6357,25 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   ]);
 
   useEffect(() => () => cleanupPipSubtitleTrack(), [cleanupPipSubtitleTrack, src]);
+
+  const requestVideoPip = useCallback(async (): Promise<boolean> => {
+    const video = videoRef.current;
+    if (!video) return false;
+
+    if (typeof video.requestPictureInPicture !== 'function') return false;
+    if (!document.pictureInPictureEnabled) return false;
+    if (video.readyState === 0 || !video.videoWidth) return false;
+    if (document.pictureInPictureElement) return false;
+
+    try {
+      createPipSubtitleTrack();
+      await video.requestPictureInPicture();
+      return document.pictureInPictureElement === video;
+    } catch {
+      cleanupPipSubtitleTrack();
+      return false;
+    }
+  }, [cleanupPipSubtitleTrack, createPipSubtitleTrack]);
 
 
 
@@ -8442,6 +8489,14 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   useEffect(() => {
     confirmActivePromptRef.current = confirmActivePrompt;
   });
+
+  // Les flèches appartiennent au lecteur (seek / volume) tant qu'il est monté :
+  // la navigation D-pad du mode TV se met en retrait sur simple déclaration,
+  // sans avoir à sonder le DOM. Voir src/utils/tvSpatialNav.ts.
+  useEffect(() => {
+    suppressTvSpatialNav();
+    return () => releaseTvSpatialNav();
+  }, []);
 
   const handlePlayerKeyDownRef = useRef<(event: KeyboardEvent) => void>(() => {});
 
@@ -12469,6 +12524,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                   </button>
                 </div>
               )}
+              {/* Watch Party : hors périmètre V1 sur TV (/watchparty/create non monté). */}
+              {!isHiddenOnTv('/watchparty/create') && (
               <div className="relative flex items-center h-[24px]">
                 <button
                   onClick={toggleWatchParty}
@@ -12491,6 +12548,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                   </motion.div>
                 </button>
               </div>
+              )}
               <div className="relative flex items-center h-[24px]">
                 <button
                   onClick={togglePip}
@@ -13075,6 +13133,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             setKeepFullscreenOnEpisodeChange,
             resumePlaybackOnEpisodeChange,
             setResumePlaybackOnEpisodeChange,
+            keepPipOnEpisodeChange,
+            setKeepPipOnEpisodeChange,
             nextPrefs,
             onNextPrefsChange: updateNextPrefs,
             skipSettings,
