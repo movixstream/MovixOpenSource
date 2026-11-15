@@ -24,6 +24,12 @@ object UiKeys {
     const val SCREENSAVER_MIN = "movix_tv_screensaver_min"
     /** Demander « Qui regarde ? » au lancement : "1" (défaut si le compte a plusieurs profils) ou "0". */
     const val PROFILE_PROMPT = "movix_tv_profile_prompt"
+    /**
+     * Préférences de lecture : JSON de [PlaybackPrefs]. Une clé par profil
+     * relié (suffixe `_<compte>_<profil>`, voir [UiPrefs.playbackKey]), cette
+     * clé seule sans compte : la langue et les sous-titres sont personnels.
+     */
+    const val PLAYBACK = "movix_tv_playback"
 }
 
 /** Couleurs d'accent proposées (crochets du focus, progression, boutons actifs). */
@@ -73,6 +79,40 @@ data class SubtitleStyle(
 @Serializable
 data class HomeRows(val order: List<String> = emptyList(), val hidden: Set<String> = emptySet())
 
+/**
+ * Préférences de lecture. Les valeurs par défaut sont le comportement
+ * d'avant : son français, VF d'abord, sous-titres selon la règle d'origine
+ * (français d'office sur une VOSTFR qui en fournit).
+ */
+@Serializable
+data class PlaybackPrefs(
+    /** Langue audio préférée (code ISO 639-1). */
+    val audio: String = "fr",
+    /** Version préférée pour le choix de la source : « VF », « VOSTFR » ou « VO ». */
+    val version: String = "VF",
+    /**
+     * Sous-titres par version (« VF », « VOSTFR », « VO ») : [OFF] ou un code
+     * de langue ; une version absente suit la règle d'origine. Une préférence
+     * par version : couper les sous-titres d'une VF ne les coupe pas en VOSTFR.
+     */
+    val subtitles: Map<String, String> = emptyMap(),
+    /** Les choix faits pendant la lecture deviennent les préférences. */
+    val remember: Boolean = true,
+) {
+    fun subtitlesFor(version: String): String? = subtitles[version]
+
+    /** [value] `null` : retour à la règle d'origine pour [version]. */
+    fun withSubtitles(version: String, value: String?): PlaybackPrefs =
+        copy(subtitles = if (value == null) subtitles - version else subtitles + (version to value))
+
+    companion object {
+        const val OFF = "off"
+
+        /** Langues données au lecteur : le français garde ses trois codes d'avant (« fr », « fre », « fra »). */
+        fun audioLanguages(audio: String): List<String> = if (audio == "fr") listOf("fr", "fre", "fra") else listOf(audio)
+    }
+}
+
 object UiPrefs {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -96,4 +136,21 @@ object UiPrefs {
 
     /** Minutes avant l'écran de veille, 0 = coupé. */
     fun screensaverMinutes(values: Map<String, String>): Int = values[UiKeys.SCREENSAVER_MIN]?.toIntOrNull()?.coerceIn(0, 60) ?: 5
+
+    /** Profil dont on lit les préférences de lecture : `<compte>_<profil>`, `null` sans compte relié. */
+    fun playbackScope(userId: String?, profileId: String?): String? =
+        if (userId.isNullOrBlank() || profileId.isNullOrBlank()) null else "${userId}_$profileId"
+
+    fun playbackKey(scope: String?): String = if (scope == null) UiKeys.PLAYBACK else "${UiKeys.PLAYBACK}_$scope"
+
+    /**
+     * Préférences du profil [scope] ; à défaut celles de la télé (choisies
+     * avant la liaison du compte), sinon les valeurs par défaut.
+     */
+    fun playback(values: Map<String, String>, scope: String?): PlaybackPrefs {
+        fun read(key: String) = values[key]?.let { runCatching { json.decodeFromString(PlaybackPrefs.serializer(), it) }.getOrNull() }
+        return scope?.let { read(playbackKey(it)) } ?: read(UiKeys.PLAYBACK) ?: PlaybackPrefs()
+    }
+
+    fun encode(prefs: PlaybackPrefs): String = json.encodeToString(PlaybackPrefs.serializer(), prefs)
 }

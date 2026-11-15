@@ -21,6 +21,7 @@ import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import com.movix.tv.AppContainer
 import com.movix.tv.data.local.Library
+import com.movix.tv.data.local.PlaybackPrefs
 import com.movix.tv.data.local.SubtitleStyle
 import com.movix.tv.data.local.TvKeys
 import com.movix.tv.data.local.UiKeys
@@ -126,7 +127,14 @@ class PlayerController(
     private val scope: CoroutineScope,
     initial: PlayTarget,
 ) {
-    val player: ExoPlayer = container.playerEngine.newPlayer()
+    /** Profil dont on lit et retient les préférences de lecture (`null` sans compte relié). */
+    private val prefScope: String?
+        get() = container.accounts.current?.let { UiPrefs.playbackScope(it.userId, it.profileId) }
+
+    // Langue audio préférée dès la création (rappelée à chaque source par resetTracks).
+    val player: ExoPlayer = container.playerEngine.newPlayer(
+        PlaybackPrefs.audioLanguages(UiPrefs.playback(container.store.values.value, prefScope).audio),
+    )
 
     var target by mutableStateOf(initial); private set
     var phase by mutableStateOf(PlayerPhase.LOADING); private set
@@ -206,6 +214,15 @@ class PlayerController(
     private val inFlight = HashMap<String, kotlinx.coroutines.Deferred<Extraction>>()
     private var deviceJob: Job? = null
     private var extractAllJob: Job? = null
+
+    /** Version préférée (réglages de lecture) lue au chargement de l'épisode : ordre des sources. */
+    private var preferredVersion = Lang.VF
+    /** Préférences retenues pendant cette séance, en attendant que le stockage les republie. */
+    private var savedPrefs: PlaybackPrefs? = null
+    /** Sous-titres choisis à la main depuis le lancement de la source : l'automatisme n'y touche plus. */
+    private var subsManual = false
+    /** L'automatisme a trouvé une piste dans la langue voulue : il s'arrête là. */
+    private var subsAutoDone = false
 
     private var externalCues: List<SubtitleCue> = emptyList()
     private var embeddedCueText: String? = null
@@ -310,7 +327,11 @@ class PlayerController(
         searchedSubtitles = emptyList()
         failed.clear(); intro = null; outroStartMs = null; segments = emptyList(); next = null; nextEpisode = null; episodeTitle = null
         segmentsRequested = false; metaWritten = false; formatIssue = null; stillWatching = false
-        chooseSubtitle(SubtitleChoice.Off)
+        // Nouvel épisode : les préférences décident à nouveau (un choix manuel ne vaut que pour l'épisode).
+        subsManual = false; subsAutoDone = false
+        applySubtitle(SubtitleChoice.Off)
+        preferredVersion = SourceSelector.versionOf(prefs().version)
+        val prefer = preferredVersion
         player.stop()
         loadJob = scope.launch {
             launch { loadMeta() }
@@ -340,16 +361,16 @@ class PlayerController(
                 { index -> client.resolve(req.tmdbId, s, e, index)?.let { it.url to it.quality } }
             }
             val all = container.sources.load(req, vipKey, swiftflux = swiftflux)
-            val ranked = SourceSelector.playable(all)
+            val ranked = SourceSelector.playable(all, prefer)
             // Seuls les liens que le userscript sait extraire sont proposés sur
             // la télé (les autres échouaient en « Unknown embed type ») ; leur
             // hébergeur est celui qu'il reconnaît. Le reste passe au lecteur web.
-            val device = SourceSelector.deviceOnly(all)
+            val device = SourceSelector.deviceOnly(all, prefer)
             val types = runCatching { container.extractor.embedTypes(device.mapNotNull { it.embedUrl }) }.getOrDefault(emptyMap())
             deviceSources = if (types.isEmpty()) device else device.mapNotNull { s ->
                 types[s.embedUrl]?.let { type -> s.copy(host = type, label = com.movix.tv.data.movix.SourceParsers.extractedLabel(type, s.language)) }
             }
-            webSources = SourceSelector.webCandidates(all)
+            webSources = SourceSelector.webCandidates(all, prefer)
             // Le serveur n'annonce souvent que « HD » : on lit les playlists
             // pour ne pas démarrer en 360p quand une source 720p+ existe.
             // L'ordre obtenu sert aussi aux bascules en cas de panne.
@@ -358,7 +379,7 @@ class PlayerController(
             val ratings = withContext(Dispatchers.Default) {
                 variants.mapNotNull { (id, v) -> SourceSelector.rate(v, container.codecSupport::supports)?.let { id to it } }.toMap()
             }
-            sources = SourceSelector.byQuality(ranked, ratings)
+            sources = SourceSelector.byQuality(ranked, ratings, prefer)
             val first = SourceSelector.pick(sources, req.isTv)
             Log.i("MovixPlayer", "sources lues ${ratings.size} : " + sources.take(8).joinToString { s ->
                 val r = ratings[s.id]
@@ -374,6 +395,18 @@ class PlayerController(
                 phase = if (vipKey == null) PlayerPhase.NEED_VIP else PlayerPhase.NO_SOURCE
                 return@launch
             }
+            // Version préférée choisie (VOSTFR, VO) absente du serveur mais à
+            // extraire sur la télé : une série d'extractions d'abord, sinon le
+            // serveur. Avec la VF par défaut, rien ne change.
+            if (prefer != Lang.VF && first.language != prefer &&
+                SourceSelector.deviceCandidates(deviceSources, prefer).any { it.language == prefer && it.id !in failed }
+            ) {
+                if (playFromDevice(start, only = prefer, maxBatches = 1)) {
+                    extractAllInBackground()
+                    return@launch
+                }
+                loadingText = com.movix.tv.R.string.player_loading
+            }
             phase = PlayerPhase.PLAYING
             play(first, start)
             extractAllInBackground()
@@ -387,7 +420,7 @@ class PlayerController(
      */
     private fun extractAllInBackground() {
         extractAllJob?.cancel()
-        val todo = SourceSelector.deviceCandidates(deviceSources).filter { s -> sources.none { it.id == s.id } }
+        val todo = SourceSelector.deviceCandidates(deviceSources, preferredVersion).filter { s -> sources.none { it.id == s.id } }
         if (todo.isEmpty()) return
         extractAllJob = scope.launch {
             val permits = kotlinx.coroutines.sync.Semaphore(2)
@@ -419,6 +452,8 @@ class PlayerController(
             req.tmdbId, imdb, if (req.isTv) req.season ?: 1 else null, if (req.isTv) req.episode ?: 1 else null, container.uiLanguage(),
         )
         Log.i("MovixSubs", "${searchedSubtitles.size} sous-titres Shegu/OpenSubtitles")
+        // Arrivés après le début de la lecture : la langue voulue est peut-être là.
+        autoSubtitles()
     }
 
     /** Titre de l'épisode, épisode suivant et saisons (série seulement). */
@@ -453,10 +488,21 @@ class PlayerController(
         current = source
         kindRetried = false
         formatIssue = null
+        resetTracks()
         prepare(source, startMs)
-        // Premier sous-titre français d'office pour une VOSTFR.
-        val fr = source.subtitles.firstOrNull { it.lang.startsWith("fr") } ?: source.subtitles.firstOrNull { it.isDefault }
-        chooseSubtitle(if (fr != null && (source.language == Lang.VOSTFR || fr.isDefault)) SubtitleChoice.External(fr) else SubtitleChoice.Off)
+        // Sous-titres selon la préférence (par défaut : français d'office pour une VOSTFR).
+        startAutoSubtitles()
+    }
+
+    /** Nouvelle source : les pistes choisies sur l'autre ne valent plus ; langue audio préférée. */
+    private fun resetTracks() {
+        selectedAudio = null
+        selectedVideo = null
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+            .setPreferredAudioLanguages(*PlaybackPrefs.audioLanguages(prefs().audio).toTypedArray())
+            .build()
     }
 
     private fun prepare(source: PlaybackSource, startMs: Long) {
@@ -496,14 +542,15 @@ class PlayerController(
     /**
      * Extrait les lecteurs embed sur la télé, trois à la fois, dans l'ordre de
      * [SourceSelector.deviceCandidates], et lance le premier qui marche.
+     * [only] : cette langue seulement ; [maxBatches] : séries de trois au plus.
      * `false` si aucun n'a donné de flux.
      */
-    private suspend fun playFromDevice(startMs: Long): Boolean {
-        val candidates = SourceSelector.deviceCandidates(deviceSources)
-            .filter { it.id !in failed }
+    private suspend fun playFromDevice(startMs: Long, only: Lang? = null, maxBatches: Int = Int.MAX_VALUE): Boolean {
+        val candidates = SourceSelector.deviceCandidates(deviceSources, preferredVersion)
+            .filter { it.id !in failed && (only == null || it.language == only) }
         if (candidates.isEmpty()) return false
         loadingText = com.movix.tv.R.string.player_extracting
-        for (batch in candidates.chunked(3)) {
+        for (batch in candidates.chunked(3).take(maxBatches)) {
             // Les extractions continuent en arrière-plan après le choix : leurs
             // résultats (en cache) servent aux bascules suivantes.
             val jobs = batch.map { s -> scope.async { extract(s) } }
@@ -710,6 +757,7 @@ class PlayerController(
         val position = player.currentPosition.coerceAtLeast(0)
         if (source.playable) {
             failed.remove(source.id)
+            rememberVersion(source)
             play(source, position)
             return
         }
@@ -728,8 +776,15 @@ class PlayerController(
             sources = sources.filterNot { it.id == playable.id } + playable
             failed.remove(playable.id)
             phase = PlayerPhase.PLAYING
+            rememberVersion(playable)
             play(playable, position)
         }
+    }
+
+    /** Source choisie à la main : sa version (VF, VOSTFR, VO) devient la préférée pour la suite. */
+    private fun rememberVersion(source: PlaybackSource) {
+        if (source.language == Lang.UNKNOWN) return
+        rememberChoice { it.copy(version = source.language.name) }
     }
 
     /** Ouvre [source] dans le lecteur web ; le lecteur natif se met en pause (sa position est gardée). */
@@ -827,9 +882,85 @@ class PlayerController(
             .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
             .addOverride(TrackSelectionOverride(group.mediaTrackGroup, option.trackIndex))
             .build()
+        option.language?.let { lang -> rememberChoice { it.copy(audio = lang) } }
+        // Le son change de langue, donc peut-être de version : la préférence de
+        // sous-titres de celle-ci s'applique, sauf choix manuel.
+        if (!subsManual) {
+            subsAutoDone = false
+            autoSubtitles()
+        }
     }
 
+    /**
+     * Sous-titres choisis dans le panneau : appliqués, gardés pour l'épisode
+     * (l'automatisme n'y touche plus) et retenus comme préférence de la
+     * version en cours (VF, VOSTFR ou VO).
+     */
     fun chooseSubtitle(choice: SubtitleChoice) {
+        subsManual = true
+        applySubtitle(choice)
+        val lang = when (choice) {
+            SubtitleChoice.Off -> SubtitleAuto.OFF
+            is SubtitleChoice.External -> SubtitleAuto.langOf(choice.track.lang)
+            is SubtitleChoice.Embedded -> SubtitleAuto.langOf(choice.option.language)
+        } ?: return // langue inconnue : rien à retenir
+        val version = subtitleVersion().name
+        rememberChoice { it.withSubtitles(version, lang) }
+    }
+
+    /**
+     * Nouvelle source : un choix manuel encore valable (sous-titres coupés,
+     * fichier trouvé en ligne, le même pour toutes les sources) est gardé ;
+     * sinon l'automatisme repart de zéro.
+     */
+    private fun startAutoSubtitles() {
+        val s = subtitle
+        if (subsManual && (s == SubtitleChoice.Off || (s is SubtitleChoice.External && s.track.source != null))) return
+        subsManual = false
+        subsAutoDone = false
+        if (s != SubtitleChoice.Off) applySubtitle(SubtitleChoice.Off)
+        autoSubtitles()
+    }
+
+    /**
+     * Préférence de sous-titres de la version en cours, tant que rien n'a été
+     * choisi à la main ni trouvé. Rappelé quand les pistes du flux puis les
+     * sous-titres en ligne arrivent : appliqués dès que la langue voulue paraît.
+     */
+    private fun autoSubtitles() {
+        if (subsManual || subsAutoDone) return
+        val source = current ?: return
+        val pref = prefs().subtitlesFor(subtitleVersion().name)
+        when (val pick = SubtitleAuto.pick(pref, source, embeddedTextTracks, searchedSubtitles)) {
+            null -> Unit
+            SubtitleChoice.Off -> if (subtitle != SubtitleChoice.Off) applySubtitle(SubtitleChoice.Off)
+            else -> {
+                subsAutoDone = true
+                if (pick != subtitle) applySubtitle(pick)
+            }
+        }
+    }
+
+    /** Version (VF, VOSTFR, VO) qui sert de clé aux sous-titres : le son lu, sinon la source. */
+    private fun subtitleVersion(): Lang = SubtitleAuto.version(current?.language, selectedAudio?.language)
+
+    // ---------- préférences de lecture ----------
+
+    private fun prefs(): PlaybackPrefs = savedPrefs ?: UiPrefs.playback(container.store.values.value, prefScope)
+
+    /** Retient un choix fait pendant la lecture, si « Retenir mes derniers choix » est ouvert (par défaut). */
+    private fun rememberChoice(update: (PlaybackPrefs) -> PlaybackPrefs) {
+        val now = prefs()
+        if (!now.remember) return
+        val next = update(now)
+        if (next == now) return
+        savedPrefs = next
+        val key = UiPrefs.playbackKey(prefScope)
+        // Portée de l'appli : l'écriture finit même si le lecteur se ferme.
+        container.appScope.launch { container.store.set(key, UiPrefs.encode(next)) }
+    }
+
+    private fun applySubtitle(choice: SubtitleChoice) {
         subtitle = choice
         subtitleText = null
         subsJob?.cancel()
@@ -945,6 +1076,8 @@ class PlayerController(
         audioTracks = audio
         embeddedTextTracks = text
         checkFormats(tracks)
+        // Pistes du flux connues (et langue du son lu) : la préférence de sous-titres peut s'y trouver.
+        autoSubtitles()
     }
 
     /**

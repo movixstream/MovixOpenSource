@@ -83,4 +83,21 @@
     <!-- Playback -->
     <string name="playback_autoplay">Play next episode automatically</string>
     <string name="playback_autoplay_body">When an episode ends, the next one starts on its own.</string>
+    <string name="playback_prefs_title">Playback preferences</string>
+    <string name="playback_prefs_profile">For the %1$s profile on this TV.</string>
+    <string name="playback_prefs_device">For this TV.</string>
+    <string name="playback_audio">Audio language</string>
+    <string name="playback_audio_body">Track picked by default when the source has several.</string>
+    <string name="playback_version">Preferred version</string>
+    <string name="playback_version_body">Used to pick the source when a movie or an episode starts.</string>
+    <string name="playback_subs">Subtitles</string>
+    <string name="playback_subs_body">Per version, looked for in the source, in the stream, then online. Auto: French by default on a VOSTFR that has them.</string>
+    <string name="playback_subs_vo">In VO</string>
+    <string name="playback_subs_vostfr">In VOSTFR</string>
+    <string name="playback_subs_vf">In VF</string>
+    <string name="playback_subs_auto">Auto</string>
+    <string name="playback_subs_off">Off</string>
+    <string name="playback_remember">Remember my last choices</string>
+    <string name="playback_remember_body">Subtitles, audio language and version picked during playback become the preferences.</string>
+    <string name="playback_prefs_reset">Reset playback preferences</string>
 </resources>

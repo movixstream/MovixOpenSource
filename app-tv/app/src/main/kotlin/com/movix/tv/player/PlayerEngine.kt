@@ -85,7 +85,7 @@ class PlayerEngine(private val context: Context, private val http: OkHttpClient,
         return PngTsDataSource.Factory(resolving)
     }
 
-    fun newPlayer(): ExoPlayer {
+    fun newPlayer(audioLanguages: List<String> = listOf("fr", "fre", "fra")): ExoPlayer {
         // Buffer plafonné en octets : sur 1 Go de RAM, un flux 1080p remplit
         // 50 s de tampon (≈ 60 Mo) et le système tue l'appli.
         val loadControl = DefaultLoadControl.Builder()
@@ -98,7 +98,8 @@ class PlayerEngine(private val context: Context, private val http: OkHttpClient,
                 // Jamais plus que l'écran : décoder du 4K pour un écran 1080p
                 // sature les petits SoC.
                 .setViewportSizeToPhysicalDisplaySize(true)
-                .setPreferredAudioLanguages("fr", "fre", "fra")
+                // Langue audio des réglages de lecture (français par défaut).
+                .setPreferredAudioLanguages(*audioLanguages.toTypedArray())
                 .build()
         }
         // FFmpeg (module ffmpeg/) seulement après le décodeur du système et le
