@@ -19,7 +19,8 @@ data class AvatarSpot(val group: Int, val category: Int, val index: Int)
  * Chemins `/avatars/<dossier>/<fichier>.png` : ceux que le site range dans le
  * profil, servis par le site depuis `public/avatars/` (AvatarCatalogTest
  * vérifie que chaque fichier y existe). Les noms des séries sont ceux du site.
- * À reprendre quand le site ajoute des avatars.
+ * À reprendre quand le site ajoute des avatars, puis refaire leurs vignettes
+ * ([AvatarThumbs]) : `node app-tv/scripts/build-avatar-thumbs.mjs`.
  */
 object AvatarCatalog {
     /** Plateforme des premiers avatars du site (`avatars.ts`), nommée ainsi dans son sélecteur. */

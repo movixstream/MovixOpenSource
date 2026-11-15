@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -17,6 +19,7 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -34,6 +37,7 @@ import coil3.compose.AsyncImage
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import com.movix.tv.container
+import com.movix.tv.data.account.AvatarThumbs
 import com.movix.tv.ui.components.MovixIcons
 import com.movix.tv.ui.theme.Bricolage
 import com.movix.tv.ui.theme.LocalLowRam
@@ -96,16 +100,33 @@ internal fun initials(name: String): String {
 
 /**
  * Visage rond d'un profil, [size] de diamètre : ses initiales sur sa couleur,
- * l'avatar par-dessus dès qu'il est chargé (les initiales restent s'il manque).
+ * puis l'avatar par-dessus. La vignette embarquée s'affiche tout de suite,
+ * sans réseau ; l'image du site, plus nette à cette taille, la recouvre dès
+ * qu'elle est chargée. Les initiales restent si l'avatar manque.
  */
 @Composable
 internal fun AvatarFace(url: String?, name: String, colorKey: String, size: Dp, modifier: Modifier = Modifier) {
+    val thumb = rememberAvatarThumb(url)
     Box(modifier.size(size).clip(CircleShape).background(initialColor(colorKey)), contentAlignment = Alignment.Center) {
         Text(initials(name), style = MovixType.Title.copy(fontFamily = Bricolage, fontSize = (size.value * 0.34f).sp, color = Color.White))
+        if (thumb != null) Image(thumb, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         if (url != null) {
             AsyncImage(model = rememberAvatarRequest(url, size), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
     }
+}
+
+/** Vignette embarquée de l'avatar à l'adresse [url], dès qu'elle est décodée ; `null` si l'appli n'en a pas. */
+@Composable
+private fun rememberAvatarThumb(url: String?): ImageBitmap? {
+    val path = remember(url) { AvatarThumbs.pathOf(url) }
+    if (path == null) return null
+    val store = rememberAvatarThumbs()
+    val thumb = remember(path) { mutableStateOf(store.peek(path)) }
+    if (thumb.value == null) {
+        LaunchedEffect(path) { thumb.value = store.load(path) }
+    }
+    return thumb.value
 }
 
 /** Pastille « choisi » (coche blanche sur l'accent) au coin d'un avatar. */

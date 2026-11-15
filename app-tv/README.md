@@ -19,7 +19,10 @@ Jetpack Compose for TV et Media3.
   compte ; le catalogue d'un profil 7+, 12+ ou 16+ est rempli à partir des
   classifications d'âge de TMDB.
 - Profils du compte gérés depuis « Qui regarde ? » : création, avatar, nom,
-  limite d'âge, suppression.
+  limite d'âge, suppression. Le choix d'avatar affiche des vignettes
+  embarquées (`app/src/main/assets/avatar_thumbs/`), sans réseau ; quand le
+  site change ses avatars, reprendre `AvatarCatalog.kt` puis lancer
+  `node app-tv/scripts/build-avatar-thumbs.mjs`.
 
 Installation pour les utilisateurs : page `/app-tv` du site.
 

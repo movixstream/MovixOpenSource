@@ -155,6 +155,16 @@ fun ProfilePickerScreen(onDone: () -> Unit, onBack: () -> Unit, modifier: Modifi
     // Plus de compte (session supprimée depuis le site) : plus rien à choisir ni à gérer, on le dit.
     LaunchedEffect(account) { if (account == null) signedOut = true }
 
+    // Éditeur ouvert : le choix d'avatar est préparé (catalogue, premières vignettes) et s'ouvrira
+    // sans attente. Éditeur fermé : les vignettes sont rendues.
+    val thumbs = rememberAvatarThumbs()
+    val avatarsPerRow = rememberAvatarsPerRow()
+    val editorOpen = draft != null
+    val editedAvatar = draft?.avatar
+    LaunchedEffect(editorOpen, editedAvatar) {
+        if (editorOpen) prepareAvatarPicker(thumbs, editedAvatar, avatarsPerRow) else thumbs.trim()
+    }
+
     fun focusList(target: ListFocus) {
         listFocus = target
         focusNonce++
