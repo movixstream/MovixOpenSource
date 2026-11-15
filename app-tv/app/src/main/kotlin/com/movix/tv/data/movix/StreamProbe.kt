@@ -28,6 +28,17 @@ import kotlin.coroutines.resume
  */
 data class Variant(val height: Int?, val codecs: List<String> = emptyList())
 
+/** Réponse de [StreamProbe.probe] pour une source. */
+sealed interface ProbeOutcome {
+    /** Pas de réponse dans le délai, refus du serveur, page web à la place du flux. */
+    data object Unreachable : ProbeOutcome
+
+    /** Le flux répond sans annoncer sa résolution (playlist de segments, conteneur non lu). */
+    data object Unknown : ProbeOutcome
+
+    data class Found(val variants: List<Variant>) : ProbeOutcome
+}
+
 /**
  * Qualité et codecs réels des flux avant de lancer. Le serveur n'annonce
  * souvent que « HD » ; la playlist HLS maîtresse, elle, porte `RESOLUTION=`
@@ -64,6 +75,36 @@ class StreamProbe(
         withTimeoutOrNull(totalMs) { jobs.awaitAll() }
         jobs.forEach { it.cancel() }
         HashMap(results)
+    }
+
+    /**
+     * Sonde d'une seule source, bornée à [totalMs] (« Vérifier la qualité ») :
+     * à la différence de [variants], dit si le lien est mort ou s'il répond
+     * sans annoncer sa résolution. Le type annoncé n'est qu'un indice : les
+     * URL du relais n'ont pas d'extension, un MP4 peut arriver pour du HLS et
+     * l'inverse ; on regarde les premiers octets.
+     */
+    suspend fun probe(source: PlaybackSource, totalMs: Long): ProbeOutcome {
+        val url = source.streamUrl ?: return ProbeOutcome.Unreachable
+        return withTimeoutOrNull(totalMs) { probeOnce(url, source.headers, source.kind) } ?: ProbeOutcome.Unreachable
+    }
+
+    private suspend fun probeOnce(url: String, headers: Map<String, String>, kind: StreamKind): ProbeOutcome {
+        // Premier morceau : la playlist entière (64 Ko) ou la première page d'un MP4, de même taille.
+        val head = fetch(url, headers, 0, MAX_PLAYLIST, ranged = kind == StreamKind.FILE) ?: return ProbeOutcome.Unreachable
+        val text = head.decodeToString(0, minOf(head.size, 512)).trimStart()
+        if (text.startsWith("#EXTM3U")) {
+            val found = HlsMaster.variants(head.decodeToString())
+            return if (found.isEmpty()) ProbeOutcome.Unknown else ProbeOutcome.Found(found)
+        }
+        // Page web (lien expiré, captcha…) à la place du flux.
+        if (text.startsWith("<")) return ProbeOutcome.Unreachable
+        if (head.size >= 8 && String(head, 4, 4, Charsets.ISO_8859_1) == "ftyp") {
+            val mp4 = Mp4Header.read { offset, length -> if (offset == 0L) head else fetch(url, headers, offset, length, ranged = true) }
+            return mp4?.let { ProbeOutcome.Found(listOf(it)) } ?: ProbeOutcome.Unknown
+        }
+        // Le serveur répond, mais ni HLS ni MP4 : MKV, AVI… lisibles, sans taille lue ici.
+        return if (kind == StreamKind.FILE) ProbeOutcome.Unknown else ProbeOutcome.Unreachable
     }
 
     /**

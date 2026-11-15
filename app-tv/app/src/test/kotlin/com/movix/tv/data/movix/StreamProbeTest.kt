@@ -42,6 +42,17 @@ class StreamProbeTest {
                 }
                 "/slow" -> MockResponse.Builder().body("#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=1920x1080\n/v.m3u8\n")
                     .headersDelay(3, java.util.concurrent.TimeUnit.SECONDS).build()
+                // Lien du relais sans extension : un MP4 servi à qui le prend pour du HLS (Range ou pas).
+                "/relay" -> {
+                    val range = request.headers["Range"]
+                    if (range == null) MockResponse.Builder().body(Buffer().write(mp4)).build()
+                    else {
+                        val (from, to) = range.removePrefix("bytes=").split('-').map { it.toLong() }
+                        val end = minOf(to, mp4.size - 1L)
+                        MockResponse.Builder().code(206).body(Buffer().write(mp4.copyOfRange(from.toInt(), end.toInt() + 1))).build()
+                    }
+                }
+                "/page" -> MockResponse.Builder().body("<html>lien expiré</html>").build()
                 else -> MockResponse.Builder().code(403).build()
             }
         }
@@ -76,6 +87,41 @@ class StreamProbeTest {
         val found = withContext(Dispatchers.Default) { StreamProbe(OkHttpClient()).variants(listOf(slow, hd), totalMs = 1_000) }
         val tookMs = (System.nanoTime() - started) / 1_000_000
         assertEquals(setOf(hd.id), found.keys)
+        assertTrue("attente trop longue : $tookMs ms", tookMs < 3_000)
+    }
+
+    // ---------- sonde d'une source seule (« Vérifier la qualité ») ----------
+
+    @Test
+    fun probeTellsDeadLinksFromUnannouncedQuality() = runBlocking {
+        val probe = StreamProbe(OkHttpClient())
+        withContext(Dispatchers.Default) {
+            assertEquals(ProbeOutcome.Found(listOf(Variant(486))), probe.probe(source("/low"), 5_000))
+            assertEquals(ProbeOutcome.Found(listOf(Variant(720, listOf("avc1", "mp4a")))), probe.probe(source("/film.mp4", StreamKind.FILE), 5_000))
+            // Playlist de segments : le flux répond, mais sans résolution annoncée.
+            assertEquals(ProbeOutcome.Unknown, probe.probe(source("/media"), 5_000))
+            // Refus du serveur, ou page web à la place d'une playlist : lien mort.
+            assertEquals(ProbeOutcome.Unreachable, probe.probe(source("/denied"), 5_000))
+            assertEquals(ProbeOutcome.Unreachable, probe.probe(source("/page"), 5_000))
+        }
+    }
+
+    @Test
+    fun probeReadsStreamsWhoseKindWasGuessedWrong() = runBlocking {
+        val probe = StreamProbe(OkHttpClient())
+        withContext(Dispatchers.Default) {
+            // MP4 pris pour du HLS, et playlist maîtresse prise pour un fichier.
+            assertEquals(ProbeOutcome.Found(listOf(Variant(720, listOf("avc1", "mp4a")))), probe.probe(source("/relay"), 5_000))
+            assertEquals(ProbeOutcome.Found(listOf(Variant(486))), probe.probe(source("/low", StreamKind.FILE), 5_000))
+        }
+    }
+
+    @Test
+    fun probeGivesUpAtItsOwnDelay() = runBlocking {
+        val started = System.nanoTime()
+        val outcome = withContext(Dispatchers.Default) { StreamProbe(OkHttpClient()).probe(source("/slow"), 1_000) }
+        val tookMs = (System.nanoTime() - started) / 1_000_000
+        assertEquals(ProbeOutcome.Unreachable, outcome)
         assertTrue("attente trop longue : $tookMs ms", tookMs < 3_000)
     }
 }

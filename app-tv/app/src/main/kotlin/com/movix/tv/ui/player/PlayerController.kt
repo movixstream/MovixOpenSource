@@ -30,6 +30,8 @@ import com.movix.tv.data.local.WatchMeta
 import com.movix.tv.data.movix.Lang
 import com.movix.tv.data.movix.PlayRequest
 import com.movix.tv.data.movix.PlaybackSource
+import com.movix.tv.data.movix.ProbeOutcome
+import com.movix.tv.data.movix.QualityResult
 import com.movix.tv.data.movix.SourceSelector
 import com.movix.tv.data.movix.StreamKind
 import com.movix.tv.data.movix.SubtitleTrack
@@ -40,13 +42,17 @@ import com.movix.tv.player.SubtitleCue
 import com.movix.tv.player.qualityLabel
 import com.movix.tv.player.Subtitles
 import com.movix.extract.Extraction
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
@@ -116,6 +122,12 @@ sealed interface SubtitleChoice {
  */
 @Immutable
 data class FormatIssue(val video: String?, val audio: String?)
+
+/** Avancement de « Vérifier la qualité » : sources mesurées sur le total. */
+@Immutable
+data class QualityProgress(val done: Int, val total: Int) {
+    val running: Boolean get() = done < total
+}
 
 /**
  * État et commandes du lecteur. Un `ExoPlayer` par écran, libéré par
@@ -214,6 +226,14 @@ class PlayerController(
     private val inFlight = HashMap<String, kotlinx.coroutines.Deferred<Extraction>>()
     private var deviceJob: Job? = null
     private var extractAllJob: Job? = null
+    /** Extractions de fond et de « Vérifier la qualité » : deux à la fois au plus (boîtiers lents). */
+    private val extractPermits = Semaphore(2)
+
+    /** « Vérifier la qualité » : résultat par source ([PlaybackSource.id]), gardé jusqu'au changement d'épisode. */
+    val quality = androidx.compose.runtime.mutableStateMapOf<String, QualityResult>()
+    /** Avancement de la vérification, `null` tant qu'elle n'a pas été lancée sur cet épisode. */
+    var qualityCheck by mutableStateOf<QualityProgress?>(null); private set
+    private var qualityJob: Job? = null
 
     /** Version préférée (réglages de lecture) lue au chargement de l'épisode : ordre des sources. */
     private var preferredVersion = Lang.VF
@@ -320,6 +340,8 @@ class PlayerController(
         loadJob?.cancel()
         deviceJob?.cancel()
         extractAllJob?.cancel()
+        // Résultats de « Vérifier la qualité » : ceux de l'épisode d'avant ne valent plus.
+        qualityJob?.cancel(); quality.clear(); qualityCheck = null
         phase = PlayerPhase.LOADING
         loadingText = com.movix.tv.R.string.player_loading
         extracted.clear(); inFlight.values.forEach { it.cancel() }; inFlight.clear(); extractingId = null
@@ -423,20 +445,16 @@ class PlayerController(
         val todo = SourceSelector.deviceCandidates(deviceSources, preferredVersion).filter { s -> sources.none { it.id == s.id } }
         if (todo.isEmpty()) return
         extractAllJob = scope.launch {
-            val permits = kotlinx.coroutines.sync.Semaphore(2)
             todo.map { s ->
                 launch {
-                    permits.acquire()
-                    try {
-                        val e = extract(s)
-                        if (e.ok) {
-                            val playable = toPlayable(s, e)
-                            if (sources.none { it.id == playable.id }) sources = sources + playable
-                        } else {
-                            deviceSources = deviceSources.filterNot { it.id == s.id }
-                        }
-                    } finally {
-                        permits.release()
+                    val e = extractPermits.withPermit { extract(s) }
+                    if (e.ok) {
+                        val playable = toPlayable(s, e)
+                        if (sources.none { it.id == playable.id }) sources = sources + playable
+                    } else if (qualityCheck == null) {
+                        // Pendant ou après « Vérifier la qualité », la ligne reste,
+                        // marquée « ne répond pas » : la liste ne bouge pas sous le focus.
+                        deviceSources = deviceSources.filterNot { it.id == s.id }
                     }
                 }
             }
@@ -1139,13 +1157,107 @@ class PlayerController(
         startWatch?.cancel()
         loadJob?.cancel()
         extractAllJob?.cancel()
+        qualityJob?.cancel()
         player.removeListener(listener)
         player.release()
+    }
+
+    // ---------- « Vérifier la qualité » ----------
+
+    /**
+     * Lignes « Extraction sur la télé » du panneau Source, dans un ordre fixe
+     * (celui des lecteurs trouvés) : un lecteur extrait garde sa place, sa
+     * version lançable remplaçant l'autre. Avant, il remontait en tête du
+     * groupe et les lignes bougeaient sous le focus à chaque extraction
+     * finie. Au plus [MAX_DEVICE_ROWS] lecteurs encore à extraire.
+     */
+    fun deviceRows(): List<PlaybackSource> {
+        val done = sources.filter { it.extracted }.associateBy { it.id }
+        val listed = deviceSources.mapTo(HashSet()) { it.id }
+        var pending = 0
+        return (deviceSources.map { done[it.id] ?: it } + done.values.filter { it.id !in listed })
+            .filter { it.playable || pending++ < MAX_DEVICE_ROWS }
+    }
+
+    /**
+     * Mesure la qualité d'image réelle de toutes les sources du panneau :
+     * celles du serveur, celles déjà extraites sur la télé et celles à
+     * extraire (extraites d'abord, deux à la fois comme l'extraction de
+     * fond). Rien n'est lancé ni coupé : playlist maîtresse ou en-tête MP4
+     * seulement ([com.movix.tv.data.movix.StreamProbe.probe]), [QUALITY_PROBES]
+     * sondes à la fois, [QUALITY_PROBE_MS] au plus par source. Chaque
+     * résultat s'affiche dès qu'il arrive ; tous restent jusqu'au changement
+     * d'épisode. Sans effet si une vérification tourne déjà.
+     */
+    fun checkQuality() {
+        if (qualityJob?.isActive == true) return
+        val targets = (sources.filter { !it.extracted } + deviceRows()).distinctBy { it.id }
+        quality.clear()
+        targets.forEach { quality[it.id] = QualityResult.Checking }
+        qualityCheck = QualityProgress(0, targets.size)
+        if (targets.isEmpty()) return
+        val probes = Semaphore(QUALITY_PROBES)
+        var done = 0
+        qualityJob = scope.launch {
+            targets.map { s ->
+                launch {
+                    val result = try {
+                        measure(s, probes)
+                    } catch (e: CancellationException) {
+                        // Extraction annulée par un autre (nouvel épisode) : ici on continue.
+                        if (!isActive) throw e
+                        QualityResult.Unavailable
+                    } catch (e: Exception) {
+                        Log.w("MovixQuality", "${s.label} : $e")
+                        QualityResult.Unavailable
+                    }
+                    quality[s.id] = result
+                    done++
+                    qualityCheck = QualityProgress(done, targets.size)
+                }
+            }.joinAll()
+            Log.i("MovixQuality", "vérification finie : " + targets.joinToString { s ->
+                when (val r = quality[s.id]) {
+                    is QualityResult.Measured -> "${s.label}=${r.rating.height ?: "?"}" + if (r.rating.playableHere) "" else " (illisible)"
+                    else -> "${s.label}=${r?.javaClass?.simpleName}"
+                }
+            })
+        }
+    }
+
+    /** Qualité d'une source : extraite d'abord si besoin, puis sondée, sans rien lire de la vidéo. */
+    private suspend fun measure(s: PlaybackSource, probes: Semaphore): QualityResult {
+        val stream = if (s.playable) s else {
+            val e = withTimeoutOrNull(EXTRACT_WAIT_MS) { extractLimited(s) }
+            if (e == null || !e.ok) return QualityResult.Unavailable
+            // Extraite : lançable tout de suite, comme avec l'extraction de fond (même ligne, même place).
+            toPlayable(s, e).also { p -> if (sources.none { it.id == p.id }) sources = sources + p }
+        }
+        return when (val outcome = probes.withPermit { container.streamProbe.probe(stream, QUALITY_PROBE_MS) }) {
+            ProbeOutcome.Unreachable -> QualityResult.Unavailable
+            ProbeOutcome.Unknown -> QualityResult.Unknown
+            is ProbeOutcome.Found -> withContext(Dispatchers.Default) { SourceSelector.rate(outcome.variants, container.codecSupport::supports) }
+                ?.let { QualityResult.Measured(it) } ?: QualityResult.Unknown
+        }
+    }
+
+    /** Extraction déjà faite ou en cours réutilisée ; sinon une nouvelle, dans la limite de [extractPermits]. */
+    private suspend fun extractLimited(s: PlaybackSource): Extraction {
+        val embed = s.embedUrl ?: return Extraction("", null, error = "no_embed")
+        extracted[embed]?.let { return it }
+        inFlight[embed]?.let { return it.await() }
+        return extractPermits.withPermit { extract(s) }
     }
 
     private companion object {
         /** Épisodes enchaînés seuls avant « Vous regardez toujours ? ». */
         const val STILL_WATCHING_AFTER = 3
+        /** « Vérifier la qualité » : sondes à la fois, délai par source, attente d'une extraction. */
+        const val QUALITY_PROBES = 3
+        const val QUALITY_PROBE_MS = 12_000L
+        const val EXTRACT_WAIT_MS = 30_000L
+        /** Lecteurs encore à extraire montrés dans le panneau Source. */
+        const val MAX_DEVICE_ROWS = 30
         val GENERIC_TRACK = Regex("""(?i)(track|piste|audio|sound|son|subtitle|sous-titres?)\s*#?\d*|\d+""")
         val PARSING_ERRORS = setOf(
             PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,

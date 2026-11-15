@@ -25,4 +25,20 @@
     <string name="player_st_yellow">Jaune</string>
     <string name="player_st_cyan">Cyan</string>
     <string name="player_st_green">Vert</string>
+
+    <!-- « Vérifier la qualité » (panneau Source) -->
+    <string name="player_quality_check">Vérifier la qualité</string>
+    <string name="player_quality_check_body">Mesure la vraie qualité d\'image de chaque source</string>
+    <string name="player_quality_checking">Vérification… %1$d/%2$d</string>
+    <string name="player_quality_checking_body">La qualité s\'affiche sur chaque source</string>
+    <string name="player_quality_best_so_far">Meilleure pour l\'instant : %1$s</string>
+    <string name="player_quality_again">Vérifier à nouveau</string>
+    <string name="player_quality_best_is">Meilleure qualité trouvée : %1$s</string>
+    <string name="player_quality_none">Aucune source n\'a donné sa qualité</string>
+    <string name="player_quality_nothing">Aucune source à vérifier</string>
+    <string name="player_quality_best">Meilleure qualité</string>
+    <string name="player_quality_pending">vérification…</string>
+    <string name="player_quality_down">ne répond pas</string>
+    <string name="player_quality_unknown">qualité non annoncée</string>
+    <string name="player_quality_unreadable">illisible sur cette télé (%1$s)</string>
 </resources>
