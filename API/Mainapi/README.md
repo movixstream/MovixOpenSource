@@ -133,9 +133,11 @@ Une cinquantaine de fiches ne publient pas d'ID TMDB, mais donnent leur ID AniLi
 | `GET /anime/tmdb/:type/:id` | œuvre dont la fiche porte cet ID TMDB (`tv` ou `movie`), même forme |
 | `GET /anime/episode/:slug?season=<chemin>&episode=<rang>` | adresses des lecteurs d'un épisode |
 | `GET /anime/catalogue`, `/anime/catalogue/genres` | catalogue indexé, paginé et filtrable |
-| `GET /anime/planning?from=&to=` | sorties annoncées entre deux jours |
+| `GET /anime/planning?from=&to=` | sorties annoncées entre deux jours, plus celles prévues la semaine suivante (`estimated: true`) |
 
 Dans la liste d'une œuvre, chaque langue d'un épisode donne `players` (adresses connues) et `pending` (lecteurs dont l'adresse reste à demander par `/anime/episode`).
+
+Le planning du site ne couvre que la semaine en cours, du lundi au dimanche. `/anime/planning` y ajoute la semaine suivante : les sorties de la semaine connue, sept jours plus tard, avec le numéro d'épisode suivant et `estimated: true` (les films et OAV ne sont pas recopiés). Ces sorties prévues ne sont pas rangées en base : elles disparaissent dès que le site publie la semaine, et aucune n'est rendue pour un jour passé. Le statut « Terminé » des fiches ne sert pas de filtre : près de la moitié des séries en cours de diffusion le portent (il décrit souvent la première saison).
 
 Scénario de bout en bout contre le vrai site et une base MySQL de test (nom fini par `_test`), avec rapport (`report.md`, réponses, requêtes, logs) :
 

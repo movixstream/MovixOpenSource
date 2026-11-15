@@ -667,7 +667,8 @@
       "tv": "New series"
     },
     "animeRelease": {
-      "delayed": "Delayed"
+      "delayed": "Delayed",
+      "estimated": "Expected"
     },
     "category": {
       "movie": "Movie",

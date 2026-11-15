@@ -667,7 +667,8 @@
       "tv": "Nouvelle s\u00e9rie"
     },
     "animeRelease": {
-      "delayed": "Reporté"
+      "delayed": "Reporté",
+      "estimated": "Prévu"
     },
     "category": {
       "movie": "Film",

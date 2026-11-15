@@ -432,6 +432,35 @@ async function main() {
     check('planning : une sortie d’une œuvre indexée porte son ID TMDB', `${SMALL.slug} → tv/${SMALL.tmdb[1]}`, smallInPlanning ? `${smallInPlanning.day} ${smallInPlanning.lang} tmdb ${smallInPlanning.tmdb?.type}/${smallInPlanning.tmdb?.id}` : `${SMALL.slug} absent du planning de la semaine`, !smallInPlanning || smallInPlanning.tmdb?.id === SMALL.tmdb[1]);
     const outside = await getJson(port, '/anime/planning?from=2001-01-01&to=2001-01-31');
     check('planning : hors période, rien', '0 sortie', `${outside.body.entries.length} sortie(s)`, outside.body.entries.length === 0);
+
+    // ---- 7. Semaine suivante : le planning du site s'arrête au dimanche, elle
+    // est prévue en recopiant la semaine publiée.
+    const shift = (day, days) => new Date(Date.parse(`${day}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+    const lastRealDay = entries.filter(entry => !entry.estimated).reduce((last, entry) => (entry.day > last ? entry.day : last), '');
+    const weekEnd = lastRealDay ? shift(lastRealDay, (7 - new Date(`${lastRealDay}T00:00:00Z`).getUTCDay()) % 7) : '';
+    const today = new Date().toISOString().slice(0, 10);
+    const twoWeeks = await getJson(port, `/anime/planning?from=${shift(weekEnd, -6)}&to=${shift(weekEnd, 7)}`);
+    await saveResponse('planning-deux-semaines', twoWeeks.body);
+    const announced = twoWeeks.body.entries.filter(entry => !entry.estimated);
+    const expectedNext = twoWeeks.body.entries.filter(entry => entry.estimated);
+    const runOf = entry => `${entry.slug}|${entry.seasonPath}|${entry.lang}`;
+    const repeating = announced.filter(entry => !/^(film|oav)/i.test(entry.seasonPath) && shift(entry.day, 7) >= today);
+    const twinOf = entry => expectedNext.find(other => runOf(other) === runOf(entry) && other.day === shift(entry.day, 7));
+    const wellShifted = repeating.filter((entry) => {
+      const twin = twinOf(entry);
+      return twin && twin.state === 'scheduled' && twin.releaseAt === (entry.releaseAt === null ? null : entry.releaseAt + 7 * 86400) && JSON.stringify(twin.tmdb) === JSON.stringify(entry.tmdb);
+    });
+    check('semaine suivante : chaque sortie de la semaine publiée est prévue sept jours plus tard', `${repeating.length} sorties prévues du ${shift(weekEnd, 1)} au ${shift(weekEnd, 7)}, même heure, même lien TMDB`, `${expectedNext.length} prévues, ${wellShifted.length} bien décalées, jours ${[...new Set(expectedNext.map(entry => entry.day))].sort().join(' ')}`, repeating.length >= 20 && expectedNext.length === repeating.length && wellShifted.length === repeating.length && expectedNext.every(entry => entry.day > weekEnd && entry.day <= shift(weekEnd, 7)));
+    check('semaine publiée : aucune sortie prévue ne s’y glisse', `0 sortie prévue jusqu’au ${weekEnd}`, `${expectedNext.filter(entry => entry.day <= weekEnd).length} prévue(s), ${announced.length} annoncées`, announced.length >= 20 && expectedNext.every(entry => entry.day > weekEnd));
+
+    const episodeOf = label => Number(String(label || '').match(/Épisode\s+(\d+)\s*$/i)?.[1]);
+    const once = repeating.filter(entry => Number.isInteger(episodeOf(entry.label)) && repeating.filter(other => runOf(other) === runOf(entry)).length === 1);
+    const advanced = once.filter(entry => episodeOf(twinOf(entry)?.label) === episodeOf(entry.label) + 1);
+    check('semaine suivante : le numéro d’épisode avance d’un cran', `${once.length} œuvres à un épisode par semaine, toutes à l’épisode suivant`, `${advanced.length}/${once.length} ; par exemple « ${once[0]?.label} » → « ${twinOf(once[0] || {})?.label} »`, once.length >= 10 && advanced.length === once.length);
+
+    const nextOnly = await getJson(port, `/anime/planning?from=${shift(weekEnd, 1)}&to=${shift(weekEnd, 7)}`);
+    const beyond = await getJson(port, `/anime/planning?from=${shift(weekEnd, 8)}&to=${shift(weekEnd, 40)}`);
+    check('fenêtre de la seule semaine suivante, puis au-delà', `${repeating.length} sorties toutes prévues, puis 0`, `${nextOnly.body.entries.length} sorties dont ${nextOnly.body.entries.filter(entry => entry.estimated).length} prévues, puis ${beyond.body.entries.length}`, nextOnly.body.entries.length === repeating.length && nextOnly.body.entries.every(entry => entry.estimated === true) && beyond.body.entries.length === 0);
   } finally {
     server.close();
     await pool.end().catch(() => {});

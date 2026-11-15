@@ -83,6 +83,11 @@ export interface AnimePlanningEntry {
   releaseAt: number | null;
   label: string;
   state: 'scheduled' | 'released' | 'delayed';
+  /**
+   * Sortie prévue, pas encore annoncée : le planning du site s'arrête au
+   * dimanche, le Main API recopie donc la semaine connue sept jours plus tard.
+   */
+  estimated?: boolean;
   tmdb: { type: 'tv' | 'movie'; id: number } | null;
   posterPath: string | null;
   image: string;

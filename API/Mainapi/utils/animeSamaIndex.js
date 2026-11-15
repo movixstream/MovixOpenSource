@@ -301,7 +301,42 @@ function createAnimeSamaStore({ getPool }) {
     return { updatedAt, entries };
   }
 
-  return { listKnown, saveTitle, setMissing, replacePlanning, prune, findByTmdb, listTitles, listGenres, readPlanning };
+  // Dernier jour pour lequel une sortie est rangée (`AAAA-MM-JJ`), ou null.
+  async function lastPlanningDay() {
+    const [[row]] = await pool().query('SELECT MAX(day) AS day FROM anime_sama_planning');
+    return row?.day || null;
+  }
+
+  return { listKnown, saveTitle, setMissing, replacePlanning, prune, findByTmdb, listTitles, listGenres, readPlanning, lastPlanningDay };
+}
+
+// ---- Planning : semaine suivante ----
+
+const shiftDay = (day, days) => dayKeyOf(Date.parse(`${day}T00:00:00Z`) + days * DAY_MS);
+// Le planning du site va du lundi au dimanche : dimanche de la semaine de `day`.
+const sundayOf = day => shiftDay(day, (7 - new Date(`${day}T00:00:00Z`).getUTCDay()) % 7);
+// Sorties qui ne reviennent pas chaque semaine.
+const ONE_OFF_PATH = /^(?:film|oav)/i;
+const EPISODE_NUMBER = /(Épisode\s+)(\d+)(\s*)$/i;
+
+/**
+ * Sorties prévues la semaine suivante : celles de la semaine connue, sept jours
+ * plus tard. Le numéro d'épisode avance d'autant d'épisodes que l'œuvre en sort
+ * par semaine dans cette langue (« Saison 1 · Épisode 6 » → « … Épisode 7 »).
+ */
+function expectNextWeek(entries) {
+  const weekly = entries.filter(entry => !ONE_OFF_PATH.test(entry.seasonPath));
+  const runOf = entry => `${entry.slug}|${entry.seasonPath}|${entry.lang}`;
+  const perWeek = new Map();
+  for (const entry of weekly) perWeek.set(runOf(entry), (perWeek.get(runOf(entry)) || 0) + 1);
+  return weekly.map(entry => ({
+    ...entry,
+    day: shiftDay(entry.day, 7),
+    releaseAt: entry.releaseAt === null ? null : entry.releaseAt + (7 * DAY_MS) / 1000,
+    label: String(entry.label || '').replace(EPISODE_NUMBER, (_, word, number, tail) => `${word}${Number(number) + perWeek.get(runOf(entry))}${tail}`),
+    state: 'scheduled',
+    estimated: true,
+  }));
 }
 
 // ---- Tâche de fond ----
@@ -511,6 +546,27 @@ function createAnimeSamaIndex({
   }
 
   /**
+   * Sorties entre deux jours. Le planning du site s'arrête au dimanche de la
+   * semaine en cours : la semaine d'après est prévue en recopiant la semaine
+   * connue (`estimated: true`). Une sortie prévue n'existe que tant que le site
+   * n'a pas publié cette semaine-là, et jamais dans le passé.
+   */
+  async function readPlanning({ from, to }) {
+    const planning = await store.readPlanning({ from, to });
+    const lastDay = await store.lastPlanningDay();
+    if (!lastDay) return planning;
+
+    const weekEnd = sundayOf(lastDay);
+    const first = [from, shiftDay(weekEnd, 1), dayKeyOf(now())].sort().pop();
+    const last = [to, shiftDay(weekEnd, 7)].sort()[0];
+    if (first > last) return planning;
+
+    const known = await store.readPlanning({ from: shiftDay(weekEnd, -6), to: weekEnd });
+    const expected = expectNextWeek(known.entries).filter(entry => entry.day >= first && entry.day <= last);
+    return { updatedAt: planning.updatedAt ?? known.updatedAt, entries: [...planning.entries, ...expected] };
+  }
+
+  /**
    * Lance la tâche sur le worker désigné : un premier passage après
    * `firstDelayMs`, puis un toutes les `intervalMs`. Rend false si rien n'a été
    * lancé (autre worker, ou déjà lancée).
@@ -543,7 +599,7 @@ function createAnimeSamaIndex({
     findByTmdb: (type, id) => store.findByTmdb(type, id),
     listTitles: options => store.listTitles(options),
     listGenres: () => store.listGenres(),
-    readPlanning: range => store.readPlanning(range),
+    readPlanning,
   };
 }
 

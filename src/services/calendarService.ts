@@ -744,6 +744,10 @@ const airingEpisodesOf = async (
  *
  * Seules les œuvres reliées à une fiche TMDB sont gardées : sans fiche, la
  * ligne ne mènerait nulle part et resterait sans affiche.
+ *
+ * Le planning du site s'arrête au dimanche. Le Main API y ajoute la semaine
+ * suivante, recopiée de la semaine connue (`estimated`) : ces sorties portent
+ * la mention « Prévu » tant que le site ne les a pas annoncées.
  */
 const animeReleasesOf = async (fromKey: string, toKey: string): Promise<CalendarOccurrence[]> => {
   // Le planning range chaque sortie au jour de la France. Un jour de marge de
@@ -767,6 +771,7 @@ const animeReleasesOf = async (fromKey: string, toKey: string): Promise<Calendar
       entry.label,
       entry.lang.toUpperCase(),
       entry.state === 'delayed' ? i18n.t('calendar.animeRelease.delayed') : '',
+      entry.estimated ? i18n.t('calendar.animeRelease.estimated') : '',
     ].filter(Boolean).join(' · ');
 
     occurrences.push({

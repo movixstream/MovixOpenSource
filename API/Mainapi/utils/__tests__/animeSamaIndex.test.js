@@ -35,6 +35,18 @@
  * 11. Une fiche reliée par correspondance prend la page TMDB d'une œuvre que
  *     le site relie déjà à cet ID (film ou saison à part rangé sous la série).
  * 12. Une correspondance retirée ou corrigée par le service reste en base.
+ * 13. Le planning du site s'arrête au dimanche de la semaine en cours : le
+ *     calendrier n'a plus aucune sortie d'anime au-delà. La semaine suivante
+ *     est donc prévue en recopiant la dernière semaine connue. Ce qui peut mal
+ *     tourner : une sortie prévue reste à côté de la vraie une fois la semaine
+ *     publiée ; l'heure de sortie n'est pas décalée (le site range alors la
+ *     sortie au mauvais jour) ; le numéro d'épisode n'avance pas, ou avance mal
+ *     pour deux épisodes par semaine ; un film repasse chaque semaine ; une
+ *     sortie « reportée » reste reportée ; la prévision s'étend sans fin.
+ * 14. Index en retard de plusieurs jours : des sorties « prévues » sont
+ *     inventées dans le passé.
+ * 15. Une fenêtre qui ne couvre que la semaine suivante ne reçoit rien, parce
+ *     que la semaine recopiée est hors de la fenêtre demandée.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -65,13 +77,13 @@ function ficheHtml({ name, tmdb = null, anilist = null, mal = null, seasons = ['
 
 const sitemapXml = slugs => `<urlset>${slugs.map(slug => `<url><loc>${SITE}catalogue/${slug}/</loc></url>`).join('')}</urlset>`;
 
-// `days` : [['09/11', [{ slug, name, lien, ts, classes }]], …]
+// `days` : [['09/11', [{ slug, name, lien, ts, classes, label }]], …]
 function planningHtml(days) {
   return days.map(([date, cards]) => [
     `<h2 class="titreJours">Jour</h2><p>${date}</p>`,
     ...cards.map(card => [
       `<div class="as-carte planning-card ${card.classes || 'Anime VOSTFR'}" data-url="/catalogue/${card.slug}/" data-lien="${card.lien || 'saison1/vostfr'}" data-nom="${card.name || card.slug}"${card.ts ? ` data-release-ts="${card.ts}"` : ''}>`,
-      '<div class="as-carte-info"><span>Saison 1</span></div></div>',
+      `<div class="as-carte-info"><span>${card.label || 'Saison 1'}</span></div></div>`,
     ].join('')),
   ].join('\n')).join('\n');
 }
@@ -109,6 +121,20 @@ function createStore() {
       for (const entry of entries) planning.set(`${entry.day}|${entry.slug}|${entry.seasonPath}|${entry.lang}`, entry);
     },
     async prune() { store.check(); },
+    // Sorties rangées entre deux jours, avec le lien TMDB de l'œuvre.
+    async readPlanning({ from, to }) {
+      store.check();
+      const entries = [...planning.values()]
+        .filter(entry => entry.day >= from && entry.day <= to)
+        .sort((a, b) => a.day.localeCompare(b.day) || a.slug.localeCompare(b.slug))
+        .map(entry => ({ ...entry, tmdb: titles.get(entry.slug)?.fiche.tmdb ?? null, posterPath: null, image: '' }));
+      return { updatedAt: entries.length ? START : null, entries };
+    },
+    // Dernier jour pour lequel une sortie est rangée, ou null.
+    async lastPlanningDay() {
+      store.check();
+      return [...planning.values()].reduce((last, entry) => (last === null || entry.day > last ? entry.day : last), null);
+    },
   };
   return store;
 }
@@ -459,6 +485,101 @@ test('une fiche lue par la source passe par la même correspondance, sans jamais
   assert.deepEqual(h.tmdbOf('beta'), { type: 'tv', id: 313068 }, 'la panne ne retire pas le lien');
   assert.equal(await h.index.recordTitle('delta', { ...fiche, name: 'Delta', anilistId: 900 }), true);
   assert.equal(h.tmdbOf('delta'), null);
+});
+
+// Semaine publiée par le site, du lundi 09/11 au dimanche 15/11. L'horloge des
+// essais est au vendredi 13.
+const WEEK = [
+  ['09/11', [{ slug: 'alpha', ts: 1794232200, label: 'Saison 1 · Épisode 6', classes: 'Anime VOSTFR pl-sorti' }]],
+  ['10/11', []], ['11/11', []], ['12/11', []],
+  ['13/11', [
+    { slug: 'beta', lien: 'saison2/vf', label: 'Saison 2 · Épisode 12', classes: 'Anime VF pl-sorti' },
+    { slug: 'gamma', lien: 'film/vostfr', label: 'Film' },
+  ]],
+  ['14/11', []],
+  ['15/11', [{ slug: 'alpha', label: 'Saison 1 · Épisode 7', classes: 'Anime VOSTFR pl-retard' }]],
+];
+const brief = planning => planning.entries
+  .map(entry => `${entry.day} ${entry.slug} ${entry.seasonPath} ${entry.lang} « ${entry.label} » ${entry.state}${entry.estimated ? ' prévu' : ''}`)
+  .sort();
+
+test('semaine suivante : les sorties de la semaine connue sont prévues sept jours plus tard', async () => {
+  const h = setup();
+  h.site.planning = planningHtml(WEEK);
+  await h.index.runOnce();
+
+  // La fenêtre ne couvre que la semaine suivante : la semaine recopiée est hors fenêtre.
+  const next = await h.index.readPlanning({ from: '2026-11-16', to: '2026-11-22' });
+  assert.deepEqual(brief(next), [
+    // Deux épisodes d'alpha par semaine : les numéros avancent de deux.
+    '2026-11-16 alpha saison1 vostfr « Saison 1 · Épisode 8 » scheduled prévu',
+    '2026-11-20 beta saison2 vf « Saison 2 · Épisode 13 » scheduled prévu',
+    '2026-11-22 alpha saison1 vostfr « Saison 1 · Épisode 9 » scheduled prévu',
+  ], 'le film ne repasse pas, la sortie reportée redevient une sortie prévue');
+  const monday = next.entries.find(entry => entry.day === '2026-11-16');
+  assert.equal(monday.releaseAt, 1794232200 + 7 * 24 * 3600, 'l’heure de sortie suit le jour');
+  assert.deepEqual(monday.tmdb, { type: 'tv', id: 100 });
+  assert.equal(next.entries.find(entry => entry.day === '2026-11-20').releaseAt, null);
+
+  // À cheval sur les deux semaines : les vraies sorties, puis les prévues.
+  assert.deepEqual(brief(await h.index.readPlanning({ from: '2026-11-13', to: '2026-11-17' })), [
+    '2026-11-13 beta saison2 vf « Saison 2 · Épisode 12 » released',
+    '2026-11-13 gamma film vostfr « Film » scheduled',
+    '2026-11-15 alpha saison1 vostfr « Saison 1 · Épisode 7 » delayed',
+    '2026-11-16 alpha saison1 vostfr « Saison 1 · Épisode 8 » scheduled prévu',
+  ]);
+  // Rien avant la semaine connue, rien au-delà d'une semaine de prévision.
+  assert.deepEqual(brief(await h.index.readPlanning({ from: '2026-11-02', to: '2026-11-08' })), []);
+  assert.deepEqual(brief(await h.index.readPlanning({ from: '2026-11-23', to: '2026-12-31' })), []);
+});
+
+test('le site publie la semaine suivante : ses sorties remplacent les prévues, la prévision avance', async () => {
+  const h = setup();
+  h.site.planning = planningHtml(WEEK);
+  await h.index.runOnce();
+
+  // Lundi 16 : alpha n'a plus qu'un épisode par semaine, beta fait une pause,
+  // et le reste de la semaine publiée est vide.
+  h.clock.now += 3 * DAY;
+  h.site.planning = planningHtml([
+    ['16/11', [{ slug: 'alpha', label: 'Saison 1 · Épisode 8', classes: 'Anime VOSTFR pl-sorti' }]],
+    ['17/11', []], ['18/11', []], ['19/11', []], ['20/11', []], ['21/11', []], ['22/11', []],
+  ]);
+  await h.index.runOnce();
+
+  assert.deepEqual(brief(await h.index.readPlanning({ from: '2026-11-16', to: '2026-11-22' })), [
+    '2026-11-16 alpha saison1 vostfr « Saison 1 · Épisode 8 » released',
+  ], 'aucune sortie prévue ne reste dans une semaine que le site a publiée');
+  assert.deepEqual(brief(await h.index.readPlanning({ from: '2026-11-23', to: '2026-11-29' })), [
+    '2026-11-23 alpha saison1 vostfr « Saison 1 · Épisode 9 » scheduled prévu',
+  ]);
+});
+
+test('index en retard : aucune sortie prévue dans le passé', async () => {
+  const h = setup();
+  h.site.planning = planningHtml(WEEK);
+  await h.index.runOnce();
+  h.site.planning = CHALLENGE;
+
+  // Mercredi 18, le planning n'a pas pu être relu depuis vendredi.
+  h.clock.now = Date.UTC(2026, 10, 18, 9, 0, 0);
+  await h.index.runOnce();
+  assert.deepEqual(brief(await h.index.readPlanning({ from: '2026-11-14', to: '2026-11-30' })), [
+    '2026-11-15 alpha saison1 vostfr « Saison 1 · Épisode 7 » delayed',
+    '2026-11-20 beta saison2 vf « Saison 2 · Épisode 13 » scheduled prévu',
+    '2026-11-22 alpha saison1 vostfr « Saison 1 · Épisode 9 » scheduled prévu',
+  ], 'la sortie prévue lundi 16, jamais confirmée, n’est pas affichée après coup');
+
+  // Dix jours plus tard : toute la semaine prévue est passée.
+  h.clock.now = Date.UTC(2026, 10, 25, 9, 0, 0);
+  assert.deepEqual(brief(await h.index.readPlanning({ from: '2026-11-14', to: '2026-11-30' })), [
+    '2026-11-15 alpha saison1 vostfr « Saison 1 · Épisode 7 » delayed',
+  ]);
+});
+
+test('planning jamais lu : aucune sortie, aucune prévision', async () => {
+  const h = setup();
+  assert.deepEqual((await h.index.readPlanning({ from: '2026-11-01', to: '2026-11-30' })).entries, []);
 });
 
 test('la tâche de fond ne démarre que sur le worker désigné', async () => {
