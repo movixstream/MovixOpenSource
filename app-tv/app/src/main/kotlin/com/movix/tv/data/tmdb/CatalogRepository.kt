@@ -5,6 +5,9 @@ import com.movix.tv.data.age.AgeLimitUnknownException
 import com.movix.tv.data.age.AgeLimits
 import com.movix.tv.data.age.AgeRules
 import com.movix.tv.data.age.ContentAges
+import com.movix.tv.data.age.KidCatalog
+import com.movix.tv.data.age.ListPage
+import com.movix.tv.data.age.ListQuery
 import com.movix.tv.data.age.TitleRef
 import com.movix.tv.data.imdb.ImdbSuggestions
 import java.text.Normalizer
@@ -95,10 +98,7 @@ class CatalogRepository(
         specs.map { spec ->
             async {
                 val t0 = System.nanoTime()
-                val result = runCatching {
-                    val l = limit.getOrThrow()
-                    allowedItems(api.list(spec.path, spec.params()).results.mapNotNull { it.toMediaItem(spec.fallbackType) }, l)
-                }
+                val result = runCatching { rowItems(spec, limit.getOrThrow()) }
                 val ms = (System.nanoTime() - t0) / 1_000_000
                 if (ms > 3000 || result.isFailure) {
                     android.util.Log.w("MovixPerf", "rangée ${spec.id} : $ms ms, ${result.exceptionOrNull()?.toString() ?: "ok"}")
@@ -108,13 +108,46 @@ class CatalogRepository(
         }.awaitAll().toMap()
     }
 
-    suspend fun page(spec: RowSpec, page: Int): CatalogPage {
+    /**
+     * Titres d'une rangée. Sans restriction : sa première page, telle quelle.
+     * Profil limité : la rangée est remplie à partir de listes déjà triées par
+     * classification ([KidCatalog]), sinon le filtre d'âge n'en laisserait que
+     * quelques titres et elle disparaîtrait.
+     */
+    private suspend fun rowItems(spec: RowSpec, limit: Int): List<MediaItem> {
+        if (limit <= 0) return api.list(spec.path, spec.params()).results.mapNotNull { it.toMediaItem(spec.fallbackType) }
+        return KidCatalog.fill(
+            queries = KidCatalog.queries(spec.path, spec.params(), limit),
+            // Un classement (Top 10) a besoin de tous ses rangs.
+            enough = maxOf(spec.limit ?: 0, KidCatalog.ROW_ENOUGH),
+            load = { query, page ->
+                val found = api.list(query.path, query.params, page)
+                ListPage(titles(found, query, spec), hasMore = page < found.totalPages)
+            },
+            keep = { allowedItems(it, limit) },
+            key = { it.key },
+        )
+    }
+
+    /** Titres affichables d'une page de [query] (avec affiche) ; leur type vient de la liste si elle le fixe, sinon de la rangée. */
+    private fun titles(found: TmdbPage, query: ListQuery, spec: RowSpec): List<MediaItem> {
+        val type = KidCatalog.typeOf(query.path) ?: spec.fallbackType
+        return found.results.mapNotNull { it.toMediaItem(type) }.filter { it.posterPath != null }
+    }
+
+    /**
+     * Page [page] d'une grille (« Voir tout », genre). Profil limité : la même
+     * page de chaque liste triée par classification ([KidCatalog]), réunies.
+     */
+    suspend fun page(spec: RowSpec, page: Int): CatalogPage = coroutineScope {
         val limit = limitNow()
-        val found = api.list(spec.path, spec.params(), page).results
-            .mapNotNull { it.toMediaItem(spec.fallbackType) }
-            .filter { it.posterPath != null }
+        val found = KidCatalog.interleave(
+            KidCatalog.queries(spec.path, spec.params(), limit).map { query ->
+                async { titles(api.list(query.path, query.params, page), query, spec) }
+            }.awaitAll(),
+        ) { it.key }
         val kept = allowedItems(found, limit)
-        return CatalogPage(kept, hidden = found.size - kept.size)
+        CatalogPage(kept, hidden = found.size - kept.size)
     }
 
     // Fiches récentes en mémoire : la bannière précharge la fiche du titre
