@@ -1,12 +1,12 @@
 {
-  "versionCode": 8,
-  "versionName": "0.2.6",
+  "versionCode": 9,
+  "versionName": "0.3.0",
   "apkUrl": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app-tv/movix-tv.apk",
-  "apkSize": 13574038,
-  "apkSha256": "c615bfe2596a7a1a6ecb01f298c5e5fa38f3f82429b516aef01fa30c9a141dfc",
+  "apkSize": 21037791,
+  "apkSha256": "8aec096b66cbc38b59dbaa2875e9683f40f61c0ce2c2d148de09cf1e1fe472f1",
   "minSdk": 25,
   "notes": {
-    "fr": "Fsvid et Vidzy se lisent à nouveau sur la télé : le lecteur se présente maintenant à ces sites comme un vrai navigateur Chrome.",
-    "en": "Fsvid and Vidzy play again on the TV: the player now presents itself to these sites as a real Chrome browser."
+    "fr": "Nouveau : genres et « Voir tout » dans le catalogue, « Vérifier la qualité » dans le lecteur, préférences de lecture (sous-titres, audio et version retenus), filmographie des acteurs, mode enfant et gestion des profils sur la télé.",
+    "en": "New: genres and “See all” in the catalogue, “Check quality” in the player, playback preferences (subtitles, audio and version remembered), actor filmographies, kids mode and profile management on the TV."
   }
 }
