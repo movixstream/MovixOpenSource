@@ -76,6 +76,7 @@ internal class NetworkBoundMediaProxyUpstream(
     private val client = OkHttpClient.Builder()
         .socketFactory(network.socketFactory)
         .dns(networkDns)
+        .cookieJar(MediaProxyCookieJar)
         .followRedirects(false)
         .followSslRedirects(false)
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -162,11 +163,17 @@ internal class NetworkBoundMediaProxyUpstream(
                 responseHeaders = response.headers,
                 localRequestHeaders = localRequestHeaders,
             )
+            val (decodedHeaders, decodedBody) = decodedManualResponse(
+                target.method,
+                response.statusCode,
+                response.headers,
+                response.body,
+            )
             return MediaProxyUpstreamResponse(
                 statusCode = response.statusCode,
                 statusMessage = response.statusMessage,
-                headers = response.headers,
-                body = response.body,
+                headers = decodedHeaders,
+                body = decodedBody,
                 finalUrl = response.finalUrl,
                 onClose = response::close,
             )

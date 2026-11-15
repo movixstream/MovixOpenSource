@@ -348,7 +348,7 @@ test('iOS sends the provider encoding and origin to the native media proxy', asy
     assert.equal(headers.Range, 'bytes=0-1023');
     assert.equal(
       headers['Accept-Encoding'],
-      host.includes('uqload') ? 'identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0' : 'identity',
+      host.includes('uqload') ? 'identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0' : 'gzip, deflate, br, zstd',
     );
   }
 });

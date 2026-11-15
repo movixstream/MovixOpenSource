@@ -98,6 +98,32 @@ class CronetMediaProxyUpstreamTest {
     }
 
     @Test
+    fun decodesGzipPlaylistsFetchedWithAManualAcceptEncoding() {
+        val playlist = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nindex-v1-a1.m3u8\n"
+        val compressed = java.io.ByteArrayOutputStream().also { out ->
+            java.util.zip.GZIPOutputStream(out).use { it.write(playlist.toByteArray()) }
+        }.toByteArray()
+        val headers = mapOf(
+            "Content-Type" to "application/vnd.apple.mpegurl",
+            "Content-Encoding" to "gzip",
+            "Content-Length" to compressed.size.toString(),
+        )
+
+        val (decodedHeaders, body) = decodedManualResponse(
+            "GET", 200, headers, ByteArrayInputStream(compressed),
+        )
+
+        assertEquals(playlist, body.readBytes().decodeToString())
+        assertFalse(decodedHeaders.keys.any { it.equals("Content-Encoding", ignoreCase = true) })
+        assertFalse(decodedHeaders.keys.any { it.equals("Content-Length", ignoreCase = true) })
+        // HEAD : pas de corps à décoder, en-têtes intacts.
+        assertEquals(
+            headers,
+            decodedManualResponse("HEAD", 200, headers, ByteArrayInputStream(ByteArray(0))).first,
+        )
+    }
+
+    @Test
     fun doesNotAssumeAnUnknownEncodingWasDecoded() {
         val headers = mapOf(
             "Content-Encoding" to "custom-encoding",

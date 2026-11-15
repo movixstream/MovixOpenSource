@@ -22,30 +22,36 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Text
 import com.movix.tv.R
 import com.movix.tv.container
+import com.movix.tv.data.age.TitleRef
 import com.movix.tv.data.local.Library
 import com.movix.tv.data.tmdb.MediaItem
 import com.movix.tv.data.tmdb.MediaType
 import com.movix.tv.data.tmdb.TmdbImage
 import com.movix.tv.ui.components.PosterCard
+import com.movix.tv.ui.components.rememberAgeAllowed
 import com.movix.tv.ui.theme.MovixType
 import kotlinx.coroutines.delay
 
-/** Ma liste : films et séries mêlés, le plus récent ajouté d'abord. */
+/** Ma liste : films et séries mêlés, le plus récent ajouté d'abord ; seulement ce que le profil peut voir. */
 @Composable
 fun WatchlistScreen(onOpen: (MediaItem) -> Unit, onEmptyBack: () -> Unit, modifier: Modifier = Modifier) {
     val values by LocalContext.current.container.store.values.collectAsStateWithLifecycle()
-    val items = remember(values) {
+    val saved = remember(values) {
         (Library.watchlist(values, MediaType.MOVIE) + Library.watchlist(values, MediaType.TV))
             .sortedByDescending { it.addedAt }
             .map {
                 MediaItem(it.id, if (it.type == "tv") MediaType.TV else MediaType.MOVIE, it.title, it.poster_path, null, "", null, null)
             }
     }
+    // Profil enfant : chaque titre est vérifié avant d'apparaître (`null` : vérification en cours).
+    val items = rememberAgeAllowed(saved) { TitleRef(it.type, it.id) }
     val first = remember { FocusRequester() }
     Column(modifier.padding(start = 24.dp, top = 40.dp)) {
         Text(stringResource(R.string.nav_watchlist), style = MovixType.Title, modifier = Modifier.padding(bottom = 20.dp))
-        if (items.isEmpty()) {
-            Text(stringResource(R.string.empty_watchlist), style = MovixType.Body)
+        if (items == null) {
+            Text(stringResource(R.string.grid_loading), style = MovixType.Meta)
+        } else if (items.isEmpty()) {
+            Text(stringResource(if (saved.isEmpty()) R.string.empty_watchlist else R.string.age_watchlist_hidden), style = MovixType.Body)
             LaunchedEffect(Unit) { delay(32); onEmptyBack() }
         } else {
             LazyVerticalGrid(

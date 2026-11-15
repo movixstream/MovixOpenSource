@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "movix-tv"
 include(":app")
 include(":extractor")
+include(":ffmpeg")

@@ -9,8 +9,10 @@ import logging
 from pathlib import Path
 import re
 import sys
+import time
 from types import SimpleNamespace
 import unittest
+import urllib.parse
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urljoin, urlparse
 
@@ -35,7 +37,8 @@ def load_proxy_headers():
         '_prepare_headers', 'fsvid_proxy_handler', 'vidzy_proxy_handler', 'uqload_proxy_handler',
         'fsvid_extract_handler', 'vidzy_extract_handler', '_is_fsvid_vidzy_embed_url',
         '_extract_uqload_media_url', '_extract_uqload_media', '_validate_uqload_url',
-        '_extract_m3u8_url',
+        '_extract_m3u8_url', '_fsvid_vidzy_gate_urls', '_fsvid_vidzy_gate_key',
+        '_with_fsvid_vidzy_gate_key',
     }
     proxy_class.body = [
         node for node in proxy_class.body
@@ -46,7 +49,8 @@ def load_proxy_headers():
     ]
     constants = [
         node for node in tree.body if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id.startswith(('FSVID_VIDZY_', 'PROVIDER_MEDIA_'))
+            isinstance(target, ast.Name)
+            and target.id.startswith(('FSVID_VIDZY_', '_FSVID_VIDZY_', 'PROVIDER_MEDIA_'))
             for target in node.targets
         )
     ]
@@ -63,12 +67,15 @@ def load_proxy_headers():
         'extract_uqload_media_url': extract_uqload_media_url,
         'extract_uqload_subtitles': extract_uqload_subtitles,
         'asyncio': asyncio, 'aiohttp': aiohttp, 'ClientTimeout': ClientTimeout,
-        'web': web, 'hashlib': hashlib,
+        'web': web, 'hashlib': hashlib, 'urllib': urllib, 'time': time,
         '_signed_service_url': lambda route, url: url,
         'logger': logging.getLogger(__name__),
     }
     exec(compile(ast.fix_missing_locations(module), 'server.py', 'exec'), namespace)
-    return namespace['ProxyServer']()
+    proxy = namespace['ProxyServer']()
+    proxy._fsvid_vidzy_gate_key_entry = None
+    proxy._fsvid_vidzy_gate_lock = asyncio.Lock()
+    return proxy
 
 
 class ProviderEncodingTests(unittest.IsolatedAsyncioTestCase):
@@ -82,9 +89,9 @@ class ProviderEncodingTests(unittest.IsolatedAsyncioTestCase):
                 'identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0',
             )
         else:
-            # `gzip;q=0` fait servir à Fsvid/Vidzy leur playlist leurre
-            # `/e/segN.ts` en 200 : seul `identity` donne le vrai flux.
-            self.assertEqual(headers.get('Accept-Encoding'), 'identity')
+            # Fsvid/Vidzy servent un faux master à tout Accept-Encoding qui
+            # n'est pas exactement celui de Chrome.
+            self.assertEqual(headers.get('Accept-Encoding'), 'gzip, deflate, br, zstd')
 
     async def test_dedicated_and_generic_relays_use_the_same_encoding(self):
         proxy = self.proxy
@@ -158,6 +165,113 @@ class ProviderEncodingTests(unittest.IsolatedAsyncioTestCase):
             f'("{payload}"), type: "application/x-mpegURL"}}]'
         )
         self.assertEqual(self.proxy._extract_m3u8_url(script, embed), media)
+
+
+class FakeGateSession:
+    """Session aiohttp minimale : chaque porte répond par son entrée de `replies`."""
+
+    def __init__(self, replies):
+        self.replies = replies
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append(url)
+        reply = self.replies[url.split('?', 1)[0]]
+        session = self
+
+        class Context:
+            async def __aenter__(self):
+                if isinstance(reply, Exception):
+                    raise reply
+                status, payload = reply
+                return SimpleNamespace(status=status, json=AsyncMock(return_value=payload))
+
+            async def __aexit__(self, *exc):
+                return False
+
+        return Context()
+
+
+class FsvidVidzyGateKeyTests(unittest.IsolatedAsyncioTestCase):
+    MASTER = 'https://u14.vidzy.cc/hls2/06/00065/id_n/master.m3u8?t=tok&s=1&e=14400&f=2&i=0.0&sp=0'
+    KEY = 'uPkLjE6iV6vLOUDFlpmYqrXzbcHX_nVDwW6Ut3pRupA.1792771707.86400'
+    VIDZY_PAGE = "<script>fetch('https://v7.vidzy.cc/gate.php?'+d,{mode:'cors'})</script>"
+
+    def setUp(self):
+        self.proxy = load_proxy_headers()
+
+    async def test_key_is_appended_and_shared_between_providers(self):
+        # Relevé du 2026-10-23 : sans `gk`, 403 dès le 10e segment (u14) ou le
+        # 20e (v6, r1.fsvid.lol) ; avec, les 40 premiers passent.
+        session = FakeGateSession({'https://v7.vidzy.cc/gate.php': (200, {'ok': 1, 'gk': self.KEY})})
+        self.proxy.sessions = {'normal': session}
+        url = await self.proxy._with_fsvid_vidzy_gate_key(self.MASTER, self.VIDZY_PAGE, 'vidzy')
+        self.assertEqual(url, f'{self.MASTER}&gk={self.KEY}')
+        # La porte inscrite dans la page passe d'abord, avec une empreinte de
+        # vrai Chrome : une empreinte sans canvas reçoit `{"ok":0}`.
+        query = urllib.parse.parse_qs(session.calls[0].split('?', 1)[1], keep_blank_values=True)
+        self.assertEqual(query['cw'], ['159.56'])
+        self.assertEqual(query['ft'], ['TOP'])
+        # La clé ne dépend pas de la vidéo : Fsvid réutilise la même, sans
+        # rappeler la porte.
+        fsvid_master = 'https://r1.fsvid.lol/hls2/01/00031/id_n/master.m3u8?t=x'
+        fsvid_url = await self.proxy._with_fsvid_vidzy_gate_key(fsvid_master, '', 'fsvid')
+        self.assertEqual(fsvid_url, f'{fsvid_master}&gk={self.KEY}')
+        self.assertEqual(len(session.calls), 1)
+        # Déjà porteuse d'une clé : l'URL ne change pas.
+        self.assertEqual(await self.proxy._with_fsvid_vidzy_gate_key(url, '', 'vidzy'), url)
+
+    async def test_falls_back_to_the_other_gate_then_pauses_after_a_failure(self):
+        session = FakeGateSession({
+            'https://fsvid.lol/gk': aiohttp.ClientError('down'),
+            'https://v6.vidzy.cc/gate.php': (200, {'ok': 1, 'gk': self.KEY}),
+        })
+        self.proxy.sessions = {'normal': session}
+        master = 'https://r1.fsvid.lol/hls2/01/00031/id_n/master.m3u8?t=x'
+        self.assertEqual(
+            await self.proxy._with_fsvid_vidzy_gate_key(master, '', 'fsvid'),
+            f'{master}&gk={self.KEY}',
+        )
+
+        refused = FakeGateSession({
+            'https://fsvid.lol/gk': (200, {'ok': 0}),
+            'https://v6.vidzy.cc/gate.php': (200, {'ok': 0}),
+        })
+        proxy = load_proxy_headers()
+        proxy.sessions = {'normal': refused}
+        self.assertEqual(await proxy._with_fsvid_vidzy_gate_key(master, '', 'fsvid'), master)
+        self.assertEqual(len(refused.calls), 2)
+        # Pendant la panne, une nouvelle extraction ne rappelle pas les portes.
+        self.assertEqual(await proxy._with_fsvid_vidzy_gate_key(master, '', 'fsvid'), master)
+        self.assertEqual(len(refused.calls), 2)
+
+    async def test_extraction_caches_only_a_keyed_url(self):
+        for provider, host, gate in [
+            ('vidzy', 'vidzy.cc', 'https://v6.vidzy.cc/gate.php'),
+            ('fsvid', 'fsvid.lol', 'https://fsvid.lol/gk'),
+        ]:
+            for reply, expect_key in [((200, {'ok': 1, 'gk': self.KEY}), True), ((200, {'ok': 0}), False)]:
+                with self.subTest(provider=provider, keyed=expect_key):
+                    proxy = load_proxy_headers()
+                    page = MagicMock()
+                    page.request.return_value.__aenter__.return_value = SimpleNamespace(
+                        status=200, text=AsyncMock(return_value='<html></html>'),
+                    )
+                    other = 'https://fsvid.lol/gk' if provider == 'vidzy' else 'https://v6.vidzy.cc/gate.php'
+                    gates = FakeGateSession({gate: reply, other: reply})
+                    proxy.sessions = {'normal': SimpleNamespace(request=page.request, get=gates.get), 'no_ssl': page}
+                    proxy._require_internal = lambda request: None
+                    proxy._check_vip = AsyncMock(return_value=True)
+                    proxy._resolve_fsvid_vidzy_m3u8 = AsyncMock(return_value=self.MASTER)
+                    cache = MagicMock()
+                    cache.get.return_value = None
+                    setattr(proxy, f'{provider}_cache', cache)
+                    response = await getattr(proxy, f'{provider}_extract_handler')(
+                        SimpleNamespace(query={'url': f'https://{host}/embed-example.html'}),
+                    )
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual('gk=' in response.text, expect_key)
+                    self.assertEqual(cache.set.called, expect_key)
 
 
 def load_decoy_helpers():

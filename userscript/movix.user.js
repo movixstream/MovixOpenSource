@@ -1,15 +1,11 @@
 // ==UserScript==
 // @name         Movix Proxy Extension (Tampermonkey)
 // @namespace    https://movix.cash
-// @version      1.7.4
+// @version      1.7.9
 // @description  Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus - version userscript Tampermonkey
 // @author       Movix
 // @updateURL    https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
 // @downloadURL  https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
-// @match        http://localhost/*
-// @match        http://127.0.0.1/*
-// @match        https://localhost/*
-// @match        https://127.0.0.1/*
 // @match        https://movix.cash/*
 // @match        https://*.movix.cash/*
 // @match        https://movix.club/*
@@ -36,6 +32,9 @@
 // @match        https://*.movix.luxe/*
 // @match        https://movix.dog/*
 // @match        https://*.movix.dog/*
+// @match        https://movix.miami/*
+// @match        https://*.movix.miami/*
+// @include      /^https:\/\/([a-z0-9-]+\.)*movix\.[a-z]{2,63}\/.*$/
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -50,6 +49,241 @@
 
 (() => {
   "use strict";
+
+  // BEGIN SITE DOMAINS
+  // Les domaines du site viennent de movix.online (address.json, champ
+  // « active ») et restent en cache : un nouveau domaine marche sans mise à
+  // jour du script, un domaine retiré n'est plus servi. La liste intégrée ne
+  // sert que tant que movix.online n'a jamais répondu.
+  //
+  // L'en-tête couvre donc tout « movix.<extension> ». Sous un gestionnaire de
+  // userscripts, le script s'arrête ici sur un domaine absent de la liste.
+  // Dans l'app mobile (pas de GM_info), c'est l'app qui choisit les pages :
+  // pas d'arrêt.
+  const SITE_DOMAINS_URL = "https://movix.online/address.json";
+  const SITE_DOMAINS_STORAGE_KEY = "movix_site_domains";
+  const SITE_DOMAINS_RELOAD_KEY = "movix_userscript_site_domains_reload";
+  const SITE_DOMAINS_REFRESH_MS = 60 * 60 * 1000;
+  const SITE_DOMAINS_POLL_MS = 5 * 60 * 1000;
+  const SITE_DOMAINS_RETRY_MS = 15 * 60 * 1000;
+  const SITE_DOMAINS_UNKNOWN_HOST_RETRY_MS = 5 * 60 * 1000;
+  const SITE_DOMAINS_TIMEOUT_MS = 10000;
+  const SITE_DOMAINS_MAX = 50;
+  const SITE_DOMAIN_RE =
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+  const BUILTIN_SITE_DOMAINS = [
+    "movix.cash",
+    "movix.club",
+    "movix.cloud",
+    "movix.tax",
+    "movix.golf",
+    "movix.chat",
+    "movix.date",
+    "movix.fun",
+    "movix.show",
+    "movix.men",
+    "movix.college",
+    "movix.luxe",
+    "movix.dog",
+    "movix.miami",
+  ];
+
+  // Liste reçue de movix.online, ou null tant qu'elle n'est jamais arrivée.
+  let remoteSiteDomains = null;
+  let siteDomains = BUILTIN_SITE_DOMAINS;
+  let siteDomainsCheckedAt = 0;
+  let siteDomainsLastCheckFailed = false;
+
+  function normalizeSiteDomains(list) {
+    if (!Array.isArray(list)) return null;
+    const domains = [];
+    for (const entry of list) {
+      if (typeof entry !== "string") continue;
+      const domain = entry.trim().toLowerCase();
+      if (domain.length > 253 || !SITE_DOMAIN_RE.test(domain)) continue;
+      if (!domains.includes(domain)) domains.push(domain);
+      if (domains.length >= SITE_DOMAINS_MAX) break;
+    }
+    return domains.length ? domains : null;
+  }
+
+  // address.json : { active: [{ url: "https://movix.miami" }, …] }
+  function parseSiteDomainsPayload(payload) {
+    if (!payload || !Array.isArray(payload.active)) return null;
+    const hosts = [];
+    for (const entry of payload.active) {
+      try {
+        const url = new URL(entry && entry.url);
+        if (url.protocol !== "https:" || url.port) continue;
+        if (url.username || url.password) continue;
+        hosts.push(url.hostname);
+      } catch {}
+    }
+    return normalizeSiteDomains(hosts);
+  }
+
+  function setRemoteSiteDomains(domains) {
+    remoteSiteDomains = domains;
+    siteDomains = domains || BUILTIN_SITE_DOMAINS;
+  }
+
+  function isSiteHost(hostname) {
+    const host = String(hostname || "").toLowerCase();
+    return siteDomains.some(
+      (domain) => host === domain || host.endsWith("." + domain),
+    );
+  }
+
+  function applyStoredSiteDomains(stored) {
+    if (!stored || typeof stored !== "object") return;
+    setRemoteSiteDomains(normalizeSiteDomains(stored.domains));
+    if (Number.isFinite(stored.checkedAt)) {
+      // Une horloge reculée ne doit pas geler la liste.
+      siteDomainsCheckedAt = Math.min(stored.checkedAt, Date.now());
+    }
+    siteDomainsLastCheckFailed = stored.failed === true;
+  }
+
+  function readStoredSiteDomains() {
+    try {
+      if (typeof GM_getValue === "function") {
+        return GM_getValue(SITE_DOMAINS_STORAGE_KEY, null);
+      }
+      if (
+        typeof GM !== "undefined" &&
+        GM &&
+        typeof GM.getValue === "function"
+      ) {
+        return GM.getValue(SITE_DOMAINS_STORAGE_KEY, null);
+      }
+    } catch {}
+    return null;
+  }
+
+  // Résout à true quand movix.online a rendu une liste valable. Réponse
+  // absente ou illisible : on garde la liste en place.
+  function refreshSiteDomains() {
+    return new Promise((resolve) => {
+      let request;
+      try {
+        request = getGMRequest();
+      } catch {
+        resolve(false);
+        return;
+      }
+
+      let settled = false;
+      const finish = (payload) => {
+        if (settled) return;
+        settled = true;
+        const domains = payload ? parseSiteDomainsPayload(payload) : null;
+        if (domains) setRemoteSiteDomains(domains);
+        siteDomainsCheckedAt = Date.now();
+        siteDomainsLastCheckFailed = !domains;
+        Promise.resolve()
+          .then(() =>
+            gmSetValueCompat(SITE_DOMAINS_STORAGE_KEY, {
+              domains: remoteSiteDomains,
+              checkedAt: siteDomainsCheckedAt,
+              failed: siteDomainsLastCheckFailed,
+            }),
+          )
+          .then(
+            () => resolve(Boolean(domains)),
+            () => resolve(Boolean(domains)),
+          );
+      };
+
+      try {
+        request({
+          method: "GET",
+          url: SITE_DOMAINS_URL,
+          timeout: SITE_DOMAINS_TIMEOUT_MS,
+          anonymous: true,
+          onload: (response) => {
+            let payload = null;
+            try {
+              if (response && response.status === 200) {
+                payload = JSON.parse(response.responseText);
+              }
+            } catch {}
+            finish(payload);
+          },
+          onerror: () => finish(null),
+          ontimeout: () => finish(null),
+          onabort: () => finish(null),
+        });
+      } catch {
+        finish(null);
+      }
+    });
+  }
+
+  function refreshSiteDomainsIfOlderThan(maxAgeMs) {
+    if (Date.now() - siteDomainsCheckedAt < maxAgeMs) {
+      return Promise.resolve(false);
+    }
+    return refreshSiteDomains();
+  }
+
+  // Relit d'abord le cache : un autre onglet a peut-être déjà fait la
+  // requête de l'heure.
+  function refreshSiteDomainsWhenDue() {
+    return Promise.resolve(readStoredSiteDomains())
+      .then((stored) => {
+        applyStoredSiteDomains(stored);
+        return refreshSiteDomainsIfOlderThan(
+          siteDomainsLastCheckFailed
+            ? SITE_DOMAINS_RETRY_MS
+            : SITE_DOMAINS_REFRESH_MS,
+        );
+      })
+      .catch(() => false);
+  }
+
+  // Un seul rechargement par onglet : sans stockage de session pour s'en
+  // souvenir, on ne recharge pas.
+  function reloadOnceForSiteDomains() {
+    try {
+      if (sessionStorage.getItem(SITE_DOMAINS_RELOAD_KEY)) return;
+      sessionStorage.setItem(SITE_DOMAINS_RELOAD_KEY, "1");
+    } catch {
+      return;
+    }
+    location.reload();
+  }
+
+  const siteDomainsHostname =
+    typeof location !== "undefined" && location ? location.hostname : "";
+  const storedSiteDomains = readStoredSiteDomains();
+  const storedSiteDomainsPending =
+    storedSiteDomains && typeof storedSiteDomains.then === "function";
+  if (!storedSiteDomainsPending) applyStoredSiteDomains(storedSiteDomains);
+
+  if (typeof GM_info !== "undefined" && !isSiteHost(siteDomainsHostname)) {
+    // Domaine inconnu : peut-être une adresse toute neuve. On relit la liste
+    // et, si elle le contient maintenant, on recharge la page pour démarrer
+    // le script normalement, dès le début du chargement. Un stockage
+    // asynchrone ne permet pas de le savoir à temps : la liste intégrée
+    // décide seule.
+    if (!storedSiteDomainsPending) {
+      refreshSiteDomainsIfOlderThan(SITE_DOMAINS_UNKNOWN_HOST_RETRY_MS)
+        .then((updated) => {
+          if (updated && isSiteHost(siteDomainsHostname)) {
+            reloadOnceForSiteDomains();
+          }
+        })
+        .catch(() => {});
+    }
+    return;
+  }
+
+  // La liste est relue toutes les heures, même si la page reste ouverte.
+  refreshSiteDomainsWhenDue();
+  if (typeof setInterval === "function") {
+    setInterval(refreshSiteDomainsWhenDue, SITE_DOMAINS_POLL_MS);
+  }
+  // END SITE DOMAINS
 
   // BEGIN KISSKH FALLBACK
   const KISSKH_REQUEST_TIMEOUT_MS = 10000;
@@ -427,7 +661,7 @@
 
   const USERSCRIPT_MANIFEST = {
     name: "Movix Proxy Extension",
-    version: "1.7.4",
+    version: "1.7.9",
     description:
       "Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus",
   };
@@ -829,6 +1063,13 @@
     );
     const body = serializeBody(init.body);
     const request = getGMRequest();
+    // Un gestionnaire peut taire l'en-tête Cookie posé à la main ; Tampermonkey
+    // et Violentmonkey prennent aussi l'option `cookie`, qu'ils ajoutent aux
+    // cookies envoyés (cookie de session Fsvid/Vidzy, voir
+    // fsvidVidzySessionCookie).
+    const cookieHeader = Object.keys(headers).find(
+      (name) => name.toLowerCase() === "cookie",
+    );
 
     return new Promise((resolve, reject) => {
       let finished = false;
@@ -860,6 +1101,10 @@
           method,
           url: requestUrl,
           headers,
+          ...(cookieHeader ? { cookie: headers[cookieHeader] } : {}),
+          // `anonymous` : sans les cookies du navigateur. Demandé par
+          // PROXY_HTTP, que la page appelle avec l'URL de son choix.
+          ...(init.anonymous === true ? { anonymous: true } : {}),
           data: body,
           responseType: "arraybuffer",
           timeout: init.timeout ?? 30000,
@@ -3282,6 +3527,176 @@
     return extractFsvidVidzyWithQuickJs(html, safeEmbedUrl, provider);
   }
 
+  // Sans clé `gk`, le CDN Fsvid/Vidzy ne sert que les 9 à 19 premiers segments
+  // (selon le serveur), puis répond 403. Leur lecteur demande cette clé à une
+  // « porte » (gate.php chez Vidzy, /gk chez Fsvid) avec une empreinte du
+  // navigateur, puis l'ajoute au master ; le CDN la recopie ensuite dans les
+  // URLs des variantes et des segments. La clé ne dépend ni de l'IP ni de la
+  // vidéo, et les deux hébergeurs partagent la même : une seule sert partout.
+  // La porte refuse (`{"ok":0}`) une empreinte sans canvas : faute de canvas
+  // (QuickJS de l'app TV), on envoie les largeurs que mesure Chrome sous Windows.
+  // Même code dans extension/*/extractors.js : garder les deux en phase.
+  const FSVID_VIDZY_GATE_TEXT = "Movix7Qm@Éédoà1l";
+  const FSVID_VIDZY_GATE_FALLBACK_WIDTHS = { serif: 159.56, sans: 170.34 };
+  const FSVID_VIDZY_GATE_URLS = {
+    vidzy: "https://v6.vidzy.cc/gate.php",
+    fsvid: "https://fsvid.lol/gk",
+  };
+  const FSVID_VIDZY_GATE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+  const FSVID_VIDZY_GATE_RETRY_AFTER_MS = 60 * 1000;
+  let fsvidVidzyGateKey = null;
+  let fsvidVidzyGateKeyPromise = null;
+
+  function measureFsvidVidzyGateText() {
+    try {
+      const canvas =
+        typeof OffscreenCanvas === "function"
+          ? new OffscreenCanvas(16, 16)
+          : typeof document !== "undefined"
+            ? document.createElement("canvas")
+            : null;
+      const context = canvas?.getContext?.("2d");
+      if (context) {
+        const measure = (font) => {
+          context.textBaseline = "top";
+          context.font = font;
+          return (
+            Math.round(context.measureText(FSVID_VIDZY_GATE_TEXT).width * 100) /
+            100
+          );
+        };
+        const serif = measure("18px serif");
+        const sans = measure("18px sans-serif");
+        if (
+          Number.isFinite(serif) &&
+          Number.isFinite(sans) &&
+          serif > 0 &&
+          sans > 0
+        ) {
+          return { serif, sans };
+        }
+      }
+    } catch {}
+    return FSVID_VIDZY_GATE_FALLBACK_WIDTHS;
+  }
+
+  function buildFsvidVidzyGateQuery() {
+    const { serif, sans } = measureFsvidVidzyGateText();
+    const nav = typeof navigator !== "undefined" ? navigator : {};
+    const scr = typeof screen !== "undefined" ? screen : {};
+    const dpr =
+      typeof devicePixelRatio === "number" && devicePixelRatio > 0
+        ? devicePixelRatio
+        : 1;
+    return [
+      ["v", "p1"],
+      ["cw", serif],
+      ["cw2", sans],
+      ["wg", 1],
+      ["dpr", dpr],
+      ["sw", scr.width || 1920],
+      ["hw", nav.hardwareConcurrency || 8],
+      ["ft", "TOP"],
+      ["rf", ""],
+    ]
+      .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+      .join("&");
+  }
+
+  function getFsvidVidzyGateUrls(html, provider) {
+    const urls = [];
+    // Vidzy écrit l'adresse de sa porte dans la page : la suivre si elle change.
+    const inline = /fetch\(\s*['"](https:\/\/[a-z0-9.-]+\/gate\.php)\?/i.exec(
+      String(html || ""),
+    );
+    if (
+      inline &&
+      /(?:^|\.)(?:vidzy\.cc|vidzy\.org|fsvid\.lol)$/i.test(
+        new URL(inline[1]).hostname,
+      )
+    ) {
+      urls.push(inline[1]);
+    }
+    urls.push(
+      FSVID_VIDZY_GATE_URLS[provider],
+      FSVID_VIDZY_GATE_URLS[provider === "fsvid" ? "vidzy" : "fsvid"],
+    );
+    return [...new Set(urls)];
+  }
+
+  async function requestFsvidVidzyGateKey(gateUrls) {
+    const query = buildFsvidVidzyGateQuery();
+    for (const gateUrl of gateUrls) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      try {
+        const resp = await fetch(`${gateUrl}?${query}`, {
+          signal: controller.signal,
+        });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        if (
+          typeof data?.gk === "string" &&
+          /^[A-Za-z0-9_.-]{16,512}$/.test(data.gk)
+        ) {
+          return data.gk;
+        }
+      } catch {
+        // Porte suivante.
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return null;
+  }
+
+  function getFsvidVidzyGateKey(html, provider) {
+    if (fsvidVidzyGateKey && fsvidVidzyGateKey.expiresAt > Date.now()) {
+      return Promise.resolve(fsvidVidzyGateKey.value);
+    }
+    if (!fsvidVidzyGateKeyPromise) {
+      fsvidVidzyGateKeyPromise = requestFsvidVidzyGateKey(
+        getFsvidVidzyGateUrls(html, provider),
+      )
+        .then((value) => {
+          // La clé se termine par `.<émission>.<durée en s>` : la garder la
+          // moitié de sa durée, sans dépasser six heures.
+          const ttl = Number(String(value || "").split(".")[2]);
+          const lifetime =
+            Number.isFinite(ttl) && ttl > 0
+              ? Math.min(FSVID_VIDZY_GATE_MAX_AGE_MS, ttl * 500)
+              : FSVID_VIDZY_GATE_MAX_AGE_MS;
+          // Après un échec, ne pas rappeler les portes à chaque extraction.
+          fsvidVidzyGateKey = {
+            value: value || null,
+            expiresAt:
+              Date.now() + (value ? lifetime : FSVID_VIDZY_GATE_RETRY_AFTER_MS),
+          };
+          return value;
+        })
+        .finally(() => {
+          fsvidVidzyGateKeyPromise = null;
+        });
+    }
+    return fsvidVidzyGateKeyPromise;
+  }
+
+  function hasFsvidVidzyGateKey(url) {
+    return /[?&]gk=/.test(String(url || ""));
+  }
+
+  async function withFsvidVidzyGateKey(m3u8Url, html, provider) {
+    if (hasFsvidVidzyGateKey(m3u8Url)) return m3u8Url;
+    const gateKey = await getFsvidVidzyGateKey(html, provider);
+    if (!gateKey) {
+      console.warn(
+        `[EXT-${provider.toUpperCase()}] Gate key unavailable, playback will stop early`,
+      );
+      return m3u8Url;
+    }
+    return `${m3u8Url}${m3u8Url.includes("?") ? "&" : "?"}gk=${encodeURIComponent(gateKey)}`;
+  }
+
   function extractUqloadMediaUrl(html) {
     const candidates = [];
     const collect = (value) => {
@@ -3698,7 +4113,11 @@
 
     const cacheKey = md5Hash(safeFsvidUrl);
     const cached = caches.fsvid.get(cacheKey);
-    if (cached && normalizeFsvidVidzyMediaUrl(cached.m3u8Url, safeFsvidUrl, "fsvid")) {
+    if (
+      cached &&
+      normalizeFsvidVidzyMediaUrl(cached.m3u8Url, safeFsvidUrl, "fsvid") &&
+      hasFsvidVidzyGateKey(cached.m3u8Url)
+    ) {
       console.log("[EXT-FSVID] Cache hit");
       return { ...cached, fromCache: true };
     }
@@ -3755,9 +4174,10 @@
         return { success: false, error: "Fsvid: M3U8 not found in page" };
       }
 
-      console.log(`[EXT-FSVID] Final M3U8 URL: ${m3u8Url}`);
-      const result = { m3u8Url, success: true, source: "fsvid" };
-      caches.fsvid.set(cacheKey, result);
+      const playableUrl = await withFsvidVidzyGateKey(m3u8Url, html, "fsvid");
+      console.log(`[EXT-FSVID] Final M3U8 URL: ${playableUrl}`);
+      const result = { m3u8Url: playableUrl, success: true, source: "fsvid" };
+      if (hasFsvidVidzyGateKey(playableUrl)) caches.fsvid.set(cacheKey, result);
       return result;
     } catch (e) {
       if (e.name === "AbortError") {
@@ -3782,7 +4202,11 @@
 
     const cacheKey = md5Hash(safeVidzyUrl);
     const cached = caches.vidzy.get(cacheKey);
-    if (cached && normalizeFsvidVidzyMediaUrl(cached.m3u8Url, safeVidzyUrl, "vidzy")) {
+    if (
+      cached &&
+      normalizeFsvidVidzyMediaUrl(cached.m3u8Url, safeVidzyUrl, "vidzy") &&
+      hasFsvidVidzyGateKey(cached.m3u8Url)
+    ) {
       return { ...cached, fromCache: true };
     }
 
@@ -3817,8 +4241,9 @@
       if (!m3u8Url)
         return { success: false, error: "Vidzy: M3U8 not found in page" };
 
-      const result = { m3u8Url, success: true, source: "vidzy" };
-      caches.vidzy.set(cacheKey, result);
+      const playableUrl = await withFsvidVidzyGateKey(m3u8Url, html, "vidzy");
+      const result = { m3u8Url: playableUrl, success: true, source: "vidzy" };
+      if (hasFsvidVidzyGateKey(playableUrl)) caches.vidzy.set(cacheKey, result);
       return result;
     } catch (e) {
       console.error("[EXT-VIDZY] Error:", e);
@@ -4835,7 +5260,10 @@
       "|sandratableother|sandrataxeight|scatch176duplicities|sethniceletter|shannonpersonalcost" +
       "|simpulumlamerop|smoki|stevenfamilyedge|stevenimaginelittle|strawberriesporail|telyn610zoanthropy" +
       "|timberwoodanotia|timmaybealready|toddpartneranimal|toxitabellaeatrebates306|tracylocalschool" +
-      "|uptodatefinishconferenceroom|valeronevijao|walterprettytheir|wolfdyslectic|yodelswartlike)\\.",
+      "|uptodatefinishconferenceroom|valeronevijao|walterprettytheir|wolfdyslectic|yodelswartlike" +
+      // Domaines VOE des lecteurs d'anime-sama (2026-10-19)
+      "|claireguessthousand|derricknationtop|jamesbornmain|jeremyparticipantanything|megankiddifference" +
+      "|teresapoliticallearn)\\.",
     "i",
   );
 
@@ -4993,6 +5421,23 @@
   /**
    * Set up DNR headers for a service's extracted URL so the browser player can use it
    */
+  /**
+   * Cookie de session que le master Fsvid/Vidzy pose (`vz_pe`/`fsv_pe`, valeur
+   * = jeton `t=` de son URL). Depuis le 2026-10-27, Vidzy sert sa fausse
+   * playlist de 177 octets à la place des segments après quelques dizaines de
+   * requêtes sans lui. N'importe quel jeton valide du même serveur suffit,
+   * d'où une seule règle par domaine. Même code que l'extension.
+   */
+  function fsvidVidzySessionCookie(url) {
+    try {
+      const token = new URL(url).searchParams.get("t") || "";
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(token)) return null;
+      return `vz_pe=${token}; fsv_pe=${token}`;
+    } catch {
+      return null;
+    }
+  }
+
   async function setupHeadersForService(type, url, referer) {
     // Fsvid needs different referers:
     // - Embed page (fsvid.lol/embed-xxx) → fs13.lol (required by fsvid to serve content)
@@ -5078,8 +5523,12 @@
       },
     };
 
-    const hdrs = headerMap[type];
+    let hdrs = headerMap[type];
     if (!hdrs || !url) return;
+    if (type === "fsvid" || type === "vidzy") {
+      const cookie = fsvidVidzySessionCookie(url);
+      if (cookie) hdrs = { ...hdrs, Cookie: cookie };
+    }
 
     try {
       const parsedUrl = new URL(url);
@@ -5331,23 +5780,7 @@
         },
         condition: {
           urlFilter: "*",
-          initiatorDomains: [
-            "localhost",
-            "127.0.0.1",
-            "movix.cash",
-            "movix.club",
-            "movix.cloud",
-            "movix.tax",
-            "movix.golf",
-            "movix.chat",
-            "movix.date",
-            "movix.fun",
-            "movix.show",
-            "movix.men",
-            "movix.college",
-            "movix.luxe",
-            "movix.dog",
-          ],
+          initiatorDomains: ["localhost", "127.0.0.1", ...siteDomains],
           resourceTypes: [
             "xmlhttprequest",
             "other",
@@ -5696,7 +6129,10 @@
         }
       }
 
-      const response = await fetch(url, { headers });
+      // Sans cookies, comme l'extension : la page choisit l'URL et reçoit le
+      // corps de la réponse, elle ne doit pas lire un site où l'utilisateur
+      // est connecté.
+      const response = await fetch(url, { headers, anonymous: true });
       const buffer = await response.arrayBuffer();
       const base64 = proxyBytesToBase64(new Uint8Array(buffer));
 
@@ -5927,34 +6363,7 @@
       const currentOrigin = pageWindow.location?.origin;
       const currentHostname = pageWindow.location?.hostname ?? "";
 
-      if (
-        currentHostname === "movix.cash" ||
-        currentHostname.endsWith(".movix.cash") ||
-        currentHostname === "movix.club" ||
-        currentHostname.endsWith(".movix.club") ||
-        currentHostname === "movix.cloud" ||
-        currentHostname.endsWith(".movix.cloud") ||
-        currentHostname === "movix.tax" ||
-        currentHostname.endsWith(".movix.tax") ||
-        currentHostname === "movix.golf" ||
-        currentHostname === "movix.chat" ||
-        currentHostname.endsWith(".movix.chat") ||
-        currentHostname === "movix.date" ||
-        currentHostname.endsWith(".movix.date") ||
-        currentHostname === "movix.fun" ||
-        currentHostname.endsWith(".movix.fun") ||
-        currentHostname === "movix.show" ||
-        currentHostname.endsWith(".movix.show") ||
-        currentHostname === "movix.men" ||
-        currentHostname.endsWith(".movix.men") ||
-        currentHostname === "movix.college" ||
-        currentHostname.endsWith(".movix.college") ||
-        currentHostname === "movix.luxe" ||
-        currentHostname.endsWith(".movix.luxe") ||
-        currentHostname === "movix.dog" ||
-        currentHostname.endsWith(".movix.dog") ||
-        currentHostname.endsWith(".movix.golf")
-      ) {
+      if (isSiteHost(currentHostname)) {
         return (currentOrigin || "https://movix.fun").replace(/\/$/, "");
       }
     } catch {}

@@ -7,14 +7,29 @@ import com.movix.tv.player.Codecs
  * React (`sourceAutoSelect.ts`, `types/sourcePriority.ts`), adapté au lecteur
  * natif : seules les sources jouables tout de suite sont candidates.
  *
- * Ordre : VF avant VOSTFR avant inconnu avant VO ; puis les flux extraits par
+ * Ordre : la version préférée d'abord (réglage de lecture ; par défaut VF
+ * avant VOSTFR avant inconnu avant VO) ; puis les flux extraits par
  * le serveur (HLS d'abord), PurStream, fichiers communautaires, KissKH ; puis
  * la route (FStream en tête, Coflix en dernier) ; puis l'hébergeur.
  * Avant de lancer, [byQuality] fait passer devant, dans la langue choisie,
  * les flux en 720p ou plus que l'appareil sait décoder.
  */
 object SourceSelector {
-    private val LANG_RANK = mapOf(Lang.VF to 0, Lang.VOSTFR to 1, Lang.UNKNOWN to 2, Lang.VO to 3)
+    /**
+     * Rang des langues selon la version préférée. VOSTFR : la VO (son
+     * d'origine, sous-titres à ajouter) passe avant l'inconnu, la VF en dernier.
+     */
+    private val LANG_RANKS = mapOf(
+        Lang.VF to mapOf(Lang.VF to 0, Lang.VOSTFR to 1, Lang.UNKNOWN to 2, Lang.VO to 3),
+        Lang.VOSTFR to mapOf(Lang.VOSTFR to 0, Lang.VO to 1, Lang.UNKNOWN to 2, Lang.VF to 3),
+        Lang.VO to mapOf(Lang.VO to 0, Lang.VOSTFR to 1, Lang.UNKNOWN to 2, Lang.VF to 3),
+    )
+
+    private fun langRank(prefer: Lang): Map<Lang, Int> = LANG_RANKS[prefer] ?: LANG_RANKS.getValue(Lang.VF)
+
+    /** Version préférée rangée dans les réglages (« VF », « VOSTFR », « VO ») ; VF sinon. */
+    fun versionOf(name: String?): Lang =
+        Lang.entries.firstOrNull { it.name == name && it in LANG_RANKS } ?: Lang.VF
 
     private val PROVIDER_RANK = listOf(
         Provider.FSTREAM, Provider.SWIFTFLUX, Provider.WIFLIX, Provider.VIPER, Provider.J1F, Provider.OMEGA, Provider.LINKS,
@@ -36,21 +51,24 @@ object SourceSelector {
 
     private fun rank(list: List<Any?>, value: Any?): Int = list.indexOf(value).let { if (it < 0) list.size else it }
 
-    private val comparator = compareBy<PlaybackSource>(
-        { LANG_RANK[it.language] ?: 9 },
-        { categoryRank(it) },
-        { rank(PROVIDER_RANK, it.provider) },
-        { rank(HOST_RANK, it.host) },
-    )
+    private fun comparator(prefer: Lang): Comparator<PlaybackSource> {
+        val langs = langRank(prefer)
+        return compareBy(
+            { langs[it.language] ?: 9 },
+            { categoryRank(it) },
+            { rank(PROVIDER_RANK, it.provider) },
+            { rank(HOST_RANK, it.host) },
+        )
+    }
 
     /**
      * Sources jouables rangées, doublons retirés (même flux, ou même lecteur
      * embed servi par deux routes). L'ordre est celui des essais successifs.
      */
-    fun playable(all: List<PlaybackSource>): List<PlaybackSource> {
+    fun playable(all: List<PlaybackSource>, prefer: Lang = Lang.VF): List<PlaybackSource> {
         val seenStream = HashSet<String>()
         val seenEmbed = HashSet<String>()
-        return all.filter { it.playable }.sortedWith(comparator).filter { s ->
+        return all.filter { it.playable }.sortedWith(comparator(prefer)).filter { s ->
             seenStream.add(s.streamUrl!!) && (s.embedUrl == null || seenEmbed.add(s.embedUrl))
         }
     }
@@ -70,18 +88,20 @@ object SourceSelector {
      * Java ou Python, mais accepte la pile TLS d'Android avec l'identité
      * Chrome de l'appli (vérifié en 1080p sur Android TV 9, Cronet coupé).
      */
-    fun deviceCandidates(device: List<PlaybackSource>): List<PlaybackSource> =
-        device.filter { it.embedUrl != null && (it.host == null || it.host in DEVICE_HOSTS) }
+    fun deviceCandidates(device: List<PlaybackSource>, prefer: Lang = Lang.VF): List<PlaybackSource> {
+        val langs = langRank(prefer)
+        return device.filter { it.embedUrl != null && (it.host == null || it.host in DEVICE_HOSTS) }
             .sortedWith(compareBy(
-                { LANG_RANK[it.language] ?: 9 },
+                { langs[it.language] ?: 9 },
                 { if (it.host == null) 1 else 0 },
             ))
+    }
 
     /** Lecteurs sans flux résolu par le serveur, à extraire sur la télé. */
-    fun deviceOnly(all: List<PlaybackSource>): List<PlaybackSource> {
+    fun deviceOnly(all: List<PlaybackSource>, prefer: Lang = Lang.VF): List<PlaybackSource> {
         val resolvedEmbeds = all.filter { it.playable }.mapNotNullTo(HashSet()) { it.embedUrl }
         return all.filter { !it.playable && it.embedUrl != null && it.embedUrl !in resolvedEmbeds }
-            .sortedWith(comparator).distinctBy { it.embedUrl }
+            .sortedWith(comparator(prefer)).distinctBy { it.embedUrl }
     }
 
     /**
@@ -89,13 +109,15 @@ object SourceSelector {
      * recours : chaque page embed une fois, ceux que la télé ne sait pas
      * extraire d'abord (c'est pour eux que le lecteur web existe), puis les autres.
      */
-    fun webCandidates(all: List<PlaybackSource>): List<PlaybackSource> =
-        all.filter { it.embedUrl?.startsWith("http") == true }
+    fun webCandidates(all: List<PlaybackSource>, prefer: Lang = Lang.VF): List<PlaybackSource> {
+        val langs = langRank(prefer)
+        return all.filter { it.embedUrl?.startsWith("http") == true }
             .distinctBy { it.embedUrl }
             .sortedWith(compareBy<PlaybackSource>(
-                { LANG_RANK[it.language] ?: 9 },
+                { langs[it.language] ?: 9 },
                 { if (it.host != null && it.host in DEVICE_HOSTS) 1 else 0 },
-            ).then(comparator))
+            ).then(comparator(prefer)))
+    }
 
     /**
      * Source à lancer. Un film ne démarre jamais sur KissKH (catalogue de
@@ -168,10 +190,11 @@ object SourceSelector {
      * puis celles que l'appareil ne sait pas décoder. Le reste de l'ordre
      * (catégorie, route, hébergeur) départage. La langue reste le premier critère.
      */
-    fun byQuality(playable: List<PlaybackSource>, ratings: Map<String, Rating>): List<PlaybackSource> {
+    fun byQuality(playable: List<PlaybackSource>, ratings: Map<String, Rating>, prefer: Lang = Lang.VF): List<PlaybackSource> {
         fun height(s: PlaybackSource) = ratings[s.id]?.height ?: declaredHeight(s)
+        val langs = langRank(prefer)
         return playable.sortedWith(compareBy(
-            { LANG_RANK[it.language] ?: 9 },
+            { langs[it.language] ?: 9 },
             {
                 val h = height(it)
                 when {

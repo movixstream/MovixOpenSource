@@ -204,7 +204,7 @@ fun PillButton(
         if (icon != null) {
             Image(rememberVectorPainter(icon), null, Modifier.size(16.dp), colorFilter = ColorFilter.tint(fg))
         }
-        Text(text, style = MovixType.Button.copy(color = fg), maxLines = 1)
+        Text(text, style = MovixType.Button.copy(color = fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

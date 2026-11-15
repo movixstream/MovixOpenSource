@@ -42,6 +42,23 @@ class TmdbApi(
         get<TmdbPage>("/search/multi", mapOf("query" to query, "include_adult" to "false"))
             .results.filter { it.mediaType == "movie" || it.mediaType == "tv" }
 
+    /** Film ou série TMDB d'un identifiant IMDb (`tt…`), titre en français. */
+    suspend fun findImdb(imdbId: String): TmdbFind =
+        get("/find/$imdbId", mapOf("external_source" to "imdb_id"))
+
+    /**
+     * Personne (acteur…) et tous ses rôles en une requête. Les traductions
+     * donnent la biographie anglaise quand TMDB n'en a pas en français.
+     */
+    suspend fun person(id: Int): TmdbPerson =
+        get("/person/$id", mapOf("append_to_response" to "combined_credits,translations"))
+
+    /** Classifications d'un film, par pays (restriction d'âge des profils enfant). */
+    suspend fun releaseDates(movieId: Int): TmdbReleaseDates = get("/movie/$movieId/release_dates", emptyMap())
+
+    /** Classifications d'une série, par pays. */
+    suspend fun contentRatings(tvId: Int): TmdbRatings = get("/tv/$tvId/content_ratings", emptyMap())
+
     /** `true` si TMDB accepte la clé (HTTP 200 sur /configuration). */
     suspend fun validateKey(key: String): Boolean = withContext(Dispatchers.IO) {
         val url = baseUrl.newBuilder().addPathSegments("configuration").addQueryParameter("api_key", key).build()

@@ -25,4 +25,20 @@
     <string name="player_st_yellow">Yellow</string>
     <string name="player_st_cyan">Cyan</string>
     <string name="player_st_green">Green</string>
+
+    <!-- "Check quality" (Source panel) -->
+    <string name="player_quality_check">Check quality</string>
+    <string name="player_quality_check_body">Measures the real picture quality of every source</string>
+    <string name="player_quality_checking">Checking… %1$d/%2$d</string>
+    <string name="player_quality_checking_body">Quality shows up on each source</string>
+    <string name="player_quality_best_so_far">Best so far: %1$s</string>
+    <string name="player_quality_again">Check again</string>
+    <string name="player_quality_best_is">Best quality found: %1$s</string>
+    <string name="player_quality_none">No source reported its quality</string>
+    <string name="player_quality_nothing">No source to check</string>
+    <string name="player_quality_best">Best quality</string>
+    <string name="player_quality_pending">checking…</string>
+    <string name="player_quality_down">not responding</string>
+    <string name="player_quality_unknown">quality not reported</string>
+    <string name="player_quality_unreadable">can\'t play on this TV (%1$s)</string>
 </resources>

@@ -107,6 +107,9 @@
   Context.prototype.evalCode = function (code, filename) {
     var remaining = this._rt._deadline > 0 ? Math.max(1, this._rt._deadline - Date.now()) : 0;
     var res = JSON.parse(__n_sandboxEval(this._ensure(), String(code), String(filename || "eval.js"), remaining));
+    // Sans cette trace, un échec du bac à sable ne laissait qu'un « M3U8 not
+    // found in page » muet dans les journaux.
+    if (!res.ok) console.warn("[QJS] " + filename + " : " + String(res.error).slice(0, 160));
     return res.ok ? { value: new Handle(res.value) } : { error: new Handle(res.error) };
   };
   Context.prototype.dump = function (handle) { return handle ? handle.value : undefined; };

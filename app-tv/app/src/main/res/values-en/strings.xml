@@ -52,6 +52,13 @@
     <string name="search_space">Space</string>
     <string name="search_delete">Delete</string>
     <string name="search_clear">Clear</string>
+    <string name="search_voice">Voice search</string>
+    <string name="search_voice_prompt">Say the title of a movie or show</string>
+    <string name="search_loading">Searching…</string>
+    <string name="search_recent">Recent searches</string>
+    <string name="search_recent_clear">Clear history</string>
+    <string name="search_start">Type a title with the keyboard. Accented letters are in the “àéç” tab, numbers and symbols in “123 &amp;?”.</string>
+    <string name="search_start_voice">Type a title with the keyboard, or press the mic and say it. Accented letters are in the “àéç” tab, numbers and symbols in “123 &amp;?”.</string>
 
     <string name="settings_tmdb_title">TMDB key</string>
     <string name="settings_tmdb_body">Optional: the app already has the website\'s key. Only enter your own v3 key from themoviedb.org if the catalog stops loading.</string>

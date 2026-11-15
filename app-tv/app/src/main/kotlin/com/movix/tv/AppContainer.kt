@@ -7,6 +7,7 @@ import com.movix.tv.data.account.AccountManager
 import com.movix.tv.data.account.HistoryApi
 import com.movix.tv.data.account.SwiftFluxClient
 import com.movix.tv.data.account.SyncManager
+import com.movix.tv.data.imdb.ImdbSuggestions
 import com.movix.tv.data.local.LocalStore
 import kotlinx.coroutines.launch
 import com.movix.tv.data.local.TvKeys
@@ -24,10 +25,17 @@ import com.movix.tv.player.CodecSupport
 import com.movix.tv.player.MediaHeaders
 import com.movix.tv.player.PlayerEngine
 import com.movix.tv.data.tmdb.CatalogRepository
+import com.movix.tv.data.tmdb.MediaType
 import com.movix.tv.data.tmdb.TmdbApi
+import com.movix.tv.data.tmdb.TmdbException
+import com.movix.tv.data.age.AgeRules
+import com.movix.tv.data.age.ContentAges
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.Json
 import okhttp3.Cache
 import okhttp3.Dispatcher
@@ -71,7 +79,26 @@ class AppContainer(context: Context) {
         ?: BuildConfig.TMDB_KEY.takeIf { it.isNotBlank() }
 
     val tmdb = TmdbApi(http, json, ::tmdbKey)
-    val catalog = CatalogRepository(tmdb)
+    /** Titres connus en tête de la recherche (barre de recherche d'imdb.com). */
+    val imdb = ImdbSuggestions(http, json)
+
+    /**
+     * Âges des titres pour les profils enfant (classifications TMDB), gardés sur
+     * la télé. Jamais demandés sans profil limité.
+     */
+    val ages = ContentAges(
+        fetch = { type, id ->
+            try {
+                if (type == MediaType.TV) AgeRules.tvAge(tmdb.contentRatings(id).results)
+                else AgeRules.movieAge(tmdb.releaseDates(id).results)
+            } catch (e: TmdbException) {
+                // Titre retiré de TMDB : rien à lire, gardé comme « sans classification ».
+                if (e.code == 404) null else throw e
+            }
+        },
+        file = File(context.filesDir, "content_ages.txt"),
+        scope = appScope,
+    )
 
     val movix = MovixApi(http, json)
     // Clé de test de local.properties (debug et benchmark seulement, vide en
@@ -86,10 +113,25 @@ class AppContainer(context: Context) {
 
     val accountApi = AccountApi(http, json, movix.baseUrl)
     val accounts = AccountManager(context.applicationContext, store, accountApi, vip, json)
+    /** Tous les titres affichés passent par ici, filtrés pour le profil qui regarde (restriction d'âge). */
+    val catalog = CatalogRepository(tmdb, imdb, ages, accounts)
     val sync = SyncManager(appScope, store, accountApi, accounts, json)
     val swiftflux = SwiftFluxClient(http, json, movix.baseUrl)
     /** Rangée « Reprendre » lue sur le serveur (historique en base). */
     val history = HistoryApi(http, json, movix.baseUrl)
+
+    private val _wakeups = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /**
+     * Écran rallumé ou fin de l'économiseur du système. Beaucoup de télés
+     * gardent l'appli au premier plan pendant la veille : aucun onStart au
+     * réveil, et les minuteurs (`delay`) ont été gelés pendant le sommeil.
+     */
+    val wakeups: SharedFlow<Unit> = _wakeups.asSharedFlow()
+
+    fun onWake() {
+        sync.onForeground()
+        _wakeups.tryEmit(Unit)
+    }
 
     /** Mise à jour depuis l'appli (manifeste `app-tv/version.json` du dépôt movix). */
     val updates = com.movix.tv.data.update.UpdateManager(context.applicationContext, http, store, appScope, BuildConfig.VERSION_CODE)
@@ -129,7 +171,7 @@ class AppContainer(context: Context) {
     /** Langue de l'appli (« fr », « en ») : ses sous-titres passent devant. */
     fun uiLanguage(): String = appContext.resources.configuration.locales[0].language
 
-    val streamProbe = StreamProbe(http)
+    val streamProbe = StreamProbe(http, context.applicationContext)
     val codecSupport = CodecSupport(context.applicationContext)
 
     val playerEngine = PlayerEngine(context.applicationContext, http, (context.applicationContext as? MovixApp)?.lowRam ?: false)

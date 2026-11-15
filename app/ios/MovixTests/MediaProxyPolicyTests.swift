@@ -386,10 +386,11 @@ struct MediaProxyEncodingTests {
     let data = try MediaProxyPinnedHTTPExchange.serialize(request)
     let text = try #require(String(data: data, encoding: .utf8))
     #expect(text.hasPrefix("GET \(path) HTTP/1.1\r\n"))
-    // `gzip;q=0` fait servir à Fsvid/Vidzy leur playlist leurre `/e/segN.ts`.
+    // Fsvid/Vidzy servent un faux master à tout Accept-Encoding qui n'est pas
+    // exactement celui de Chrome.
     let encoding = host.lowercased().contains("uqload")
       ? "identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0"
-      : "identity"
+      : "gzip, deflate, br, zstd"
     #expect(text.contains("\r\nAccept-Encoding: \(encoding)\r\n"))
     #expect(text.contains("\r\nRange: bytes=100-199\r\n"))
   }

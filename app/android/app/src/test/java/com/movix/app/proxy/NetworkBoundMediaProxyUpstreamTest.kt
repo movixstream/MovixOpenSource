@@ -152,7 +152,7 @@ class NetworkBoundMediaProxyUpstreamTest {
                         if (host.contains("uqload")) {
                             "identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0"
                         } else {
-                            "identity"
+                            "gzip, deflate, br, zstd"
                         },
                         request.header("Accept-Encoding"),
                     )

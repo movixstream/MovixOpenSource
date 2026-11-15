@@ -46,7 +46,7 @@ app/
 
 - Node.js 18+
 - React Native CLI (`npm install -g @react-native-community/cli`)
-- **Android** : Android Studio, JDK 17, Android SDK 35
+- **Android** : Android Studio, JDK 17, Android SDK 35, NDK 26.1 et CMake 3.22 (le build télécharge [libcurl-impersonate](https://github.com/lexiforest/curl-impersonate), utilisée par le proxy média)
 - **iOS** : Xcode 15+, CocoaPods (`gem install cocoapods`)
 
 ## Installation

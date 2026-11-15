@@ -196,6 +196,54 @@ class SourceSelectorTest {
         assertEquals(listOf(low, hevc, vostfr), sorted)
     }
 
+    // ---------- version préférée (réglages de lecture) ----------
+
+    @Test
+    fun preferredVersionRanksFirst() {
+        val vf = hls(Provider.FSTREAM, "voe")
+        val vostfr = hls(Provider.WIFLIX, "voe", Lang.VOSTFR)
+        val vo = hls(Provider.VIPER, "voe", Lang.VO)
+        val unknown = hls(Provider.J1F, "voe", Lang.UNKNOWN)
+        val all = listOf(vo, unknown, vostfr, vf)
+        // Sans préférence : l'ordre d'avant (VF, VOSTFR, inconnu, VO).
+        assertEquals(listOf(vf, vostfr, unknown, vo), SourceSelector.playable(all))
+        assertEquals(listOf(vf, vostfr, unknown, vo), SourceSelector.playable(all, prefer = Lang.VF))
+        // VOSTFR : la VO (son d'origine) avant l'inconnu, la VF en dernier.
+        assertEquals(listOf(vostfr, vo, unknown, vf), SourceSelector.playable(all, prefer = Lang.VOSTFR))
+        assertEquals(listOf(vo, vostfr, unknown, vf), SourceSelector.playable(all, prefer = Lang.VO))
+    }
+
+    @Test
+    fun preferredVersionStaysFirstEvenInLowQuality() {
+        val vf = hls(Provider.FSTREAM, "voe")
+        val vostfr = hls(Provider.WIFLIX, "vidzy", Lang.VOSTFR)
+        val ranked = SourceSelector.playable(listOf(vf, vostfr), prefer = Lang.VOSTFR)
+        val sorted = SourceSelector.byQuality(ranked, r(vf to 1080, vostfr to 360), prefer = Lang.VOSTFR)
+        assertEquals(vostfr, sorted.first())
+        assertEquals(vostfr, SourceSelector.pick(sorted, isTv = true))
+        assertEquals(listOf(vostfr), SourceSelector.probeCandidates(ranked, isTv = true))
+    }
+
+    @Test
+    fun deviceAndWebListsFollowThePreferredVersion() {
+        val vf = src(Provider.J1F, Lang.VF, stream = null, embed = "https://voe.sx/e/1", host = "voe")
+        val vostfr = src(Provider.VIPER, Lang.VOSTFR, stream = null, embed = "https://voe.sx/e/2", host = "voe")
+        val all = listOf(vf, vostfr)
+        assertEquals(Lang.VF, SourceSelector.deviceCandidates(all).first().language)
+        assertEquals(Lang.VOSTFR, SourceSelector.deviceCandidates(all, prefer = Lang.VOSTFR).first().language)
+        assertEquals(Lang.VOSTFR, SourceSelector.deviceOnly(all, prefer = Lang.VOSTFR).first().language)
+        assertEquals(Lang.VOSTFR, SourceSelector.webCandidates(all, prefer = Lang.VOSTFR).first().language)
+    }
+
+    @Test
+    fun storedVersionNamesAreReadSafely() {
+        assertEquals(Lang.VOSTFR, SourceSelector.versionOf("VOSTFR"))
+        assertEquals(Lang.VO, SourceSelector.versionOf("VO"))
+        assertEquals(Lang.VF, SourceSelector.versionOf(null))
+        assertEquals(Lang.VF, SourceSelector.versionOf("UNKNOWN"))
+        assertEquals(Lang.VF, SourceSelector.versionOf("n'importe quoi"))
+    }
+
     @Test
     fun declaredQualityCountsWhenNothingWasRead() {
         fun file(label: String, quality: String? = null) =

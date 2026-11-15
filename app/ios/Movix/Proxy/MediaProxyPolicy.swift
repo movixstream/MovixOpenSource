@@ -120,14 +120,16 @@ enum MediaProxyPolicy {
   // requêtes aussi sûrement qu'une absence d'en-tête. On émet donc la chaîne
   // complète, alignée sur playbackSecChUa et sur le relais Python
   // (API/proxiesembed/server.py, FSVID_VIDZY_CLIENT_HINTS).
+  // Chrome 142 et non 140 : depuis le 2026-10-26, Fsvid/Vidzy servent un faux
+  // master qui boucle sur lui-même à la chaîne exacte « Windows Chrome 140 ».
   static let playbackUserAgent =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    + "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+    + "(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
   // Fsvid/Vidzy exigent un Referer sur un de leurs domaines ET la présence de
   // Sec-Ch-Ua. Sans cet en-tête leur CDN répond 302 vers .../troll/master.m3u8
   // (fsvid) ou 403 (vidzy). Seule la présence compte, pas la valeur.
   static let playbackSecChUa =
-    "\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\""
+    "\"Chromium\";v=\"142\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"142\""
   // Un vrai Chrome ne dissocie jamais les trois indices client : poser Sec-Ch-Ua
   // seul revenait à annoncer un navigateur tout en le contredisant.
   static let playbackSecChUaMobile = "?0"
@@ -139,13 +141,38 @@ enum MediaProxyPolicy {
   // décompresse pas les réponses et doit préserver les Range.
   private static let providerMediaAcceptEncoding =
     "identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0"
-  // Fsvid/Vidzy servent leur playlist leurre (`/e/segN.ts`, la vidéo troll) en
-  // 200 dès que `gzip;q=0` figure dans la requête (mesuré le 2026-10-15) :
-  // `identity` seul donne le vrai flux, lui aussi non compressé.
+  // Fsvid/Vidzy servent un faux master (sa variante renvoie le master
+  // lui-même) à tout Accept-Encoding autre que celui de Chrome, `identity`
+  // compris (mesuré le 2026-10-26). Leur CDN répond alors en gzip pour les
+  // playlists, que MediaProxyServer décompresse ; les segments arrivent bruts.
+  private static let fsvidVidzyMediaAcceptEncoding = "gzip, deflate, br, zstd"
+
+  /// Cookie de session que le master Fsvid/Vidzy pose (`vz_pe`/`fsv_pe`, valeur
+  /// = jeton `t=` de son URL) et sans lequel Vidzy sert sa fausse variante de
+  /// 177 octets (mesuré le 2026-10-27). Le transport épinglé n'a pas de
+  /// stockage de cookies : on le reconstruit depuis le jeton de chaque requête.
+  static func providerSessionCookie(for url: URL) -> String? {
+    guard let host = url.host?.lowercased() else { return nil }
+    let normalizedHost = host.hasSuffix(".") ? String(host.dropLast()) : host
+    guard providerDecoyHostSuffixes.contains(where: {
+      normalizedHost == $0 || normalizedHost.hasSuffix(".\($0)")
+    }),
+      let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+        .queryItems?.first(where: { $0.name == "t" })?.value,
+      (16...128).contains(token.count),
+      token.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") })
+    else { return nil }
+    return "vz_pe=\(token); fsv_pe=\(token)"
+  }
 
   static func playbackAcceptEncoding(for url: URL) -> String {
     guard let host = url.host?.lowercased() else { return "identity" }
     let normalizedHost = host.hasSuffix(".") ? String(host.dropLast()) : host
+    if providerDecoyHostSuffixes.contains(where: {
+      normalizedHost == $0 || normalizedHost.hasSuffix(".\($0)")
+    }) {
+      return fsvidVidzyMediaAcceptEncoding
+    }
     let isUqloadHost = normalizedHost.range(
       of: #"(?:^|\.)uqload\.[a-z]{2,24}$"#,
       options: .regularExpression

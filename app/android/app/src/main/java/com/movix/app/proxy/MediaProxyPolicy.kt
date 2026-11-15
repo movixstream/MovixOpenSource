@@ -70,16 +70,18 @@ object MediaProxyPolicy {
     // nos requetes aussi surement qu'une absence d'entete. On emet donc la
     // chaine complete, alignee sur PLAYBACK_SEC_CH_UA et sur le relais Python
     // (API/proxiesembed/server.py, FSVID_VIDZY_CLIENT_HINTS).
+    // Chrome 142 et non 140 : depuis le 2026-10-26, Fsvid/Vidzy servent un faux
+    // master qui boucle sur lui-même à la chaîne exacte « Windows Chrome 140 ».
     private const val PLAYBACK_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+            "(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
 
     // Fsvid/Vidzy exigent un Referer sur un de leurs domaines ET la presence de
     // Sec-Ch-Ua. Sans cet en-tete leur CDN repond 302 vers .../troll/master.m3u8
     // (fsvid) ou 403 (vidzy). La valeur exacte est ignoree, seule la presence
     // compte, donc on aligne celle d'un Chrome recent.
     const val PLAYBACK_SEC_CH_UA =
-        "\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\""
+        "\"Chromium\";v=\"142\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"142\""
 
     // Un vrai Chrome ne dissocie jamais les trois indices client. Poser
     // Sec-Ch-Ua seul revenait a annoncer un navigateur tout en le contredisant
@@ -91,10 +93,12 @@ object MediaProxyPolicy {
     // Accept-Encoding est fourni par l'appelant.
     private const val PROVIDER_MEDIA_ACCEPT_ENCODING =
         "identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0"
-    // Fsvid/Vidzy servent leur playlist leurre (`/e/segN.ts`, la video troll)
-    // en 200 des que `gzip;q=0` figure dans la requete (mesure le 2026-10-15).
-    // `identity` seul donne le vrai flux, toujours non compresse.
-    private const val FSVID_VIDZY_MEDIA_ACCEPT_ENCODING = "identity"
+    // Fsvid/Vidzy servent un faux master (sa variante renvoie le master
+    // lui-même) à tout Accept-Encoding autre que celui de Chrome, `identity`
+    // compris (mesuré le 2026-10-26). Le CDN répond alors en gzip pour les
+    // playlists : les chemins OkHttp le décodent (decodedManualResponse),
+    // Cronet le fait seul.
+    private const val FSVID_VIDZY_MEDIA_ACCEPT_ENCODING = "gzip, deflate, br, zstd"
     private val providerDecoySegmentPattern = Regex("^/e/seg\\d+\\.ts$")
     private val uqloadHostPattern = Regex("(?:^|\\.)uqload\\.[a-z]{2,24}$")
     private val tokenPattern = Regex("^[A-Za-z0-9_-]{8,128}$")
@@ -167,18 +171,28 @@ object MediaProxyPolicy {
     /**
      * Vrai si l'upstream doit passer par OkHttp plutôt que par Cronet. Seul
      * Uqload : son profil exige un Accept-Encoding que Cronet réécrit.
-     *
-     * Plus Fsvid/Vidzy : depuis le 2026-10-16 au soir, leur CDN compare
-     * l'empreinte TLS au User-Agent. Un « Chrome Windows » dont le ClientHello
-     * n'est pas celui de Chrome (OkHttp) reçoit un faux master de 177 octets
-     * qui pointe sur `index.m3u8`, lui-même identique (levelParsingError).
-     * Cronet présente le TLS de Chromium et obtient le vrai flux, quel que soit
-     * l'Accept-Encoding (mesuré le 2026-10-17).
      */
     fun requiresOkHttpUpstream(rawUrl: String): Boolean {
         val host = runCatching { URI(rawUrl).host?.lowercase(Locale.US)?.trimEnd('.') }
             .getOrNull() ?: return false
         return uqloadHostPattern.containsMatchIn(host)
+    }
+
+    /**
+     * Vrai si l'upstream doit imiter un vrai Chrome (libcurl-impersonate, voir
+     * [ImpersonateMediaProxyUpstream]) : Fsvid/Vidzy.
+     *
+     * Leur CDN a d'abord trié sur l'empreinte TLS (2026-10-17, OkHttp refusé,
+     * Cronet accepté), puis sur l'Accept-Encoding exact de Chrome (2026-10-26,
+     * Cronet refusé car il réécrit cet en-tête, OkHttp accepté). Depuis le
+     * 2026-10-30, il exige les deux : un ClientHello qui propose
+     * X25519MLKEM768 et « gzip, deflate, br, zstd ». Aucune des deux piles
+     * Android ne les réunit ; seul un profil de navigateur complet le fait.
+     */
+    fun requiresBrowserImpersonation(rawUrl: String): Boolean {
+        val host = runCatching { URI(rawUrl).host?.lowercase(Locale.US)?.trimEnd('.') }
+            .getOrNull() ?: return false
+        return PROVIDER_DECOY_HOST_SUFFIXES.any { host == it || host.endsWith(".$it") }
     }
 
     fun validatePublicHttpsUrl(

@@ -615,6 +615,137 @@ async function extractFsvidVidzyM3u8(html, embedUrl, provider) {
     }
 }
 
+// Sans clé `gk`, le CDN Fsvid/Vidzy ne sert que les 9 à 19 premiers segments
+// (selon le serveur), puis répond 403. Leur lecteur demande cette clé à une
+// « porte » (gate.php chez Vidzy, /gk chez Fsvid) avec une empreinte du
+// navigateur, puis l'ajoute au master ; le CDN la recopie ensuite dans les
+// URLs des variantes et des segments. La clé ne dépend ni de l'IP ni de la
+// vidéo, et les deux hébergeurs partagent la même : une seule sert partout.
+// La porte refuse (`{"ok":0}`) une empreinte sans canvas : faute de canvas
+// (service worker sans OffscreenCanvas, QuickJS), on envoie les largeurs que
+// mesure Chrome sous Windows.
+const FSVID_VIDZY_GATE_TEXT = 'Movix7Qm@Éédoà1l';
+const FSVID_VIDZY_GATE_FALLBACK_WIDTHS = { serif: 159.56, sans: 170.34 };
+const FSVID_VIDZY_GATE_URLS = {
+    vidzy: 'https://v6.vidzy.cc/gate.php',
+    fsvid: 'https://fsvid.lol/gk',
+};
+const FSVID_VIDZY_GATE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const FSVID_VIDZY_GATE_RETRY_AFTER_MS = 60 * 1000;
+let fsvidVidzyGateKey = null;
+let fsvidVidzyGateKeyPromise = null;
+
+function measureFsvidVidzyGateText() {
+    try {
+        const canvas = typeof OffscreenCanvas === 'function'
+            ? new OffscreenCanvas(16, 16)
+            : (typeof document !== 'undefined' ? document.createElement('canvas') : null);
+        const context = canvas?.getContext?.('2d');
+        if (context) {
+            const measure = (font) => {
+                context.textBaseline = 'top';
+                context.font = font;
+                return Math.round(context.measureText(FSVID_VIDZY_GATE_TEXT).width * 100) / 100;
+            };
+            const serif = measure('18px serif');
+            const sans = measure('18px sans-serif');
+            if (Number.isFinite(serif) && Number.isFinite(sans) && serif > 0 && sans > 0) {
+                return { serif, sans };
+            }
+        }
+    } catch {}
+    return FSVID_VIDZY_GATE_FALLBACK_WIDTHS;
+}
+
+function buildFsvidVidzyGateQuery() {
+    const { serif, sans } = measureFsvidVidzyGateText();
+    const nav = typeof navigator !== 'undefined' ? navigator : {};
+    const scr = typeof screen !== 'undefined' ? screen : {};
+    const dpr = typeof devicePixelRatio === 'number' && devicePixelRatio > 0 ? devicePixelRatio : 1;
+    return [
+        ['v', 'p1'], ['cw', serif], ['cw2', sans], ['wg', 1], ['dpr', dpr],
+        ['sw', scr.width || 1920], ['hw', nav.hardwareConcurrency || 8],
+        ['ft', 'TOP'], ['rf', ''],
+    ].map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&');
+}
+
+function getFsvidVidzyGateUrls(html, provider) {
+    const urls = [];
+    // Vidzy écrit l'adresse de sa porte dans la page : la suivre si elle change.
+    const inline = /fetch\(\s*['"](https:\/\/[a-z0-9.-]+\/gate\.php)\?/i.exec(String(html || ''));
+    if (inline && /(?:^|\.)(?:vidzy\.cc|vidzy\.org|fsvid\.lol)$/i.test(new URL(inline[1]).hostname)) {
+        urls.push(inline[1]);
+    }
+    urls.push(FSVID_VIDZY_GATE_URLS[provider], FSVID_VIDZY_GATE_URLS[provider === 'fsvid' ? 'vidzy' : 'fsvid']);
+    return [...new Set(urls)];
+}
+
+async function requestFsvidVidzyGateKey(gateUrls) {
+    const query = buildFsvidVidzyGateQuery();
+    for (const gateUrl of gateUrls) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        try {
+            const resp = await fetch(`${gateUrl}?${query}`, {
+                cache: 'no-store',
+                credentials: 'omit',
+                signal: controller.signal,
+            });
+            if (!resp.ok) continue;
+            const data = await resp.json();
+            if (typeof data?.gk === 'string' && /^[A-Za-z0-9_.-]{16,512}$/.test(data.gk)) {
+                return data.gk;
+            }
+        } catch {
+            // Porte suivante.
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+    return null;
+}
+
+function getFsvidVidzyGateKey(html, provider) {
+    if (fsvidVidzyGateKey && fsvidVidzyGateKey.expiresAt > Date.now()) {
+        return Promise.resolve(fsvidVidzyGateKey.value);
+    }
+    if (!fsvidVidzyGateKeyPromise) {
+        fsvidVidzyGateKeyPromise = requestFsvidVidzyGateKey(getFsvidVidzyGateUrls(html, provider))
+            .then((value) => {
+                // La clé se termine par `.<émission>.<durée en s>` : la garder la
+                // moitié de sa durée, sans dépasser six heures.
+                const ttl = Number(String(value || '').split('.')[2]);
+                const lifetime = Number.isFinite(ttl) && ttl > 0
+                    ? Math.min(FSVID_VIDZY_GATE_MAX_AGE_MS, ttl * 500)
+                    : FSVID_VIDZY_GATE_MAX_AGE_MS;
+                // Après un échec, ne pas rappeler les portes à chaque extraction.
+                fsvidVidzyGateKey = {
+                    value: value || null,
+                    expiresAt: Date.now() + (value ? lifetime : FSVID_VIDZY_GATE_RETRY_AFTER_MS),
+                };
+                return value;
+            })
+            .finally(() => {
+                fsvidVidzyGateKeyPromise = null;
+            });
+    }
+    return fsvidVidzyGateKeyPromise;
+}
+
+function hasFsvidVidzyGateKey(url) {
+    return /[?&]gk=/.test(String(url || ''));
+}
+
+async function withFsvidVidzyGateKey(m3u8Url, html, provider) {
+    if (hasFsvidVidzyGateKey(m3u8Url)) return m3u8Url;
+    const gateKey = await getFsvidVidzyGateKey(html, provider);
+    if (!gateKey) {
+        console.warn(`[EXT-${provider.toUpperCase()}] Gate key unavailable, playback will stop early`);
+        return m3u8Url;
+    }
+    return `${m3u8Url}${m3u8Url.includes('?') ? '&' : '?'}gk=${encodeURIComponent(gateKey)}`;
+}
+
 function extractUqloadMediaUrl(html) {
     const candidates = [];
     const collect = value => {
@@ -992,7 +1123,7 @@ async function extractFsvid(fsvidUrl) {
     const cacheKey = md5Hash(embedUrl);
     const cached = caches.fsvid.get(cacheKey);
     const cachedMediaUrl = normalizeFsvidVidzyMediaUrl(cached?.m3u8Url, embedUrl, 'fsvid');
-    if (cached && cachedMediaUrl) {
+    if (cached && cachedMediaUrl && hasFsvidVidzyGateKey(cachedMediaUrl)) {
         console.log('[EXT-FSVID] Cache hit');
         return { ...cached, m3u8Url: cachedMediaUrl, fromCache: true };
     }
@@ -1036,9 +1167,10 @@ async function extractFsvid(fsvidUrl) {
             return { success: false, error: 'Fsvid: M3U8 not found in page' };
         }
 
-        console.log(`[EXT-FSVID] Final M3U8 URL: ${m3u8Url}`);
-        const result = { m3u8Url, success: true, source: 'fsvid' };
-        caches.fsvid.set(cacheKey, result);
+        const playableUrl = await withFsvidVidzyGateKey(m3u8Url, html, 'fsvid');
+        console.log(`[EXT-FSVID] Final M3U8 URL: ${playableUrl}`);
+        const result = { m3u8Url: playableUrl, success: true, source: 'fsvid' };
+        if (hasFsvidVidzyGateKey(playableUrl)) caches.fsvid.set(cacheKey, result);
         return result;
 
     } catch (e) {
@@ -1063,7 +1195,7 @@ async function extractVidzy(vidzyUrl) {
     const cacheKey = md5Hash(embedUrl);
     const cached = caches.vidzy.get(cacheKey);
     const cachedMediaUrl = normalizeFsvidVidzyMediaUrl(cached?.m3u8Url, embedUrl, 'vidzy');
-    if (cached && cachedMediaUrl) {
+    if (cached && cachedMediaUrl && hasFsvidVidzyGateKey(cachedMediaUrl)) {
         return { ...cached, m3u8Url: cachedMediaUrl, fromCache: true };
     }
 
@@ -1089,8 +1221,9 @@ async function extractVidzy(vidzyUrl) {
 
         if (!m3u8Url) return { success: false, error: 'Vidzy: M3U8 not found in page' };
 
-        const result = { m3u8Url, success: true, source: 'vidzy' };
-        caches.vidzy.set(cacheKey, result);
+        const playableUrl = await withFsvidVidzyGateKey(m3u8Url, html, 'vidzy');
+        const result = { m3u8Url: playableUrl, success: true, source: 'vidzy' };
+        if (hasFsvidVidzyGateKey(playableUrl)) caches.vidzy.set(cacheKey, result);
         return result;
 
     } catch (e) {
@@ -1930,7 +2063,10 @@ const VOE_DOMAIN_PATTERN = new RegExp(
     + '|sandratableother|sandrataxeight|scatch176duplicities|sethniceletter|shannonpersonalcost'
     + '|simpulumlamerop|smoki|stevenfamilyedge|stevenimaginelittle|strawberriesporail|telyn610zoanthropy'
     + '|timberwoodanotia|timmaybealready|toddpartneranimal|toxitabellaeatrebates306|tracylocalschool'
-    + '|uptodatefinishconferenceroom|valeronevijao|walterprettytheir|wolfdyslectic|yodelswartlike)\\.',
+    + '|uptodatefinishconferenceroom|valeronevijao|walterprettytheir|wolfdyslectic|yodelswartlike'
+    // Domaines VOE des lecteurs d'anime-sama (2026-10-19)
+    + '|claireguessthousand|derricknationtop|jamesbornmain|jeremyparticipantanything|megankiddifference'
+    + '|teresapoliticallearn)\\.',
     'i'
 );
 
@@ -2069,6 +2205,24 @@ async function extractAll(sources) {
 /**
  * Set up DNR headers for a service's extracted URL so the browser player can use it
  */
+/**
+ * Cookie de session que le master Fsvid/Vidzy pose (`vz_pe`/`fsv_pe`, valeur
+ * = jeton `t=` de son URL). Depuis le 2026-10-27, Vidzy sert sa fausse
+ * playlist de 177 octets à la place des segments après quelques dizaines de
+ * requêtes sans lui. Le navigateur ne le renvoie pas : cookie tiers (bloqué
+ * par Brave), et hls.js lit sans `credentials`. N'importe quel jeton valide
+ * du même serveur suffit, d'où une seule règle par domaine.
+ */
+function fsvidVidzySessionCookie(url) {
+    try {
+        const token = new URL(url).searchParams.get('t') || '';
+        if (!/^[A-Za-z0-9_-]{16,128}$/.test(token)) return null;
+        return `vz_pe=${token}; fsv_pe=${token}`;
+    } catch {
+        return null;
+    }
+}
+
 async function setupHeadersForService(type, url, referer) {
     // Fsvid needs different referers:
     // - Embed page (fsvid.lol/embed-xxx) → fsmirror46.lol (required by fsvid to serve content)
@@ -2126,8 +2280,12 @@ async function setupHeadersForService(type, url, referer) {
         kisskh: { 'Referer': 'https://kisskh.do/', 'Origin': 'https://kisskh.do' },
     };
 
-    const hdrs = headerMap[type];
+    let hdrs = headerMap[type];
     if (!hdrs || !url) return;
+    if (type === 'fsvid' || type === 'vidzy') {
+        const cookie = fsvidVidzySessionCookie(url);
+        if (cookie) hdrs = { ...hdrs, 'Cookie': cookie };
+    }
 
     try {
         const parsedUrl = new URL(url);

@@ -83,4 +83,21 @@
     <!-- Lecture -->
     <string name="playback_autoplay">Enchaîner l\'épisode suivant</string>
     <string name="playback_autoplay_body">À la fin d\'un épisode, le suivant démarre tout seul.</string>
+    <string name="playback_prefs_title">Préférences de lecture</string>
+    <string name="playback_prefs_profile">Propres au profil %1$s sur cette télé.</string>
+    <string name="playback_prefs_device">Propres à cette télé.</string>
+    <string name="playback_audio">Langue audio</string>
+    <string name="playback_audio_body">Piste choisie d\'office quand la source en propose plusieurs.</string>
+    <string name="playback_version">Version préférée</string>
+    <string name="playback_version_body">Pour choisir la source au lancement d\'un film ou d\'un épisode.</string>
+    <string name="playback_subs">Sous-titres</string>
+    <string name="playback_subs_body">Selon la version, cherchés dans la source, dans le flux puis en ligne. Auto : français d\'office sur une VOSTFR qui en fournit.</string>
+    <string name="playback_subs_vo">En VO</string>
+    <string name="playback_subs_vostfr">En VOSTFR</string>
+    <string name="playback_subs_vf">En VF</string>
+    <string name="playback_subs_auto">Auto</string>
+    <string name="playback_subs_off">Désactivés</string>
+    <string name="playback_remember">Retenir mes derniers choix</string>
+    <string name="playback_remember_body">Sous-titres, langue audio et version choisis pendant la lecture deviennent les préférences.</string>
+    <string name="playback_prefs_reset">Rétablir les préférences par défaut</string>
 </resources>

@@ -40,9 +40,12 @@ import com.movix.tv.R
 import com.movix.tv.container
 import com.movix.tv.data.local.AccentColor
 import com.movix.tv.data.local.HomeRows
+import com.movix.tv.data.local.PlaybackPrefs
 import com.movix.tv.data.local.SubtitleStyle
 import com.movix.tv.data.local.UiKeys
 import com.movix.tv.data.local.UiPrefs
+import com.movix.tv.data.movix.Lang
+import com.movix.tv.data.movix.SourceSelector
 import com.movix.tv.data.tmdb.RowRegistry
 import com.movix.tv.ui.components.PillButton
 import com.movix.tv.ui.components.RailHideable
@@ -55,6 +58,7 @@ import com.movix.tv.ui.theme.MovixType
 import com.movix.tv.ui.theme.subtitleFontFamily
 import com.movix.tv.ui.theme.subtitleFontLabel
 import kotlinx.coroutines.launch
+import java.util.Locale
 import com.movix.tv.data.tmdb.TmdbImage as TmdbUrls
 
 /** Réglages de la télé : lus en direct, écrits tout de suite (appliqués par le reste de l'appli). */
@@ -169,9 +173,12 @@ internal fun SubtitlesPane() {
 @Composable
 private fun SubtitlePreview(style: SubtitleStyle) {
     val container = LocalContext.current.container
-    val backdrop by produceState<String?>(null) {
+    // Image filtrée pour le profil (restriction d'âge) : relue s'il change.
+    val ageLimit = com.movix.tv.ui.components.rememberAgeLimit()
+    val backdrop by produceState<String?>(null, ageLimit) {
+        value = null
         value = runCatching {
-            container.catalog.page(RowRegistry.home.first(), 1).firstNotNullOfOrNull { TmdbUrls.backdrop(it.backdropPath) }
+            container.catalog.page(RowRegistry.home.first(), 1).items.firstNotNullOfOrNull { TmdbUrls.backdrop(it.backdropPath) }
         }.getOrNull()
     }
     Box(
@@ -309,6 +316,15 @@ internal fun RailPane() {
 @Composable
 internal fun PlaybackPane() {
     val (values, write) = rememberUiValues()
+    val container = LocalContext.current.container
+    // Préférences propres au profil relié (la langue et les sous-titres sont
+    // personnels), celles de la télé sans compte : voir UiPrefs.playback.
+    val account by container.accounts.state.collectAsStateWithLifecycle()
+    val scope = UiPrefs.playbackScope(account?.userId, account?.profileId)
+    val prefs = UiPrefs.playback(values, scope)
+    fun save(next: PlaybackPrefs) =
+        write(UiPrefs.playbackKey(scope), if (scope == null && next == PlaybackPrefs()) null else UiPrefs.encode(next))
+
     Column(PaneScroll.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         PaneHeader(stringResource(R.string.settings_section_playback))
         val autoplay = UiPrefs.flag(values, UiKeys.AUTOPLAY_NEXT)
@@ -318,5 +334,66 @@ internal fun PlaybackPane() {
             { write(UiKeys.AUTOPLAY_NEXT, if (autoplay) "0" else null) },
             body = stringResource(R.string.playback_autoplay_body),
         )
+        Spacer(Modifier.height(10.dp))
+        PaneHeader(
+            stringResource(R.string.playback_prefs_title),
+            account?.let { stringResource(R.string.playback_prefs_profile, it.profileName) } ?: stringResource(R.string.playback_prefs_device),
+        )
+        PrefBlock(stringResource(R.string.playback_audio), stringResource(R.string.playback_audio_body)) {
+            ChoiceRow("", languageChoices(prefs.audio), prefs.audio, { save(prefs.copy(audio = it)) })
+        }
+        PrefBlock(stringResource(R.string.playback_version), stringResource(R.string.playback_version_body)) {
+            ChoiceRow(
+                "",
+                listOf(Lang.VF, Lang.VOSTFR, Lang.VO).map { it.name to it.label.orEmpty() },
+                SourceSelector.versionOf(prefs.version).name,
+                { save(prefs.copy(version = it)) },
+            )
+        }
+        PrefBlock(stringResource(R.string.playback_subs), stringResource(R.string.playback_subs_body)) {
+            // Une préférence par version : couper les sous-titres d'une VF ne les coupe pas en VOSTFR.
+            listOf(
+                Lang.VO to R.string.playback_subs_vo,
+                Lang.VOSTFR to R.string.playback_subs_vostfr,
+                Lang.VF to R.string.playback_subs_vf,
+            ).forEach { (version, label) ->
+                val current = prefs.subtitlesFor(version.name)
+                ChoiceRow(stringResource(label), subtitleChoices(current), current, { save(prefs.withSubtitles(version.name, it)) })
+            }
+        }
+        ToggleRow(
+            stringResource(R.string.playback_remember),
+            prefs.remember,
+            { save(prefs.copy(remember = !prefs.remember)) },
+            body = stringResource(R.string.playback_remember_body),
+        )
+        Spacer(Modifier.height(4.dp))
+        PillButton(stringResource(R.string.playback_prefs_reset), { save(PlaybackPrefs()) })
+        Spacer(Modifier.height(24.dp))
     }
 }
+
+/** Bloc de réglage : titre, explication, puis ses pastilles (comme l'écran de veille). */
+@Composable
+private fun PrefBlock(title: String, body: String?, content: @Composable () -> Unit) {
+    Column(Modifier.fillMaxWidth().background(MovixColors.Panel, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 8.dp)) {
+        Text(title, style = MovixType.Button)
+        if (body != null) Text(body, style = MovixType.Meta)
+        content()
+    }
+}
+
+/** Français, anglais, et la langue retenue si c'en est une autre (choisie dans le lecteur). */
+@Composable
+private fun languageChoices(current: String?): List<Pair<String, String>> {
+    val ui = LocalContext.current.resources.configuration.locales[0]
+    return (listOf("fr", "en") + listOfNotNull(current?.takeIf { it != PlaybackPrefs.OFF })).distinct().map { code ->
+        code to Locale(code).getDisplayLanguage(ui).replaceFirstChar { it.titlecase(ui) }
+    }
+}
+
+/** Auto (règle d'origine), désactivés, puis les langues. */
+@Composable
+private fun subtitleChoices(current: String?): List<Pair<String?, String>> =
+    listOf<Pair<String?, String>>(null to stringResource(R.string.playback_subs_auto), PlaybackPrefs.OFF to stringResource(R.string.playback_subs_off)) +
+        languageChoices(current)

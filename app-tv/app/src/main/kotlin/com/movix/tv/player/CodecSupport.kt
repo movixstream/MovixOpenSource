@@ -4,12 +4,14 @@ import android.content.Context
 import android.media.MediaCodecList
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MimeTypes
+import androidx.media3.decoder.ffmpeg.FfmpegLibrary
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Ce que l'appareil sait lire : un décodeur pour le type MIME, ou, pour le
- * son Dolby/DTS, le passage direct vers la barre de son ou l'ampli (HDMI).
+ * son Dolby/DTS, le passage direct vers la barre de son ou l'ampli (HDMI), à
+ * défaut le décodage par FFmpeg dans l'appli.
  * Dolby Vision se rabat sur sa couche HEVC quand il n'a pas de décodeur.
  */
 class CodecSupport(private val context: Context) {
@@ -26,7 +28,7 @@ class CodecSupport(private val context: Context) {
         when {
             m in decoders -> true
             m == "video/dolby-vision" -> "video/hevc" in decoders
-            m.startsWith("audio/") -> passthrough(m)
+            m.startsWith("audio/") -> passthrough(m) || ffmpeg(m)
             else -> false
         }
     }
@@ -36,4 +38,6 @@ class CodecSupport(private val context: Context) {
         encoding != androidx.media3.common.C.ENCODING_INVALID &&
             AudioCapabilities.getCapabilities(context, AudioAttributes.DEFAULT, null).supportsEncoding(encoding)
     }.getOrDefault(false)
+
+    private fun ffmpeg(mime: String): Boolean = runCatching { FfmpegLibrary.supportsFormat(mime) }.getOrDefault(false)
 }

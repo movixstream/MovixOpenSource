@@ -56,6 +56,10 @@ import com.movix.tv.data.local.UiPrefs
 import com.movix.tv.data.movix.Lang
 import com.movix.tv.data.movix.PlaybackSource
 import com.movix.tv.data.movix.Provider
+import com.movix.tv.data.movix.QualityCheck
+import com.movix.tv.data.movix.QualityResult
+import com.movix.tv.player.Codecs
+import com.movix.tv.player.qualityLabel
 import com.movix.tv.ui.components.MovixIcons
 import com.movix.tv.ui.theme.MovixColors
 import com.movix.tv.ui.theme.MovixType
@@ -107,8 +111,22 @@ private fun Modifier.stopAtEnds(first: Boolean, last: Boolean): Modifier =
 private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
 private val OFFSETS = (-10..10).map { it * 500L }
 
-/** Une ligne d'un sous-panneau. */
-private class Option(val title: String, val subtitle: String? = null, val selected: Boolean = false, val enabled: Boolean = true, val vip: Boolean = false, val group: String? = null, val onClick: () -> Unit = {})
+/**
+ * Une ligne d'un sous-panneau. [key] : identité stable dans la liste (une
+ * ligne qui change de texte ou de place garde son focus) ; [badge] : pastille
+ * devant le sous-titre (« Meilleure qualité »).
+ */
+private class Option(
+    val title: String,
+    val subtitle: String? = null,
+    val selected: Boolean = false,
+    val enabled: Boolean = true,
+    val vip: Boolean = false,
+    val group: String? = null,
+    val key: String? = null,
+    val badge: String? = null,
+    val onClick: () -> Unit = {},
+)
 
 /**
  * Panneau de réglages à droite (maquette 4) : la liste principale à droite,
@@ -211,10 +229,15 @@ private fun SubPanel(title: String, options: List<Option>, modifier: Modifier) {
     val selectedIndex = options.indexOfFirst { it.selected && it.enabled }.takeIf { it >= 0 } ?: options.indexOfFirst { it.enabled }.coerceAtLeast(0)
     val requester = remember(title) { FocusRequester() }
     val state = rememberLazyListState(initialFirstVisibleItemIndex = (selectedIndex - 3).coerceAtLeast(0))
+    // Clés stables (sources : leur identifiant) : quand les résultats de
+    // « Vérifier la qualité » arrivent, la ligne sous le focus reste la même.
+    // Clés en double (ne devrait pas arriver) : la position, comme avant.
+    val keys = options.mapIndexed { i, o -> o.key ?: "$i:${o.title}" }
+        .let { k -> if (k.toSet().size == k.size) k else options.indices.map { "$it:${options[it].title}" } }
     Column(modifier.fillMaxHeight().padding(top = 28.dp)) {
         Text(title, style = MovixType.Panel, modifier = Modifier.padding(start = 22.dp, bottom = 10.dp))
         LazyColumn(state = state, contentPadding = PaddingValues(start = 22.dp, end = 22.dp, bottom = 28.dp)) {
-            itemsIndexed(options, key = { i, o -> "$i:${o.title}" }) { i, o ->
+            itemsIndexed(options, key = { i, _ -> keys[i] }) { i, o ->
                 Column {
                     o.group?.let { Text(it, style = MovixType.Kicker.copy(fontSize = 11.5.sp, color = MovixColors.Dim), modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 6.dp)) }
                     SourceRow(
@@ -260,8 +283,19 @@ private fun SourceRow(o: Option, modifier: Modifier) {
             }
             if (o.selected) Icon(MovixIcons.Check, MovixColors.Red, 16)
         }
-        o.subtitle?.let {
-            Text(it, style = MovixType.CardSub.copy(fontSize = 11.5.sp, color = if (focused) Color(0xFF555555) else MovixColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+        if (o.subtitle != null || o.badge != null) {
+            Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                o.badge?.let {
+                    Text(
+                        it, maxLines = 1,
+                        style = MovixType.Badge.copy(fontSize = 10.sp, color = Color.White),
+                        modifier = Modifier.background(MovixColors.Red, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
+                    )
+                }
+                o.subtitle?.let {
+                    Text(it, style = MovixType.CardSub.copy(fontSize = 11.5.sp, color = if (focused) Color(0xFF555555) else MovixColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
         }
     }
 }
@@ -295,29 +329,41 @@ private fun options(
     PanelPage.SOURCE -> {
         val server = context.getString(R.string.player_group_server)
         val device = context.getString(R.string.player_group_device)
+        // Résultats de « Vérifier la qualité » : qualité mesurée sur chaque
+        // ligne, badge sur la ou les meilleures lisibles ici. L'ordre des
+        // lignes ne change pas quand ils arrivent (le focus ne saute pas).
+        val results = c.quality
+        val best = QualityCheck.best(results)
+        val bestBadge = context.getString(R.string.player_quality_best)
         // Serveur Movix : flux résolus par le serveur. Extraction sur la télé :
-        // lecteurs déjà extraits (lançables tout de suite) puis ceux à extraire.
+        // lecteurs dans l'ordre où ils ont été trouvés, un lecteur extrait
+        // gardant sa place ([PlayerController.deviceRows]).
         val serverSources = c.sources.filter { !it.extracted }
-        val deviceList = c.sources.filter { it.extracted } +
-            c.deviceSources.filter { d -> c.sources.none { it.id == d.id } }.take(30)
-        serverSources.mapIndexed { i, s ->
+        val deviceList = c.deviceRows()
+        listOf(qualityCheckOption(c, results, context)) + serverSources.mapIndexed { i, s ->
             Option(
-                s.label, sourceSubtitle(s, context.getString(R.string.player_native)), selected = s.id == c.current?.id,
+                s.label, sourceSubtitle(s, context.getString(R.string.player_native), results[s.id], context), selected = s.id == c.current?.id,
                 // Badge VIP seulement avec une clé VIP, et pas sur ce qui se lit sans (SwiftFlux, KissKH, fichiers).
                 vip = c.isVip && s.provider != Provider.SWIFTFLUX && s.provider != Provider.KISSKH && (s.provider != Provider.LINKS || s.embedUrl != null),
                 group = if (i == 0) server else null,
+                key = "server:${s.id}",
+                badge = bestBadge.takeIf { s.id in best },
                 onClick = { c.selectSource(s); onClose() },
             )
         } + deviceList.mapIndexed { i, s ->
-            val note = if (c.extractingId == s.id) context.getString(R.string.player_extracting_short) else context.getString(R.string.player_device_soon)
+            val extracting = c.extractingId == s.id
+            val note = if (extracting) context.getString(R.string.player_extracting_short) else context.getString(R.string.player_device_soon)
             Option(
-                s.label, sourceSubtitle(s, note), selected = s.id == c.current?.id, group = if (i == 0) device else null,
+                s.label, sourceSubtitle(s, note, results[s.id].takeUnless { extracting }, context), selected = s.id == c.current?.id, group = if (i == 0) device else null,
+                key = "device:${s.id}",
+                badge = bestBadge.takeIf { s.id in best },
                 onClick = { c.selectSource(s); if (s.playable) onClose() },
             )
         } + c.webSources.take(20).mapIndexed { i, s ->
             Option(
                 s.label, sourceSubtitle(s, context.getString(R.string.player_web_note)),
                 group = if (i == 0) context.getString(R.string.player_group_web) else null,
+                key = "web:${s.embedUrl ?: s.id}",
                 onClick = { onClose(); c.openWeb(s) },
             )
         }
@@ -414,9 +460,44 @@ private fun positionLabel(p: String, context: android.content.Context): String =
 private fun outlineLabel(on: Boolean, context: android.content.Context): String =
     context.getString(if (on) R.string.player_st_outline_on else R.string.player_st_outline_off)
 
-/** « Multi, HD, VF, lecture native » : le groupe du site d'abord (le site range ses lecteurs par groupe). */
-private fun sourceSubtitle(s: PlaybackSource, tail: String): String =
-    listOfNotNull(s.provider.label.takeUnless { s.extracted }, s.quality?.takeIf { it.isNotBlank() }, s.language.label, tail).distinct().joinToString(", ")
+/**
+ * « Multi, HD, VF, lecture native » : le groupe du site d'abord (le site range
+ * ses lecteurs par groupe). Après « Vérifier la qualité » ([result]), la
+ * qualité mesurée (« 1080p », même étiquette que le lecteur) remplace celle
+ * annoncée par le serveur, et l'état de la sonde remplace [tail].
+ */
+private fun sourceSubtitle(s: PlaybackSource, tail: String, result: QualityResult? = null, context: android.content.Context? = null): String {
+    val rating = (result as? QualityResult.Measured)?.rating
+    val quality = rating?.height?.let { qualityLabel(0, it) } ?: s.quality?.takeIf { it.isNotBlank() }
+    val note = if (context == null) null else when {
+        result == QualityResult.Checking -> context.getString(R.string.player_quality_pending)
+        result == QualityResult.Unavailable -> context.getString(R.string.player_quality_down)
+        rating != null && !rating.playableHere ->
+            context.getString(R.string.player_quality_unreadable, rating.unsupported.joinToString(" + ") { Codecs.displayName(it) })
+        result == QualityResult.Unknown || (rating != null && rating.height == null) -> context.getString(R.string.player_quality_unknown)
+        else -> null
+    }
+    return listOfNotNull(s.provider.label.takeUnless { s.extracted }, quality, s.language.label, note ?: tail).distinct().joinToString(", ")
+}
+
+/**
+ * Ligne « Vérifier la qualité » en tête de la page Source : OK lance la
+ * mesure, la ligne montre l'avancement (« Vérification… 4/12 ») puis la
+ * meilleure qualité trouvée. OK pendant la mesure ne fait rien.
+ */
+private fun qualityCheckOption(c: PlayerController, results: Map<String, QualityResult>, context: android.content.Context): Option {
+    val progress = c.qualityCheck
+    val best = QualityCheck.bestHeight(results)?.let { qualityLabel(0, it) }
+    val (title, subtitle) = when {
+        progress == null -> context.getString(R.string.player_quality_check) to context.getString(R.string.player_quality_check_body)
+        progress.total == 0 -> context.getString(R.string.player_quality_check) to context.getString(R.string.player_quality_nothing)
+        progress.running -> context.getString(R.string.player_quality_checking, progress.done, progress.total) to
+            (best?.let { context.getString(R.string.player_quality_best_so_far, it) } ?: context.getString(R.string.player_quality_checking_body))
+        else -> context.getString(R.string.player_quality_again) to
+            (best?.let { context.getString(R.string.player_quality_best_is, it) } ?: context.getString(R.string.player_quality_none))
+    }
+    return Option(title, subtitle, key = "quality-check", onClick = { c.checkQuality() })
+}
 
 private fun subtitleLabel(c: PlayerController, context: android.content.Context): String = when (val s = c.subtitle) {
     SubtitleChoice.Off -> context.getString(R.string.player_off)

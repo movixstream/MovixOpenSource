@@ -223,7 +223,7 @@ class MediaProxyPolicyTest {
         // qu'annonce PLAYBACK_SEC_CH_UA, sans quoi Fsvid sert son flux leurre.
         val signedUserAgent =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+                "(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
 
         for (url in listOf(
             "https://r1.fsvid.lol/video/master.m3u8",
@@ -239,10 +239,11 @@ class MediaProxyPolicyTest {
 
     @Test
     fun limitsExplicitEncodingToTheProviderDomains() {
-        // `gzip;q=0` fait servir a Fsvid/Vidzy leur playlist leurre `/e/segN.ts`.
+        // Fsvid/Vidzy servent un faux master a tout Accept-Encoding qui n'est
+        // pas exactement celui de Chrome.
         for (host in listOf("r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org")) {
             assertEquals(
-                "identity",
+                "gzip, deflate, br, zstd",
                 MediaProxyPolicy.playbackAcceptEncoding("https://$host/master.m3u8"),
             )
         }
@@ -263,11 +264,21 @@ class MediaProxyPolicyTest {
     }
 
     @Test
-    fun keepsFsvidVidzyOnCronetForTheChromeTlsFingerprint() {
-        // Leur CDN sert un faux master de 177 octets a un TLS non-Chrome (OkHttp).
-        for (host in listOf("r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org")) {
+    fun routesFsvidVidzyToTheBrowserImpersonation() {
+        // Leur CDN exige le TLS d'un navigateur ET l'Accept-Encoding exact de
+        // Chrome : ni Cronet ni OkHttp, seul libcurl-impersonate.
+        for (host in listOf("r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org", "V6.VIDZY.CC.")) {
+            assertTrue(MediaProxyPolicy.requiresBrowserImpersonation("https://$host/master.m3u8"))
             assertFalse(MediaProxyPolicy.requiresOkHttpUpstream("https://$host/master.m3u8"))
         }
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("https://vidzy.cc.attacker.example/m.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("https://notfsvid.lol/m.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("https://strm4.uqload.vc/m.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("not-a-url"))
+    }
+
+    @Test
+    fun keepsOnlyUqloadOnOkHttp() {
         for (host in listOf("strm4.uqload.vc", "STRM4.UQLOAD.VC.")) {
             assertTrue(MediaProxyPolicy.requiresOkHttpUpstream("https://$host/master.m3u8"))
         }

@@ -10,6 +10,17 @@
 -keep class kotlin.UByteArray { *; }
 -keep class com.dokar.quickjs.** { *; }
 
+# libcurl-impersonate (src/main/cpp/movix_curl.c) : fonctions natives liées
+# par leur nom complet, et callbacks appelés par nom depuis le C.
+-keep class com.movix.tv.player.CurlImpersonate { native <methods>; }
+-keep interface com.movix.tv.player.CurlTransferCallback { *; }
+-keepclassmembers class * implements com.movix.tv.player.CurlTransferCallback {
+    public void onHeaderLine(byte[]);
+    public boolean onBody(byte[], int);
+    public boolean shouldAbort();
+    public void onError(java.lang.String);
+}
+
 # Bloqueur du lecteur web (crate app-tv/adblock) : les fonctions natives
 # sont liées par leur nom complet (Java_com_movix_tv_adblock_AdblockNative_*).
 -keep class com.movix.tv.adblock.AdblockNative { native <methods>; }

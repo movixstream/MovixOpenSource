@@ -61,6 +61,22 @@ class TmdbApiTest {
     }
 
     @Test
+    fun findImdbAsksTmdbForTheImdbIdInFrench() = runTest {
+        server.enqueue(
+            MockResponse.Builder().body(
+                """{"movie_results":[],"tv_results":[{"id":1396,"name":"Breaking Bad","media_type":"tv","poster_path":"/b.jpg","vote_count":16000}],"person_results":[]}""",
+            ).build(),
+        )
+        val found = api.findImdb("tt0903747")
+        val url = server.takeRequest().url
+        assertEquals("/3/find/tt0903747", url.encodedPath)
+        assertEquals("imdb_id", url.queryParameter("external_source"))
+        assertEquals("fr-FR", url.queryParameter("language"))
+        assertEquals(1396, found.tv.single().id)
+        assertEquals(16000, found.tv.single().voteCount)
+    }
+
+    @Test
     fun seasonZeroIsHiddenInDetails() = runTest {
         server.enqueue(
             MockResponse.Builder().body(

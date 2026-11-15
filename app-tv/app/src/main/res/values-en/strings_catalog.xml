@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Card at the end of a row and full-list page. -->
+    <string name="see_all">See all</string>
+    <string name="grid_loading">Loading…</string>
+    <string name="grid_more_failed">Couldn\'t load more titles.</string>
+    <string name="grid_empty">Nothing here yet.</string>
+
+    <!-- Genre bar of the Movies, TV shows and Anime pages (TMDB ids). -->
+    <string name="genre_all">All</string>
+    <string name="genre_28">Action</string>
+    <string name="genre_12">Adventure</string>
+    <string name="genre_35">Comedy</string>
+    <string name="genre_18">Drama</string>
+    <string name="genre_27">Horror</string>
+    <string name="genre_53">Thriller</string>
+    <string name="genre_878">Science fiction</string>
+    <string name="genre_10749">Romance</string>
+    <string name="genre_16">Animation</string>
+    <string name="genre_80">Crime</string>
+    <string name="genre_14">Fantasy</string>
+    <string name="genre_10751">Family</string>
+    <string name="genre_9648">Mystery</string>
+    <string name="genre_99">Documentary</string>
+    <string name="genre_10752">War</string>
+    <string name="genre_36">History</string>
+    <string name="genre_10402">Music</string>
+    <string name="genre_37">Western</string>
+    <string name="genre_10759">Action &amp; adventure</string>
+    <string name="genre_10765">Sci-fi &amp; fantasy</string>
+    <string name="genre_10762">Kids</string>
+    <string name="genre_10764">Reality</string>
+    <string name="genre_10766">Soap</string>
+    <string name="genre_10768">War &amp; politics</string>
+</resources>

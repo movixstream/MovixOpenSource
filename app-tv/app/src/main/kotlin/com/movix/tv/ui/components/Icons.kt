@@ -48,5 +48,7 @@ object MovixIcons {
     val Subtitles = stroke("cc", "M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z", "M10 10.5a2 2 0 1 0 0 3M17 10.5a2 2 0 1 0 0 3")
     val Audio = stroke("audio", "M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14")
     val Mouse = stroke("mouse", "M5 3l14 7-6 2-2 6z")
+    val Mic = stroke("mic", "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z", "M19 10v2a7 7 0 0 1-14 0v-2", "M12 19v3")
+    val History = stroke("history", "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5", "M12 7v5l4 2")
     val Delete =stroke("delete", "M21 5H8l-6 7 6 7h13a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z", "M17 9l-6 6M11 9l6 6")
 }

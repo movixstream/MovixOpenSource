@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Carte en fin de rangée et page de la liste complète. -->
+    <string name="see_all">Voir tout</string>
+    <string name="grid_loading">Chargement…</string>
+    <string name="grid_more_failed">La suite n\'a pas pu être chargée.</string>
+    <string name="grid_empty">Aucun titre ici pour l\'instant.</string>
+
+    <!-- Barre de genres des pages Films, Séries et Animés (identifiants TMDB). -->
+    <string name="genre_all">Tout</string>
+    <string name="genre_28">Action</string>
+    <string name="genre_12">Aventure</string>
+    <string name="genre_35">Comédie</string>
+    <string name="genre_18">Drame</string>
+    <string name="genre_27">Horreur</string>
+    <string name="genre_53">Thriller</string>
+    <string name="genre_878">Science-fiction</string>
+    <string name="genre_10749">Romance</string>
+    <string name="genre_16">Animation</string>
+    <string name="genre_80">Policier</string>
+    <string name="genre_14">Fantastique</string>
+    <string name="genre_10751">Famille</string>
+    <string name="genre_9648">Mystère</string>
+    <string name="genre_99">Documentaire</string>
+    <string name="genre_10752">Guerre</string>
+    <string name="genre_36">Histoire</string>
+    <string name="genre_10402">Musique</string>
+    <string name="genre_37">Western</string>
+    <string name="genre_10759">Action et aventure</string>
+    <string name="genre_10765">SF et fantastique</string>
+    <string name="genre_10762">Jeunesse</string>
+    <string name="genre_10764">Téléréalité</string>
+    <string name="genre_10766">Feuilleton</string>
+    <string name="genre_10768">Guerre et politique</string>
+</resources>

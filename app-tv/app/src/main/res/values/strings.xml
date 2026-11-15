@@ -54,6 +54,13 @@
     <string name="search_space">Espace</string>
     <string name="search_delete">Effacer</string>
     <string name="search_clear">Tout effacer</string>
+    <string name="search_voice">Recherche vocale</string>
+    <string name="search_voice_prompt">Dis le titre d\'un film ou d\'une série</string>
+    <string name="search_loading">Recherche…</string>
+    <string name="search_recent">Recherches récentes</string>
+    <string name="search_recent_clear">Effacer l\'historique</string>
+    <string name="search_start">Tape un titre avec le clavier. Les lettres accentuées sont dans l\'onglet « àéç », les chiffres et symboles dans « 123 &amp;? ».</string>
+    <string name="search_start_voice">Tape un titre avec le clavier, ou appuie sur le micro et dis-le. Les lettres accentuées sont dans l\'onglet « àéç », les chiffres et symboles dans « 123 &amp;? ».</string>
 
     <string name="settings_tmdb_title">Clé TMDB</string>
     <string name="settings_tmdb_body">Facultatif : l\'appli a déjà la clé du site. Mets ta propre clé v3 de themoviedb.org seulement si le catalogue ne charge plus.</string>

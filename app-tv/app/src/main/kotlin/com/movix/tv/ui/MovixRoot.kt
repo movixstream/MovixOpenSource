@@ -38,13 +38,18 @@ import com.movix.tv.data.local.UiKeys
 import com.movix.tv.data.local.UiPrefs
 import com.movix.tv.data.movix.PlayRequest
 import com.movix.tv.ui.account.LinkScreen
+import com.movix.tv.ui.components.AgeGate
 import com.movix.tv.ui.components.Rail
+import com.movix.tv.ui.components.ageKey
 import com.movix.tv.ui.components.firstVisibleSection
 import com.movix.tv.ui.components.railHiddenSections
 import com.movix.tv.ui.profiles.ProfilePickerScreen
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import com.movix.tv.ui.details.DetailsScreen
+import com.movix.tv.ui.person.PersonScreen
 import com.movix.tv.ui.home.BrowseScreen
+import com.movix.tv.ui.home.CollectionScreen
 import com.movix.tv.ui.home.WatchlistScreen
 import com.movix.tv.ui.nav.Navigator
 import com.movix.tv.ui.nav.Route
@@ -73,15 +78,23 @@ fun MovixRoot(onExit: () -> Unit) {
     val values by container.store.values.collectAsStateWithLifecycle()
     // Entrées du menu de gauche cachées dans les réglages (lues en direct).
     val railHidden = railHiddenSections(values)
+    // Restriction d'âge du profil : les écrans de titres en dépendent. Une autre
+    // restriction (autre profil, réglage changé sur le site) leur donne un état
+    // neuf : aucune carte, grille ni recherche de l'ancien profil ne reste.
+    val ageLimit by container.catalog.ageLimit.collectAsStateWithLifecycle()
+    val age = ageKey(ageLimit)
 
     // « Qui regarde ? » : au lancement (compte à plusieurs profils) ou depuis
     // Réglages › Compte. Rien n'est affiché avant de savoir s'il faut le montrer.
     var started by remember { mutableStateOf(false) }
     var picker by remember { mutableStateOf<ProfilePickerFrom?>(null) }
+    // « Gérer les profils » (Réglages) : « Qui regarde ? » s'ouvre en mode gestion.
+    var pickerManage by remember { mutableStateOf(false) }
     var refocusContent by remember { mutableIntStateOf(0) }
     val closePicker = {
         if (picker == ProfilePickerFrom.SETTINGS) refocusContent++
         picker = null
+        pickerManage = false
     }
 
     BackHandler {
@@ -99,13 +112,15 @@ fun MovixRoot(onExit: () -> Unit) {
     if (!started) {
         Box(Modifier.fillMaxSize().background(MovixColors.Ink))
     } else if (picker != null) {
-        ProfilePickerScreen(onDone = closePicker, onBack = closePicker)
+        ProfilePickerScreen(onDone = closePicker, onBack = closePicker, startManaging = pickerManage)
     } else AnimatedContent(
         targetState = nav.current,
         contentKey = { r ->
             when (r) {
                 is Route.Main -> "main"
                 is Route.Details -> "details:${r.type}:${r.id}"
+                is Route.Person -> "person:${r.id}"
+                is Route.Collection -> "collection:${r.rowId}:${r.openedAt}"
                 is Route.Player -> "player"
                 Route.Link -> "link"
             }
@@ -124,13 +139,15 @@ fun MovixRoot(onExit: () -> Unit) {
                 // Groupe de la page : requestFocus y rend la carte quittée, sinon la première.
                 val contentModifier = Modifier.fillMaxSize().focusRequester(contentRequester).focusRestorer().focusGroup()
                 val enterContent = { runCatching { contentRequester.requestFocus() }; Unit }
-                saveable.SaveableStateProvider(route.section.name) {
+                // Réglages : sans titre, leur état ne dépend pas du profil.
+                saveable.SaveableStateProvider(if (route.section == Section.SETTINGS) route.section.name else "${route.section.name}|$age") {
                     when (route.section) {
                         Section.SEARCH -> SearchScreen(onOpen = { nav.push(Route.Details(it.type, it.id, it)) }, modifier = contentModifier.padding(start = 60.dp))
                         Section.SETTINGS -> SettingsScreen(
                             onLinkAccount = { nav.push(Route.Link) },
                             modifier = contentModifier.padding(start = 60.dp),
                             onSwitchProfile = { picker = ProfilePickerFrom.SETTINGS },
+                            onManageProfiles = { pickerManage = true; picker = ProfilePickerFrom.SETTINGS },
                         )
                         Section.WATCHLIST -> WatchlistScreen(onOpen = { nav.push(Route.Details(it.type, it.id, it)) }, onEmptyBack = { railRequester.requestFocus() }, modifier = contentModifier.padding(start = 60.dp))
                         else -> BrowseScreen(
@@ -141,6 +158,8 @@ fun MovixRoot(onExit: () -> Unit) {
                                 nav.push(Route.Player(PlayTarget(PlayRequest(e.type, e.id, e.season, e.episode), e.meta?.title.orEmpty(), e.meta?.backdropPath)))
                             },
                             modifier = contentModifier,
+                            // Ignoré si un écran est déjà par-dessus (double appui sur OK pendant le fondu).
+                            onOpenCollection = { if (nav.current is Route.Main) nav.push(Route.Collection(it)) },
                         )
                     }
                 }
@@ -154,19 +173,52 @@ fun MovixRoot(onExit: () -> Unit) {
                     hidden = railHidden,
                 )
             }
-            is Route.Details -> saveable.SaveableStateProvider("details:${route.type}:${route.id}") {
-                DetailsScreen(
-                    type = route.type, id = route.id, preview = route.preview,
-                    onPlay = { nav.push(Route.Player(it)) },
+            // Fiche et lecteur : ouverts depuis « Reprendre », la recherche, Ma liste ou
+            // une ancienne entrée, ils vérifient eux-mêmes que le profil peut voir le titre.
+            is Route.Details -> saveable.SaveableStateProvider("details:${route.type}:${route.id}|$age") {
+                AgeGate(route.type, route.id, onBack = { if (nav.current == route) nav.pop() }) {
+                    DetailsScreen(
+                        type = route.type, id = route.id, preview = route.preview,
+                        onPlay = { nav.push(Route.Player(it)) },
+                        modifier = Modifier.fillMaxSize(),
+                        onOpen = { nav.push(Route.Details(it.type, it.id, it)) },
+                        onPerson = { if (nav.current == route) nav.push(Route.Person(it.id, it.name, it.profilePath)) },
+                    )
+                }
+            }
+            is Route.Person -> saveable.SaveableStateProvider("person:${route.id}|$age") {
+                PersonScreen(
+                    id = route.id, name = route.name, profilePath = route.profilePath,
+                    onOpen = { m ->
+                        // Le titre d'où l'on vient : on y retourne au lieu d'empiler une
+                        // seconde fiche identique (elles partageraient leur état sauvegardé).
+                        // Rien si l'écran s'efface déjà (double appui sur OK pendant le fondu).
+                        val from = nav.previous
+                        if (nav.current != route) Unit
+                        else if (from is Route.Details && from.type == m.type && from.id == m.id) nav.pop()
+                        else nav.push(Route.Details(m.type, m.id, m))
+                    },
+                    onBack = { if (nav.current == route) nav.pop() },
                     modifier = Modifier.fillMaxSize(),
-                    onOpen = { nav.push(Route.Details(it.type, it.id, it)) },
                 )
             }
-            is Route.Player -> PlayerScreen(
-                target = route.target,
-                onExit = { nav.pop() },
-                onOpenSettings = { nav.select(Section.SETTINGS) },
-            )
+            is Route.Collection -> saveable.SaveableStateProvider("collection:${route.rowId}:${route.openedAt}|$age") {
+                CollectionScreen(
+                    rowId = route.rowId,
+                    // La restriction fait partie de la session : un autre profil repart de la page 1.
+                    session = "${route.rowId}:${route.openedAt}|$age",
+                    onOpen = { nav.push(Route.Details(it.type, it.id, it)) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            // L'épisode suivant reste dans la même série : la vérification vaut pour lui aussi.
+            is Route.Player -> AgeGate(route.target.request.type, route.target.request.tmdbId, onBack = { if (nav.current == route) nav.pop() }) {
+                PlayerScreen(
+                    target = route.target,
+                    onExit = { nav.pop() },
+                    onOpenSettings = { nav.select(Section.SETTINGS) },
+                )
+            }
             Route.Link -> LinkScreen(
                 onLinked = { nav.pop() },
                 onUseVipKey = { nav.select(Section.SETTINGS) },
@@ -179,6 +231,12 @@ fun MovixRoot(onExit: () -> Unit) {
     // Premier lancement sans compte : l'écran de connexion est proposé une fois.
     LaunchedEffect(Unit) {
         container.accounts.restore()
+        // Compte relié par une version qui ne gardait pas la restriction d'âge du
+        // profil : demandée avant d'afficher le catalogue. Hors ligne, le
+        // catalogue attend (rien n'est montré plutôt que tout).
+        if (container.accounts.current != null && container.accounts.limit.value == null) {
+            withTimeoutOrNull(RESTRICTION_WAIT_MS) { container.accounts.resolve() }
+        }
         val saved = container.store.snapshot()
         // Accueil caché dans les réglages : on ouvre la première entrée visible.
         val first = firstVisibleSection(railHiddenSections(saved))
@@ -210,3 +268,6 @@ fun MovixRoot(onExit: () -> Unit) {
 
 /** D'où vient « Qui regarde ? ». */
 private enum class ProfilePickerFrom { LAUNCH, SETTINGS }
+
+/** Attente de la restriction d'âge au lancement (compte relié par une ancienne version), au plus. */
+private const val RESTRICTION_WAIT_MS = 8_000L

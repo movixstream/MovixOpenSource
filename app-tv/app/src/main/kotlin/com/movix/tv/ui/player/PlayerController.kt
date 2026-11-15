@@ -21,6 +21,7 @@ import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import com.movix.tv.AppContainer
 import com.movix.tv.data.local.Library
+import com.movix.tv.data.local.PlaybackPrefs
 import com.movix.tv.data.local.SubtitleStyle
 import com.movix.tv.data.local.TvKeys
 import com.movix.tv.data.local.UiKeys
@@ -29,6 +30,8 @@ import com.movix.tv.data.local.WatchMeta
 import com.movix.tv.data.movix.Lang
 import com.movix.tv.data.movix.PlayRequest
 import com.movix.tv.data.movix.PlaybackSource
+import com.movix.tv.data.movix.ProbeOutcome
+import com.movix.tv.data.movix.QualityResult
 import com.movix.tv.data.movix.SourceSelector
 import com.movix.tv.data.movix.StreamKind
 import com.movix.tv.data.movix.SubtitleTrack
@@ -39,13 +42,17 @@ import com.movix.tv.player.SubtitleCue
 import com.movix.tv.player.qualityLabel
 import com.movix.tv.player.Subtitles
 import com.movix.extract.Extraction
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
@@ -116,6 +123,12 @@ sealed interface SubtitleChoice {
 @Immutable
 data class FormatIssue(val video: String?, val audio: String?)
 
+/** Avancement de « Vérifier la qualité » : sources mesurées sur le total. */
+@Immutable
+data class QualityProgress(val done: Int, val total: Int) {
+    val running: Boolean get() = done < total
+}
+
 /**
  * État et commandes du lecteur. Un `ExoPlayer` par écran, libéré par
  * [release]. Toutes les méthodes s'appellent sur le fil principal.
@@ -126,7 +139,14 @@ class PlayerController(
     private val scope: CoroutineScope,
     initial: PlayTarget,
 ) {
-    val player: ExoPlayer = container.playerEngine.newPlayer()
+    /** Profil dont on lit et retient les préférences de lecture (`null` sans compte relié). */
+    private val prefScope: String?
+        get() = container.accounts.current?.let { UiPrefs.playbackScope(it.userId, it.profileId) }
+
+    // Langue audio préférée dès la création (rappelée à chaque source par resetTracks).
+    val player: ExoPlayer = container.playerEngine.newPlayer(
+        PlaybackPrefs.audioLanguages(UiPrefs.playback(container.store.values.value, prefScope).audio),
+    )
 
     var target by mutableStateOf(initial); private set
     var phase by mutableStateOf(PlayerPhase.LOADING); private set
@@ -206,6 +226,23 @@ class PlayerController(
     private val inFlight = HashMap<String, kotlinx.coroutines.Deferred<Extraction>>()
     private var deviceJob: Job? = null
     private var extractAllJob: Job? = null
+    /** Extractions de fond et de « Vérifier la qualité » : deux à la fois au plus (boîtiers lents). */
+    private val extractPermits = Semaphore(2)
+
+    /** « Vérifier la qualité » : résultat par source ([PlaybackSource.id]), gardé jusqu'au changement d'épisode. */
+    val quality = androidx.compose.runtime.mutableStateMapOf<String, QualityResult>()
+    /** Avancement de la vérification, `null` tant qu'elle n'a pas été lancée sur cet épisode. */
+    var qualityCheck by mutableStateOf<QualityProgress?>(null); private set
+    private var qualityJob: Job? = null
+
+    /** Version préférée (réglages de lecture) lue au chargement de l'épisode : ordre des sources. */
+    private var preferredVersion = Lang.VF
+    /** Préférences retenues pendant cette séance, en attendant que le stockage les republie. */
+    private var savedPrefs: PlaybackPrefs? = null
+    /** Sous-titres choisis à la main depuis le lancement de la source : l'automatisme n'y touche plus. */
+    private var subsManual = false
+    /** L'automatisme a trouvé une piste dans la langue voulue : il s'arrête là. */
+    private var subsAutoDone = false
 
     private var externalCues: List<SubtitleCue> = emptyList()
     private var embeddedCueText: String? = null
@@ -303,6 +340,8 @@ class PlayerController(
         loadJob?.cancel()
         deviceJob?.cancel()
         extractAllJob?.cancel()
+        // Résultats de « Vérifier la qualité » : ceux de l'épisode d'avant ne valent plus.
+        qualityJob?.cancel(); quality.clear(); qualityCheck = null
         phase = PlayerPhase.LOADING
         loadingText = com.movix.tv.R.string.player_loading
         extracted.clear(); inFlight.values.forEach { it.cancel() }; inFlight.clear(); extractingId = null
@@ -310,13 +349,17 @@ class PlayerController(
         searchedSubtitles = emptyList()
         failed.clear(); intro = null; outroStartMs = null; segments = emptyList(); next = null; nextEpisode = null; episodeTitle = null
         segmentsRequested = false; metaWritten = false; formatIssue = null; stillWatching = false
-        chooseSubtitle(SubtitleChoice.Off)
+        // Nouvel épisode : les préférences décident à nouveau (un choix manuel ne vaut que pour l'épisode).
+        subsManual = false; subsAutoDone = false
+        applySubtitle(SubtitleChoice.Off)
+        preferredVersion = SourceSelector.versionOf(prefs().version)
+        val prefer = preferredVersion
         player.stop()
         loadJob = scope.launch {
             launch { loadMeta() }
             // Ouvert sans titre (reprise d'une entrée venue du site) : on le complète.
             if (target.title.isBlank() || target.backdropPath == null) launch {
-                val d = runCatching { container.catalog.details(target.request.type, target.request.tmdbId) }.getOrNull() ?: return@launch
+                val d = runCatching { container.catalog.info(target.request.type, target.request.tmdbId) }.getOrNull() ?: return@launch
                 target = target.copy(title = target.title.ifBlank { d.item.title }, backdropPath = target.backdropPath ?: d.item.backdropPath)
             }
             // Cronet se charge pendant que les routes répondent.
@@ -324,7 +367,7 @@ class PlayerController(
             var req = target.request
             if (!req.isTv && req.imdbId == null) {
                 val imdb = withTimeoutOrNull(4_000) {
-                    runCatching { container.catalog.details(MediaType.MOVIE, req.tmdbId).imdbId }.getOrNull()
+                    runCatching { container.catalog.info(MediaType.MOVIE, req.tmdbId).imdbId }.getOrNull()
                 }
                 req = req.copy(imdbId = imdb)
             }
@@ -340,16 +383,16 @@ class PlayerController(
                 { index -> client.resolve(req.tmdbId, s, e, index)?.let { it.url to it.quality } }
             }
             val all = container.sources.load(req, vipKey, swiftflux = swiftflux)
-            val ranked = SourceSelector.playable(all)
+            val ranked = SourceSelector.playable(all, prefer)
             // Seuls les liens que le userscript sait extraire sont proposés sur
             // la télé (les autres échouaient en « Unknown embed type ») ; leur
             // hébergeur est celui qu'il reconnaît. Le reste passe au lecteur web.
-            val device = SourceSelector.deviceOnly(all)
+            val device = SourceSelector.deviceOnly(all, prefer)
             val types = runCatching { container.extractor.embedTypes(device.mapNotNull { it.embedUrl }) }.getOrDefault(emptyMap())
             deviceSources = if (types.isEmpty()) device else device.mapNotNull { s ->
                 types[s.embedUrl]?.let { type -> s.copy(host = type, label = com.movix.tv.data.movix.SourceParsers.extractedLabel(type, s.language)) }
             }
-            webSources = SourceSelector.webCandidates(all)
+            webSources = SourceSelector.webCandidates(all, prefer)
             // Le serveur n'annonce souvent que « HD » : on lit les playlists
             // pour ne pas démarrer en 360p quand une source 720p+ existe.
             // L'ordre obtenu sert aussi aux bascules en cas de panne.
@@ -358,7 +401,7 @@ class PlayerController(
             val ratings = withContext(Dispatchers.Default) {
                 variants.mapNotNull { (id, v) -> SourceSelector.rate(v, container.codecSupport::supports)?.let { id to it } }.toMap()
             }
-            sources = SourceSelector.byQuality(ranked, ratings)
+            sources = SourceSelector.byQuality(ranked, ratings, prefer)
             val first = SourceSelector.pick(sources, req.isTv)
             Log.i("MovixPlayer", "sources lues ${ratings.size} : " + sources.take(8).joinToString { s ->
                 val r = ratings[s.id]
@@ -374,6 +417,18 @@ class PlayerController(
                 phase = if (vipKey == null) PlayerPhase.NEED_VIP else PlayerPhase.NO_SOURCE
                 return@launch
             }
+            // Version préférée choisie (VOSTFR, VO) absente du serveur mais à
+            // extraire sur la télé : une série d'extractions d'abord, sinon le
+            // serveur. Avec la VF par défaut, rien ne change.
+            if (prefer != Lang.VF && first.language != prefer &&
+                SourceSelector.deviceCandidates(deviceSources, prefer).any { it.language == prefer && it.id !in failed }
+            ) {
+                if (playFromDevice(start, only = prefer, maxBatches = 1)) {
+                    extractAllInBackground()
+                    return@launch
+                }
+                loadingText = com.movix.tv.R.string.player_loading
+            }
             phase = PlayerPhase.PLAYING
             play(first, start)
             extractAllInBackground()
@@ -387,23 +442,19 @@ class PlayerController(
      */
     private fun extractAllInBackground() {
         extractAllJob?.cancel()
-        val todo = SourceSelector.deviceCandidates(deviceSources).filter { s -> sources.none { it.id == s.id } }
+        val todo = SourceSelector.deviceCandidates(deviceSources, preferredVersion).filter { s -> sources.none { it.id == s.id } }
         if (todo.isEmpty()) return
         extractAllJob = scope.launch {
-            val permits = kotlinx.coroutines.sync.Semaphore(2)
             todo.map { s ->
                 launch {
-                    permits.acquire()
-                    try {
-                        val e = extract(s)
-                        if (e.ok) {
-                            val playable = toPlayable(s, e)
-                            if (sources.none { it.id == playable.id }) sources = sources + playable
-                        } else {
-                            deviceSources = deviceSources.filterNot { it.id == s.id }
-                        }
-                    } finally {
-                        permits.release()
+                    val e = extractPermits.withPermit { extract(s) }
+                    if (e.ok) {
+                        val playable = toPlayable(s, e)
+                        if (sources.none { it.id == playable.id }) sources = sources + playable
+                    } else if (qualityCheck == null) {
+                        // Pendant ou après « Vérifier la qualité », la ligne reste,
+                        // marquée « ne répond pas » : la liste ne bouge pas sous le focus.
+                        deviceSources = deviceSources.filterNot { it.id == s.id }
                     }
                 }
             }
@@ -413,12 +464,14 @@ class PlayerController(
     /** Shegu et OpenSubtitles en parallèle ; une série cherche d'abord son id IMDb. */
     private suspend fun loadSearchedSubtitles(req: PlayRequest) {
         val imdb = req.imdbId ?: if (req.isTv) withTimeoutOrNull(4_000) {
-            runCatching { container.catalog.details(MediaType.TV, req.tmdbId).imdbId }.getOrNull()
+            runCatching { container.catalog.info(MediaType.TV, req.tmdbId).imdbId }.getOrNull()
         } else null
         searchedSubtitles = container.externalSubtitles.search(
             req.tmdbId, imdb, if (req.isTv) req.season ?: 1 else null, if (req.isTv) req.episode ?: 1 else null, container.uiLanguage(),
         )
         Log.i("MovixSubs", "${searchedSubtitles.size} sous-titres Shegu/OpenSubtitles")
+        // Arrivés après le début de la lecture : la langue voulue est peut-être là.
+        autoSubtitles()
     }
 
     /** Titre de l'épisode, épisode suivant et saisons (série seulement). */
@@ -432,7 +485,7 @@ class PlayerController(
         val hasNextHere = episodes.any { it.number == e + 1 }
         if (hasNextHere) next = s to e + 1
         if (seasonNumbers.isEmpty()) {
-            seasonNumbers = runCatching { container.catalog.details(MediaType.TV, req.tmdbId).seasonNumbers }.getOrDefault(emptyList())
+            seasonNumbers = runCatching { container.catalog.info(MediaType.TV, req.tmdbId).seasonNumbers }.getOrDefault(emptyList())
         }
         if (!hasNextHere) next = seasonNumbers.firstOrNull { it > s }?.let { it to 1 }
         nextEpisode = next?.let { (ns, ne) -> episodesOf(ns).firstOrNull { it.number == ne } }
@@ -453,10 +506,21 @@ class PlayerController(
         current = source
         kindRetried = false
         formatIssue = null
+        resetTracks()
         prepare(source, startMs)
-        // Premier sous-titre français d'office pour une VOSTFR.
-        val fr = source.subtitles.firstOrNull { it.lang.startsWith("fr") } ?: source.subtitles.firstOrNull { it.isDefault }
-        chooseSubtitle(if (fr != null && (source.language == Lang.VOSTFR || fr.isDefault)) SubtitleChoice.External(fr) else SubtitleChoice.Off)
+        // Sous-titres selon la préférence (par défaut : français d'office pour une VOSTFR).
+        startAutoSubtitles()
+    }
+
+    /** Nouvelle source : les pistes choisies sur l'autre ne valent plus ; langue audio préférée. */
+    private fun resetTracks() {
+        selectedAudio = null
+        selectedVideo = null
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+            .setPreferredAudioLanguages(*PlaybackPrefs.audioLanguages(prefs().audio).toTypedArray())
+            .build()
     }
 
     private fun prepare(source: PlaybackSource, startMs: Long) {
@@ -496,14 +560,15 @@ class PlayerController(
     /**
      * Extrait les lecteurs embed sur la télé, trois à la fois, dans l'ordre de
      * [SourceSelector.deviceCandidates], et lance le premier qui marche.
+     * [only] : cette langue seulement ; [maxBatches] : séries de trois au plus.
      * `false` si aucun n'a donné de flux.
      */
-    private suspend fun playFromDevice(startMs: Long): Boolean {
-        val candidates = SourceSelector.deviceCandidates(deviceSources)
-            .filter { it.id !in failed }
+    private suspend fun playFromDevice(startMs: Long, only: Lang? = null, maxBatches: Int = Int.MAX_VALUE): Boolean {
+        val candidates = SourceSelector.deviceCandidates(deviceSources, preferredVersion)
+            .filter { it.id !in failed && (only == null || it.language == only) }
         if (candidates.isEmpty()) return false
         loadingText = com.movix.tv.R.string.player_extracting
-        for (batch in candidates.chunked(3)) {
+        for (batch in candidates.chunked(3).take(maxBatches)) {
             // Les extractions continuent en arrière-plan après le choix : leurs
             // résultats (en cache) servent aux bascules suivantes.
             val jobs = batch.map { s -> scope.async { extract(s) } }
@@ -572,7 +637,7 @@ class PlayerController(
                 // sinon la rangée « Reprendre » garderait une carte vide.
                 val req0 = target.request
                 val details = if (target.title.isBlank() || target.backdropPath == null) {
-                    runCatching { container.catalog.details(req0.type, req0.tmdbId) }.getOrNull()
+                    runCatching { container.catalog.info(req0.type, req0.tmdbId) }.getOrNull()
                 } else null
                 val title = target.title.ifBlank { details?.item?.title.orEmpty() }
                 val backdrop = target.backdropPath ?: details?.item?.backdropPath
@@ -710,6 +775,7 @@ class PlayerController(
         val position = player.currentPosition.coerceAtLeast(0)
         if (source.playable) {
             failed.remove(source.id)
+            rememberVersion(source)
             play(source, position)
             return
         }
@@ -728,8 +794,15 @@ class PlayerController(
             sources = sources.filterNot { it.id == playable.id } + playable
             failed.remove(playable.id)
             phase = PlayerPhase.PLAYING
+            rememberVersion(playable)
             play(playable, position)
         }
+    }
+
+    /** Source choisie à la main : sa version (VF, VOSTFR, VO) devient la préférée pour la suite. */
+    private fun rememberVersion(source: PlaybackSource) {
+        if (source.language == Lang.UNKNOWN) return
+        rememberChoice { it.copy(version = source.language.name) }
     }
 
     /** Ouvre [source] dans le lecteur web ; le lecteur natif se met en pause (sa position est gardée). */
@@ -827,9 +900,85 @@ class PlayerController(
             .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
             .addOverride(TrackSelectionOverride(group.mediaTrackGroup, option.trackIndex))
             .build()
+        option.language?.let { lang -> rememberChoice { it.copy(audio = lang) } }
+        // Le son change de langue, donc peut-être de version : la préférence de
+        // sous-titres de celle-ci s'applique, sauf choix manuel.
+        if (!subsManual) {
+            subsAutoDone = false
+            autoSubtitles()
+        }
     }
 
+    /**
+     * Sous-titres choisis dans le panneau : appliqués, gardés pour l'épisode
+     * (l'automatisme n'y touche plus) et retenus comme préférence de la
+     * version en cours (VF, VOSTFR ou VO).
+     */
     fun chooseSubtitle(choice: SubtitleChoice) {
+        subsManual = true
+        applySubtitle(choice)
+        val lang = when (choice) {
+            SubtitleChoice.Off -> SubtitleAuto.OFF
+            is SubtitleChoice.External -> SubtitleAuto.langOf(choice.track.lang)
+            is SubtitleChoice.Embedded -> SubtitleAuto.langOf(choice.option.language)
+        } ?: return // langue inconnue : rien à retenir
+        val version = subtitleVersion().name
+        rememberChoice { it.withSubtitles(version, lang) }
+    }
+
+    /**
+     * Nouvelle source : un choix manuel encore valable (sous-titres coupés,
+     * fichier trouvé en ligne, le même pour toutes les sources) est gardé ;
+     * sinon l'automatisme repart de zéro.
+     */
+    private fun startAutoSubtitles() {
+        val s = subtitle
+        if (subsManual && (s == SubtitleChoice.Off || (s is SubtitleChoice.External && s.track.source != null))) return
+        subsManual = false
+        subsAutoDone = false
+        if (s != SubtitleChoice.Off) applySubtitle(SubtitleChoice.Off)
+        autoSubtitles()
+    }
+
+    /**
+     * Préférence de sous-titres de la version en cours, tant que rien n'a été
+     * choisi à la main ni trouvé. Rappelé quand les pistes du flux puis les
+     * sous-titres en ligne arrivent : appliqués dès que la langue voulue paraît.
+     */
+    private fun autoSubtitles() {
+        if (subsManual || subsAutoDone) return
+        val source = current ?: return
+        val pref = prefs().subtitlesFor(subtitleVersion().name)
+        when (val pick = SubtitleAuto.pick(pref, source, embeddedTextTracks, searchedSubtitles)) {
+            null -> Unit
+            SubtitleChoice.Off -> if (subtitle != SubtitleChoice.Off) applySubtitle(SubtitleChoice.Off)
+            else -> {
+                subsAutoDone = true
+                if (pick != subtitle) applySubtitle(pick)
+            }
+        }
+    }
+
+    /** Version (VF, VOSTFR, VO) qui sert de clé aux sous-titres : le son lu, sinon la source. */
+    private fun subtitleVersion(): Lang = SubtitleAuto.version(current?.language, selectedAudio?.language)
+
+    // ---------- préférences de lecture ----------
+
+    private fun prefs(): PlaybackPrefs = savedPrefs ?: UiPrefs.playback(container.store.values.value, prefScope)
+
+    /** Retient un choix fait pendant la lecture, si « Retenir mes derniers choix » est ouvert (par défaut). */
+    private fun rememberChoice(update: (PlaybackPrefs) -> PlaybackPrefs) {
+        val now = prefs()
+        if (!now.remember) return
+        val next = update(now)
+        if (next == now) return
+        savedPrefs = next
+        val key = UiPrefs.playbackKey(prefScope)
+        // Portée de l'appli : l'écriture finit même si le lecteur se ferme.
+        container.appScope.launch { container.store.set(key, UiPrefs.encode(next)) }
+    }
+
+    private fun applySubtitle(choice: SubtitleChoice) {
         subtitle = choice
         subtitleText = null
         subsJob?.cancel()
@@ -945,6 +1094,8 @@ class PlayerController(
         audioTracks = audio
         embeddedTextTracks = text
         checkFormats(tracks)
+        // Pistes du flux connues (et langue du son lu) : la préférence de sous-titres peut s'y trouver.
+        autoSubtitles()
     }
 
     /**
@@ -1006,13 +1157,107 @@ class PlayerController(
         startWatch?.cancel()
         loadJob?.cancel()
         extractAllJob?.cancel()
+        qualityJob?.cancel()
         player.removeListener(listener)
         player.release()
+    }
+
+    // ---------- « Vérifier la qualité » ----------
+
+    /**
+     * Lignes « Extraction sur la télé » du panneau Source, dans un ordre fixe
+     * (celui des lecteurs trouvés) : un lecteur extrait garde sa place, sa
+     * version lançable remplaçant l'autre. Avant, il remontait en tête du
+     * groupe et les lignes bougeaient sous le focus à chaque extraction
+     * finie. Au plus [MAX_DEVICE_ROWS] lecteurs encore à extraire.
+     */
+    fun deviceRows(): List<PlaybackSource> {
+        val done = sources.filter { it.extracted }.associateBy { it.id }
+        val listed = deviceSources.mapTo(HashSet()) { it.id }
+        var pending = 0
+        return (deviceSources.map { done[it.id] ?: it } + done.values.filter { it.id !in listed })
+            .filter { it.playable || pending++ < MAX_DEVICE_ROWS }
+    }
+
+    /**
+     * Mesure la qualité d'image réelle de toutes les sources du panneau :
+     * celles du serveur, celles déjà extraites sur la télé et celles à
+     * extraire (extraites d'abord, deux à la fois comme l'extraction de
+     * fond). Rien n'est lancé ni coupé : playlist maîtresse ou en-tête MP4
+     * seulement ([com.movix.tv.data.movix.StreamProbe.probe]), [QUALITY_PROBES]
+     * sondes à la fois, [QUALITY_PROBE_MS] au plus par source. Chaque
+     * résultat s'affiche dès qu'il arrive ; tous restent jusqu'au changement
+     * d'épisode. Sans effet si une vérification tourne déjà.
+     */
+    fun checkQuality() {
+        if (qualityJob?.isActive == true) return
+        val targets = (sources.filter { !it.extracted } + deviceRows()).distinctBy { it.id }
+        quality.clear()
+        targets.forEach { quality[it.id] = QualityResult.Checking }
+        qualityCheck = QualityProgress(0, targets.size)
+        if (targets.isEmpty()) return
+        val probes = Semaphore(QUALITY_PROBES)
+        var done = 0
+        qualityJob = scope.launch {
+            targets.map { s ->
+                launch {
+                    val result = try {
+                        measure(s, probes)
+                    } catch (e: CancellationException) {
+                        // Extraction annulée par un autre (nouvel épisode) : ici on continue.
+                        if (!isActive) throw e
+                        QualityResult.Unavailable
+                    } catch (e: Exception) {
+                        Log.w("MovixQuality", "${s.label} : $e")
+                        QualityResult.Unavailable
+                    }
+                    quality[s.id] = result
+                    done++
+                    qualityCheck = QualityProgress(done, targets.size)
+                }
+            }.joinAll()
+            Log.i("MovixQuality", "vérification finie : " + targets.joinToString { s ->
+                when (val r = quality[s.id]) {
+                    is QualityResult.Measured -> "${s.label}=${r.rating.height ?: "?"}" + if (r.rating.playableHere) "" else " (illisible)"
+                    else -> "${s.label}=${r?.javaClass?.simpleName}"
+                }
+            })
+        }
+    }
+
+    /** Qualité d'une source : extraite d'abord si besoin, puis sondée, sans rien lire de la vidéo. */
+    private suspend fun measure(s: PlaybackSource, probes: Semaphore): QualityResult {
+        val stream = if (s.playable) s else {
+            val e = withTimeoutOrNull(EXTRACT_WAIT_MS) { extractLimited(s) }
+            if (e == null || !e.ok) return QualityResult.Unavailable
+            // Extraite : lançable tout de suite, comme avec l'extraction de fond (même ligne, même place).
+            toPlayable(s, e).also { p -> if (sources.none { it.id == p.id }) sources = sources + p }
+        }
+        return when (val outcome = probes.withPermit { container.streamProbe.probe(stream, QUALITY_PROBE_MS) }) {
+            ProbeOutcome.Unreachable -> QualityResult.Unavailable
+            ProbeOutcome.Unknown -> QualityResult.Unknown
+            is ProbeOutcome.Found -> withContext(Dispatchers.Default) { SourceSelector.rate(outcome.variants, container.codecSupport::supports) }
+                ?.let { QualityResult.Measured(it) } ?: QualityResult.Unknown
+        }
+    }
+
+    /** Extraction déjà faite ou en cours réutilisée ; sinon une nouvelle, dans la limite de [extractPermits]. */
+    private suspend fun extractLimited(s: PlaybackSource): Extraction {
+        val embed = s.embedUrl ?: return Extraction("", null, error = "no_embed")
+        extracted[embed]?.let { return it }
+        inFlight[embed]?.let { return it.await() }
+        return extractPermits.withPermit { extract(s) }
     }
 
     private companion object {
         /** Épisodes enchaînés seuls avant « Vous regardez toujours ? ». */
         const val STILL_WATCHING_AFTER = 3
+        /** « Vérifier la qualité » : sondes à la fois, délai par source, attente d'une extraction. */
+        const val QUALITY_PROBES = 3
+        const val QUALITY_PROBE_MS = 12_000L
+        const val EXTRACT_WAIT_MS = 30_000L
+        /** Lecteurs encore à extraire montrés dans le panneau Source. */
+        const val MAX_DEVICE_ROWS = 30
         val GENERIC_TRACK = Regex("""(?i)(track|piste|audio|sound|son|subtitle|sous-titres?)\s*#?\d*|\d+""")
         val PARSING_ERRORS = setOf(
             PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,

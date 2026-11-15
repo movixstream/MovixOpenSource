@@ -1,6 +1,8 @@
 .gradle/
 .kotlin/
 build/
+# Cache CMake du pont natif (libcurl-impersonate), recréé à chaque build.
+.cxx/
 /local.properties
 /captures/
 .idea/

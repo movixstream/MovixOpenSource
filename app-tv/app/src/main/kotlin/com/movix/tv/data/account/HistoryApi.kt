@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.CacheControl
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -88,7 +89,8 @@ class HistoryApi(private val client: OkHttpClient, private val json: Json, priva
             .addQueryParameter("profileId", profileId)
             .addQueryParameter("language", language)
             .build()
-        val req = Request.Builder().url(url).header("Authorization", "Bearer $token").build()
+        // Jamais lue dans le cache HTTP de l'appli : la rangée change à chaque visionnage.
+        val req = Request.Builder().url(url).header("Authorization", "Bearer $token").cacheControl(CacheControl.FORCE_NETWORK).build()
         client.newCall(req).execute().use { res ->
             if (res.code == 401) throw SessionRevokedException()
             if (!res.isSuccessful) throw IOException("history continue ${res.code}")

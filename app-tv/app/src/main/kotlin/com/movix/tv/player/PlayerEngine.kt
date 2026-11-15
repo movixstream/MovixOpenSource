@@ -27,8 +27,9 @@ import java.util.concurrent.Executors
  *
  * Chaîne réseau d'une requête du lecteur (manifeste, segments, clés) :
  * Cronet (empreinte TLS de Chrome ; OkHttp si les services Google manquent,
- * cas des Fire TV) → en-têtes par hôte ([MediaHeaders]) → déballage des
- * segments PNG+MPEG-TS ([PngTsDataSource]).
+ * cas des Fire TV), libcurl-impersonate pour Fsvid/Vidzy
+ * ([CurlImpersonateDataSource]) → en-têtes par hôte ([MediaHeaders]) →
+ * déballage des segments PNG+MPEG-TS ([PngTsDataSource]).
  */
 class PlayerEngine(private val context: Context, private val http: OkHttpClient, private val lowRam: Boolean) {
     private val cronetExecutor by lazy { Executors.newFixedThreadPool(4) }
@@ -54,13 +55,26 @@ class PlayerEngine(private val context: Context, private val http: OkHttpClient,
         Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, "debug.movix.nocronet") == "1"
     }.getOrDefault(false)
 
-    private fun upstream(): DataSource.Factory =
-        cronet?.let {
+    private fun upstream(): DataSource.Factory {
+        val okHttp = OkHttpDataSource.Factory(playbackHttp)
+        val cronetFactory = cronet?.let {
             CronetDataSource.Factory(it, cronetExecutor)
                 .setConnectionTimeoutMs(8_000)
                 .setReadTimeoutMs(20_000)
                 .setHandleSetCookieRequests(true)
-        } ?: OkHttpDataSource.Factory(http)
+        }
+        // Fsvid/Vidzy : profil Chrome complet ; OkHttp si la bibliothèque manque.
+        val impersonated = if (CurlImpersonate.available) CurlImpersonateDataSource.Factory(context) else okHttp
+        return HostRoutingDataSource.Factory(
+            cronetFactory ?: okHttp,
+            impersonated,
+            HostRoutingDataSource::needsBrowserImpersonation,
+        )
+    }
+
+    private val playbackHttp: OkHttpClient by lazy {
+        http.newBuilder().cookieJar(PlaybackCookieJar).addInterceptor(ManualGzipInterceptor).build()
+    }
 
     /** Usine de `DataSource` pour une source : [baseHeaders] + règles par hôte sur chaque requête. */
     fun dataSourceFactory(baseHeaders: Map<String, String> = emptyMap()): DataSource.Factory {
@@ -71,7 +85,7 @@ class PlayerEngine(private val context: Context, private val http: OkHttpClient,
         return PngTsDataSource.Factory(resolving)
     }
 
-    fun newPlayer(): ExoPlayer {
+    fun newPlayer(audioLanguages: List<String> = listOf("fr", "fre", "fra")): ExoPlayer {
         // Buffer plafonné en octets : sur 1 Go de RAM, un flux 1080p remplit
         // 50 s de tampon (≈ 60 Mo) et le système tue l'appli.
         val loadControl = DefaultLoadControl.Builder()
@@ -84,10 +98,15 @@ class PlayerEngine(private val context: Context, private val http: OkHttpClient,
                 // Jamais plus que l'écran : décoder du 4K pour un écran 1080p
                 // sature les petits SoC.
                 .setViewportSizeToPhysicalDisplaySize(true)
-                .setPreferredAudioLanguages("fr", "fre", "fra")
+                // Langue audio des réglages de lecture (français par défaut).
+                .setPreferredAudioLanguages(*audioLanguages.toTypedArray())
                 .build()
         }
-        val renderers = DefaultRenderersFactory(context).setEnableDecoderFallback(true)
+        // FFmpeg (module ffmpeg/) seulement après le décodeur du système et le
+        // passage direct vers l'ampli : le Dolby/DTS sort alors en PCM.
+        val renderers = DefaultRenderersFactory(context)
+            .setEnableDecoderFallback(true)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         return ExoPlayer.Builder(context, renderers)
             .setLoadControl(loadControl)
             .setTrackSelector(trackSelector)

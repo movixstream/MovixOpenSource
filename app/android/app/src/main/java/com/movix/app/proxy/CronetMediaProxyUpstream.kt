@@ -16,6 +16,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
+import java.util.zip.InflaterInputStream
 import org.chromium.net.CronetEngine
 import org.chromium.net.CronetException
 import org.chromium.net.ExperimentalCronetEngine
@@ -41,6 +43,33 @@ internal fun decodedCronetResponseHeaders(headers: Map<String, String>): Map<Str
 }
 
 /**
+ * OkHttp ne décompresse plus rien dès que l'appelant fixe Accept-Encoding, ce
+ * que fait la politique pour Fsvid/Vidzy (leur CDN exige celui de Chrome et
+ * répond alors en gzip pour les playlists). On décode donc ici gzip et
+ * deflate ; tout autre encodage est rendu tel quel.
+ */
+internal fun decodedManualResponse(
+    method: String,
+    statusCode: Int,
+    headers: Map<String, String>,
+    body: InputStream,
+): Pair<Map<String, String>, InputStream> {
+    if (method.equals("HEAD", ignoreCase = true) || statusCode !in 200..299 || statusCode == 204) {
+        return headers to body
+    }
+    val encoding = headers.entries
+        .firstOrNull { it.key.equals("Content-Encoding", ignoreCase = true) }
+        ?.value?.trim()?.lowercase()
+        ?: return headers to body
+    val decoded = when (encoding) {
+        "gzip", "x-gzip" -> GZIPInputStream(body)
+        "deflate" -> InflaterInputStream(body)
+        else -> return headers to body
+    }
+    return decodedCronetResponseHeaders(headers) to decoded
+}
+
+/**
  * Upstream du proxy media qui fetch via **Cronet** (le moteur reseau de
  * Chromium, charge depuis Google Play Services).
  *
@@ -48,8 +77,10 @@ internal fun decodedCronetResponseHeaders(headers: Map<String, String>): Map<Str
  * Accept-Encoding. Cronet controle cet en-tete et ignore addHeader ;
  * activer Brotli seul ne suffit donc pas. OkHttp permet de le fixer tout en
  * demandant identity pour conserver les octets des playlists et des Range.
- * Fsvid/Vidzy restent sur Cronet : leur CDN exige le TLS de Chrome
- * (voir [MediaProxyPolicy.requiresOkHttpUpstream]).
+ * Fsvid/Vidzy passent par [impersonated] : leur CDN exige à la fois le TLS
+ * d'un navigateur et l'Accept-Encoding exact de Chrome, avec zstd, que
+ * Cronet réécrit en « gzip, deflate, br »
+ * (voir [MediaProxyPolicy.requiresBrowserImpersonation]).
  *
  * Cronet est asynchrone (callbacks) alors que [MediaProxyUpstream.execute] est
  * synchrone et rend un flux. Le pont est fait par [CronetResponseBody] : le
@@ -71,6 +102,9 @@ internal class CronetMediaProxyUpstream(
     // joint a la fois le Chromecast et Internet (comme le socketFactory
     // network-bound d'okhttp). Null pour la lecture in-app (egress systeme).
     private val boundNetwork: Network? = null,
+    // Imitation complète de Chrome (libcurl-impersonate) pour Fsvid/Vidzy ;
+    // [fallback] s'il n'est pas fourni.
+    private val impersonated: MediaProxyUpstream? = null,
 ) : MediaProxyUpstream {
 
     @Volatile
@@ -114,6 +148,9 @@ internal class CronetMediaProxyUpstream(
     ): MediaProxyUpstreamResponse {
         if (MediaProxyPolicy.isProviderDecoyUrl(target.upstreamUrl)) {
             throw IllegalStateException("Upstream returned a decoy stream")
+        }
+        if (MediaProxyPolicy.requiresBrowserImpersonation(target.upstreamUrl)) {
+            return (impersonated ?: fallback).execute(target, localRequestHeaders)
         }
         if (MediaProxyPolicy.requiresOkHttpUpstream(target.upstreamUrl)) {
             return fallback.execute(target, localRequestHeaders)

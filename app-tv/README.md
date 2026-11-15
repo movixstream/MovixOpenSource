@@ -3,12 +3,26 @@
 Appli Android TV native de Movix (Fire TV, Google TV, Android TV) : Kotlin,
 Jetpack Compose for TV et Media3.
 
-- Catalogue, fiches, épisodes, recherche, Ma liste et réglages.
+- Catalogue par genre, fiches, filmographie des acteurs, épisodes, recherche,
+  Ma liste et réglages.
 - Lecteur natif avec les sources du serveur Movix, reprise et épisode suivant.
+- Qualité réelle de chaque source mesurée à la demande ; langue audio,
+  sous-titres et version retenus d'un épisode à l'autre.
+- Son Dolby et DTS décodé par l'appli quand la télé ne le gère pas
+  ([`ffmpeg/`](ffmpeg/README.md)).
 - Extraction des lecteurs embed directement sur la télé, sans WebView : le
   userscript Movix tourne dans QuickJS (module `extractor/`).
 - Lecteur web avec bloqueur de pubs ([`adblock/`](adblock/README.md)).
-- Liaison au compte Movix par un code affiché sur la télé.
+- Liaison au compte Movix par un code affiché sur la télé ; profils du compte,
+  avec la restriction d'âge des profils enfant.
+- Mode enfant réglable sur la télé (Réglages › Mode enfant), avec ou sans
+  compte ; le catalogue d'un profil 7+, 12+ ou 16+ est rempli à partir des
+  classifications d'âge de TMDB.
+- Profils du compte gérés depuis « Qui regarde ? » : création, avatar, nom,
+  limite d'âge, suppression. Le choix d'avatar affiche des vignettes
+  embarquées (`app/src/main/assets/avatar_thumbs/`), sans réseau ; quand le
+  site change ses avatars, reprendre `AvatarCatalog.kt` puis lancer
+  `node app-tv/scripts/build-avatar-thumbs.mjs`.
 
 Installation pour les utilisateurs : page `/app-tv` du site.
 
@@ -51,3 +65,10 @@ l'APK signée et réécrit ces deux fichiers.
 
 Bricolage Grotesque et Instrument Sans, sous licence SIL Open Font License 1.1,
 réduites aux caractères latins (`app/src/main/res/font/`).
+
+## Réseau du lecteur
+
+Certains hébergeurs n'acceptent qu'un vrai navigateur : le lecteur passe alors
+par [libcurl-impersonate](https://github.com/lexiforest/curl-impersonate)
+(licence MIT), téléchargée et vérifiée au build (NDK 26.1 et CMake 3.22
+requis).

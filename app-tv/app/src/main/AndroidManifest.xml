@@ -6,6 +6,13 @@
     <!-- Mise à jour depuis l'appli : l'installeur du système demande toujours la confirmation. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Recherche vocale : Android 11+ cache les autres applis sans cette déclaration. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+    </queries>
+
     <!-- Appli TV, mais installable partout : aucun matériel exigé. -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />

@@ -2,7 +2,7 @@ package com.movix.tv.ui.details
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.focusable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -39,14 +41,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -71,12 +76,17 @@ import com.movix.tv.ui.components.PillButton
 import com.movix.tv.ui.components.PivotBringIntoViewSpec
 import com.movix.tv.ui.components.TabPill
 import com.movix.tv.ui.components.TmdbImage
+import com.movix.tv.ui.components.pressProgress
+import com.movix.tv.ui.components.pressScale
 import com.movix.tv.ui.home.Message
+import com.movix.tv.ui.person.requestFocusSoon
 import com.movix.tv.ui.player.PlayTarget
 import com.movix.tv.ui.theme.MovixColors
 import com.movix.tv.ui.theme.MovixType
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
 private val Start = 84.dp
@@ -91,6 +101,8 @@ fun DetailsScreen(
     modifier: Modifier = Modifier,
     /** Titre similaire choisi en bas de la fiche. */
     onOpen: (MediaItem) -> Unit = {},
+    /** Acteur choisi dans la distribution : ouvre sa filmographie. */
+    onPerson: (CastMember) -> Unit = {},
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -111,14 +123,14 @@ fun DetailsScreen(
                 stringResource(R.string.action_retry),
             ) { reload++ }
         } else if (shown != null) {
-            DetailsContent(shown, onPlay, onOpen)
+            DetailsContent(shown, onPlay, onOpen, onPerson)
         }
     }
 }
 
 @OptIn(ExperimentalComposeUiApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (MediaItem) -> Unit) {
+private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (MediaItem) -> Unit, onPerson: (CastMember) -> Unit) {
     val context = LocalContext.current
     // Bande-annonce ou bonus lu par-dessus la fiche, dans l'appli.
     var video by remember { mutableStateOf<VideoClip?>(null) }
@@ -141,8 +153,22 @@ private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (Me
         } else emptyList()
     }
     val playRequester = remember { FocusRequester() }
-    fun play(season: Int?, episode: Int?) =
+    // Distribution sans doublon de clé (TMDB crédite parfois deux fois le même
+    // rôle) : deux clés identiques font planter la rangée.
+    val cast = remember(d.cast) { d.cast.distinctBy { it.rowKey } }
+    val currentCast by rememberUpdatedState(cast)
+    val castState = rememberLazyListState()
+    val castRequester = remember { FocusRequester() }
+    var castFocused by remember { mutableStateOf(false) }
+    // Acteur ouvert depuis la distribution : sauvegardé avec la fiche, il dit au
+    // retour que le focus doit revenir sur sa carte plutôt que sur « Lecture ».
+    var openedCast by rememberSaveable(item.id) { mutableStateOf<String?>(null) }
+    val restoreCast = remember(item.id) { openedCast }
+    fun play(season: Int?, episode: Int?) {
+        // Lecture lancée : au retour du lecteur, le focus revient sur « Lecture ».
+        openedCast = null
         onPlay(PlayTarget(PlayRequest(item.type, item.id, season, episode, d.imdbId), item.title, item.backdropPath))
+    }
     val playMain = {
         if (item.type == MediaType.TV) play(resume?.first ?: d.seasonNumbers.firstOrNull() ?: 1, resume?.second ?: 1) else play(null, null)
     }
@@ -254,12 +280,41 @@ private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (Me
                 }
             }
         }
-        DetailsExtras(d, onOpen = onOpen, onVideo = { video = it })
+        DetailsExtras(
+            d,
+            onOpen = { openedCast = null; onOpen(it) },
+            onVideo = { video = it },
+            cast = cast,
+            castState = castState,
+            castRequester = castRequester,
+            restoreCast = restoreCast,
+            onCastFocus = { castFocused = it },
+            onCast = { c ->
+                if (c.id > 0) {
+                    openedCast = c.rowKey
+                    onPerson(c)
+                }
+            },
+        )
         }
 
         video?.let { clip -> TrailerOverlay(clip, onClose = { video = null }) }
     }
-    LaunchedEffect(item.id) { delay(32); runCatching { playRequester.requestFocus() } }
+    LaunchedEffect(item.id) {
+        delay(32)
+        // Retour d'un acteur : sa carte reprend le focus dès que la distribution
+        // est là (la fiche complète remplace l'aperçu juste après). Sinon, ou si
+        // elle n'arrive pas à temps, « Lecture » comme d'habitude.
+        val back = restoreCast?.let { key ->
+            withTimeoutOrNull(2_000) { snapshotFlow { currentCast.indexOfFirst { it.rowKey == key } }.first { it >= 0 } }
+        }
+        if (back != null) {
+            castState.scrollToItem(back)
+            castRequester.requestFocusSoon { castFocused }
+            if (castFocused) return@LaunchedEffect
+        }
+        runCatching { playRequester.requestFocus() }
+    }
 }
 
 /**
@@ -268,7 +323,18 @@ private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (Me
  */
 @OptIn(ExperimentalComposeUiApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun DetailsExtras(d: Details, onOpen: (MediaItem) -> Unit, onVideo: (VideoClip) -> Unit) {
+private fun DetailsExtras(
+    d: Details,
+    onOpen: (MediaItem) -> Unit,
+    onVideo: (VideoClip) -> Unit,
+    cast: List<CastMember>,
+    castState: LazyListState,
+    castRequester: FocusRequester,
+    /** Clé de l'acteur dont on revient : sa carte porte [castRequester]. */
+    restoreCast: String?,
+    onCastFocus: (Boolean) -> Unit,
+    onCast: (CastMember) -> Unit,
+) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val rowSpec = remember(density) { PivotBringIntoViewSpec(with(density) { Start.toPx() }) }
@@ -309,25 +375,39 @@ private fun DetailsExtras(d: Details, onOpen: (MediaItem) -> Unit, onVideo: (Vid
                 }
             }
         }
-        if (d.cast.isNotEmpty()) {
+        if (cast.isNotEmpty()) {
             Title(R.string.details_cast)
             LazyRow(
-                Modifier.fillMaxWidth().focusRestorer(),
+                Modifier.fillMaxWidth().onFocusChanged { onCastFocus(it.hasFocus) }.focusRestorer(),
+                state = castState,
                 contentPadding = PaddingValues(start = Start, end = 48.dp, top = 8.dp, bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(22.dp),
             ) {
-                items(d.cast, key = { it.name + it.character }) { c -> CastCard(c) }
+                items(cast, key = { it.rowKey }, contentType = { "cast" }) { c ->
+                    CastCard(
+                        c,
+                        onClick = { onCast(c) },
+                        modifier = if (c.rowKey == restoreCast) Modifier.focusRequester(castRequester) else Modifier,
+                    )
+                }
             }
         }
     }
 }
 
-/** Acteur : photo ronde, nom, rôle. Prend le focus pour faire défiler la rangée ; anneau blanc au focus. */
+/** Clé d'un acteur dans la rangée (un même acteur peut tenir deux rôles). */
+private val CastMember.rowKey: String get() = name + character
+
+/** Acteur : photo ronde, nom, rôle. OK ouvre sa filmographie ; anneau blanc au focus. */
 @Composable
-private fun CastCard(c: CastMember) {
+private fun CastCard(c: CastMember, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
-    Column(Modifier.width(112.dp).focusable(interactionSource = source), horizontalAlignment = Alignment.CenterHorizontally) {
+    val press = pressProgress(source)
+    Column(
+        modifier.width(112.dp).pressScale(press).clickable(interactionSource = source, indication = null, onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Box(
             Modifier.size(96.dp).clip(CircleShape).background(MovixColors.Chip)
                 .border(if (focused) 3.dp else 0.dp, if (focused) MovixColors.Text else Color.Transparent, CircleShape),

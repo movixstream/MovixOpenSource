@@ -7,6 +7,7 @@ import com.movix.tv.AppContainer
 import com.movix.tv.data.account.HistoryApi
 import com.movix.tv.data.account.SessionRevokedException
 import com.movix.tv.data.account.toContinueEntry
+import com.movix.tv.data.age.TitleRef
 import com.movix.tv.data.local.ContinueEntry
 import com.movix.tv.data.local.Library
 import com.movix.tv.data.tmdb.CatalogRepository
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -37,10 +39,17 @@ sealed interface BrowseStatus {
     data object NoKey : BrowseStatus
     data object Error : BrowseStatus
     data object Ready : BrowseStatus
+    /** Tout a été chargé, mais la restriction d'âge du profil masque chaque rangée. */
+    data object OnlyHidden : BrowseStatus
 }
 
+/** [limit] : restriction d'âge avec laquelle ces rangées ont été filtrées (l'écran n'en montre pas d'autres). */
 @Immutable
-data class BrowseState(val status: BrowseStatus = BrowseStatus.Loading, val rows: List<CatalogRow> = emptyList())
+data class BrowseState(val status: BrowseStatus = BrowseStatus.Loading, val rows: List<CatalogRow> = emptyList(), val limit: Int? = null)
+
+/** Rangée « Reprendre » filtrée pour la restriction [limit]. */
+@Immutable
+data class ContinueRowState(val limit: Int?, val entries: List<ContinueEntry>)
 
 /**
  * Une page de rangées (accueil, films, séries, animés). Palier 1 d'abord pour
@@ -69,8 +78,20 @@ class BrowseViewModel(private val container: AppContainer, private var specs: Li
             else ContinueSource(Library.continueWatching(values), false)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, ContinueSource(emptyList(), false))
 
-    val continueRow: StateFlow<List<ContinueEntry>> =
+    private val continueRow: StateFlow<List<ContinueEntry>> =
         continueSource.map { it.entries }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * « Reprendre » tel qu'il s'affiche : seulement les titres que le profil peut
+     * voir (rangée du serveur ou locale). Sans restriction, la rangée telle quelle.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val visibleContinueRow: StateFlow<ContinueRowState> =
+        combine(continueSource, container.catalog.ageLimit) { source, limit -> source.entries to limit }
+            .mapLatest { (entries, limit) ->
+                ContinueRowState(limit, container.catalog.allowedOnly(entries, limit) { TitleRef(it.type, it.id) })
+            }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, ContinueRowState(null, emptyList()))
 
     // Rafraîchissements de la rangée du serveur : délai demandé (ms), au plus un
     // appel toutes les 30 s ; les demandes reçues entre-temps n'en font qu'une.
@@ -95,6 +116,11 @@ class BrowseViewModel(private val container: AppContainer, private var specs: Li
 
     init {
         load()
+        // Autre restriction d'âge (profil changé, réglage changé sur le site) :
+        // les rangées sont rechargées et filtrées pour elle.
+        viewModelScope.launch {
+            container.catalog.ageLimit.collect { if (it != _state.value.limit) load() }
+        }
         // Entrées venues du site (liste `continueWatching`, ids seuls) ou sans
         // fiche connue : titre, image et nom d'épisode demandés à TMDB, comme
         // le fait le site, puis gardés dans WATCH_META.
@@ -131,6 +157,19 @@ class BrowseViewModel(private val container: AppContainer, private var specs: Li
                     if (visible) refreshRequests.trySend(SYNC_SETTLE_MS) else changedWhileHidden = true
                 }
             }
+            // Télé réveillée sans quitter l'accueil : relecture tout de suite
+            // (le délai laisse au Wi-Fi le temps de revenir).
+            viewModelScope.launch {
+                container.wakeups.collect { if (visible) refreshRequests.trySend(WAKE_SETTLE_MS) else changedWhileHidden = true }
+            }
+            // Accueil laissé affiché (titre vu sur le téléphone ou le site entre-temps) :
+            // relecture régulière tant qu'il est visible.
+            viewModelScope.launch {
+                while (true) {
+                    delay(PERIODIC_MS)
+                    if (visible) refreshRequests.trySend(0L)
+                }
+            }
         }
     }
 
@@ -154,6 +193,7 @@ class BrowseViewModel(private val container: AppContainer, private var specs: Li
             // Profil changé pendant l'appel : cette liste est celle de l'ancien.
             if (container.accounts.current?.profileId != account.profileId) return
             serverRow.value = ServerRow(account.profileId, items.mapNotNull { it.toContinueEntry() })
+            android.util.Log.i("MovixContinue", "rangée du serveur relue : ${items.size} titre(s)")
         } catch (e: SessionRevokedException) {
             serverRow.value = null
             container.accounts.logout(remote = false)
@@ -171,7 +211,7 @@ class BrowseViewModel(private val container: AppContainer, private var specs: Li
     }
 
     private suspend fun enrichNow(e: ContinueEntry) {
-        val d = runCatching { container.catalog.details(e.type, e.id) }
+        val d = runCatching { container.catalog.info(e.type, e.id) }
             .onFailure { android.util.Log.w("MovixContinue", "fiche ${e.type.path} ${e.id} introuvable : $it") }
             .getOrNull() ?: return
         val episode = if (e.season != null && e.episode != null) {
@@ -206,23 +246,27 @@ class BrowseViewModel(private val container: AppContainer, private var specs: Li
             return
         }
         val rows = CatalogRepository.assemble(specs, fetched)
-        _state.value = if (rows.isEmpty()) BrowseState(BrowseStatus.Error) else BrowseState(BrowseStatus.Ready, rows)
+        _state.value = settled(rows, _state.value.limit)
     }
 
     /** Charge les rangées manquantes sans vider l'écran. */
     private fun refill() {
         job?.cancel()
         val wanted = specs
+        val limit = _state.value.limit
         job = viewModelScope.launch {
             val missing = wanted.filter { it.id !in fetched || fetched[it.id]?.isFailure == true }
             fetched += container.catalog.fetch(missing)
             val rows = CatalogRepository.assemble(wanted, fetched)
-            if (rows.isNotEmpty()) _state.value = BrowseState(BrowseStatus.Ready, rows)
+            if (rows.isNotEmpty()) _state.value = BrowseState(BrowseStatus.Ready, rows, limit)
         }
     }
 
     fun load() {
-        _state.value = BrowseState()
+        // Restriction lue avant les requêtes : elle étiquette les rangées. Si elle
+        // change pendant le chargement, un nouveau chargement annule celui-ci.
+        val limit = container.catalog.ageLimit.value
+        _state.value = BrowseState(limit = limit)
         fetched.clear()
         job?.cancel()
         val wanted = specs
@@ -232,14 +276,24 @@ class BrowseViewModel(private val container: AppContainer, private var specs: Li
                 fetched += container.catalog.fetch(wanted.filter { it.tier == tier })
                 android.util.Log.i("MovixPerf", "palier $tier chargé en ${android.os.SystemClock.elapsedRealtime() - t0} ms")
                 if (fetched.values.any { it.exceptionOrNull() is MissingTmdbKeyException }) {
-                    _state.value = BrowseState(BrowseStatus.NoKey)
+                    _state.value = BrowseState(BrowseStatus.NoKey, limit = limit)
                     return@launch
                 }
                 val rows = CatalogRepository.assemble(wanted, fetched)
-                if (rows.isNotEmpty()) _state.update { BrowseState(BrowseStatus.Ready, rows) }
+                if (rows.isNotEmpty()) _state.update { BrowseState(BrowseStatus.Ready, rows, limit) }
             }
-            if (_state.value.rows.isEmpty()) _state.value = BrowseState(BrowseStatus.Error)
+            if (_state.value.rows.isEmpty()) _state.value = settled(emptyList(), limit)
         }
+    }
+
+    /**
+     * État final : les rangées, sinon « Rien pour ce profil ici » quand toutes ont
+     * répondu mais que la restriction d'âge masque tout, sinon une erreur.
+     */
+    private fun settled(rows: List<CatalogRow>, limit: Int?): BrowseState = when {
+        rows.isNotEmpty() -> BrowseState(BrowseStatus.Ready, rows, limit)
+        (limit ?: 0) > 0 && fetched.isNotEmpty() && fetched.values.none { it.isFailure } -> BrowseState(BrowseStatus.OnlyHidden, limit = limit)
+        else -> BrowseState(BrowseStatus.Error, limit = limit)
     }
 
     private companion object {
@@ -247,6 +301,10 @@ class BrowseViewModel(private val container: AppContainer, private var specs: Li
         const val REFRESH_MIN_MS = 30_000L
         /** Délai laissé à la synchro pour envoyer une écriture locale avant la relecture. */
         const val SYNC_SETTLE_MS = 6_000L
+        /** Délai après le réveil de la télé, le temps que le réseau revienne. */
+        const val WAKE_SETTLE_MS = 3_000L
+        /** Relecture de l'accueil resté affiché. */
+        const val PERIODIC_MS = 3 * 60_000L
         /** Fiches de « Reprendre » demandées à TMDB en même temps, au plus. */
         const val ENRICH_CONCURRENCY = 4
     }

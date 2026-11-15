@@ -13,6 +13,13 @@ sealed interface Route {
     data class Main(val section: Section) : Route
     /** `preview` : ce qu'on sait déjà du titre, affiché tout de suite pendant le chargement de la fiche. */
     data class Details(val type: MediaType, val id: Int, val preview: MediaItem? = null) : Route
+    /** Acteur ouvert depuis une fiche : nom et photo déjà connus, montrés pendant le chargement. */
+    data class Person(val id: Int, val name: String, val profilePath: String? = null) : Route
+    /**
+     * « Voir tout » d'une rangée du registre (`rowId`). `openedAt` distingue deux
+     * ouvertures : chacune repart du début, le retour d'une fiche garde la même.
+     */
+    data class Collection(val rowId: String, val openedAt: Long = System.nanoTime()) : Route
     data class Player(val target: PlayTarget) : Route
     /** Liaison au compte (code à 5 caractères). */
     data object Link : Route
@@ -28,6 +35,8 @@ class Navigator {
 
     val current: Route get() = stack.last()
     val depth: Int get() = stack.size
+    /** Écran juste sous l'écran courant (`null` à la racine). */
+    val previous: Route? get() = stack.getOrNull(stack.lastIndex - 1)
 
     fun push(route: Route) {
         if (stack.last() != route) stack.add(route)

@@ -890,7 +890,7 @@ PROBLEMATIC_DOMAINS = frozenset([
 # illégitime : jadis une 302 vers s1.fsvid.lol/troll/master.m3u8, désormais
 # aussi une playlist 200 servie à l'URL réelle, de neuf segments `/e/segN.ts`.
 # Vidzy répond en plus 403 à une empreinte TLS non navigateur (d'où curl_cffi).
-FSVID_VIDZY_SEC_CH_UA = '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"'
+FSVID_VIDZY_SEC_CH_UA = '"Chromium";v="142", "Not=A?Brand";v="24", "Google Chrome";v="142"'
 
 # Uqload : q=0 conserve les tokens du navigateur tout en demandant un corps
 # identity (surtout pas pour Fsvid/Vidzy, voir plus bas) :
@@ -903,7 +903,14 @@ PROVIDER_MEDIA_ACCEPT_ENCODING = 'identity, gzip;q=0, deflate;q=0, br;q=0, zstd;
 # s1.fsvid.lol et v6/u14.vidzy.cc). `identity` seul donne le vrai flux, non
 # compressé, playlists comme plages de segments. Le 403 qui avait motivé le
 # token zstd venait de l'empreinte TLS, pas de cet en-tête.
-FSVID_VIDZY_MEDIA_ACCEPT_ENCODING = 'identity'
+#
+# Depuis le 2026-10-26 au soir, c'est l'inverse : le CDN sert son faux master
+# statique (variante qui renvoie le master lui-même) à tout Accept-Encoding
+# autre que celui de Chrome, `identity` compris. Seule la valeur exacte de
+# Chrome passe. Le CDN répond alors en gzip pour les playlists (décodé par
+# curl_cffi comme par aiohttp, puis réécrit avec sa nouvelle longueur) et sans
+# compression pour les segments.
+FSVID_VIDZY_MEDIA_ACCEPT_ENCODING = 'gzip, deflate, br, zstd'
 _FSVID_VIDZY_DECOY_PATH = re.compile(r'^/e/seg\d+\.ts$', re.IGNORECASE)
 
 
@@ -940,9 +947,16 @@ def is_fsvid_vidzy_decoy_playlist(text: str, base_url: str) -> bool:
 # une signature qu'aucun navigateur ne produit. L'extraction et le relais
 # partagent désormais le même jeu, pour que la page d'embed et le CDN voient un
 # client identique.
+#
+# Depuis le 2026-10-26, le CDN sert un faux master statique (sa variante
+# `index.m3u8` renvoie le master lui-même, le lecteur tourne en rond) à cette
+# chaîne exacte en Chrome 140 Windows : Chrome 139, 141 ou 142 passent, comme
+# 140 sous Android. On annonce donc Chrome 142, la version que curl_cffi imite
+# en TLS (`impersonate='chrome'`). Prochaine coupure : essayer d'abord une
+# autre version de l'User-Agent sur le master.
 FSVID_VIDZY_USER_AGENT = (
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-    '(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+    '(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
 )
 FSVID_VIDZY_CLIENT_HINTS = {
     'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -951,6 +965,33 @@ FSVID_VIDZY_CLIENT_HINTS = {
     'Sec-Ch-Ua-Platform': '"Windows"',
     'User-Agent': FSVID_VIDZY_USER_AGENT,
 }
+
+# Sans clé `gk`, le CDN Fsvid/Vidzy ne sert que les 9 à 19 premiers segments
+# (selon le serveur), puis répond 403 (mesuré le 2026-10-23). Leur lecteur
+# demande cette clé à une « porte » (gate.php chez Vidzy, /gk chez Fsvid) avec
+# une empreinte du navigateur, puis l'ajoute au master ; le CDN la recopie
+# ensuite dans les URLs des variantes et des segments. La clé ne dépend ni de
+# l'IP (le relais SOCKS tiré au hasard la garde) ni de la vidéo, et les deux
+# hébergeurs partagent la même. La porte refuse (`{"ok":0}`) une empreinte
+# sans canvas : on envoie les largeurs que mesure Chrome sous Windows, comme
+# l'User-Agent ci-dessus. Même logique dans extension/*/extractors.js et
+# userscript/movix.user.js.
+FSVID_VIDZY_GATE_URLS = {
+    'vidzy': 'https://v6.vidzy.cc/gate.php',
+    'fsvid': 'https://fsvid.lol/gk',
+}
+FSVID_VIDZY_GATE_QUERY = urllib.parse.urlencode([
+    ('v', 'p1'), ('cw', '159.56'), ('cw2', '170.34'), ('wg', '1'), ('dpr', '1'),
+    ('sw', '1920'), ('hw', '8'), ('ft', 'TOP'), ('rf', ''),
+])
+FSVID_VIDZY_GATE_MAX_AGE = 6 * 3600
+FSVID_VIDZY_GATE_RETRY_AFTER = 60
+_FSVID_VIDZY_GATE_KEY = re.compile(r'[A-Za-z0-9_.-]{16,512}')
+_FSVID_VIDZY_INLINE_GATE = re.compile(
+    r'fetch\(\s*[\'"](https://[a-z0-9.-]+/gate\.php)\?',
+    re.IGNORECASE,
+)
+_FSVID_VIDZY_HAS_GATE_KEY = re.compile(r'[?&]gk=')
 
 # AES decryption constants for seekstreaming (embed4me)
 SEEKSTREAMING_AES_KEY = b"kiemtienmua911ca"
@@ -1400,6 +1441,9 @@ class ProxyServer:
         # court, sinon on ressert une URL déjà morte.
         self.vidara_cache = TTLCache(maxsize=500, ttl=900)
         self.seekstreaming_cache = TTLCache(maxsize=500, ttl=300)
+        # Clé `gk` commune à Fsvid et Vidzy : (valeur ou None, échéance monotonic).
+        self._fsvid_vidzy_gate_key_entry: Optional[tuple] = None
+        self._fsvid_vidzy_gate_lock = asyncio.Lock()
         self.vip_cache = TTLCache(maxsize=5000, ttl=VIP_CACHE_TTL)  # VIP access key verification cache
         self.m3u8_response_cache = TTLCache(maxsize=2000, ttl=M3U8_CACHE_TTL)  # Short-lived M3U8 response cache
         self.m3u8_vod_cache = TTLCache(maxsize=1000, ttl=M3U8_VOD_CACHE_TTL)   # Longer-lived VOD M3U8 cache
@@ -4115,12 +4159,14 @@ class ProxyServer:
                     )
                     return web.json_response({'error': 'M3U8 not found'}, status=404)
 
+                m3u8_url = await self._with_fsvid_vidzy_gate_key(m3u8_url, html, 'fsvid')
                 result = {
                     'm3u8Url': _signed_service_url('/fsvid-proxy', m3u8_url),
                     'source': 'fsvid'
                 }
 
-                self.fsvid_cache.set(cache_key, result)
+                if _FSVID_VIDZY_HAS_GATE_KEY.search(m3u8_url):
+                    self.fsvid_cache.set(cache_key, result)
                 resp = web.json_response(result)
                 resp.headers['X-Cache'] = 'MISS'
                 return resp
@@ -4548,7 +4594,78 @@ class ProxyServer:
         if fallback and self._is_fsvid_vidzy_media_candidate(fallback, provider):
             return fallback
         return None
-    
+
+    @staticmethod
+    def _fsvid_vidzy_gate_urls(html: str, provider: str) -> list:
+        urls = []
+        # Vidzy écrit l'adresse de sa porte dans la page : la suivre si elle change.
+        match = _FSVID_VIDZY_INLINE_GATE.search(html or '')
+        if match:
+            hostname = (urlparse(match.group(1)).hostname or '').lower()
+            if any(
+                hostname == suffix or hostname.endswith(f'.{suffix}')
+                for suffix in ('vidzy.cc', 'vidzy.org', 'fsvid.lol')
+            ):
+                urls.append(match.group(1))
+        other = 'vidzy' if provider == 'fsvid' else 'fsvid'
+        for url in (FSVID_VIDZY_GATE_URLS[provider], FSVID_VIDZY_GATE_URLS[other]):
+            if url not in urls:
+                urls.append(url)
+        return urls
+
+    async def _fsvid_vidzy_gate_key(self, html: str, provider: str) -> Optional[str]:
+        """Clé `gk` en cache, sinon demandée aux portes Vidzy/Fsvid."""
+        entry = self._fsvid_vidzy_gate_key_entry
+        if entry and entry[1] > time.monotonic():
+            return entry[0]
+        async with self._fsvid_vidzy_gate_lock:
+            entry = self._fsvid_vidzy_gate_key_entry
+            if entry and entry[1] > time.monotonic():
+                return entry[0]
+            for gate_url in self._fsvid_vidzy_gate_urls(html, provider):
+                try:
+                    async with self.sessions['normal'].get(
+                        f'{gate_url}?{FSVID_VIDZY_GATE_QUERY}',
+                        headers={'Accept': '*/*', **FSVID_VIDZY_CLIENT_HINTS},
+                        timeout=ClientTimeout(total=4),
+                    ) as response:
+                        if response.status != 200:
+                            continue
+                        data = await response.json(content_type=None)
+                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                    continue
+                gate_key = data.get('gk') if isinstance(data, dict) else None
+                if not isinstance(gate_key, str) or not _FSVID_VIDZY_GATE_KEY.fullmatch(gate_key):
+                    continue
+                # La clé se termine par `.<émission>.<durée en s>` : la garder
+                # la moitié de sa durée, sans dépasser six heures.
+                try:
+                    ttl = int(gate_key.split('.')[2])
+                except (IndexError, ValueError):
+                    ttl = 0
+                lifetime = min(FSVID_VIDZY_GATE_MAX_AGE, ttl / 2) if ttl > 0 else FSVID_VIDZY_GATE_MAX_AGE
+                self._fsvid_vidzy_gate_key_entry = (gate_key, time.monotonic() + lifetime)
+                return gate_key
+            logger.warning(
+                '[%s-EXTRACT] Clé gk indisponible : la lecture s\'arrêtera après quelques segments',
+                provider.upper(),
+            )
+            # Ne pas rappeler les portes à chaque extraction pendant une panne.
+            self._fsvid_vidzy_gate_key_entry = (
+                None,
+                time.monotonic() + FSVID_VIDZY_GATE_RETRY_AFTER,
+            )
+            return None
+
+    async def _with_fsvid_vidzy_gate_key(self, m3u8_url: str, html: str, provider: str) -> str:
+        if _FSVID_VIDZY_HAS_GATE_KEY.search(m3u8_url):
+            return m3u8_url
+        gate_key = await self._fsvid_vidzy_gate_key(html, provider)
+        if not gate_key:
+            return m3u8_url
+        separator = '&' if '?' in m3u8_url else '?'
+        return f"{m3u8_url}{separator}gk={urllib.parse.quote(gate_key, safe='')}"
+
     async def vidzy_extract_handler(self, request: Request) -> Response:
         """VIDZY M3U8 extraction"""
         internal_error = self._require_internal(request)
@@ -4600,12 +4717,14 @@ class ProxyServer:
                     )
                     return web.json_response({'error': 'M3U8 not found'}, status=404)
 
+                m3u8_url = await self._with_fsvid_vidzy_gate_key(m3u8_url, html, 'vidzy')
                 result = {
                     'm3u8Url': _signed_service_url('/vidzy-proxy', m3u8_url),
                     'source': 'vidzy'
                 }
 
-                self.vidzy_cache.set(cache_key, result)
+                if _FSVID_VIDZY_HAS_GATE_KEY.search(m3u8_url):
+                    self.vidzy_cache.set(cache_key, result)
                 resp = web.json_response(result)
                 resp.headers['X-Cache'] = 'MISS'
                 return resp
