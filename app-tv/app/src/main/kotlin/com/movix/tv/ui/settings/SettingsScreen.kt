@@ -71,6 +71,7 @@ import java.util.Locale
 /** Sections des réglages, dans l'ordre de la colonne de gauche. */
 private enum class Pane(val label: Int) {
     ACCOUNT(R.string.settings_account_title),
+    KIDS(R.string.kids_title),
     APPEARANCE(R.string.settings_section_appearance),
     SUBTITLES(R.string.settings_section_subtitles),
     HOME(R.string.settings_section_home),
@@ -126,6 +127,7 @@ fun SettingsScreen(onLinkAccount: () -> Unit, modifier: Modifier = Modifier, onS
                 Box(Modifier.width(500.dp).fillMaxHeight().focusRequester(paneRequester).focusRestorer().focusGroup()) {
                     when (pane) {
                         Pane.ACCOUNT -> AccountPane(onLinkAccount, onSwitchProfile)
+                        Pane.KIDS -> KidsPane(onSwitchProfile)
                         Pane.APPEARANCE -> AppearancePane()
                         Pane.SUBTITLES -> SubtitlesPane()
                         Pane.HOME -> HomePane()

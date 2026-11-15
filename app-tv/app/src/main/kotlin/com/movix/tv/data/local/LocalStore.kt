@@ -76,6 +76,8 @@ object TvKeys {
     const val SYNC_OUTBOX = "movix_tv_sync_outbox"
     /** L'écran de connexion a déjà été proposé au premier lancement. */
     const val LINK_PROMPTED = "movix_tv_link_prompted"
+    /** Mode enfant de la télé sans compte relié : limite d'âge (« 7 », « 12 », « 16 »), absente = désactivé. */
+    const val KID_LIMIT = "movix_tv_kid_limit"
     /** Recherches récentes (liste JSON, la plus récente d'abord). Restent sur la télé. */
     const val SEARCH_RECENT = "movix_tv_search_recent"
     /** Mise à jour : dernière vérification (ms). */

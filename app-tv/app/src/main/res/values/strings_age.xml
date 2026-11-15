@@ -18,4 +18,33 @@
     <string name="age_badge" translatable="false">%1$d+</string>
     <string name="settings_account_age">Restriction d\'âge : %1$d+. Seuls les titres classés pour cet âge sont proposés.</string>
     <string name="settings_account_age_unknown">Restriction d\'âge du profil en cours de vérification.</string>
+
+    <!-- Réglages › Mode enfant : limite d'âge du profil qui regarde, ou de la télé sans compte. -->
+    <string name="kids_title">Mode enfant</string>
+    <string name="kids_body">Ne propose que les films et séries classés pour l\'âge choisi.</string>
+    <string name="kids_off">Désactivé</string>
+    <string name="kids_state_off">Désactivé : tout le catalogue est proposé.</string>
+    <string name="kids_state_on">Activé : seuls les titres classés %1$d+ ou moins sont proposés. Ceux sans classification d\'âge sont masqués.</string>
+    <string name="kids_state_adult">18+ : tout le catalogue est proposé.</string>
+    <string name="kids_scope_profile">Ce réglage est celui du profil %1$s. Il vaut aussi sur le site et sur tes autres appareils.</string>
+    <string name="kids_scope_tv">Ce réglage reste sur cette télé.</string>
+    <string name="kids_tip_profiles">Pour un enfant, le mieux est un profil à lui : « Changer de profil », puis « Ajouter un profil ».</string>
+    <string name="kids_saving">Enregistrement…</string>
+    <string name="kids_error_network">Le serveur Movix ne répond pas. Le réglage n\'a pas changé.</string>
+    <string name="kids_error_refused">Le serveur a refusé ce réglage. Rien n\'a changé.</string>
+    <string name="kids_error_signed_out">La télé n\'est plus reliée au compte. Reconnecte-la dans « Compte ».</string>
+
+    <!-- « Qui regarde ? » : profil créé depuis la télé. -->
+    <string name="profiles_add">Ajouter un profil</string>
+    <string name="profiles_new_title">Nouveau profil</string>
+    <string name="profiles_new_body">Choisis son nom et sa limite d\'âge. L\'avatar se change sur le site.</string>
+    <string name="profiles_new_default_name">Enfant</string>
+    <string name="profiles_new_name">Nom</string>
+    <string name="profiles_new_age">Limite d\'âge</string>
+    <string name="profiles_new_none">Aucune</string>
+    <string name="profiles_new_create">Créer le profil</string>
+    <string name="profiles_new_cancel">Annuler</string>
+    <string name="profiles_new_creating">Création du profil…</string>
+    <string name="profiles_new_name_empty">Donne un nom au profil.</string>
+    <string name="profiles_new_refused">Le serveur a refusé ce profil : nom non accepté, ou cinq profils déjà.</string>
 </resources>

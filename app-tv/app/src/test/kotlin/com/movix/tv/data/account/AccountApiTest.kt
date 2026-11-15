@@ -70,4 +70,74 @@ class AccountApiTest {
         assertEquals(com.movix.tv.data.age.AgeRules.UNREADABLE_LIMIT, list[5].ageRestriction)
         assertEquals(com.movix.tv.data.age.AgeRules.UNREADABLE_LIMIT, list[6].ageRestriction)
     }
+
+    // Mode enfant réglé depuis la télé. Le serveur ne touche qu'aux champs
+    // envoyés : seul `ageRestriction` part, sinon le nom ou l'avatar du profil
+    // seraient réécrits par la télé.
+    @Test
+    fun `restriction d'âge d'un profil envoyée seule au serveur`() = runTest {
+        server.enqueue(MockResponse.Builder().body("""{"success":true,"profile":{"id":"p1","name":"Léa",
+            "avatar":"/avatars/disney/disney_avatar_1.png","ageRestriction":12}}""").build())
+        val profile = api.updateProfileAge("jwt", "p1", 12)
+        val req = server.takeRequest()
+        assertEquals("PUT", req.method)
+        assertEquals("/api/profiles/p1", req.url.encodedPath)
+        assertEquals("Bearer jwt", req.headers["Authorization"])
+        assertEquals("""{"ageRestriction":12}""", req.body?.utf8())
+        assertEquals(12, profile.ageRestriction)
+        assertEquals("Léa", profile.name)
+    }
+
+    @Test
+    fun `mode enfant coupé envoie zéro, pas un champ absent`() = runTest {
+        server.enqueue(MockResponse.Builder().body("""{"success":true,"profile":{"id":"p1","ageRestriction":0}}""").build())
+        api.updateProfileAge("jwt", "p1", 0)
+        // Champ absent : le serveur répondrait 400 (« Name, avatar, or ageRestriction is required »).
+        assertEquals("""{"ageRestriction":0}""", server.takeRequest().body?.utf8())
+    }
+
+    @Test
+    fun `profil créé depuis la télé avec nom, avatar et restriction`() = runTest {
+        server.enqueue(MockResponse.Builder().body("""{"success":true,"profile":{"id":"new","name":"Enfant",
+            "avatar":"/avatars/pixar/pixar_avatar_1.png","ageRestriction":7,"isDefault":false}}""").build())
+        val profile = api.createProfile("jwt", "Enfant", "/avatars/pixar/pixar_avatar_1.png", 7)
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/api/profiles", req.url.encodedPath)
+        assertEquals("Bearer jwt", req.headers["Authorization"])
+        val sent = json.parseToJsonElement(req.body!!.utf8()) as kotlinx.serialization.json.JsonObject
+        assertEquals(setOf("name", "avatar", "ageRestriction"), sent.keys)
+        assertEquals("\"Enfant\"", sent["name"].toString())
+        assertEquals("\"/avatars/pixar/pixar_avatar_1.png\"", sent["avatar"].toString())
+        assertEquals("7", sent["ageRestriction"].toString())
+        assertEquals("new", profile.id)
+        assertEquals(7, profile.ageRestriction)
+    }
+
+    // Refus du serveur (5 profils déjà, nom refusé) : à distinguer d'une panne, pour le dire à l'écran.
+    @Test
+    fun `création refusée par le serveur distinguée d'une panne`() = runTest {
+        server.enqueue(MockResponse.Builder().code(400).body("""{"error":"Maximum 5 profiles allowed"}""").build())
+        val refused = runCatching { api.createProfile("jwt", "Enfant", "/avatars/pixar/pixar_avatar_1.png", 7) }.exceptionOrNull()
+        assertEquals(true, refused is ProfileRefusedException)
+
+        server.enqueue(MockResponse.Builder().code(500).body("""{"error":"Failed to create profile"}""").build())
+        val broken = runCatching { api.createProfile("jwt", "Enfant", "/avatars/pixar/pixar_avatar_1.png", 7) }.exceptionOrNull()
+        assertEquals(true, broken is java.io.IOException && broken !is ProfileRefusedException)
+    }
+
+    @Test
+    fun `session supprimée pendant le réglage du mode enfant`() = runTest {
+        server.enqueue(MockResponse.Builder().code(401).body("""{"error":"Unauthorized"}""").build())
+        val error = runCatching { api.updateProfileAge("jwt", "p1", 12) }.exceptionOrNull()
+        assertEquals(true, error is SessionRevokedException)
+    }
+
+    // Réponse sans le profil (serveur en panne partielle) : une erreur, pas un profil inventé.
+    @Test
+    fun `réponse sans profil refusée`() = runTest {
+        server.enqueue(MockResponse.Builder().body("""{"success":true}""").build())
+        val error = runCatching { api.updateProfileAge("jwt", "p1", 12) }.exceptionOrNull()
+        assertEquals(true, error is java.io.IOException)
+    }
 }

@@ -3,11 +3,12 @@ package com.movix.tv.data.age
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * Restriction d'âge du profil qui regarde, telle que la télé la connaît.
+ * Limite d'âge de ce que la télé propose, telle qu'elle la connaît.
  *
- * [limit] : 0 = aucune (pas de compte relié, ou profil sans restriction) ;
- * 7, 12, 16 ou 18 = âge maximal des titres montrés ; `null` = compte relié dont
- * la restriction n'est pas encore connue (rien ne doit être montré).
+ * [limit] : 0 = aucune ; 7, 12, 16 ou 18 = âge maximal des titres montrés ;
+ * `null` = compte relié dont la restriction n'est pas encore connue (rien ne
+ * doit être montré). Compte relié : restriction du profil qui regarde. Sans
+ * compte : mode enfant réglé sur la télé (Réglages › Mode enfant).
  */
 interface AgeLimits {
     val limit: StateFlow<Int?>

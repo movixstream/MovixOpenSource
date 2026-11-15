@@ -31,6 +31,9 @@ import java.io.IOException
 /** La session de la télé n'existe plus (supprimée depuis le site) : il faut se reconnecter. */
 class SessionRevokedException : IOException("session révoquée")
 
+/** Le serveur a refusé un réglage de profil (nom refusé, cinq profils déjà, profil supprimé) : réessayer tel quel ne changera rien. */
+class ProfileRefusedException(code: Int) : IOException("profil refusé ($code)")
+
 @Serializable
 data class LinkStart(
     val deviceCode: String,
@@ -74,6 +77,10 @@ internal object AgeRestrictionSerializer : KSerializer<Int> {
 
 @Serializable
 internal data class ProfilesResponse(val profiles: List<LinkedProfile> = emptyList())
+
+/** Réponse de `PUT /api/profiles/{id}` et de `POST /api/profiles` : `{ success, profile }`. */
+@Serializable
+internal data class ProfileResponse(val profile: LinkedProfile? = null)
 
 /**
  * `expiresAt` : date ISO, ou nombre (millisecondes) sur un serveur plus ancien.
@@ -127,6 +134,34 @@ class AccountApi(private val client: OkHttpClient, private val json: Json, priva
             if (res.code == 401) throw SessionRevokedException()
             if (!res.isSuccessful) throw IOException("profiles ${res.code}")
             json.decodeFromString(ProfilesResponse.serializer(), res.body.string()).profiles.filter { it.id.isNotBlank() }
+        }
+    }
+
+    /**
+     * Mode enfant : pose la restriction d'âge [age] (0 = aucune, 7, 12, 16 ou 18)
+     * sur le profil. Seul ce champ part : le serveur ne touche qu'aux champs
+     * reçus, le nom et l'avatar du profil restent ceux du site. Rend le profil
+     * tel que le serveur l'a enregistré.
+     */
+    suspend fun updateProfileAge(token: String, profileId: String, age: Int): LinkedProfile =
+        profileCall("PUT", "api/profiles/$profileId", buildJsonObject { put("ageRestriction", age) }, token)
+
+    /** Nouveau profil du compte (cinq au plus). [avatar] : chemin `/avatars/…` du site. */
+    suspend fun createProfile(token: String, name: String, avatar: String, age: Int): LinkedProfile =
+        profileCall("POST", "api/profiles", buildJsonObject { put("name", name); put("avatar", avatar); put("ageRestriction", age) }, token)
+
+    /** [ProfileRefusedException] : refus du serveur (4xx) ; autre [IOException] : panne ou réponse sans profil. */
+    private suspend fun profileCall(method: String, path: String, body: JsonObject, token: String): LinkedProfile = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(url(path)).method(method, body.toString().toRequestBody(jsonType))
+            .header("Authorization", "Bearer $token")
+            .build()
+        client.newCall(req).execute().use { res ->
+            if (res.code == 401) throw SessionRevokedException()
+            // 429 : trop d'appels, réessayer plus tard peut marcher (ce n'est pas un refus).
+            if (res.code in 400..499 && res.code != 429) throw ProfileRefusedException(res.code)
+            if (!res.isSuccessful) throw IOException("$path ${res.code}")
+            json.decodeFromString(ProfileResponse.serializer(), res.body.string()).profile?.takeIf { it.id.isNotBlank() }
+                ?: throw IOException("$path : réponse sans profil")
         }
     }
 

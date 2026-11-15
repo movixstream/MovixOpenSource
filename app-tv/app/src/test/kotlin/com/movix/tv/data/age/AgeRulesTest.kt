@@ -140,4 +140,53 @@ class AgeRulesTest {
         // Profil absent de la liste : la restriction reste inconnue.
         assertNull(AgeRules.limitOf("z", list))
     }
+
+    // Mode enfant gardé sur la télé (pas de compte relié). Une valeur abîmée
+    // ne doit jamais valoir « désactivé » : l'enfant verrait tout le catalogue.
+    @Test
+    fun modeEnfantGardeSurLaTele() {
+        assertEquals(0, AgeRules.storedLimit(null))
+        assertEquals(0, AgeRules.storedLimit(""))
+        assertEquals(0, AgeRules.storedLimit("0"))
+        assertEquals(7, AgeRules.storedLimit("7"))
+        assertEquals(12, AgeRules.storedLimit(" 12 "))
+        assertEquals(16, AgeRules.storedLimit("16"))
+        assertEquals(18, AgeRules.storedLimit("18"))
+        assertEquals(AgeRules.UNREADABLE_LIMIT, AgeRules.storedLimit("abc"))
+        assertEquals(AgeRules.UNREADABLE_LIMIT, AgeRules.storedLimit("9"))
+        assertEquals(AgeRules.UNREADABLE_LIMIT, AgeRules.storedLimit("-3"))
+    }
+
+    @Test
+    fun valeursProposeesSontCellesDuServeur() {
+        // Le serveur remplace toute autre valeur par 0 : le mode enfant serait coupé sans le dire.
+        val server = setOf(0, 7, 12, 16, 18)
+        assertTrue(AgeRules.CHOICES.isNotEmpty())
+        assertTrue(AgeRules.CHOICES.all { it in server })
+        assertEquals(0, AgeRules.CHOICES.first())
+        // Une restriction déjà posée sur le site reste affichée comme choisie, même hors de la liste courte.
+        assertTrue(18 in AgeRules.choicesFor(18))
+        assertEquals(AgeRules.CHOICES, AgeRules.choicesFor(12))
+        assertEquals(AgeRules.CHOICES, AgeRules.choicesFor(null))
+    }
+
+    @Test
+    fun avatarDUnNouveauProfil() {
+        // Le serveur refuse tout avatar hors de `/avatars/`.
+        assertTrue(AgeRules.NEW_PROFILE_AVATARS.all { it.startsWith("/avatars/") })
+        val first = AgeRules.NEW_PROFILE_AVATARS.first()
+        assertEquals(first, AgeRules.newProfileAvatar(emptyList()))
+        // Déjà pris par un autre profil : le suivant, pour les distinguer dans « Qui regarde ? ».
+        assertEquals(AgeRules.NEW_PROFILE_AVATARS[1], AgeRules.newProfileAvatar(listOf(first, null)))
+        // Tous pris : on en donne un quand même.
+        assertTrue(AgeRules.newProfileAvatar(AgeRules.NEW_PROFILE_AVATARS) in AgeRules.NEW_PROFILE_AVATARS)
+    }
+
+    @Test
+    fun nomDUnNouveauProfil() {
+        // Mêmes bornes que le serveur (1 à 32 caractères) : un nom refusé là-bas ne part pas.
+        assertNull(AgeRules.profileName("   "))
+        assertEquals("Léo", AgeRules.profileName("  Léo "))
+        assertEquals(32, AgeRules.profileName("a".repeat(40))?.length)
+    }
 }

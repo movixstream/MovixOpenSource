@@ -1,6 +1,7 @@
 package com.movix.tv.ui.profiles
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,14 +14,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -33,10 +40,15 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,6 +60,7 @@ import coil3.request.ImageRequest
 import com.movix.tv.R
 import com.movix.tv.container
 import com.movix.tv.data.account.LinkedProfile
+import com.movix.tv.data.account.ProfileChange
 import com.movix.tv.data.age.AgeRules
 import com.movix.tv.data.local.UiKeys
 import com.movix.tv.data.local.UiPrefs
@@ -58,10 +71,12 @@ import com.movix.tv.ui.components.focusProgress
 import com.movix.tv.ui.components.focusScale
 import com.movix.tv.ui.components.pressProgress
 import com.movix.tv.ui.components.pressScale
+import com.movix.tv.ui.settings.ChoiceRow
 import com.movix.tv.ui.theme.Bricolage
 import com.movix.tv.ui.theme.MovixColors
 import com.movix.tv.ui.theme.MovixType
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -71,7 +86,8 @@ import kotlinx.coroutines.withContext
  * Retour garde le profil actuel ([onBack]).
  *
  * La liste part des profils gardés sur la télé et se met à jour depuis le
- * serveur (`GET /api/profiles`).
+ * serveur (`GET /api/profiles`). La tuile « + » crée un profil sans passer par
+ * le site (nom et limite d'âge : c'est ainsi qu'on fait un profil enfant).
  */
 @Composable
 fun ProfilePickerScreen(onDone: () -> Unit, onBack: () -> Unit, modifier: Modifier = Modifier) {
@@ -85,6 +101,20 @@ fun ProfilePickerScreen(onDone: () -> Unit, onBack: () -> Unit, modifier: Modifi
     var failed by remember { mutableStateOf(false) }
     var switching by remember { mutableStateOf(false) }
     var attempt by remember { mutableStateOf(0) }
+
+    // Nouveau profil (tuile « + ») : le formulaire prend la place des profils.
+    var creating by remember { mutableStateOf(false) }
+    var creatingBusy by remember { mutableStateOf(false) }
+    var createError by remember { mutableStateOf<Int?>(null) }
+    // Profil qui prend le focus au retour du formulaire : celui qu'on vient de créer.
+    var focusId by remember { mutableStateOf<String?>(null) }
+    // Formulaire refermé sans rien créer : le focus revient sur la tuile « + ».
+    var focusAdd by remember { mutableStateOf(false) }
+    fun closeForm() {
+        focusAdd = true
+        createError = null
+        creating = false
+    }
 
     LaunchedEffect(attempt) {
         failed = false
@@ -103,10 +133,17 @@ fun ProfilePickerScreen(onDone: () -> Unit, onBack: () -> Unit, modifier: Modifi
         value = runCatching { withContext(Dispatchers.IO) { container.apiHost.current().removePrefix("api.") } }.getOrNull()
     }
 
-    BackHandler { if (!switching) onBack() }
+    BackHandler {
+        when {
+            // Formulaire ouvert : Retour le referme (pas pendant l'envoi).
+            creating -> if (!creatingBusy) closeForm()
+            !switching -> onBack()
+        }
+    }
 
     val currentId = account?.profileId
     val firstRequester = remember { FocusRequester() }
+    val addRequester = remember { FocusRequester() }
     var errorText by remember { mutableStateOf(false) }
 
     fun choose(p: LinkedProfile) {
@@ -121,6 +158,35 @@ fun ProfilePickerScreen(onDone: () -> Unit, onBack: () -> Unit, modifier: Modifi
         }
     }
 
+    fun create(name: String, limit: Int) {
+        if (creatingBusy) return
+        if (AgeRules.profileName(name) == null) { createError = R.string.profiles_new_name_empty; return }
+        creatingBusy = true
+        createError = null
+        scope.launch {
+            // Mené au bout même si l'écran se ferme : le profil créé est gardé sur la télé.
+            val result = withContext(NonCancellable) { container.accounts.createProfile(name, limit) }
+            creatingBusy = false
+            when (result.status) {
+                ProfileChange.OK -> {
+                    result.profile?.let { created ->
+                        profiles = profiles.filter { it.id != created.id } + created
+                        // Le focus arrive sur le nouveau profil : OK y bascule.
+                        focusId = created.id
+                    }
+                    focusAdd = false
+                    creating = false
+                    // La liste du serveur fait foi (elle a pu être lue avant la création).
+                    attempt++
+                }
+                ProfileChange.REFUSED -> createError = R.string.profiles_new_refused
+                ProfileChange.NETWORK -> createError = R.string.profiles_error
+                // Session supprimée depuis le site : l'écran se ferme (plus de compte).
+                ProfileChange.SIGNED_OUT -> Unit
+            }
+        }
+    }
+
     Box(
         modifier
             .fillMaxSize()
@@ -131,11 +197,15 @@ fun ProfilePickerScreen(onDone: () -> Unit, onBack: () -> Unit, modifier: Modifi
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(stringResource(R.string.profiles_title), style = MovixType.Hero)
+            Text(stringResource(if (creating) R.string.profiles_new_title else R.string.profiles_title), style = MovixType.Hero)
             Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.profiles_body), style = MovixType.Body)
+            Text(stringResource(if (creating) R.string.profiles_new_body else R.string.profiles_body), style = MovixType.Body)
             Spacer(Modifier.height(36.dp))
+            // Le profil qui reçoit le focus : celui qu'on vient de créer, sinon l'actuel, sinon le premier.
+            val ids = profiles.map { it.id }
+            val targetId = focusId?.takeIf { it in ids } ?: currentId?.takeIf { it in ids } ?: ids.firstOrNull()
             when {
+                creating -> NewProfileForm(creatingBusy, createError, ::create, onCancel = { if (!creatingBusy) closeForm() })
                 loading -> Text(stringResource(R.string.profiles_loading), style = MovixType.Meta)
                 failed -> {
                     Text(stringResource(R.string.profiles_error), style = MovixType.Body.copy(color = MovixColors.Red))
@@ -149,32 +219,144 @@ fun ProfilePickerScreen(onDone: () -> Unit, onBack: () -> Unit, modifier: Modifi
                             current = p.id == currentId,
                             avatarUrl = avatarUrl(p.avatar, siteHost),
                             onClick = { choose(p) },
-                            modifier = if (p.id == currentId || (currentId !in profiles.map { it.id } && p == profiles.first())) Modifier.focusRequester(firstRequester) else Modifier,
+                            modifier = if (p.id == targetId) Modifier.focusRequester(firstRequester) else Modifier,
                         )
+                    }
+                    // Profil enfant créé depuis la télé (le serveur en garde cinq au plus).
+                    if (profiles.size < AgeRules.MAX_PROFILES) {
+                        AddProfileTile({ if (!switching) { createError = null; creating = true } }, Modifier.focusRequester(addRequester))
                     }
                 }
             }
-            Spacer(Modifier.height(28.dp))
-            Box(Modifier.height(22.dp)) {
-                when {
-                    switching -> Text(stringResource(R.string.profiles_switching), style = MovixType.Meta)
-                    errorText -> Text(stringResource(R.string.profiles_error), style = MovixType.Body.copy(color = MovixColors.Red))
+            if (!creating) {
+                Spacer(Modifier.height(28.dp))
+                Box(Modifier.height(22.dp)) {
+                    when {
+                        switching -> Text(stringResource(R.string.profiles_switching), style = MovixType.Meta)
+                        errorText -> Text(stringResource(R.string.profiles_error), style = MovixType.Body.copy(color = MovixColors.Red))
+                    }
                 }
+                Spacer(Modifier.height(12.dp))
+                val prompt = UiPrefs.flag(values, UiKeys.PROFILE_PROMPT)
+                PillButton(
+                    stringResource(R.string.profiles_dont_ask),
+                    { scope.launch { container.store.set(UiKeys.PROFILE_PROMPT, if (prompt) "0" else null) } },
+                    icon = if (!prompt) MovixIcons.Check else null,
+                    selected = !prompt,
+                )
             }
-            Spacer(Modifier.height(12.dp))
-            val prompt = UiPrefs.flag(values, UiKeys.PROFILE_PROMPT)
-            PillButton(
-                stringResource(R.string.profiles_dont_ask),
-                { scope.launch { container.store.set(UiKeys.PROFILE_PROMPT, if (prompt) "0" else null) } },
-                icon = if (!prompt) MovixIcons.Check else null,
-                selected = !prompt,
-            )
         }
     }
 
-    // Focus d'entrée : le profil actuel (ou le premier, ou « Réessayer »).
-    LaunchedEffect(loading, failed, profiles.size) {
-        if (!loading) runCatching { firstRequester.requestFocus() }
+    // Focus d'entrée : le profil actuel (ou le premier, ou « Réessayer ») ; au
+    // retour du formulaire, la tuile « + » quittée ou le profil créé.
+    LaunchedEffect(loading, failed, profiles.size, creating) {
+        if (loading || creating) return@LaunchedEffect
+        val entered = focusAdd && runCatching { addRequester.requestFocus() }.isSuccess
+        focusAdd = false
+        if (!entered) runCatching { firstRequester.requestFocus() }
+    }
+}
+
+/** Limite d'âge proposée d'office à un profil créé sur la télé (profil enfant). */
+private const val NEW_PROFILE_LIMIT = 7
+
+/**
+ * Nouveau profil : son nom, sa limite d'âge, puis « Créer le profil ». Le
+ * focus arrive sur ce bouton : le nom et la limite proposés donnent un profil
+ * enfant en un appui, et le clavier ne s'ouvre que si l'on monte sur le nom.
+ */
+@Composable
+private fun NewProfileForm(busy: Boolean, error: Int?, onCreate: (String, Int) -> Unit, onCancel: () -> Unit) {
+    val defaultName = stringResource(R.string.profiles_new_default_name)
+    var name by remember { mutableStateOf(defaultName) }
+    var limit by remember { mutableIntStateOf(NEW_PROFILE_LIMIT) }
+    val createRequester = remember { FocusRequester() }
+    Column(Modifier.width(460.dp)) {
+        Text(stringResource(R.string.profiles_new_name), style = MovixType.Kicker)
+        Spacer(Modifier.height(6.dp))
+        NameField(name, { name = it.take(AgeRules.PROFILE_NAME_MAX) }, onDone = { runCatching { createRequester.requestFocus() } })
+        Spacer(Modifier.height(18.dp))
+        Text(stringResource(R.string.profiles_new_age), style = MovixType.Kicker)
+        Spacer(Modifier.height(2.dp))
+        val none = stringResource(R.string.profiles_new_none)
+        ChoiceRow("", AgeRules.CHOICES.map { it to if (it == 0) none else stringResource(R.string.age_badge, it) }, limit, { limit = it })
+        Text(
+            if (limit > 0) stringResource(R.string.kids_state_on, limit) else stringResource(R.string.kids_state_off),
+            style = MovixType.Body,
+        )
+        Spacer(Modifier.height(22.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PillButton(stringResource(R.string.profiles_new_create), { onCreate(name, limit) }, Modifier.focusRequester(createRequester))
+            PillButton(stringResource(R.string.profiles_new_cancel), onCancel)
+        }
+        Spacer(Modifier.height(14.dp))
+        Box(Modifier.height(22.dp)) {
+            when {
+                busy -> Text(stringResource(R.string.profiles_new_creating), style = MovixType.Meta)
+                error != null -> Text(stringResource(error), style = MovixType.Body.copy(color = MovixColors.Red))
+            }
+        }
+    }
+    LaunchedEffect(Unit) { runCatching { createRequester.requestFocus() } }
+}
+
+/** Champ du nom : bordure claire au focus, OK ouvre le clavier de la télé. */
+@Composable
+private fun NameField(value: String, onChange: (String) -> Unit, onDone: () -> Unit) {
+    val source = remember { MutableInteractionSource() }
+    val focused by source.collectIsFocusedAsState()
+    BasicTextField(
+        value = value,
+        onValueChange = onChange,
+        singleLine = true,
+        textStyle = MovixType.Button.copy(fontSize = 15.sp),
+        cursorBrush = SolidColor(MovixColors.Text),
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done, autoCorrectEnabled = false),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        interactionSource = source,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MovixColors.Panel, RoundedCornerShape(10.dp))
+            .border(2.dp, if (focused) MovixColors.Text else MovixColors.Line, RoundedCornerShape(10.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    )
+}
+
+/** Tuile « + » au bout des profils : ouvre le formulaire d'un nouveau profil. */
+@Composable
+private fun AddProfileTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val source = remember { MutableInteractionSource() }
+    val focused by source.collectIsFocusedAsState()
+    val progress = focusProgress(focused)
+    val press = pressProgress(source)
+    Column(modifier.width(120.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .pressScale(press)
+                .focusScale(progress, max = 1.1f)
+                .size(112.dp)
+                .border(3.dp, if (focused) MovixColors.Red else Color.Transparent, CircleShape)
+                .clickable(interactionSource = source, indication = null, onClick = onClick)
+                .padding(7.dp)
+                .clip(CircleShape)
+                .background(MovixColors.Chip),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                rememberVectorPainter(MovixIcons.Plus),
+                null,
+                Modifier.size(34.dp),
+                colorFilter = ColorFilter.tint(if (focused) MovixColors.Text else MovixColors.Muted),
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            stringResource(R.string.profiles_add),
+            style = MovixType.Button.copy(color = if (focused) MovixColors.Text else MovixColors.Muted, textAlign = TextAlign.Center),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

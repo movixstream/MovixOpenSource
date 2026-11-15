@@ -17,4 +17,33 @@
     <!-- Account settings. -->
     <string name="settings_account_age">Age restriction: %1$d+. Only titles rated for this age are shown.</string>
     <string name="settings_account_age_unknown">Checking the profile\'s age restriction.</string>
+
+    <!-- Settings › Kids mode: age limit of the profile that is watching, or of the TV without an account. -->
+    <string name="kids_title">Kids mode</string>
+    <string name="kids_body">Only shows movies and series rated for the chosen age.</string>
+    <string name="kids_off">Off</string>
+    <string name="kids_state_off">Off: the whole catalog is shown.</string>
+    <string name="kids_state_on">On: only titles rated %1$d+ or under are shown. Titles with no age rating are hidden.</string>
+    <string name="kids_state_adult">18+: the whole catalog is shown.</string>
+    <string name="kids_scope_profile">This setting belongs to the profile %1$s. It also applies on the website and your other devices.</string>
+    <string name="kids_scope_tv">This setting stays on this TV.</string>
+    <string name="kids_tip_profiles">For a child, a profile of their own works best: “Switch profile”, then “Add a profile”.</string>
+    <string name="kids_saving">Saving…</string>
+    <string name="kids_error_network">The Movix server isn\'t responding. The setting hasn\'t changed.</string>
+    <string name="kids_error_refused">The server refused this setting. Nothing changed.</string>
+    <string name="kids_error_signed_out">The TV is no longer linked to the account. Link it again in “Account”.</string>
+
+    <!-- “Who\'s watching?”: profile created from the TV. -->
+    <string name="profiles_add">Add a profile</string>
+    <string name="profiles_new_title">New profile</string>
+    <string name="profiles_new_body">Choose its name and age limit. The avatar can be changed on the website.</string>
+    <string name="profiles_new_default_name">Kid</string>
+    <string name="profiles_new_name">Name</string>
+    <string name="profiles_new_age">Age limit</string>
+    <string name="profiles_new_none">None</string>
+    <string name="profiles_new_create">Create profile</string>
+    <string name="profiles_new_cancel">Cancel</string>
+    <string name="profiles_new_creating">Creating the profile…</string>
+    <string name="profiles_new_name_empty">Give the profile a name.</string>
+    <string name="profiles_new_refused">The server refused this profile: name not accepted, or five profiles already.</string>
 </resources>

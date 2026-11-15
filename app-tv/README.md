@@ -15,6 +15,8 @@ Jetpack Compose for TV et Media3.
 - Lecteur web avec bloqueur de pubs ([`adblock/`](adblock/README.md)).
 - Liaison au compte Movix par un code affiché sur la télé ; profils du compte,
   avec la restriction d'âge des profils enfant.
+- Mode enfant réglable sur la télé (Réglages › Mode enfant), avec ou sans
+  compte ; profil enfant créé depuis « Qui regarde ? ».
 
 Installation pour les utilisateurs : page `/app-tv` du site.
 

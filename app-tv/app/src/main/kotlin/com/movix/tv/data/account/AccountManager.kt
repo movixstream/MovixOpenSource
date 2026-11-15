@@ -9,6 +9,7 @@ import com.movix.tv.data.age.AgeRules
 import com.movix.tv.data.local.LocalStore
 import com.movix.tv.data.local.TvKeys
 import com.movix.tv.data.movix.VipManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,6 +41,20 @@ data class Account(
     val ageRestriction: Int? = null,
 )
 
+/** Issue d'un réglage de profil demandé depuis la télé. */
+enum class ProfileChange {
+    OK,
+    /** Le serveur a dit non (nom refusé, cinq profils déjà) : réessayer tel quel ne changera rien. */
+    REFUSED,
+    /** Serveur injoignable ou en panne : rien n'a changé, on peut réessayer. */
+    NETWORK,
+    /** La session a été supprimée depuis le site : la télé n'est plus reliée. */
+    SIGNED_OUT,
+}
+
+/** Profil créé depuis la télé ([profile] seulement si [status] vaut [ProfileChange.OK]). */
+data class ProfileCreation(val status: ProfileChange, val profile: LinkedProfile? = null)
+
 class AccountManager(
     private val context: Context,
     private val store: LocalStore,
@@ -61,9 +76,13 @@ class AccountManager(
     private val limitLock = Mutex()
     @Volatile private var profilesReadAt = 0L
 
+    // Mode enfant gardé sur la télé : il vaut tant qu'aucun compte n'est relié
+    // (avec un compte, c'est la restriction du profil qui regarde).
+    @Volatile private var localLimit = 0
+
     /** Publie le compte ; la restriction d'abord, pour que ceux qui suivent le compte la lisent à jour. */
     private fun publish(account: Account?) {
-        _limit.value = if (account == null) 0 else account.ageRestriction?.let(AgeRules::profileLimit)
+        _limit.value = if (account == null) localLimit else account.ageRestriction?.let(AgeRules::profileLimit)
         _state.value = account
     }
 
@@ -73,6 +92,7 @@ class AccountManager(
     }
 
     suspend fun restore() {
+        localLimit = AgeRules.storedLimit(store.read(TvKeys.KID_LIMIT))
         val saved = store.read(TvKeys.ACCOUNT)?.let { runCatching { json.decodeFromString(Account.serializer(), it) }.getOrNull() }
         // Compte enregistré sans la restriction : celle des profils gardés sur la télé, s'ils la donnent.
         val account = if (saved != null && saved.ageRestriction == null) {
@@ -150,7 +170,7 @@ class AccountManager(
     /** Restriction inconnue : la liste des profils est demandée (une fois à la fois). */
     override suspend fun resolve(): Int? {
         if (!restored) restore()
-        if (current == null) return 0
+        if (current == null) return localLimit
         _limit.value?.let { return it }
         return limitLock.withLock {
             _limit.value ?: run {
@@ -176,6 +196,77 @@ class AccountManager(
     suspend fun cachedProfiles(): List<LinkedProfile> {
         if (current == null) return emptyList()
         return store.read(PROFILES_CACHE)?.let { runCatching { json.decodeFromString(profileList, it) }.getOrNull() }.orEmpty()
+    }
+
+    /** Range [profile] (modifié ou créé depuis la télé) dans les profils gardés : « Qui regarde ? » le montre sans attendre le réseau. */
+    private suspend fun cacheProfile(profile: LinkedProfile) {
+        val list = cachedProfiles()
+        val next = if (list.any { it.id == profile.id }) list.map { if (it.id == profile.id) profile else it } else list + profile
+        store.writeAll(mapOf(PROFILES_CACHE to json.encodeToString(profileList, next)))
+    }
+
+    /**
+     * Mode enfant : [limit] (0 = désactivé, sinon 7, 12, 16 ou 18) devient la
+     * limite d'âge de ce qui est proposé.
+     *
+     * Compte relié : c'est la restriction du profil qui regarde, enregistrée sur
+     * le serveur (la même que sur le site) ; rien ne change sur la télé tant que
+     * le serveur n'a pas répondu, et c'est la valeur qu'il a gardée qui
+     * s'applique. Sans compte : le réglage reste sur la télé.
+     */
+    suspend fun setAgeLimit(limit: Int): ProfileChange {
+        val value = AgeRules.profileLimit(limit)
+        val account = current
+        if (account == null) {
+            store.writeAll(mapOf(TvKeys.KID_LIMIT to value.takeIf { it > 0 }?.toString()))
+            localLimit = value
+            // Un compte relié entre-temps garde la restriction de son profil.
+            if (current == null) _limit.value = value
+            return ProfileChange.OK
+        }
+        val saved = try {
+            api.updateProfileAge(account.token, account.profileId, value)
+        } catch (e: SessionRevokedException) {
+            logout(remote = false)
+            return ProfileChange.SIGNED_OUT
+        } catch (e: ProfileRefusedException) {
+            return ProfileChange.REFUSED
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("MovixAccount", "mode enfant non enregistré : $e")
+            return ProfileChange.NETWORK
+        }
+        cacheProfile(saved)
+        // Profil changé pendant l'appel (« Qui regarde ? ») : sa restriction n'est pas celle-ci.
+        current?.takeIf { it.profileId == saved.id }?.let { save(it.copy(ageRestriction = AgeRules.profileLimit(saved.ageRestriction))) }
+        return ProfileChange.OK
+    }
+
+    /**
+     * Nouveau profil du compte, créé depuis « Qui regarde ? » : [name] et sa
+     * limite d'âge [limit]. L'avatar est un de ceux du site, à changer là-bas.
+     * La télé reste sur le profil actuel : c'est l'écran qui propose de basculer.
+     */
+    suspend fun createProfile(name: String, limit: Int): ProfileCreation {
+        val account = current ?: return ProfileCreation(ProfileChange.SIGNED_OUT)
+        val safeName = AgeRules.profileName(name) ?: return ProfileCreation(ProfileChange.REFUSED)
+        val avatar = AgeRules.newProfileAvatar(cachedProfiles().map { it.avatar })
+        val created = try {
+            api.createProfile(account.token, safeName, avatar, AgeRules.profileLimit(limit))
+        } catch (e: SessionRevokedException) {
+            logout(remote = false)
+            return ProfileCreation(ProfileChange.SIGNED_OUT)
+        } catch (e: ProfileRefusedException) {
+            return ProfileCreation(ProfileChange.REFUSED)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("MovixAccount", "profil non créé : $e")
+            return ProfileCreation(ProfileChange.NETWORK)
+        }
+        cacheProfile(created)
+        return ProfileCreation(ProfileChange.OK, created)
     }
 
     /**
