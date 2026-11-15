@@ -36,7 +36,7 @@
     <!-- “Who\'s watching?”: profile created from the TV. -->
     <string name="profiles_add">Add a profile</string>
     <string name="profiles_new_title">New profile</string>
-    <string name="profiles_new_body">Choose its name and age limit. The avatar can be changed on the website.</string>
+    <string name="profiles_new_body">Choose its avatar, name and age limit.</string>
     <string name="profiles_new_default_name">Kid</string>
     <string name="profiles_new_name">Name</string>
     <string name="profiles_new_age">Age limit</string>

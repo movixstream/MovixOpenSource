@@ -16,7 +16,10 @@ Jetpack Compose for TV et Media3.
 - Liaison au compte Movix par un code affiché sur la télé ; profils du compte,
   avec la restriction d'âge des profils enfant.
 - Mode enfant réglable sur la télé (Réglages › Mode enfant), avec ou sans
-  compte ; profil enfant créé depuis « Qui regarde ? ».
+  compte ; le catalogue d'un profil 7+, 12+ ou 16+ est rempli à partir des
+  classifications d'âge de TMDB.
+- Profils du compte gérés depuis « Qui regarde ? » : création, avatar, nom,
+  limite d'âge, suppression.
 
 Installation pour les utilisateurs : page `/app-tv` du site.
 

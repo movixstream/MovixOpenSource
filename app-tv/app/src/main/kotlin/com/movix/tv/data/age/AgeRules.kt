@@ -110,26 +110,7 @@ object AgeRules {
         return text.toIntOrNull()?.takeIf { it == 0 || it == 7 || it == 12 || it == 16 || it == 18 } ?: UNREADABLE_LIMIT
     }
 
-    /** Avatars du site donnés à un profil créé sur la télé (le serveur n'accepte que `/avatars/…`). */
-    val NEW_PROFILE_AVATARS: List<String> = listOf(
-        "/avatars/pixar/pixar_avatar_1.png",
-        "/avatars/mickey/mickey_avatar_1.png",
-        "/avatars/pixar/pixar_avatar_2.png",
-        "/avatars/mickey/mickey_avatar_2.png",
-        "/avatars/pixar/pixar_avatar_3.png",
-    )
-
-    /** Premier avatar que les autres profils ([taken]) n'ont pas : on les distingue dans « Qui regarde ? ». */
-    fun newProfileAvatar(taken: Collection<String?>): String =
-        NEW_PROFILE_AVATARS.firstOrNull { it !in taken } ?: NEW_PROFILE_AVATARS.first()
-
-    /** Nom d'un nouveau profil, aux bornes du serveur (1 à 32 caractères) ; `null` s'il est vide. */
-    fun profileName(raw: String): String? = raw.trim().take(PROFILE_NAME_MAX).trim().takeIf { it.isNotEmpty() }
-
-    const val PROFILE_NAME_MAX = 32
-
-    /** Nombre de profils qu'un compte peut avoir (limite du serveur). */
-    const val MAX_PROFILES = 5
+    // Nom, avatar et nombre des profils : `data/account/ProfileRules.kt`.
 
     private inline fun <T> ordered(all: List<T>, preferred: List<String>, country: (T) -> String): List<T> =
         preferred.mapNotNull { code -> all.firstOrNull { country(it) == code } } + all.filter { country(it) !in preferred }

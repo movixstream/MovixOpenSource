@@ -88,10 +88,13 @@ fun MovixRoot(onExit: () -> Unit) {
     // Réglages › Compte. Rien n'est affiché avant de savoir s'il faut le montrer.
     var started by remember { mutableStateOf(false) }
     var picker by remember { mutableStateOf<ProfilePickerFrom?>(null) }
+    // « Gérer les profils » (Réglages) : « Qui regarde ? » s'ouvre en mode gestion.
+    var pickerManage by remember { mutableStateOf(false) }
     var refocusContent by remember { mutableIntStateOf(0) }
     val closePicker = {
         if (picker == ProfilePickerFrom.SETTINGS) refocusContent++
         picker = null
+        pickerManage = false
     }
 
     BackHandler {
@@ -109,7 +112,7 @@ fun MovixRoot(onExit: () -> Unit) {
     if (!started) {
         Box(Modifier.fillMaxSize().background(MovixColors.Ink))
     } else if (picker != null) {
-        ProfilePickerScreen(onDone = closePicker, onBack = closePicker)
+        ProfilePickerScreen(onDone = closePicker, onBack = closePicker, startManaging = pickerManage)
     } else AnimatedContent(
         targetState = nav.current,
         contentKey = { r ->
@@ -144,6 +147,7 @@ fun MovixRoot(onExit: () -> Unit) {
                             onLinkAccount = { nav.push(Route.Link) },
                             modifier = contentModifier.padding(start = 60.dp),
                             onSwitchProfile = { picker = ProfilePickerFrom.SETTINGS },
+                            onManageProfiles = { pickerManage = true; picker = ProfilePickerFrom.SETTINGS },
                         )
                         Section.WATCHLIST -> WatchlistScreen(onOpen = { nav.push(Route.Details(it.type, it.id, it)) }, onEmptyBack = { railRequester.requestFocus() }, modifier = contentModifier.padding(start = 60.dp))
                         else -> BrowseScreen(

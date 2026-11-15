@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- « Gérer les profils » : modifier, supprimer, choisir l'avatar depuis la télé. -->
+    <string name="profiles_manage">Gérer les profils</string>
+    <string name="profiles_manage_body">Choisis le profil à modifier. Les changements valent aussi sur le site.</string>
+    <string name="profiles_manage_done">Terminé</string>
+    <string name="profiles_manage_edit">Modifier</string>
+
+    <!-- Éditeur d'un profil -->
+    <string name="profiles_edit_title">Modifier le profil</string>
+    <string name="profiles_edit_body">Avatar, nom et limite d\'âge. Les changements valent aussi sur le site et sur tes autres appareils.</string>
+    <string name="profiles_avatar_change">Changer l\'avatar</string>
+    <string name="profiles_name_placeholder">Nom du profil</string>
+    <string name="profiles_name_hint">OK pour modifier</string>
+    <string name="profiles_save">Enregistrer</string>
+    <string name="profiles_saving">Enregistrement…</string>
+    <string name="profiles_edit_refused">Le serveur a refusé ces changements : nom non accepté, ou profil supprimé entre-temps. Rien n\'a changé.</string>
+    <string name="profiles_network">Le serveur Movix ne répond pas. Rien n\'a changé : réessaie dans un instant.</string>
+
+    <!-- Suppression, en deux temps -->
+    <string name="profiles_delete">Supprimer le profil</string>
+    <string name="profiles_delete_current">Le profil en cours d\'utilisation ne peut pas être supprimé : passe d\'abord sur un autre profil.</string>
+    <string name="profiles_delete_last">Le dernier profil du compte ne peut pas être supprimé.</string>
+    <string name="profiles_delete_title">Supprimer « %1$s » ?</string>
+    <string name="profiles_delete_body">Son historique, sa reprise et Ma liste seront effacés pour de bon, sur la télé comme sur le site. Ça ne pourra pas être annulé.</string>
+    <string name="profiles_delete_keep">Garder le profil</string>
+    <string name="profiles_delete_confirm">Supprimer définitivement</string>
+    <string name="profiles_deleting">Suppression du profil…</string>
+    <string name="profiles_delete_refused">Le serveur a refusé la suppression. Rien n\'a changé.</string>
+
+    <!-- Choix de l'avatar -->
+    <string name="profiles_avatar_title">Choisis un avatar</string>
+    <string name="profiles_avatar_body">OK choisit l\'avatar, Retour garde celui d\'avant. Haut et Bas changent de série.</string>
+    <string name="profiles_avatar_classics">Classiques</string>
+
+    <!-- Session supprimée depuis le site pendant la gestion des profils -->
+    <string name="profiles_signed_out_title">Plus de compte relié</string>
+    <string name="profiles_signed_out">La session de cette télé a été supprimée depuis le site : elle n\'est plus reliée au compte. Reconnecte-la dans Réglages › Compte.</string>
+    <string name="profiles_close">Fermer</string>
+</resources>

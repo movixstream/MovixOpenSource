@@ -170,23 +170,5 @@ class AgeRulesTest {
         assertEquals(AgeRules.CHOICES, AgeRules.choicesFor(null))
     }
 
-    @Test
-    fun avatarDUnNouveauProfil() {
-        // Le serveur refuse tout avatar hors de `/avatars/`.
-        assertTrue(AgeRules.NEW_PROFILE_AVATARS.all { it.startsWith("/avatars/") })
-        val first = AgeRules.NEW_PROFILE_AVATARS.first()
-        assertEquals(first, AgeRules.newProfileAvatar(emptyList()))
-        // Déjà pris par un autre profil : le suivant, pour les distinguer dans « Qui regarde ? ».
-        assertEquals(AgeRules.NEW_PROFILE_AVATARS[1], AgeRules.newProfileAvatar(listOf(first, null)))
-        // Tous pris : on en donne un quand même.
-        assertTrue(AgeRules.newProfileAvatar(AgeRules.NEW_PROFILE_AVATARS) in AgeRules.NEW_PROFILE_AVATARS)
-    }
-
-    @Test
-    fun nomDUnNouveauProfil() {
-        // Mêmes bornes que le serveur (1 à 32 caractères) : un nom refusé là-bas ne part pas.
-        assertNull(AgeRules.profileName("   "))
-        assertEquals("Léo", AgeRules.profileName("  Léo "))
-        assertEquals(32, AgeRules.profileName("a".repeat(40))?.length)
-    }
+    // Nom et avatar d'un nouveau profil : `data/account/ProfileRulesTest.kt`.
 }

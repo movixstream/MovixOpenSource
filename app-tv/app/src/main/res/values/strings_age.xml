@@ -37,7 +37,7 @@
     <!-- « Qui regarde ? » : profil créé depuis la télé. -->
     <string name="profiles_add">Ajouter un profil</string>
     <string name="profiles_new_title">Nouveau profil</string>
-    <string name="profiles_new_body">Choisis son nom et sa limite d\'âge. L\'avatar se change sur le site.</string>
+    <string name="profiles_new_body">Choisis son avatar, son nom et sa limite d\'âge.</string>
     <string name="profiles_new_default_name">Enfant</string>
     <string name="profiles_new_name">Nom</string>
     <string name="profiles_new_age">Limite d\'âge</string>

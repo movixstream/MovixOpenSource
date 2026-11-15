@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- "Manage profiles": edit, delete and choose the avatar from the TV. -->
+    <string name="profiles_manage">Manage profiles</string>
+    <string name="profiles_manage_body">Choose the profile to edit. Changes also apply on the website.</string>
+    <string name="profiles_manage_done">Done</string>
+    <string name="profiles_manage_edit">Edit</string>
+
+    <!-- Profile editor -->
+    <string name="profiles_edit_title">Edit profile</string>
+    <string name="profiles_edit_body">Avatar, name and age limit. Changes also apply on the website and your other devices.</string>
+    <string name="profiles_avatar_change">Change avatar</string>
+    <string name="profiles_name_placeholder">Profile name</string>
+    <string name="profiles_name_hint">Press OK to edit</string>
+    <string name="profiles_save">Save</string>
+    <string name="profiles_saving">Saving…</string>
+    <string name="profiles_edit_refused">The server refused these changes: name not accepted, or the profile was deleted meanwhile. Nothing changed.</string>
+    <string name="profiles_network">The Movix server isn\'t responding. Nothing changed: try again in a moment.</string>
+
+    <!-- Deletion, in two steps -->
+    <string name="profiles_delete">Delete profile</string>
+    <string name="profiles_delete_current">The profile in use can\'t be deleted: switch to another profile first.</string>
+    <string name="profiles_delete_last">The account\'s last profile can\'t be deleted.</string>
+    <string name="profiles_delete_title">Delete “%1$s”?</string>
+    <string name="profiles_delete_body">Its history, Continue watching and My list will be erased for good, on the TV and on the website. This can\'t be undone.</string>
+    <string name="profiles_delete_keep">Keep profile</string>
+    <string name="profiles_delete_confirm">Delete permanently</string>
+    <string name="profiles_deleting">Deleting the profile…</string>
+    <string name="profiles_delete_refused">The server refused the deletion. Nothing changed.</string>
+
+    <!-- Avatar choice -->
+    <string name="profiles_avatar_title">Choose an avatar</string>
+    <string name="profiles_avatar_body">OK picks the avatar, Back keeps the previous one. Up and Down switch series.</string>
+    <string name="profiles_avatar_classics">Classics</string>
+
+    <!-- Session deleted from the website while managing profiles -->
+    <string name="profiles_signed_out_title">No linked account</string>
+    <string name="profiles_signed_out">This TV\'s session was deleted from the website: it is no longer linked to the account. Link it again in Settings › Account.</string>
+    <string name="profiles_close">Close</string>
+</resources>

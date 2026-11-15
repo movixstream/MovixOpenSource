@@ -140,4 +140,69 @@ class AccountApiTest {
         val error = runCatching { api.updateProfileAge("jwt", "p1", 12) }.exceptionOrNull()
         assertEquals(true, error is java.io.IOException)
     }
+
+    // Profil modifié depuis la télé (« Gérer les profils »). Le serveur ne touche
+    // qu'aux champs reçus : un champ que l'on n'a pas changé ne doit pas partir,
+    // sinon la télé réécrirait ce qui vient d'être changé sur le site.
+    @Test
+    fun `modification d'un profil envoie seulement les champs changés`() = runTest {
+        server.enqueue(MockResponse.Builder().body("""{"success":true,"profile":{"id":"p1","name":"Léo",
+            "avatar":"/avatars/pixar/pixar_avatar_1.png","ageRestriction":12}}""").build())
+        val saved = api.updateProfile("jwt", "p1", ProfileEdit(name = "Léo"))
+        val req = server.takeRequest()
+        assertEquals("PUT", req.method)
+        assertEquals("/api/profiles/p1", req.url.encodedPath)
+        assertEquals("Bearer jwt", req.headers["Authorization"])
+        assertEquals("""{"name":"Léo"}""", req.body?.utf8())
+        assertEquals("Léo", saved.name)
+        assertEquals(12, saved.ageRestriction)
+
+        server.enqueue(MockResponse.Builder().body("""{"success":true,"profile":{"id":"p1","name":"Léo",
+            "avatar":"/avatars/mickey/mickey_avatar_2.png","ageRestriction":0}}""").build())
+        api.updateProfile("jwt", "p1", ProfileEdit(avatar = "/avatars/mickey/mickey_avatar_2.png", ageRestriction = 0))
+        val sent = json.parseToJsonElement(server.takeRequest().body!!.utf8()) as kotlinx.serialization.json.JsonObject
+        assertEquals(setOf("avatar", "ageRestriction"), sent.keys)
+        assertEquals("\"/avatars/mickey/mickey_avatar_2.png\"", sent["avatar"].toString())
+        // Restriction levée : 0 envoyé, jamais un champ absent (le profil resterait limité).
+        assertEquals("0", sent["ageRestriction"].toString())
+    }
+
+    @Test
+    fun `modification refusée distinguée d'une panne`() = runTest {
+        server.enqueue(MockResponse.Builder().code(400).body("""{"error":"Invalid profile name","code":"INVALID_PROFILE_NAME"}""").build())
+        val refused = runCatching { api.updateProfile("jwt", "p1", ProfileEdit(name = "x")) }.exceptionOrNull()
+        assertEquals(true, refused is ProfileRefusedException)
+
+        server.enqueue(MockResponse.Builder().code(500).body("""{"error":"Failed to update profile"}""").build())
+        val broken = runCatching { api.updateProfile("jwt", "p1", ProfileEdit(name = "x")) }.exceptionOrNull()
+        assertEquals(true, broken is java.io.IOException && broken !is ProfileRefusedException)
+    }
+
+    @Test
+    fun `suppression d'un profil`() = runTest {
+        server.enqueue(MockResponse.Builder().body("""{"success":true,"newDefaultProfile":null}""").build())
+        api.deleteProfile("jwt", "p2")
+        val req = server.takeRequest()
+        assertEquals("DELETE", req.method)
+        assertEquals("/api/profiles/p2", req.url.encodedPath)
+        assertEquals("Bearer jwt", req.headers["Authorization"])
+    }
+
+    // Profil déjà supprimé ailleurs (404) : le code reste lisible, pour ne pas
+    // l'afficher comme une panne ; panne du serveur et session supprimée à part.
+    @Test
+    fun `suppression refusée, en panne ou sans session`() = runTest {
+        server.enqueue(MockResponse.Builder().code(404).body("""{"error":"Profile not found"}""").build())
+        val gone = runCatching { api.deleteProfile("jwt", "p2") }.exceptionOrNull()
+        assertEquals(true, gone is ProfileRefusedException)
+        assertEquals(404, (gone as ProfileRefusedException).code)
+
+        server.enqueue(MockResponse.Builder().code(500).body("""{"error":"Failed to delete profile"}""").build())
+        val broken = runCatching { api.deleteProfile("jwt", "p2") }.exceptionOrNull()
+        assertEquals(true, broken is java.io.IOException && broken !is ProfileRefusedException)
+
+        server.enqueue(MockResponse.Builder().code(401).body("""{"error":"Unauthorized"}""").build())
+        val revoked = runCatching { api.deleteProfile("jwt", "p2") }.exceptionOrNull()
+        assertEquals(true, revoked is SessionRevokedException)
+    }
 }

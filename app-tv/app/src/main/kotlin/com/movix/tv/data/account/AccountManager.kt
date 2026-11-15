@@ -44,7 +44,7 @@ data class Account(
 /** Issue d'un réglage de profil demandé depuis la télé. */
 enum class ProfileChange {
     OK,
-    /** Le serveur a dit non (nom refusé, cinq profils déjà) : réessayer tel quel ne changera rien. */
+    /** Le serveur a dit non (nom refusé, cinq profils déjà, profil supprimé entre-temps) : réessayer tel quel ne changera rien. */
     REFUSED,
     /** Serveur injoignable ou en panne : rien n'a changé, on peut réessayer. */
     NETWORK,
@@ -52,8 +52,8 @@ enum class ProfileChange {
     SIGNED_OUT,
 }
 
-/** Profil créé depuis la télé ([profile] seulement si [status] vaut [ProfileChange.OK]). */
-data class ProfileCreation(val status: ProfileChange, val profile: LinkedProfile? = null)
+/** Profil créé ou modifié depuis la télé ([profile] : tel que le serveur l'a gardé, seulement si [status] vaut [ProfileChange.OK]). */
+data class ProfileResult(val status: ProfileChange, val profile: LinkedProfile? = null)
 
 class AccountManager(
     private val context: Context,
@@ -205,6 +205,13 @@ class AccountManager(
         store.writeAll(mapOf(PROFILES_CACHE to json.encodeToString(profileList, next)))
     }
 
+    /** Retire le profil [profileId] (supprimé) des profils gardés sur la télé. */
+    private suspend fun uncacheProfile(profileId: String) {
+        val list = cachedProfiles()
+        if (list.none { it.id == profileId }) return
+        store.writeAll(mapOf(PROFILES_CACHE to json.encodeToString(profileList, list.filter { it.id != profileId })))
+    }
+
     /**
      * Mode enfant : [limit] (0 = désactivé, sinon 7, 12, 16 ou 18) devient la
      * limite d'âge de ce qui est proposé.
@@ -244,29 +251,87 @@ class AccountManager(
     }
 
     /**
-     * Nouveau profil du compte, créé depuis « Qui regarde ? » : [name] et sa
-     * limite d'âge [limit]. L'avatar est un de ceux du site, à changer là-bas.
-     * La télé reste sur le profil actuel : c'est l'écran qui propose de basculer.
+     * Nouveau profil du compte, créé depuis « Qui regarde ? » : [name], sa
+     * limite d'âge [limit] et son [avatar] (chemin du site ; absent ou hors du
+     * site : un des avatars proposés d'office). La télé reste sur le profil
+     * actuel : c'est l'écran qui propose de basculer.
      */
-    suspend fun createProfile(name: String, limit: Int): ProfileCreation {
-        val account = current ?: return ProfileCreation(ProfileChange.SIGNED_OUT)
-        val safeName = AgeRules.profileName(name) ?: return ProfileCreation(ProfileChange.REFUSED)
-        val avatar = AgeRules.newProfileAvatar(cachedProfiles().map { it.avatar })
+    suspend fun createProfile(name: String, limit: Int, avatar: String? = null): ProfileResult {
+        val account = current ?: return ProfileResult(ProfileChange.SIGNED_OUT)
+        val safeName = ProfileRules.profileName(name) ?: return ProfileResult(ProfileChange.REFUSED)
+        val safeAvatar = avatar?.takeIf(ProfileRules::isSiteAvatar) ?: ProfileRules.newProfileAvatar(cachedProfiles().map { it.avatar })
         val created = try {
-            api.createProfile(account.token, safeName, avatar, AgeRules.profileLimit(limit))
+            api.createProfile(account.token, safeName, safeAvatar, AgeRules.profileLimit(limit))
         } catch (e: SessionRevokedException) {
             logout(remote = false)
-            return ProfileCreation(ProfileChange.SIGNED_OUT)
+            return ProfileResult(ProfileChange.SIGNED_OUT)
         } catch (e: ProfileRefusedException) {
-            return ProfileCreation(ProfileChange.REFUSED)
+            return ProfileResult(ProfileChange.REFUSED)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             android.util.Log.w("MovixAccount", "profil non créé : $e")
-            return ProfileCreation(ProfileChange.NETWORK)
+            return ProfileResult(ProfileChange.NETWORK)
         }
         cacheProfile(created)
-        return ProfileCreation(ProfileChange.OK, created)
+        return ProfileResult(ProfileChange.OK, created)
+    }
+
+    /**
+     * « Gérer les profils » : enregistre [original] avec ce [name], cet
+     * [avatar] et cette limite d'âge [limit]. Seuls les champs changés partent
+     * ([ProfileRules.changes]) ; rien de changé : rien n'est envoyé. Si c'est
+     * le profil en cours, le compte de la télé suit (nom, avatar, et la limite
+     * d'âge appliquée au catalogue, tout de suite).
+     */
+    suspend fun updateProfile(original: LinkedProfile, name: String, avatar: String, limit: Int): ProfileResult {
+        val account = current ?: return ProfileResult(ProfileChange.SIGNED_OUT)
+        if (ProfileRules.profileName(name) == null) return ProfileResult(ProfileChange.REFUSED)
+        val edit = ProfileRules.changes(original, name, avatar, limit)
+        if (edit.isEmpty) return ProfileResult(ProfileChange.OK, original)
+        val saved = try {
+            api.updateProfile(account.token, original.id, edit)
+        } catch (e: SessionRevokedException) {
+            logout(remote = false)
+            return ProfileResult(ProfileChange.SIGNED_OUT)
+        } catch (e: ProfileRefusedException) {
+            return ProfileResult(ProfileChange.REFUSED)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("MovixAccount", "profil non modifié : $e")
+            return ProfileResult(ProfileChange.NETWORK)
+        }
+        cacheProfile(saved)
+        // Relu après l'appel : le profil a pu changer entre-temps (« Qui regarde ? »).
+        current?.let { now -> ProfileRules.accountAfterSave(now, saved)?.let { save(it) } }
+        return ProfileResult(ProfileChange.OK, saved)
+    }
+
+    /**
+     * Supprime [profile] du compte, et sur le serveur son historique et ses
+     * données : c'est définitif. Jamais le profil en cours ni le dernier
+     * ([ProfileRules.canDelete]) : [ProfileChange.REFUSED]. Profil déjà
+     * supprimé ailleurs : le but est atteint, [ProfileChange.OK].
+     */
+    suspend fun deleteProfile(profile: LinkedProfile): ProfileChange {
+        val account = current ?: return ProfileChange.SIGNED_OUT
+        if (!ProfileRules.canDelete(profile.id, account.profileId, cachedProfiles().size)) return ProfileChange.REFUSED
+        try {
+            api.deleteProfile(account.token, profile.id)
+        } catch (e: SessionRevokedException) {
+            logout(remote = false)
+            return ProfileChange.SIGNED_OUT
+        } catch (e: ProfileRefusedException) {
+            if (e.code != 404) return ProfileChange.REFUSED
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("MovixAccount", "profil non supprimé : $e")
+            return ProfileChange.NETWORK
+        }
+        uncacheProfile(profile.id)
+        return ProfileChange.OK
     }
 
     /**

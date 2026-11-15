@@ -32,7 +32,16 @@ import java.io.IOException
 class SessionRevokedException : IOException("session révoquée")
 
 /** Le serveur a refusé un réglage de profil (nom refusé, cinq profils déjà, profil supprimé) : réessayer tel quel ne changera rien. */
-class ProfileRefusedException(code: Int) : IOException("profil refusé ($code)")
+class ProfileRefusedException(val code: Int) : IOException("profil refusé ($code)")
+
+/**
+ * Champs d'un profil à changer sur le serveur (`PUT /api/profiles/{id}`) ;
+ * `null` = inchangé, rien n'est envoyé pour ce champ. `ageRestriction` à 0
+ * lève la limite (un champ absent la laisserait).
+ */
+data class ProfileEdit(val name: String? = null, val avatar: String? = null, val ageRestriction: Int? = null) {
+    val isEmpty: Boolean get() = name == null && avatar == null && ageRestriction == null
+}
 
 @Serializable
 data class LinkStart(
@@ -144,11 +153,42 @@ class AccountApi(private val client: OkHttpClient, private val json: Json, priva
      * tel que le serveur l'a enregistré.
      */
     suspend fun updateProfileAge(token: String, profileId: String, age: Int): LinkedProfile =
-        profileCall("PUT", "api/profiles/$profileId", buildJsonObject { put("ageRestriction", age) }, token)
+        updateProfile(token, profileId, ProfileEdit(ageRestriction = age))
+
+    /**
+     * « Gérer les profils » : envoie seulement les champs de [edit] (le serveur
+     * ne modifie que ceux qu'il reçoit). Rend le profil tel que le serveur l'a
+     * enregistré. [edit] vide : refusé ici, le serveur répondrait 400.
+     */
+    suspend fun updateProfile(token: String, profileId: String, edit: ProfileEdit): LinkedProfile {
+        require(!edit.isEmpty) { "rien à modifier" }
+        val body = buildJsonObject {
+            edit.name?.let { put("name", it) }
+            edit.avatar?.let { put("avatar", it) }
+            edit.ageRestriction?.let { put("ageRestriction", it) }
+        }
+        return profileCall("PUT", "api/profiles/$profileId", body, token)
+    }
 
     /** Nouveau profil du compte (cinq au plus). [avatar] : chemin `/avatars/…` du site. */
     suspend fun createProfile(token: String, name: String, avatar: String, age: Int): LinkedProfile =
         profileCall("POST", "api/profiles", buildJsonObject { put("name", name); put("avatar", avatar); put("ageRestriction", age) }, token)
+
+    /**
+     * Supprime le profil [profileId] et, sur le serveur, son historique et ses
+     * données (`DELETE /api/profiles/{id}`). Mêmes erreurs que [profileCall] ;
+     * 404 (profil déjà supprimé ailleurs) : [ProfileRefusedException] de code 404.
+     */
+    suspend fun deleteProfile(token: String, profileId: String): Unit = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(url("api/profiles/$profileId")).delete()
+            .header("Authorization", "Bearer $token")
+            .build()
+        client.newCall(req).execute().use { res ->
+            if (res.code == 401) throw SessionRevokedException()
+            if (res.code in 400..499 && res.code != 429) throw ProfileRefusedException(res.code)
+            if (!res.isSuccessful) throw IOException("suppression du profil ${res.code}")
+        }
+    }
 
     /** [ProfileRefusedException] : refus du serveur (4xx) ; autre [IOException] : panne ou réponse sans profil. */
     private suspend fun profileCall(method: String, path: String, body: JsonObject, token: String): LinkedProfile = withContext(Dispatchers.IO) {

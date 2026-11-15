@@ -1,6 +1,8 @@
 package com.movix.tv.ui.settings
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -14,6 +16,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -37,15 +41,32 @@ import kotlinx.coroutines.withContext
  * Compte relié : c'est la restriction du profil qui regarde, enregistrée sur
  * le serveur (la même que sur le site). Sans compte : le réglage reste sur la
  * télé. La pastille choisie ne bouge qu'une fois le réglage vraiment appliqué.
+ * « Gérer les profils » règle la limite des autres profils (celui d'un enfant)
+ * sans basculer dessus.
  */
 @Composable
-internal fun KidsPane(onSwitchProfile: () -> Unit) {
+internal fun KidsPane(
+    onSwitchProfile: () -> Unit,
+    onManageProfiles: () -> Unit = {},
+    returnTo: ProfilesOpener? = null,
+    onReturned: () -> Unit = {},
+) {
     val container = LocalContext.current.container
     val scope = rememberCoroutineScope()
     val account by container.accounts.state.collectAsStateWithLifecycle()
     val limit = rememberAgeLimit()
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Int?>(null) }
+    val switchRequester = remember { FocusRequester() }
+    val manageRequester = remember { FocusRequester() }
+    ReturnFocus(
+        when (returnTo) {
+            ProfilesOpener.KIDS_SWITCH -> switchRequester
+            ProfilesOpener.KIDS_MANAGE -> manageRequester
+            else -> null
+        },
+        onReturned,
+    )
 
     fun choose(value: Int) {
         if (busy || value == limit) return
@@ -93,7 +114,10 @@ internal fun KidsPane(onSwitchProfile: () -> Unit) {
             Spacer(Modifier.height(4.dp))
             Text(stringResource(R.string.kids_tip_profiles), style = MovixType.Body)
             Spacer(Modifier.height(12.dp))
-            PillButton(stringResource(R.string.settings_account_switch), onSwitchProfile)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                PillButton(stringResource(R.string.settings_account_switch), onSwitchProfile, Modifier.focusRequester(switchRequester))
+                PillButton(stringResource(R.string.profiles_manage), onManageProfiles, Modifier.focusRequester(manageRequester))
+            }
         }
         Spacer(Modifier.height(24.dp))
     }

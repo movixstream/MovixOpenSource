@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -30,9 +31,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
@@ -82,17 +85,49 @@ private enum class Pane(val label: Int) {
     ABOUT(R.string.settings_about),
 }
 
+/** Bouton des réglages qui a ouvert « Qui regarde ? » : il reprend le focus au retour. */
+internal enum class ProfilesOpener { ACCOUNT_SWITCH, ACCOUNT_MANAGE, KIDS_SWITCH, KIDS_MANAGE }
+
+/**
+ * Retour de « Qui regarde ? » : le focus revient sur [target], le bouton qui
+ * l'a ouvert (l'écran des réglages a été recomposé entre-temps). Passe après
+ * MovixRoot, qui rend le focus à la page deux images après le retour.
+ */
+@Composable
+internal fun ReturnFocus(target: FocusRequester?, onDone: () -> Unit) {
+    if (target == null) return
+    LaunchedEffect(target) {
+        repeat(4) { withFrameNanos { } }
+        runCatching { target.requestFocus(FocusDirection.Enter) }
+        onDone()
+    }
+}
+
 /**
  * Réglages : sections à gauche (la section suit le focus, Droite ou OK entre
  * dedans), contenu à droite (Gauche revient sur la section ouverte).
+ * [onSwitchProfile] et [onManageProfiles] ouvrent « Qui regarde ? », en mode
+ * normal ou en mode gestion des profils.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun SettingsScreen(onLinkAccount: () -> Unit, modifier: Modifier = Modifier, onSwitchProfile: () -> Unit = {}) {
+fun SettingsScreen(
+    onLinkAccount: () -> Unit,
+    modifier: Modifier = Modifier,
+    onSwitchProfile: () -> Unit = {},
+    onManageProfiles: () -> Unit = {},
+) {
     var pane by rememberSaveable { mutableStateOf(Pane.ACCOUNT) }
     val selectedTab = remember { FocusRequester() }
     val paneRequester = remember { FocusRequester() }
     val enterPane = { runCatching { paneRequester.requestFocus() }; Unit }
+    // Gardé pendant « Qui regarde ? » (l'écran est recomposé au retour).
+    var opener by rememberSaveable { mutableStateOf<ProfilesOpener?>(null) }
+    fun open(from: ProfilesOpener, manage: Boolean) {
+        opener = from
+        if (manage) onManageProfiles() else onSwitchProfile()
+    }
+    val returned = { opener = null }
 
     Column(modifier.padding(start = 24.dp, top = 40.dp)) {
         Text(stringResource(R.string.nav_settings), style = MovixType.Title)
@@ -126,8 +161,19 @@ fun SettingsScreen(onLinkAccount: () -> Unit, modifier: Modifier = Modifier, onS
             key(pane) {
                 Box(Modifier.width(500.dp).fillMaxHeight().focusRequester(paneRequester).focusRestorer().focusGroup()) {
                     when (pane) {
-                        Pane.ACCOUNT -> AccountPane(onLinkAccount, onSwitchProfile)
-                        Pane.KIDS -> KidsPane(onSwitchProfile)
+                        Pane.ACCOUNT -> AccountPane(
+                            onLinkAccount = onLinkAccount,
+                            onSwitchProfile = { open(ProfilesOpener.ACCOUNT_SWITCH, manage = false) },
+                            onManageProfiles = { open(ProfilesOpener.ACCOUNT_MANAGE, manage = true) },
+                            returnTo = opener,
+                            onReturned = returned,
+                        )
+                        Pane.KIDS -> KidsPane(
+                            onSwitchProfile = { open(ProfilesOpener.KIDS_SWITCH, manage = false) },
+                            onManageProfiles = { open(ProfilesOpener.KIDS_MANAGE, manage = true) },
+                            returnTo = opener,
+                            onReturned = returned,
+                        )
                         Pane.APPEARANCE -> AppearancePane()
                         Pane.SUBTITLES -> SubtitlesPane()
                         Pane.HOME -> HomePane()
@@ -147,13 +193,29 @@ fun SettingsScreen(onLinkAccount: () -> Unit, modifier: Modifier = Modifier, onS
     }
 }
 
-/** Compte relié par le code à 5 caractères, profil et « Qui regarde ? ». */
+/** Compte relié par le code à 5 caractères, profil, « Qui regarde ? » et « Gérer les profils ». */
 @Composable
-private fun AccountPane(onLinkAccount: () -> Unit, onSwitchProfile: () -> Unit) {
+private fun AccountPane(
+    onLinkAccount: () -> Unit,
+    onSwitchProfile: () -> Unit,
+    onManageProfiles: () -> Unit,
+    returnTo: ProfilesOpener?,
+    onReturned: () -> Unit,
+) {
     val container = LocalContext.current.container
     val scope = rememberCoroutineScope()
     val account by container.accounts.state.collectAsStateWithLifecycle()
     val values by container.store.values.collectAsStateWithLifecycle()
+    val switchRequester = remember { FocusRequester() }
+    val manageRequester = remember { FocusRequester() }
+    ReturnFocus(
+        when (returnTo) {
+            ProfilesOpener.ACCOUNT_SWITCH -> switchRequester
+            ProfilesOpener.ACCOUNT_MANAGE -> manageRequester
+            else -> null
+        },
+        onReturned,
+    )
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Text(stringResource(R.string.settings_account_title), style = MovixType.Panel)
         Spacer(Modifier.height(6.dp))
@@ -176,7 +238,9 @@ private fun AccountPane(onLinkAccount: () -> Unit, onSwitchProfile: () -> Unit) 
             Text(stringResource(R.string.settings_account_synced), style = MovixType.Body)
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                PillButton(stringResource(R.string.settings_account_switch), onSwitchProfile)
+                PillButton(stringResource(R.string.settings_account_switch), onSwitchProfile, Modifier.focusRequester(switchRequester))
+                // Avatar, nom, limite d'âge et suppression des profils, sans passer par le site.
+                PillButton(stringResource(R.string.profiles_manage), onManageProfiles, Modifier.focusRequester(manageRequester))
                 PillButton(stringResource(R.string.settings_account_logout), { scope.launch { container.sync.flush(); container.accounts.logout(remote = true) } })
             }
             Spacer(Modifier.height(16.dp))
