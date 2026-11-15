@@ -3,14 +3,18 @@
 Appli Android TV native de Movix (Fire TV, Google TV, Android TV) : Kotlin,
 Jetpack Compose for TV et Media3.
 
-- Catalogue, fiches, épisodes, recherche, Ma liste et réglages.
+- Catalogue par genre, fiches, filmographie des acteurs, épisodes, recherche,
+  Ma liste et réglages.
 - Lecteur natif avec les sources du serveur Movix, reprise et épisode suivant.
+- Qualité réelle de chaque source mesurée à la demande ; langue audio,
+  sous-titres et version retenus d'un épisode à l'autre.
 - Son Dolby et DTS décodé par l'appli quand la télé ne le gère pas
   ([`ffmpeg/`](ffmpeg/README.md)).
 - Extraction des lecteurs embed directement sur la télé, sans WebView : le
   userscript Movix tourne dans QuickJS (module `extractor/`).
 - Lecteur web avec bloqueur de pubs ([`adblock/`](adblock/README.md)).
-- Liaison au compte Movix par un code affiché sur la télé.
+- Liaison au compte Movix par un code affiché sur la télé ; profils du compte,
+  avec la restriction d'âge des profils enfant.
 
 Installation pour les utilisateurs : page `/app-tv` du site.
 
