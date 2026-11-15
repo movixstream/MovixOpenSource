@@ -36,12 +36,16 @@ class TitlePagerViewModel(private val catalog: CatalogRepository) : ViewModel() 
     private var lastFocus = 0
     // Pages de suite sans titre nouveau (TMDB qui répète) : l'enchaînement s'arrête.
     private var stalePages = 0
+    // Pages enchaînées sans que le focus bouge : avec un profil enfant, une page
+    // peut n'apporter qu'un titre ; on n'en vérifie pas des dizaines d'affilée.
+    private var chained = 0
 
     private val titles: PagedTitles get() = _state.value.titles
 
     /**
      * Montre [spec] sous la clé [session]. Même session (retour d'une fiche) : rien
-     * ne bouge. Nouvelle session : la grille repart de la page 1.
+     * ne bouge. Nouvelle session : la grille repart de la page 1. La session porte
+     * la restriction d'âge du profil : un autre profil repart de zéro.
      */
     fun open(session: String, spec: RowSpec) {
         if (session == this.session) return
@@ -50,12 +54,14 @@ class TitlePagerViewModel(private val catalog: CatalogRepository) : ViewModel() 
         this.spec = spec
         lastFocus = 0
         stalePages = 0
+        chained = 0
         _state.value = TitleGrid(session)
         load()
     }
 
     fun onFocus(index: Int) {
         lastFocus = index
+        chained = 0
         if (titles.wantsMore(index)) load()
     }
 
@@ -82,14 +88,27 @@ class TitlePagerViewModel(private val catalog: CatalogRepository) : ViewModel() 
             }
             // Autre grille ouverte entre-temps : cette réponse ne la concerne pas.
             if (session != current) return@launch
-            val after = if (found == null) titles.failed(page) else titles.received(page, found)
-            stalePages = if (after.items.size > before.items.size) 0 else stalePages + 1
+            val after = if (found == null) titles.failed(page) else titles.received(page, found.items, found.hidden)
+            val grew = after.items.size > before.items.size
+            // Page entièrement masquée par le profil : ce n'est pas TMDB qui répète (PagedTitles borne ces pages).
+            stalePages = when {
+                grew -> 0
+                after.hiddenRun > 0 -> stalePages
+                else -> stalePages + 1
+            }
             _state.value = TitleGrid(current, after)
-            if (stalePages < MAX_STALE_PAGES && after.wantsMore(lastFocus)) load()
+            // Grille encore vide : on continue (rien à focaliser pour demander la suite).
+            val mayChain = stalePages < MAX_STALE_PAGES && (after.items.isEmpty() || chained < MAX_CHAINED_PAGES)
+            if (mayChain && after.wantsMore(lastFocus)) {
+                chained++
+                load()
+            }
         }
     }
 
     private companion object {
         const val MAX_STALE_PAGES = 3
+        /** Sans profil limité, deux pages remplissent déjà la grille : en pratique jamais atteint. */
+        const val MAX_CHAINED_PAGES = 6
     }
 }

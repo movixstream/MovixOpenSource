@@ -17,6 +17,7 @@ import com.movix.tv.ui.MovixRoot
 import com.movix.tv.ui.home.Screensaver
 import com.movix.tv.ui.home.ScreensaverHost
 import com.movix.tv.ui.theme.MovixTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,6 +79,8 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         Screensaver.dismiss()
         container.sync.onBackground()
+        // Âges des titres (profils enfant) écrits tout de suite : l'appli peut être tuée en fond.
+        container.appScope.launch { container.ages.save() }
         super.onStop()
     }
 }

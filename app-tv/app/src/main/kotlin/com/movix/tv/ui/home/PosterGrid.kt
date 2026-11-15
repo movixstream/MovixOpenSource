@@ -129,6 +129,8 @@ private fun GridFooter(titles: PagedTitles, onRetry: () -> Unit, retryRequester:
                 )
             }
             titles.loading -> Text(stringResource(R.string.grid_loading), style = MovixType.Meta)
+            // Le profil (restriction d'âge) masque tout ce que TMDB a donné ici.
+            titles.onlyHidden -> Text(stringResource(R.string.age_grid_empty), style = MovixType.Body)
             titles.ended && empty -> Text(stringResource(R.string.grid_empty), style = MovixType.Body)
         }
     }

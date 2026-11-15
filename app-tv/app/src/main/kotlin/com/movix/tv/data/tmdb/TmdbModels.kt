@@ -78,8 +78,9 @@ data class TmdbRating(@SerialName("iso_3166_1") val country: String = "", val ra
 @Serializable
 data class TmdbRatings(val results: List<TmdbRating> = emptyList())
 
+/** Une sortie d'un pays : `type` 2 et 3 = en salle (préférées pour l'âge, comme sur le site). */
 @Serializable
-data class TmdbReleaseDate(val certification: String = "")
+data class TmdbReleaseDate(val certification: String = "", val type: Int = 0)
 
 @Serializable
 data class TmdbReleaseCountry(
@@ -96,6 +97,8 @@ data class TmdbDetails(
     val title: String? = null,
     val name: String? = null,
     val overview: String? = null,
+    /** Film pour adultes : 18 ans, sans regarder sa classification (comme le site). */
+    val adult: Boolean = false,
     @SerialName("poster_path") val posterPath: String? = null,
     @SerialName("backdrop_path") val backdropPath: String? = null,
     @SerialName("vote_average") val voteAverage: Double? = null,
@@ -147,6 +150,8 @@ data class MediaItem(
     val overview: String,
     val rating: Double?,
     val year: String?,
+    /** Titre marqué adulte par TMDB : 18 ans pour la restriction d'âge, sans requête. */
+    val adult: Boolean = false,
 ) {
     /** Identifiant stable pour les `key` des listes : un film et une série peuvent partager un id TMDB. */
     val key: String get() = "${type.path}:$id"
@@ -169,6 +174,7 @@ fun TmdbItem.toMediaItem(fallback: MediaType): MediaItem? {
         overview = overview.orEmpty(),
         rating = voteAverage?.takeIf { it > 0 },
         year = (releaseDate ?: firstAirDate)?.take(4)?.takeIf { it.length == 4 },
+        adult = adult,
     )
 }
 
@@ -196,6 +202,11 @@ data class Details(
     val similar: List<MediaItem> = emptyList(),
     val cast: List<CastMember> = emptyList(),
     val videos: List<VideoClip> = emptyList(),
+    /**
+     * Âge du titre pour la restriction des profils enfant (règles du site,
+     * [com.movix.tv.data.age.AgeRules]) ; `null` : aucune classification lisible.
+     */
+    val age: Int? = null,
 )
 
 @Immutable
@@ -215,6 +226,7 @@ fun TmdbDetails.toDetails(type: MediaType): Details {
         overview = overview.orEmpty(),
         rating = voteAverage?.takeIf { it > 0 },
         year = (releaseDate ?: firstAirDate)?.take(4)?.takeIf { it.length == 4 },
+        adult = adult,
     )
     // La saison 0 (« épisodes spéciaux ») est masquée, comme sur le site.
     val seasons = seasons.map { it.seasonNumber }.filter { it > 0 }.distinct().sorted()
@@ -246,6 +258,11 @@ fun TmdbDetails.toDetails(type: MediaType): Details {
             .sortedWith(compareBy({ VIDEO_ORDER.indexOf(it.type).let { i -> if (i < 0) VIDEO_ORDER.size else i } }, { if (it.language == "fr") 0 else 1 }, { if (it.official) 0 else 1 }))
             .distinctBy { it.key }.take(12)
             .map { VideoClip(it.key, it.name, it.type) },
+        // Mêmes données que `/movie/{id}/release_dates` et `/tv/{id}/content_ratings` : aucune requête de plus.
+        age = if (adult) 18 else when (type) {
+            MediaType.TV -> com.movix.tv.data.age.AgeRules.tvAge(contentRatings?.results.orEmpty())
+            MediaType.MOVIE -> com.movix.tv.data.age.AgeRules.movieAge(releaseDates?.results.orEmpty())
+        },
     )
 }
 

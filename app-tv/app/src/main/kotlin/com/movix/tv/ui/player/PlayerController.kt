@@ -359,7 +359,7 @@ class PlayerController(
             launch { loadMeta() }
             // Ouvert sans titre (reprise d'une entrée venue du site) : on le complète.
             if (target.title.isBlank() || target.backdropPath == null) launch {
-                val d = runCatching { container.catalog.details(target.request.type, target.request.tmdbId) }.getOrNull() ?: return@launch
+                val d = runCatching { container.catalog.info(target.request.type, target.request.tmdbId) }.getOrNull() ?: return@launch
                 target = target.copy(title = target.title.ifBlank { d.item.title }, backdropPath = target.backdropPath ?: d.item.backdropPath)
             }
             // Cronet se charge pendant que les routes répondent.
@@ -367,7 +367,7 @@ class PlayerController(
             var req = target.request
             if (!req.isTv && req.imdbId == null) {
                 val imdb = withTimeoutOrNull(4_000) {
-                    runCatching { container.catalog.details(MediaType.MOVIE, req.tmdbId).imdbId }.getOrNull()
+                    runCatching { container.catalog.info(MediaType.MOVIE, req.tmdbId).imdbId }.getOrNull()
                 }
                 req = req.copy(imdbId = imdb)
             }
@@ -464,7 +464,7 @@ class PlayerController(
     /** Shegu et OpenSubtitles en parallèle ; une série cherche d'abord son id IMDb. */
     private suspend fun loadSearchedSubtitles(req: PlayRequest) {
         val imdb = req.imdbId ?: if (req.isTv) withTimeoutOrNull(4_000) {
-            runCatching { container.catalog.details(MediaType.TV, req.tmdbId).imdbId }.getOrNull()
+            runCatching { container.catalog.info(MediaType.TV, req.tmdbId).imdbId }.getOrNull()
         } else null
         searchedSubtitles = container.externalSubtitles.search(
             req.tmdbId, imdb, if (req.isTv) req.season ?: 1 else null, if (req.isTv) req.episode ?: 1 else null, container.uiLanguage(),
@@ -485,7 +485,7 @@ class PlayerController(
         val hasNextHere = episodes.any { it.number == e + 1 }
         if (hasNextHere) next = s to e + 1
         if (seasonNumbers.isEmpty()) {
-            seasonNumbers = runCatching { container.catalog.details(MediaType.TV, req.tmdbId).seasonNumbers }.getOrDefault(emptyList())
+            seasonNumbers = runCatching { container.catalog.info(MediaType.TV, req.tmdbId).seasonNumbers }.getOrDefault(emptyList())
         }
         if (!hasNextHere) next = seasonNumbers.firstOrNull { it > s }?.let { it to 1 }
         nextEpisode = next?.let { (ns, ne) -> episodesOf(ns).firstOrNull { it.number == ne } }
@@ -637,7 +637,7 @@ class PlayerController(
                 // sinon la rangée « Reprendre » garderait une carte vide.
                 val req0 = target.request
                 val details = if (target.title.isBlank() || target.backdropPath == null) {
-                    runCatching { container.catalog.details(req0.type, req0.tmdbId) }.getOrNull()
+                    runCatching { container.catalog.info(req0.type, req0.tmdbId) }.getOrNull()
                 } else null
                 val title = target.title.ifBlank { details?.item?.title.orEmpty() }
                 val backdrop = target.backdropPath ?: details?.item?.backdropPath

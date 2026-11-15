@@ -118,4 +118,64 @@ class PagedTitlesTest {
         assertTrue(s.wantsMore(39, ahead = 21))
         assertTrue(s.wantsMore(59, ahead = 21))
     }
+
+    // Profil limité (restriction d'âge) : une page de TMDB peut être entièrement
+    // masquée (genre Horreur pour un profil 7+) sans que le catalogue soit au bout.
+    // - la liste ne doit pas s'arrêter sur cette page vide ;
+    // - elle ne doit pas non plus demander des pages masquées sans fin ;
+    // - grille vide au bout : l'écran doit savoir que c'est le profil qui masque tout.
+
+    private fun PagedTitles.hiddenPage(page: Int, hidden: Int = 20) = loadingPage().received(page, emptyList(), hidden = hidden)
+
+    @Test
+    fun pageEntierementMasqueeNeTerminePasLaListe() {
+        val s = PagedTitles().load(1, items(1..5)).hiddenPage(2)
+        assertFalse(s.ended)
+        assertTrue(s.canLoad)
+        assertEquals(3, s.nextPage)
+        assertEquals((1..5).toList(), s.items.map { it.id })
+        // Grille courte : la page suivante reste à demander.
+        assertTrue(s.wantsMore(4))
+    }
+
+    @Test
+    fun pagesMasqueesDeSuiteBornees() {
+        var s = PagedTitles()
+        for (page in 1 until PagedTitles.MAX_HIDDEN_PAGES) {
+            s = s.hiddenPage(page)
+            assertFalse("page $page", s.ended)
+        }
+        s = s.hiddenPage(PagedTitles.MAX_HIDDEN_PAGES)
+        assertTrue(s.ended)
+        assertFalse(s.canLoad)
+        assertTrue(s.items.isEmpty())
+        assertTrue(s.onlyHidden)
+    }
+
+    @Test
+    fun pageAvecTitresRemetLeCompteAZero() {
+        var s = PagedTitles()
+        for (page in 1 until PagedTitles.MAX_HIDDEN_PAGES) s = s.hiddenPage(page)
+        s = s.loadingPage().received(PagedTitles.MAX_HIDDEN_PAGES, items(1..2), hidden = 18)
+        for (page in 1 until PagedTitles.MAX_HIDDEN_PAGES) {
+            s = s.hiddenPage(PagedTitles.MAX_HIDDEN_PAGES + page)
+            assertFalse(s.ended)
+        }
+        assertEquals(listOf(1, 2), s.items.map { it.id })
+        assertFalse(s.onlyHidden)
+    }
+
+    @Test
+    fun vraiePageVideTermineMemeApresDesPagesMasquees() {
+        val s = PagedTitles().load(1, items(1..3)).hiddenPage(2).loadingPage().received(3, emptyList())
+        assertTrue(s.ended)
+        assertFalse(s.onlyHidden)
+    }
+
+    @Test
+    fun listeVideSansRienDeMasqueNestPasDuFaitDuProfil() {
+        val s = PagedTitles().load(1, emptyList())
+        assertTrue(s.ended)
+        assertFalse(s.onlyHidden)
+    }
 }

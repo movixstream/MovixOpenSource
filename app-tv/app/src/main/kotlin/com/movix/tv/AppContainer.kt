@@ -25,7 +25,11 @@ import com.movix.tv.player.CodecSupport
 import com.movix.tv.player.MediaHeaders
 import com.movix.tv.player.PlayerEngine
 import com.movix.tv.data.tmdb.CatalogRepository
+import com.movix.tv.data.tmdb.MediaType
 import com.movix.tv.data.tmdb.TmdbApi
+import com.movix.tv.data.tmdb.TmdbException
+import com.movix.tv.data.age.AgeRules
+import com.movix.tv.data.age.ContentAges
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -77,7 +81,24 @@ class AppContainer(context: Context) {
     val tmdb = TmdbApi(http, json, ::tmdbKey)
     /** Titres connus en tête de la recherche (barre de recherche d'imdb.com). */
     val imdb = ImdbSuggestions(http, json)
-    val catalog = CatalogRepository(tmdb, imdb)
+
+    /**
+     * Âges des titres pour les profils enfant (classifications TMDB), gardés sur
+     * la télé. Jamais demandés sans profil limité.
+     */
+    val ages = ContentAges(
+        fetch = { type, id ->
+            try {
+                if (type == MediaType.TV) AgeRules.tvAge(tmdb.contentRatings(id).results)
+                else AgeRules.movieAge(tmdb.releaseDates(id).results)
+            } catch (e: TmdbException) {
+                // Titre retiré de TMDB : rien à lire, gardé comme « sans classification ».
+                if (e.code == 404) null else throw e
+            }
+        },
+        file = File(context.filesDir, "content_ages.txt"),
+        scope = appScope,
+    )
 
     val movix = MovixApi(http, json)
     // Clé de test de local.properties (debug et benchmark seulement, vide en
@@ -92,6 +113,8 @@ class AppContainer(context: Context) {
 
     val accountApi = AccountApi(http, json, movix.baseUrl)
     val accounts = AccountManager(context.applicationContext, store, accountApi, vip, json)
+    /** Tous les titres affichés passent par ici, filtrés pour le profil qui regarde (restriction d'âge). */
+    val catalog = CatalogRepository(tmdb, imdb, ages, accounts)
     val sync = SyncManager(appScope, store, accountApi, accounts, json)
     val swiftflux = SwiftFluxClient(http, json, movix.baseUrl)
     /** Rangée « Reprendre » lue sur le serveur (historique en base). */

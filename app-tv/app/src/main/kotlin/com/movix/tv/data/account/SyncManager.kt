@@ -58,6 +58,9 @@ class SyncManager(
     fun onForeground() {
         if (accounts.current == null) return
         scope.launch { pull(force = false) }
+        // Restriction d'âge changée sur le site par un parent : liste des profils
+        // relue au lancement puis au plus tous les quarts d'heure (une petite requête).
+        scope.launch { accounts.refreshProfiles(PROFILES_REFRESH_MS) }
         periodicJob?.cancel()
         periodicJob = scope.launch {
             while (isActive) {
@@ -175,5 +178,9 @@ class SyncManager(
             Log.i("MovixSync", "profil fusionné : ${result.applyLocal.size} reçue(s), ${result.push.size} à envoyer")
         }
         flush()
+    }
+
+    private companion object {
+        const val PROFILES_REFRESH_MS = 15 * 60_000L
     }
 }

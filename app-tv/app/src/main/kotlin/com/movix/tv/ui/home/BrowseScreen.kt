@@ -74,6 +74,8 @@ import com.movix.tv.ui.components.PillButton
 import com.movix.tv.ui.components.PivotBringIntoViewSpec
 import com.movix.tv.ui.components.PosterCard
 import com.movix.tv.ui.components.TmdbImage
+import com.movix.tv.ui.components.ageKey
+import com.movix.tv.ui.components.rememberAgeLimit
 import com.movix.tv.ui.nav.Section
 import com.movix.tv.ui.theme.MovixColors
 import com.movix.tv.ui.theme.MovixType
@@ -137,8 +139,13 @@ fun BrowseScreen(
         BrowseViewModel(context.container, specs, withContinue = section == Section.HOME)
     }
     LaunchedEffect(specs) { vm.setSpecs(specs) }
-    val state by vm.state.collectAsStateWithLifecycle()
-    val continueRow by vm.continueRow.collectAsStateWithLifecycle()
+    // Restriction d'âge du profil : rangées et « Reprendre » d'une autre restriction
+    // ne s'affichent jamais, même le temps que le ViewModel recharge.
+    val ageLimit = rememberAgeLimit()
+    val loaded by vm.state.collectAsStateWithLifecycle()
+    val state = if (loaded.limit == ageLimit) loaded else BrowseState(limit = ageLimit)
+    val continueState by vm.visibleContinueRow.collectAsStateWithLifecycle()
+    val continueRow = if (continueState.limit == ageLimit) continueState.entries else emptyList()
 
     // Barre de genres (Films, Séries, Animés) : « Tout » montre les rangées, un
     // genre sa grille paginée. Genre sauvegardé : gardé au retour d'une fiche.
@@ -147,9 +154,10 @@ fun BrowseScreen(
     val genreVm: TitlePagerViewModel? = if (genrePage == null) null else {
         viewModel(key = "genre:${section.name}") { TitlePagerViewModel(context.container.catalog) }
     }
-    // Ouverte avant la première lecture de l'état : jamais une image de la grille d'un autre genre.
-    val genreSession = "${section.name}:$genre"
-    remember(genre) {
+    // Ouverte avant la première lecture de l'état : jamais une image de la grille
+    // d'un autre genre, ni d'un autre profil (la restriction fait partie de la session).
+    val genreSession = "${section.name}:$genre|${ageKey(ageLimit)}"
+    remember(genreSession) {
         if (genrePage != null && genre != GENRE_ALL) genreVm?.open(genreSession, Genres.spec(genrePage, genre))
     }
     val genreTitles = genreVm?.state?.collectAsStateWithLifecycle()?.value?.titlesFor(genreSession) ?: PagedTitles()
@@ -247,6 +255,13 @@ fun BrowseScreen(
             BrowseStatus.Error -> Message(
                 title = stringResource(R.string.error_title),
                 body = stringResource(R.string.error_body),
+                action = stringResource(R.string.action_retry),
+                onAction = vm::load,
+            )
+            // Profil enfant : tout ce que la page propose dépasse sa restriction d'âge.
+            BrowseStatus.OnlyHidden -> Message(
+                title = stringResource(R.string.age_page_empty_title),
+                body = stringResource(R.string.age_page_empty_body, ageLimit ?: 0),
                 action = stringResource(R.string.action_retry),
                 onAction = vm::load,
             )

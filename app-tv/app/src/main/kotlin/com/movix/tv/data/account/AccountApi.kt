@@ -1,16 +1,25 @@
 package com.movix.tv.data.account
 
+import com.movix.tv.data.age.AgeRules
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -31,8 +40,37 @@ data class LinkStart(
     val interval: Int = 5,
 )
 
+/**
+ * Profil du compte. `ageRestriction` : 0 ou absent = aucune restriction, sinon
+ * 7, 12, 16 ou 18 (profil enfant). Lu sans faire échouer la réponse (voir
+ * [AgeRestrictionSerializer]).
+ */
 @Serializable
-data class LinkedProfile(val id: String, val name: String = "", val avatar: String? = null, val ageRestriction: Int? = null)
+data class LinkedProfile(
+    val id: String,
+    val name: String = "",
+    val avatar: String? = null,
+    @Serializable(with = AgeRestrictionSerializer::class) val ageRestriction: Int? = null,
+)
+
+/**
+ * `ageRestriction` lu tel que le site le range : un nombre, parfois écrit en
+ * chaîne (« 12 ») ou en décimal (12.0). Une valeur illisible ne fait pas
+ * échouer toute la réponse (la liaison serait perdue) et ne vaut jamais
+ * « aucune restriction » : elle prend la plus stricte du site.
+ */
+internal object AgeRestrictionSerializer : KSerializer<Int> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("AgeRestriction", PrimitiveKind.INT)
+
+    override fun deserialize(decoder: Decoder): Int {
+        val element = (decoder as? JsonDecoder)?.decodeJsonElement() ?: return decoder.decodeInt()
+        val primitive = element as? JsonPrimitive ?: return AgeRules.UNREADABLE_LIMIT
+        val number = if (primitive.isString) primitive.content.trim().toDoubleOrNull() else primitive.doubleOrNull
+        return number?.takeIf { !it.isNaN() && !it.isInfinite() }?.toInt() ?: AgeRules.UNREADABLE_LIMIT
+    }
+
+    override fun serialize(encoder: Encoder, value: Int) = encoder.encodeInt(value)
+}
 
 @Serializable
 internal data class ProfilesResponse(val profiles: List<LinkedProfile> = emptyList())

@@ -84,6 +84,8 @@ fun SearchScreen(onOpen: (MediaItem) -> Unit, modifier: Modifier = Modifier) {
     var results by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     // Titres assez connus pour les titres proposés (IMDb, TMDB bien voté).
     var known by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    // Résultats masqués par la restriction d'âge du profil (message adapté si rien ne reste).
+    var hidden by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf(SearchStatus.IDLE) }
     val firstKey = remember { FocusRequester() }
     val resultFocus = remember { FocusRequester() }
@@ -132,6 +134,7 @@ fun SearchScreen(onOpen: (MediaItem) -> Unit, modifier: Modifier = Modifier) {
         if (found?.items != results) parkFocus()
         results = found?.items.orEmpty()
         known = found?.known.orEmpty()
+        hidden = found?.hidden ?: 0
         status = if (found == null) SearchStatus.FAILED else SearchStatus.DONE
     }
     // Nouveaux résultats : la grille repart du haut (sauf saut de focus, qui place la grille lui-même).
@@ -276,6 +279,7 @@ fun SearchScreen(onOpen: (MediaItem) -> Unit, modifier: Modifier = Modifier) {
                     }
                     val message = when {
                         status == SearchStatus.FAILED -> stringResource(R.string.error_body)
+                        status == SearchStatus.DONE && results.isEmpty() && hidden > 0 -> stringResource(R.string.age_search_empty, query.trim())
                         status == SearchStatus.DONE && results.isEmpty() -> stringResource(R.string.search_empty, query.trim())
                         status != SearchStatus.DONE && results.isEmpty() -> stringResource(R.string.search_loading)
                         else -> null

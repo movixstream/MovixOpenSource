@@ -48,8 +48,10 @@ import coil3.request.ImageRequest
 import com.movix.tv.R
 import com.movix.tv.container
 import com.movix.tv.data.account.LinkedProfile
+import com.movix.tv.data.age.AgeRules
 import com.movix.tv.data.local.UiKeys
 import com.movix.tv.data.local.UiPrefs
+import com.movix.tv.ui.components.AgeBadge
 import com.movix.tv.ui.components.MovixIcons
 import com.movix.tv.ui.components.PillButton
 import com.movix.tv.ui.components.focusProgress
@@ -198,29 +200,32 @@ private fun ProfileTile(profile: LinkedProfile, current: Boolean, avatarUrl: Str
     val context = LocalContext.current
     val density = LocalDensity.current
     Column(modifier.width(120.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier
-                .pressScale(press)
-                .focusScale(progress, max = 1.1f)
-                .size(112.dp)
-                // Anneau à la couleur d'accent au focus, comme les crochets des cartes.
-                .border(3.dp, if (focused) MovixColors.Red else Color.Transparent, CircleShape)
-                .clickable(interactionSource = source, indication = null, onClick = onClick)
-                .padding(7.dp)
-                .clip(CircleShape)
-                .background(InitialColors[Math.floorMod(profile.id.hashCode(), InitialColors.size)]),
-            contentAlignment = Alignment.Center,
-        ) {
-            // Initiales sous l'image : visibles tant qu'elle charge ou si elle manque.
-            Text(
-                initials(profile.name),
-                style = MovixType.Title.copy(fontFamily = Bricolage, fontSize = 34.sp, color = Color.White),
-            )
-            if (avatarUrl != null) {
-                val px = with(density) { 98.dp.roundToPx() }
-                val request = remember(avatarUrl) { ImageRequest.Builder(context).data(avatarUrl).size(px, px).build() }
-                AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        // Badge « 12+ » des profils enfant, au coin de l'avatar comme sur le site ; il suit le zoom du focus.
+        Box(Modifier.pressScale(press).focusScale(progress, max = 1.1f)) {
+            Box(
+                Modifier
+                    .size(112.dp)
+                    // Anneau à la couleur d'accent au focus, comme les crochets des cartes.
+                    .border(3.dp, if (focused) MovixColors.Red else Color.Transparent, CircleShape)
+                    .clickable(interactionSource = source, indication = null, onClick = onClick)
+                    .padding(7.dp)
+                    .clip(CircleShape)
+                    .background(InitialColors[Math.floorMod(profile.id.hashCode(), InitialColors.size)]),
+                contentAlignment = Alignment.Center,
+            ) {
+                // Initiales sous l'image : visibles tant qu'elle charge ou si elle manque.
+                Text(
+                    initials(profile.name),
+                    style = MovixType.Title.copy(fontFamily = Bricolage, fontSize = 34.sp, color = Color.White),
+                )
+                if (avatarUrl != null) {
+                    val px = with(density) { 98.dp.roundToPx() }
+                    val request = remember(avatarUrl) { ImageRequest.Builder(context).data(avatarUrl).size(px, px).build() }
+                    AsyncImage(model = request, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                }
             }
+            val limit = AgeRules.profileLimit(profile.ageRestriction)
+            if (limit > 0) AgeBadge(limit, Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 6.dp))
         }
         Spacer(Modifier.height(10.dp))
         Text(

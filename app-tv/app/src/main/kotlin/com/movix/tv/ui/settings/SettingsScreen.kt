@@ -31,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -55,7 +56,9 @@ import com.movix.tv.data.local.TvKeys
 import com.movix.tv.data.local.UiKeys
 import com.movix.tv.data.local.UiPrefs
 import com.movix.tv.data.movix.VipSubmitResult
+import com.movix.tv.ui.components.AgeBadge
 import com.movix.tv.ui.components.PillButton
+import com.movix.tv.ui.components.rememberAgeLimit
 import com.movix.tv.ui.theme.MovixColors
 import com.movix.tv.ui.theme.MovixType
 import com.movix.tv.ui.update.UpdateSection
@@ -159,6 +162,15 @@ private fun AccountPane(onLinkAccount: () -> Unit, onSwitchProfile: () -> Unit) 
             PillButton(stringResource(R.string.settings_account_link), onLinkAccount)
         } else {
             Text(stringResource(R.string.settings_account_profile, linked.profileName), style = MovixType.Body.copy(color = MovixColors.Text))
+            // Profil enfant : la restriction appliquée au catalogue de la télé.
+            val ageLimit = rememberAgeLimit()
+            when {
+                ageLimit == null -> Text(stringResource(R.string.settings_account_age_unknown), style = MovixType.Body)
+                ageLimit > 0 -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AgeBadge(ageLimit)
+                    Text(stringResource(R.string.settings_account_age, ageLimit), style = MovixType.Body)
+                }
+            }
             Text(stringResource(R.string.settings_account_synced), style = MovixType.Body)
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

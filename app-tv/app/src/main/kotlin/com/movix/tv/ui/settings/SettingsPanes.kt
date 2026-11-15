@@ -173,9 +173,12 @@ internal fun SubtitlesPane() {
 @Composable
 private fun SubtitlePreview(style: SubtitleStyle) {
     val container = LocalContext.current.container
-    val backdrop by produceState<String?>(null) {
+    // Image filtrée pour le profil (restriction d'âge) : relue s'il change.
+    val ageLimit = com.movix.tv.ui.components.rememberAgeLimit()
+    val backdrop by produceState<String?>(null, ageLimit) {
+        value = null
         value = runCatching {
-            container.catalog.page(RowRegistry.home.first(), 1).firstNotNullOfOrNull { TmdbUrls.backdrop(it.backdropPath) }
+            container.catalog.page(RowRegistry.home.first(), 1).items.firstNotNullOfOrNull { TmdbUrls.backdrop(it.backdropPath) }
         }.getOrNull()
     }
     Box(

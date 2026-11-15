@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kids profiles: age restriction (same as the website). -->
+<resources>
+    <!-- Details or playback of a title the profile may not watch. -->
+    <string name="age_blocked_title">This title isn\'t available for this profile</string>
+    <string name="age_blocked_rated">It is rated %1$d+ and this profile is limited to %2$d+ titles.</string>
+    <string name="age_blocked_unrated">Its age rating couldn\'t be verified, so it is hidden for this profile (%1$d+).</string>
+    <string name="age_blocked_back">Back</string>
+
+    <!-- Lists left empty because the profile hides everything. -->
+    <string name="age_grid_empty">Nothing for this profile here.</string>
+    <string name="age_page_empty_title">Nothing for this profile here</string>
+    <string name="age_page_empty_body">The titles on this page are above the profile\'s age limit (%1$d+).</string>
+    <string name="age_search_empty">No results for “%1$s” within this profile\'s age limit.</string>
+    <string name="age_watchlist_hidden">The titles in your list aren\'t available for this profile.</string>
+
+    <!-- Account settings. -->
+    <string name="settings_account_age">Age restriction: %1$d+. Only titles rated for this age are shown.</string>
+    <string name="settings_account_age_unknown">Checking the profile\'s age restriction.</string>
+</resources>

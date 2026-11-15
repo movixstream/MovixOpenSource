@@ -124,7 +124,7 @@ internal class BannerTrailer(
      */
     suspend fun play(item: HeroInfo) {
         try {
-            val key = runCatching { container.catalog.details(item.type, item.id).trailerKey }.getOrNull() ?: return
+            val key = runCatching { container.catalog.info(item.type, item.id).trailerKey }.getOrNull() ?: return
             // Image seule (sans le fichier audio) : moins de données, et aucun son possible.
             val streams = container.youtube.streams(key, maxHeight = if (lowRam) 480 else 720) ?: return
             stopJob?.cancel()

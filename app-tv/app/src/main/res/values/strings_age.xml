@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Profils enfant : restriction d'âge (comme sur le site). -->
+<resources>
+    <!-- Fiche ou lecture d'un titre interdit au profil. -->
+    <string name="age_blocked_title">Ce contenu n\'est pas disponible pour ce profil</string>
+    <string name="age_blocked_rated">Il est classé %1$d+ et ce profil est limité aux titres %2$d+.</string>
+    <string name="age_blocked_unrated">Sa classification d\'âge n\'a pas pu être vérifiée : il est masqué pour ce profil (%1$d+).</string>
+    <string name="age_blocked_back">Retour</string>
+
+    <!-- Listes vides parce que le profil masque tout. -->
+    <string name="age_grid_empty">Rien pour ce profil ici.</string>
+    <string name="age_page_empty_title">Rien pour ce profil ici</string>
+    <string name="age_page_empty_body">Les titres de cette page dépassent la restriction d\'âge du profil (%1$d+).</string>
+    <string name="age_search_empty">Aucun résultat pour « %1$s » avec la restriction d\'âge de ce profil.</string>
+    <string name="age_watchlist_hidden">Les titres de ta liste ne sont pas disponibles pour ce profil.</string>
+
+    <!-- Badge du profil (« Qui regarde ? ») et Réglages › Compte. -->
+    <string name="age_badge" translatable="false">%1$d+</string>
+    <string name="settings_account_age">Restriction d\'âge : %1$d+. Seuls les titres classés pour cet âge sont proposés.</string>
+    <string name="settings_account_age_unknown">Restriction d\'âge du profil en cours de vérification.</string>
+</resources>

@@ -53,6 +53,12 @@ class TmdbApi(
     suspend fun person(id: Int): TmdbPerson =
         get("/person/$id", mapOf("append_to_response" to "combined_credits,translations"))
 
+    /** Classifications d'un film, par pays (restriction d'âge des profils enfant). */
+    suspend fun releaseDates(movieId: Int): TmdbReleaseDates = get("/movie/$movieId/release_dates", emptyMap())
+
+    /** Classifications d'une série, par pays. */
+    suspend fun contentRatings(tvId: Int): TmdbRatings = get("/tv/$tvId/content_ratings", emptyMap())
+
     /** `true` si TMDB accepte la clé (HTTP 200 sur /configuration). */
     suspend fun validateKey(key: String): Boolean = withContext(Dispatchers.IO) {
         val url = baseUrl.newBuilder().addPathSegments("configuration").addQueryParameter("api_key", key).build()
