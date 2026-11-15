@@ -29,7 +29,7 @@ const {
 const ANISKIP_BASE = 'https://api.aniskip.com/v2';
 const SKIPDB_BASE = 'https://api.skipdb.tv/api';
 const INTRODB_BASE = 'https://api.introdb.app';
-const THEINTRODB_BASE = 'https://api.theintrodb.org/v1';
+const THEINTRODB_BASE = 'https://api.theintrodb.org/v4';
 
 const JSON_HEADERS = { 'User-Agent': USER_AGENT, Accept: 'application/json' };
 
@@ -277,8 +277,15 @@ const introdb = {
 // TheIntroDB — series et films, indexe par TMDB (le plus precis pour Movix,
 // qui raisonne deja en TMDB). Distingue `credits` de `outro`.
 //
-// L'endpoint public repond 401 sans cle : le fournisseur reste inactif tant que
-// `THEINTRODB_API_KEY` n'est pas renseigne dans l'environnement.
+// API v4 (`GET /v4/media`), ouverte en lecture. v1 est supprimée (404), v2 et
+// v3 sont gelées et vont fermer. `season` et `episode` vont ensemble (sinon
+// 400) : sans les deux, `tmdb_id` désigne un film. Le service convertit
+// lui-même la numérotation TMDB vers l'ordre TVDB : pas besoin de `mapping`.
+//
+// Réponse : indexée par `tvdb_id` (plus de `tmdb_id`), un tableau par type, en
+// millisecondes. Avec `details=true`, chaque relevé porte aussi `confidence`.
+//   { tvdb_id, intro: [{ start_ms, end_ms }], credits: [{ start_ms: 3433269, end_ms: null }] }
+// `start_ms: null` = depuis le début, `end_ms: null` = jusqu'à la fin.
 // ===========================================================================
 const THEINTRODB_TYPE_MAP = {
   intro: 'intro',
@@ -293,52 +300,57 @@ const theintrodb = {
   label: 'TheIntroDB',
   requires: null,
   supportsMovies: true,
-  isConfigured: () => Boolean(process.env.THEINTRODB_API_KEY),
+  isConfigured: () => true,
   async fetch({ tmdbId, imdbId, season, episode, duration }) {
-    const apiKey = process.env.THEINTRODB_API_KEY;
-    if (!apiKey) return [];
-
     // `tmdb_id` est l'identifiant recommande ; `imdb_id` sert de repli.
     const params = tmdbId ? { tmdb_id: tmdbId } : { imdb_id: imdbId };
     if (season !== null) params.season = season;
     if (episode !== null) params.episode = episode;
+    // `details` renvoie la vraie confiance de chaque relevé. `duration_ms`
+    // choisit la version la plus proche du flux (version longue, cinéma…).
+    params.details = true;
+    if (duration !== null) params.duration_ms = Math.round(duration * 1000);
 
-    const res = await axios.get(`${THEINTRODB_BASE}/segments`, {
+    // Cle facultative : la lecture est ouverte, une cle ne sert qu'a relever
+    // le quota. Une cle invalide est ignoree par le service.
+    const apiKey = process.env.THEINTRODB_API_KEY;
+    const headers = apiKey ? { ...JSON_HEADERS, Authorization: `Bearer ${apiKey}` } : JSON_HEADERS;
+
+    const res = await axios.get(`${THEINTRODB_BASE}/media`, {
       params,
       timeout: UPSTREAM_TIMEOUT_MS,
-      headers: { ...JSON_HEADERS, 'X-Api-Key': apiKey, Authorization: `Bearer ${apiKey}` },
+      headers,
       validateStatus: ACCEPT_ANY_CLIENT_STATUS,
     });
 
     if (!classifyResponse(res)) return [];
-
-    // La reponse est acceptee sous deux formes : un objet indexe par type
-    // (`{ intro: {...} }`) ou une liste (`{ segments: [{ type, ... }] }`).
-    const entries = Array.isArray(res.data?.segments)
-      ? res.data.segments
-      : Object.entries(res.data?.segments ?? res.data ?? {})
-          .filter(([key]) => key in THEINTRODB_TYPE_MAP)
-          .map(([key, value]) => (value ? { ...value, type: key } : null))
-          .filter(Boolean);
+    if (!res.data || typeof res.data !== 'object') return [];
 
     const out = [];
-    for (const entry of entries) {
-      const type = THEINTRODB_TYPE_MAP[entry?.type ?? entry?.segment_type];
-      if (!type) continue;
-      const start = Number(entry.start_sec ?? entry.start ?? (Number(entry.start_ms) / 1000));
-      const end = Number(entry.end_sec ?? entry.end ?? (Number(entry.end_ms) / 1000));
-      if (start === 0 && end === 0) continue;
+    for (const [key, type] of Object.entries(THEINTRODB_TYPE_MAP)) {
+      const raw = res.data[key];
+      const entries = Array.isArray(raw) ? raw : raw ? [raw] : [];
+      for (const entry of entries) {
+        const startMs = entry?.start_ms;
+        const endMs = entry?.end_ms;
+        const start = startMs == null ? 0 : Number(startMs) / 1000;
+        // Fin ouverte (generique jusqu'au bout) : on ne peut la borner qu'avec
+        // la duree reelle du flux. Sans elle, le releve est inutilisable.
+        const end = endMs == null ? duration : Number(endMs) / 1000;
+        if (end === null || end === undefined) continue;
+        if (start === 0 && end === 0) continue;
 
-      const candidate = {
-        type,
-        start,
-        end,
-        confidence: clampConfidence(entry.confidence, 0.7),
-        source: 'theintrodb',
-        match: null,
-        referenceLength: Number(entry.runtime_sec) || null,
-      };
-      if (accept(candidate, duration)) out.push(candidate);
+        const candidate = {
+          type,
+          start,
+          end,
+          confidence: clampConfidence(entry?.confidence, 0.7),
+          source: 'theintrodb',
+          match: null,
+          referenceLength: null,
+        };
+        if (accept(candidate, duration)) out.push(candidate);
+      }
     }
     return out;
   },
