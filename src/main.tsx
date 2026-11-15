@@ -9,6 +9,7 @@ import { api } from './services/api'
 import { registerBlockDetection } from './services/blockDetection'
 import { initAnalytics } from './utils/analytics'
 import { installHttpCache } from './utils/httpCache'
+import { persistTvPlatformFromUrl } from './utils/tvPlatform'
 import { installSegmentedSeasons } from './utils/segmentedSeasons'
 import { installManualEpisodes } from './utils/manualEpisodes'
 import './index.css'
@@ -154,6 +155,11 @@ const startMovixConsoleSafetyWarning = () => {
 };
 
 startMovixConsoleSafetyWarning();
+
+// Plateforme TV : le chargeur webOS ouvre le site avec `?platform=tv`, un
+// paramètre qui disparaît à la première navigation SPA. On le persiste ici,
+// avant le render, pour que `isTvPlatform()` soit déjà juste au premier paint.
+persistTvPlatformFromUrl();
 
 const safeLocalStorageGetItem = (key: string): string | null => {
   try {

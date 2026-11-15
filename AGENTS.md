@@ -41,6 +41,7 @@ Consulter l’index du [README principal](README.md), puis seulement les section
 - Le userscript est embarqué dans l’app mobile : vérifier le bridge et régénérer avec `node app/scripts/build-userscript.js` si nécessaire. Ne pas modifier directement une source générée.
 - Sync Pro : vérifier serveur WatchParty, hook, worker et Rust ensemble. La sortie générée est `public/wasm/watchparty-sync/` ; conserver le repli JavaScript.
 - Service worker personnalisé : `public/sw.js`, enregistré dans `src/main.tsx`. Le repli de domaine concerne aussi `src/services/blockDetection.ts` ; vérifier la configuration actuelle, sans reprendre d’anciens domaines ou TTL.
+- Périmètre TV : les routes hors V1 portent `tvExcluded` dans `src/routing/registry.tsx` et sont filtrées par `App.tsx`. Tout menu qui pointe vers elles doit passer par `isHiddenOnTv(href)` (`src/routing/tvScope.ts`), jamais par une liste de chemins recopiée. Le marqueur de plateforme vient de `src/utils/tvPlatform.ts`.
 - Hébergement : `build:cf`, `build:coolify` et `server/index.js` couvrent plusieurs cibles. Vérifier celle du déploiement demandé.
 
 ## Tests et vérification
