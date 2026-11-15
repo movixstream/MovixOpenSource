@@ -21,6 +21,10 @@ import { MEDIA_HERO_BASE_GRADIENT as HERO_GRADIENT } from '@/utils/mediaColors';
 import { HERO_OVERVIEW_SLOT, HERO_TITLE_SLOT } from './heroLayout';
 import { MorphContent, type MorphFrame } from './hero/MorphContent';
 import type { MorphBackdropProps, MorphStatus } from './hero/MorphBackdrop';
+import { HeroPromoContent } from './hero/HeroPromoContent';
+import { HERO_PROMO_FOCUS_Y, HERO_PROMO_OBJECT_POSITIONS } from './hero/heroPromoStyle';
+import { useHeroPromos, type HeroPromoDisplay } from '@/hooks/useHeroPromos';
+import type { HeroPromoPage } from '@/services/heroPromoService';
 
 const AUTO_SLIDE_MS = 6000;
 // Keep WebGL out of the classic slider's bundle. The HTML backdrop also covers
@@ -65,10 +69,46 @@ interface Media {
 
 interface HeroSliderProps {
   items: Media[];
+  /** Page du carrousel : ses promos (réglées dans l'admin) s'y ajoutent. */
+  promoPage?: HeroPromoPage;
 }
 
+interface HeroSliderInnerProps {
+  items: Media[];
+  promos: HeroPromoDisplay[];
+}
+
+type HeroSlide =
+  | { kind: 'media'; key: string; item: Media }
+  | { kind: 'promo'; key: string; promo: HeroPromoDisplay };
+
+// Chaque promo prend la place demandée (1 = première slide). À place égale,
+// l'ordre de la liste de l'admin est gardé ; au-delà de la fin, elle va en
+// dernier.
+const buildHeroSlides = (items: Media[], promos: HeroPromoDisplay[]): HeroSlide[] => {
+  const slides: HeroSlide[] = items.map((item) => ({ kind: 'media', key: `${item.media_type}-${item.id}`, item }));
+  let lastIndex = -1;
+  [...promos]
+    .sort((a, b) => a.position - b.position)
+    .forEach((promo) => {
+      const index = Math.min(Math.max(promo.position - 1, lastIndex + 1), slides.length);
+      slides.splice(index, 0, { kind: 'promo', key: `promo-${promo.id}`, promo });
+      lastIndex = index;
+    });
+  return slides;
+};
+
+const getSlideLabel = (slide: HeroSlide): string => (
+  slide.kind === 'promo' ? slide.promo.texts.title : slide.item.title || slide.item.name || ''
+);
+
+const getSlideObjectPosition = (slide: HeroSlide): string => (
+  slide.kind === 'promo' ? HERO_PROMO_OBJECT_POSITIONS[slide.promo.imagePosition] : 'center 30%'
+);
+
 interface HeroSlideMetadataProps {
-  item: Media;
+  /** Absent pour une promo : pas de logo TMDB à chercher. */
+  item?: Media;
   image: string;
   colorEnabled: boolean;
   colorPriority: boolean;
@@ -80,7 +120,7 @@ interface HeroSlideMetadataProps {
 // active : les logos restent préchauffés et le logo courant s'affiche dès
 // que sa propre requête aboutit, sans attendre une slide plus lente.
 const HeroSlideMetadata: React.FC<HeroSlideMetadataProps> = ({ item, image, colorEnabled, colorPriority, preloadEnabled, children }) => {
-  const { logoUrl } = useTmdbImages(item.media_type, item.id);
+  const { logoUrl } = useTmdbImages(item?.media_type, item?.id);
   const palette = useMediaColor('hero', image, colorEnabled, colorPriority);
   const displayLogo = logoUrl ? withTmdbImageSize(logoUrl, 'w500') : null;
   useEffect(() => {
@@ -105,8 +145,10 @@ const HeroSlideMetadata: React.FC<HeroSlideMetadataProps> = ({ item, image, colo
 // Inner component holds the heavy logic (Embla, timers, image fetches). When
 // the user disables the hero in Settings, the outer wrapper unmounts this
 // entirely → 0 RAM, 0 CPU, no logo fetch, no images downloaded.
-const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
+const HeroSliderInner: React.FC<HeroSliderInnerProps> = ({ items, promos }) => {
   const { t } = useTranslation();
+  const slides = useMemo(() => buildHeroSlides(items, promos), [items, promos]);
+  const slideCount = slides.length;
   const { effectivePrefs } = useLightMode();
   const { heroBaseGradient } = useMediaColorSettings();
   const sliderStyle = useHeroSliderStyle();
@@ -131,35 +173,48 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
     width: getCoverImageWidth(imageWidth, imageHeight, 2 / 3, imageDpr) });
   // Depend on size tiers, not every resize pixel: Morph retains its textures
   // until a different source is actually needed. Originals never enter Morph.
-  const morphImages = useMemo(() => items.map((item) => item.backdrop_path || item.poster_path
-    ? `https://image.tmdb.org/t/p/${item.backdrop_path ? backdropSize : posterSize}${item.backdrop_path || item.poster_path}`
-    : ''), [items, backdropSize, posterSize]);
+  // Une promo garde son image telle quelle (image mobile sur téléphone).
+  const mobileLayout = viewport.width < 768;
+  const morphImages = useMemo(() => slides.map((slide) => {
+    if (slide.kind === 'promo') {
+      return (mobileLayout && slide.promo.mobileImageUrl) || slide.promo.imageUrl;
+    }
+    const { item } = slide;
+    return item.backdrop_path || item.poster_path
+      ? `https://image.tmdb.org/t/p/${item.backdrop_path ? backdropSize : posterSize}${item.backdrop_path || item.poster_path}`
+      : '';
+  }), [slides, backdropSize, posterSize, mobileLayout]);
+  // Cadrage vertical de chaque image pour l'effet de transition WebGL : celui
+  // choisi dans l'admin pour une promo, `center 30%` pour un film ou une série.
+  const morphFocus = useMemo(() => slides.map((slide) => (
+    slide.kind === 'promo' ? HERO_PROMO_FOCUS_Y[slide.promo.imagePosition] : 0.3
+  )), [slides]);
   const autoSlideInterval = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const backdropRefs = useRef<(HTMLImageElement | null)[]>([]);
   const morphFrame = useMotionValue<MorphFrame>({ from: 0, to: 0, progress: 1 });
   const [morphStatus, setMorphStatus] = useState<MorphStatus>('loading');
   const [userPaused, setUserPaused] = useState(false);
-  const isPaused = userPaused || !effectivePrefs.carouselAutoplay || items.length < 2;
+  const isPaused = userPaused || !effectivePrefs.carouselAutoplay || slideCount < 2;
   const [isVisible, setIsVisible] = useState(true);
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden);
-  const morphLoading = isMorph && effectivePrefs.transitions && items.length > 1 && morphStatus === 'loading';
+  const morphLoading = isMorph && effectivePrefs.transitions && slideCount > 1 && morphStatus === 'loading';
   const frozen = isPaused || !isVisible || !documentVisible || morphLoading;
   const shouldPreload = (index: number) => isVisible && documentVisible && (
-    index === selectedIndex || index === (selectedIndex + 1) % items.length
-    || index === (selectedIndex - 1 + items.length) % items.length
+    index === selectedIndex || index === (selectedIndex + 1) % slideCount
+    || index === (selectedIndex - 1 + slideCount) % slideCount
   );
   useEffect(() => {
     if ((isMorph && effectivePrefs.transitions) || !isVisible || !documentVisible) return;
     // Decode the actual DOM images before a swipe, including last → first.
     // Only the selected slide and its two neighbours are promoted from lazy.
-    const indices = new Set([selectedIndex, (selectedIndex + 1) % items.length,
-      (selectedIndex - 1 + items.length) % items.length]);
+    const indices = new Set([selectedIndex, (selectedIndex + 1) % slideCount,
+      (selectedIndex - 1 + slideCount) % slideCount]);
     indices.forEach((index) => {
       const image = backdropRefs.current[index];
       if (image && morphImages[index] && typeof image.decode === 'function') void image.decode().catch(() => {});
     });
-  }, [isMorph, effectivePrefs.transitions, isVisible, documentVisible, selectedIndex, items.length, morphImages]);
+  }, [isMorph, effectivePrefs.transitions, isVisible, documentVisible, selectedIndex, slideCount, morphImages]);
   const progressStartRef = useRef<number>(performance.now());
   // Incrémenté à chaque redémarrage du cycle (changement de slide OU
   // interaction utilisateur). Sert de `key` à la barre de progression pour que
@@ -169,11 +224,11 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
   useLayoutEffect(() => {
     // A cold renderer must retain the outgoing content while it prepares both
     // textures. Only a real failure falls back to an immediate selection.
-    if (!isMorph || morphStatus === 'unavailable' || !effectivePrefs.transitions || !isVisible || !documentVisible || items.length < 2) {
-      const index = Math.min(selectedIndex, items.length - 1);
+    if (!isMorph || morphStatus === 'unavailable' || !effectivePrefs.transitions || !isVisible || !documentVisible || slideCount < 2) {
+      const index = Math.min(selectedIndex, slideCount - 1);
       morphFrame.set({ from: index, to: index, progress: 1 });
     }
-  }, [isMorph, morphStatus, effectivePrefs.transitions, isVisible, documentVisible, items.length, selectedIndex, morphFrame]);
+  }, [isMorph, morphStatus, effectivePrefs.transitions, isVisible, documentVisible, slideCount, selectedIndex, morphFrame]);
 
   // Track pause timing so unpause resumes from where we left off
   const pausedAtRef = useRef<number | null>(null);
@@ -325,18 +380,33 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
   const displayedFrame = morphFrame.get();
   const fallbackIndex = Math.min(morphLoading
     ? (displayedFrame.progress >= 0.5 ? displayedFrame.to : displayedFrame.from)
-    : selectedIndex, items.length - 1);
+    : selectedIndex, slideCount - 1);
 
-  const renderContent = (item: Media, idx: number) => {
+  const renderContent = (slide: HeroSlide, idx: number) => {
+    const isActive = idx === selectedIndex;
+    const colorEnabled = isVisible && documentVisible && (isActive || idx === (selectedIndex + 1) % slideCount);
+    if (slide.kind === 'promo') {
+      return (
+        <HeroSlideMetadata
+          key={slide.key}
+          image={morphImages[idx]}
+          colorEnabled={colorEnabled}
+          colorPriority={isActive}
+          preloadEnabled={shouldPreload(idx)}
+        >
+          {() => <HeroPromoContent promo={slide.promo} isActive={isActive} isMorph={isMorph} frozen={frozen} />}
+        </HeroSlideMetadata>
+      );
+    }
+    const { item } = slide;
     const year = getYear(item);
     const rating = item.vote_average ? item.vote_average.toFixed(1) : null;
-    const isActive = idx === selectedIndex;
     return (
       <HeroSlideMetadata
-        key={`${item.media_type}-${item.id}`}
+        key={slide.key}
         item={item}
         image={morphImages[idx]}
-        colorEnabled={isVisible && documentVisible && (isActive || idx === (selectedIndex + 1) % items.length)}
+        colorEnabled={colorEnabled}
         colorPriority={isActive}
         preloadEnabled={shouldPreload(idx)}
       >
@@ -470,29 +540,30 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
       >
         {isMorph && (
           <div className="pointer-events-none absolute inset-0" aria-hidden="true">
-            {(morphStatus !== 'ready' || !effectivePrefs.transitions) && isVisible && documentVisible && items.map((item, idx) => {
+            {(morphStatus !== 'ready' || !effectivePrefs.transitions) && isVisible && documentVisible && slides.map((slide, idx) => {
               const isActive = idx === fallbackIndex;
               // Warm neighbours even before the lazy renderer arrives, using
               // the same CORS request as its textures. Keep a no-CORS fallback
               // if that request or the renderer is unavailable.
               if (!isActive && !shouldPreload(idx)) return null;
               return <img
-                key={`${item.media_type}-${item.id}`}
+                key={slide.key}
                 ref={(image) => { backdropRefs.current[idx] = image; }}
                 src={morphImages[idx] || undefined}
                 alt=""
                 className="absolute inset-0 h-full w-full object-cover"
-                style={{ objectPosition: 'center 30%', visibility: isActive ? 'visible' : 'hidden' }}
+                style={{ objectPosition: getSlideObjectPosition(slide), visibility: isActive ? 'visible' : 'hidden' }}
                 draggable={false}
                 crossOrigin={morphStatus === 'unavailable' ? undefined : 'anonymous'}
                 decoding="async"
                 {...{ fetchpriority: isActive ? 'high' : 'low' }}
               />;
             })}
-            {effectivePrefs.transitions && items.length > 1 && (
+            {effectivePrefs.transitions && slideCount > 1 && (
               <React.Suspense fallback={null}>
                 <MorphBackdrop
                   images={morphImages}
+                  focus={morphFocus}
                   selectedIndex={selectedIndex}
                   active={isVisible && documentVisible}
                   frame={morphFrame}
@@ -506,13 +577,13 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
         )}
         <div className="embla__viewport relative h-full w-full overflow-hidden rounded-[inherit] touch-pan-y touch-pinch-zoom" ref={emblaRef}>
           <div className="embla__container flex h-full w-full touch-pan-y touch-pinch-zoom">
-            {items.map((item, idx) => {
+            {slides.map((slide, idx) => {
               const isActive = idx === selectedIndex;
 
               return (
                 <div
                   className="embla__slide h-full relative"
-                  key={`${item.media_type}-${item.id}`}
+                  key={slide.key}
                   style={{ userSelect: 'none', flex: '0 0 100%', minWidth: 0 }}
                 >
                   {/* La couverture tient compte de la hauteur sur mobile.
@@ -521,9 +592,9 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
                     <img
                       ref={(image) => { backdropRefs.current[idx] = image; }}
                       src={morphImages[idx] || undefined}
-                      alt={item.title || item.name}
+                      alt={getSlideLabel(slide)}
                       className="absolute inset-0 w-full h-full object-cover z-0"
-                      style={{ objectPosition: 'center 30%' }}
+                      style={{ objectPosition: getSlideObjectPosition(slide) }}
                       draggable={false}
                       loading={isActive || shouldPreload(idx) ? 'eager' : 'lazy'}
                       decoding="async"
@@ -534,7 +605,7 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
                   {!isMorph && (
                     <>
                       {heroBaseGradient && <div className="absolute inset-0 z-10 pointer-events-none" style={{ background: HERO_GRADIENT }} />}
-                      {renderContent(item, idx)}
+                      {renderContent(slide, idx)}
                     </>
                   )}
                 </div>
@@ -545,7 +616,7 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
             <>
               {heroBaseGradient && <div className="pointer-events-none absolute inset-0 z-10" style={{ background: HERO_GRADIENT }} />}
               <MorphContent frame={morphFrame} blurEnabled={effectivePrefs.blurEffects} warpEnabled={!mobileMorph}>
-                {items.map((item, idx) => renderContent(item, idx))}
+                {slides.map((slide, idx) => renderContent(slide, idx))}
               </MorphContent>
             </>
           )}
@@ -561,12 +632,12 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
                 tactile de 14x30px via un padding réabsorbé par une marge
                 négative — le rendu visuel de la barre reste identique. */}
             <div className="flex items-center gap-1.5">
-              {items.map((_, idx) => (
+              {slides.map((slide, idx) => (
                 <button
-                  key={idx}
+                  key={slide.key}
                   type="button"
                   onClick={() => scrollTo(idx)}
-                  aria-label={t('settings.carouselSlide', { position: idx + 1, total: items.length })}
+                  aria-label={t('settings.carouselSlide', { position: idx + 1, total: slideCount })}
                   aria-current={idx === selectedIndex ? 'true' : undefined}
                   className="group flex items-center justify-center px-1 -mx-1 py-3 -my-3 touch-manipulation"
                 >
@@ -582,10 +653,10 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
             </div>
 
             {/* Divider */}
-            {effectivePrefs.carouselAutoplay && items.length > 1 && <div className="w-px h-4 bg-white/20" />}
+            {effectivePrefs.carouselAutoplay && slideCount > 1 && <div className="w-px h-4 bg-white/20" />}
 
             {/* Progress bar */}
-            {effectivePrefs.carouselAutoplay && items.length > 1 && <div className="w-12 sm:w-20 h-1 bg-white/15 rounded-full overflow-hidden">
+            {effectivePrefs.carouselAutoplay && slideCount > 1 && <div className="w-12 sm:w-20 h-1 bg-white/15 rounded-full overflow-hidden">
               <div
                 key={progressKey}
                 className={`h-full w-full bg-red-500 rounded-full hero-progress-fill ${frozen ? 'is-paused' : ''}`}
@@ -594,7 +665,7 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
             </div>}
 
             {/* Pause toggle */}
-            {effectivePrefs.carouselAutoplay && items.length > 1 && <button
+            {effectivePrefs.carouselAutoplay && slideCount > 1 && <button
               type="button"
               onClick={() => setUserPaused((p) => !p)}
               aria-label={t(isPaused ? 'settings.carouselResume' : 'settings.carouselPause')}
@@ -612,12 +683,13 @@ const HeroSliderInner: React.FC<HeroSliderProps> = ({ items }) => {
 // Outer wrapper — reads the visibility flag and unmounts the inner component
 // entirely when the user disabled the hero in Settings. This is what saves
 // the freeze: no inner = no Embla, no logo fetch, no images, no timers.
-const HeroSlider: React.FC<HeroSliderProps> = ({ items }) => {
+const HeroSlider: React.FC<HeroSliderProps> = ({ items, promoPage }) => {
   const { items: allowedItems } = useAgeRestrictedContent(items);
+  const promos = useHeroPromos(promoPage);
   const isHidden = useHeroHidden();
 
   if (isHidden || allowedItems.length === 0) return null;
-  return <HeroSliderInner items={allowedItems} />;
+  return <HeroSliderInner items={allowedItems} promos={promos} />;
 };
 
 export default React.memo(HeroSlider);

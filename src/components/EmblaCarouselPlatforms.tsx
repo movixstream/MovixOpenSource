@@ -14,6 +14,9 @@ interface PlatformItem {
   label?: string;
 }
 
+// GIF ou SVG animé : affiché dans une <img>, pas dans une <video>.
+const isImageAnimation = (url: string) => /\.(gif|svg)$/i.test(url);
+
 interface EmblaCarouselPlatformsProps {
   title?: string | React.ReactNode;
   items: PlatformItem[];
@@ -104,7 +107,7 @@ const EmblaCarouselPlatforms: React.FC<EmblaCarouselPlatformsProps> = ({ title, 
                     className="w-full h-full relative bg-white rounded-xl"
                     onMouseEnter={() => {
                       if (!effectivePrefs.bgAnimations) return;
-                      if (!platform.video?.endsWith('.gif')) {
+                      if (platform.video && !isImageAnimation(platform.video)) {
                         const video = document.getElementById(`video-${platform.id}`) as HTMLVideoElement | null;
                         if (video) {
                           try {
@@ -123,7 +126,7 @@ const EmblaCarouselPlatforms: React.FC<EmblaCarouselPlatformsProps> = ({ title, 
                       }
                     }}
                     onMouseLeave={() => {
-                      if (!platform.video?.endsWith('.gif')) {
+                      if (platform.video && !isImageAnimation(platform.video)) {
                         const video = document.getElementById(`video-${platform.id}`) as HTMLVideoElement | null;
                         if (video) {
                           try { video.pause(); video.currentTime = 0; } catch (_) {}
@@ -145,7 +148,7 @@ const EmblaCarouselPlatforms: React.FC<EmblaCarouselPlatformsProps> = ({ title, 
                       </p>
                     )}
                     {effectivePrefs.bgAnimations && platform.video && (
-                      platform.video.endsWith('.gif') ? (
+                      isImageAnimation(platform.video) ? (
                         <img
                           id={`video-${platform.id}`}
                           src={platform.video}

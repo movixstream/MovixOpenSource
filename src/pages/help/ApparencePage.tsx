@@ -49,8 +49,8 @@ const ApparencePage: React.FC = () => {
     },
     {
       kind: 'text',
-      titleKey: 'help.apparence.snowTitle',
-      bodyKey: 'help.apparence.snowBody',
+      titleKey: 'help.apparence.ambientTitle',
+      bodyKey: 'help.apparence.ambientBody',
     },
     {
       kind: 'text',

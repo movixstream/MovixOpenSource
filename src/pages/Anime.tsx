@@ -11,6 +11,7 @@ import { useWrappedTracker } from '../hooks/useWrappedTracker';
 import { getTmdbLanguage } from '../i18n';
 import { getNumericAge } from '../utils/certificationUtils';
 import { resolveTmdbKeywordId } from '../utils/tmdbKeywords';
+import { fetchAnimeCatalogue, type AnimeCatalogueItem } from '../services/animeSamaService';
 
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
 const IMMEDIATE_LOAD_COUNT = 2;
@@ -20,6 +21,11 @@ const MATURE_ANIME_AGE_THRESHOLD = 17;
 const CONTENT_RATING_REGION_PRIORITY = ['FR', 'US', 'JP', 'GB', 'CA'] as const;
 const CONTENT_RATING_CACHE_PREFIX = 'movix_anime_content_rating_';
 const CONTENT_RATING_CONCURRENCY = 12;
+// Rangées tirées du catalogue de la source anime : œuvres demandées au
+// catalogue, puis œuvres gardées une fois triées par popularité.
+const SITE_ROW_FETCH_LIMIT = 40;
+const SITE_ROW_SIZE = 15;
+const SITE_ROW_MIN_ITEMS = 5;
 
 interface AnimeShow {
   id: number;
@@ -246,6 +252,99 @@ const filterMatureAnime = async (items: AnimeShow[]) => {
   return results;
 };
 
+interface SiteShows {
+  /** En cours de diffusion, lisibles sur le site. */
+  airing: AnimeShow[];
+  /** Récents, doublés en français. */
+  dubbed: AnimeShow[];
+}
+
+const NO_SITE_SHOWS: SiteShows = { airing: [], dubbed: [] };
+
+interface TmdbTvDetails {
+  name?: string;
+  overview?: string;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  vote_average?: number;
+  vote_count?: number;
+  popularity?: number;
+  first_air_date?: string;
+  genres?: Array<{ id: number }>;
+  content_ratings?: { results?: Array<{ iso_3166_1?: string; rating?: string }> };
+}
+
+/**
+ * Fiche TMDB d'une œuvre du catalogue. Le catalogue dit ce qui est lisible sur
+ * le site ; TMDB donne le titre traduit, l'affiche, le synopsis et la
+ * classification d'âge. `null` pour une œuvre réservée aux adultes, sans
+ * affiche, ou que TMDB ne rend pas.
+ */
+const fetchSiteShow = async (showId: number, language: string): Promise<AnimeShow | null> => {
+  try {
+    const { data } = await axios.get<TmdbTvDetails>(`https://api.themoviedb.org/3/tv/${showId}`, {
+      params: { api_key: TMDB_API_KEY, language, append_to_response: 'content_ratings' },
+    });
+    const certification = getPreferredContentCertification(data.content_ratings?.results ?? []);
+    const age = certification ? getNumericAge(certification) : 0;
+    setCachedContentAge(showId, age);
+    if (age >= MATURE_ANIME_AGE_THRESHOLD || !data.name || !data.poster_path) {
+      return null;
+    }
+
+    return {
+      id: showId,
+      name: data.name,
+      overview: data.overview ?? '',
+      poster_path: data.poster_path,
+      backdrop_path: data.backdrop_path ?? '',
+      vote_average: data.vote_average ?? 0,
+      vote_count: data.vote_count,
+      popularity: data.popularity,
+      first_air_date: data.first_air_date ?? '',
+      genre_ids: (data.genres ?? []).map((genre) => genre.id),
+      media_type: 'tv',
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Rangées du catalogue de la source anime (index tenu par le Main API) : tout
+ * ce qui s'y trouve a des épisodes lisibles sur le site. Rangées vides si
+ * l'index ne répond pas : la page s'affiche alors sans elles.
+ */
+const loadSiteShows = async (language: string): Promise<SiteShows> => {
+  const [airing, dubbed] = await Promise.all([
+    fetchAnimeCatalogue({ type: 'tv', linked: true, status: 'ongoing', sort: 'recent', limit: SITE_ROW_FETCH_LIMIT }),
+    fetchAnimeCatalogue({ type: 'tv', linked: true, lang: 'vf', sort: 'recent', limit: SITE_ROW_FETCH_LIMIT }),
+  ]);
+
+  const idsOf = (items: AnimeCatalogueItem[]) =>
+    items.flatMap((item) => (item.tmdb?.type === 'tv' ? [item.tmdb.id] : []));
+  const ids = [...new Set([...idsOf(airing.items), ...idsOf(dubbed.items)])];
+
+  const shows = new Map<number, AnimeShow>();
+  for (let index = 0; index < ids.length; index += CONTENT_RATING_CONCURRENCY) {
+    const chunk = ids.slice(index, index + CONTENT_RATING_CONCURRENCY);
+    const fetched = await Promise.all(chunk.map((showId) => fetchSiteShow(showId, language)));
+    fetched.forEach((show) => {
+      if (show) {
+        shows.set(show.id, show);
+      }
+    });
+  }
+
+  const rowOf = (items: AnimeCatalogueItem[]) =>
+    [...new Set(idsOf(items))]
+      .flatMap((showId) => shows.get(showId) ?? [])
+      .sort(compareAnimeByPopularity)
+      .slice(0, SITE_ROW_SIZE);
+
+  return { airing: rowOf(airing.items), dubbed: rowOf(dubbed.items) };
+};
+
 const Anime: React.FC = () => {
   const { t, i18n } = useTranslation();
   const tmdbLanguage = getTmdbLanguage();
@@ -254,6 +353,7 @@ const Anime: React.FC = () => {
   const [topContent, setTopContent] = useState<AnimeShow[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [genreImages, setGenreImages] = useState<Record<number, string | undefined>>({});
+  const [siteShows, setSiteShows] = useState<SiteShows>(NO_SITE_SHOWS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -438,6 +538,49 @@ const Anime: React.FC = () => {
     fetchAnimeShows();
   }, [fetchAnimeShows]);
 
+  // Rangées du catalogue de la source anime. Indépendantes du reste : la page
+  // s'affiche sans les attendre, et sans elles si l'index ne répond pas.
+  useEffect(() => {
+    let cancelled = false;
+    const cacheKey = `movix_anime_site_rows_v1_${tmdbLanguage}`;
+
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null') as (SiteShows & { at?: number }) | null;
+      if (cached && Date.now() - Number(cached.at) < DATA_CACHE_TTL_MS
+        && Array.isArray(cached.airing) && Array.isArray(cached.dubbed)) {
+        setSiteShows({ airing: cached.airing, dubbed: cached.dubbed });
+        return;
+      }
+    } catch {
+      // Cache illisible : on recharge.
+    }
+
+    loadSiteShows(tmdbLanguage).then((rows) => {
+      if (cancelled) {
+        return;
+      }
+
+      setSiteShows(rows);
+      // Un résultat vide n'est pas gardé : l'index peut juste être en retard.
+      if (rows.airing.length > 0 || rows.dubbed.length > 0) {
+        try {
+          sessionStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), ...rows }));
+        } catch {
+          // Ignore cache write failures.
+        }
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tmdbLanguage]);
+
+  const siteRows = useMemo<Category[]>(() => [
+    { id: 'anime-airing-on-site', title: t('animePage.airingOnSite'), items: siteShows.airing },
+    { id: 'anime-recent-dubbed', title: t('animePage.recentDubbed'), items: siteShows.dubbed },
+  ].filter((row) => row.items.length >= SITE_ROW_MIN_ITEMS), [siteShows, t]);
+
   useEffect(() => {
     const loadGenreImages = async () => {
       try {
@@ -514,6 +657,7 @@ const Anime: React.FC = () => {
         {featuredShows.length > 0 && (
           <HeroSlider
             items={featuredShows.map((show) => ({ ...show, media_type: 'tv' }))}
+            promoPage="anime"
           />
         )}
       </div>
@@ -545,7 +689,7 @@ const Anime: React.FC = () => {
           </div>
         )}
 
-        {categories.map((category, index) => (
+        {[...siteRows, ...categories].map((category, index) => (
           <div key={`wrap-${category.id}`} className="px-4 md:px-8">
             <LazySection key={category.id} index={1 + index} immediateLoadCount={IMMEDIATE_LOAD_COUNT}>
               <EmblaCarousel

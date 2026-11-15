@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
-import Snowfall from 'react-snowfall';
 import { useLightMode } from '@/context/LightModeContext';
 import { isHalloweenSeason, setHalloweenTheme, useHalloweenTheme } from '@/hooks/useHalloweenTheme';
 import { HalloweenBatIcon, HalloweenLantern, HalloweenPumpkinIcon, HalloweenThemeToggleIcon } from './halloween/HalloweenIcons';
+import HalloweenDayBanner from './halloween/HalloweenDayBanner';
 import { MovixWordmark } from './brand/MovixWordmark';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
@@ -27,9 +27,12 @@ import { useIsDesktopNav } from '../hooks/useIsDesktopNav';
 import { APRIL_FOOLS_ADMIN_PATH, isAprilFoolsAdminEnabled } from '../utils/aprilFools';
 import { getOverlayPortalRoot } from '../utils/overlayPortal';
 import { useAgeRestrictedContent } from '../hooks/useAgeRestrictedContent';
-import { readLocalStorage, readSessionStorage } from '../utils/browserStorage';
-import { IX_MATRIX_URL } from '@/config/community';
-import { MatrixIcon } from './brand/MatrixIcon';
+import { readLocalStorage } from '../utils/browserStorage';
+import CommunityMenu from './header/CommunityMenu';
+import { AMBIENT_TOGGLE_EVENT, readAmbientActive } from './ambient/ambientOptions';
+
+// Le moteur des effets d'ambiance ne se télécharge qu'une fois ceux-ci activés.
+const AmbientLayer = lazy(() => import('./ambient/AmbientLayer'));
 
 const Header: React.FC = () => {
   const { t } = useTranslation();
@@ -41,12 +44,14 @@ const Header: React.FC = () => {
   const [isExploreOpen, setIsExploreOpen] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isCommunityOpen, setIsCommunityOpen] = useState(false);
   const isDesktopNav = useIsDesktopNav();
-  // Un panneau plein écran (Explorer, notifications ou profil) couvre la page.
-  const isSheetOpen = !isDesktopNav && (isExploreOpen || showNotifications || isProfileOpen);
-  const pauseDecor = isExploreOpen || showNotifications || isProfileOpen;
+  // Un panneau plein écran (Explorer, notifications, profil ou canaux) couvre
+  // la page.
+  const isSheetOpen = !isDesktopNav && (isExploreOpen || showNotifications || isProfileOpen || isCommunityOpen);
+  const pauseDecor = isExploreOpen || showNotifications || isProfileOpen || isCommunityOpen;
 
-  // Signale un menu ouvert (Explorer, notifications ou profil, sur ordinateur
+  // Signale un menu ouvert (Explorer, notifications, profil ou canaux, sur ordinateur
   // comme sur mobile) : le décor
   // Halloween se fige le temps du menu (voir halloween-decor.css).
   // L'attribut de pause va sur les trois conteneurs du décor, pas sur
@@ -66,21 +71,13 @@ const Header: React.FC = () => {
     };
   }, [pauseDecor]);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
-  const [isSnowfallActive, setIsSnowfallActive] = useState(() => {
-    return readSessionStorage('snowfall_active') === 'true';
-  });
+  const [isAmbientActive, setIsAmbientActive] = useState(readAmbientActive);
   const [showAutocomplete, setShowAutocomplete] = useState(false);
 
   useEffect(() => {
-    try { sessionStorage.setItem('snowfall_active', String(isSnowfallActive)); } catch { /* Préférence facultative. */ }
-  }, [isSnowfallActive]);
-
-  useEffect(() => {
-    const handleSnowfallToggle = () => {
-      setIsSnowfallActive(readSessionStorage('snowfall_active') === 'true');
-    };
-    window.addEventListener('snowfall_toggled', handleSnowfallToggle);
-    return () => window.removeEventListener('snowfall_toggled', handleSnowfallToggle);
+    const handleAmbientToggle = () => setIsAmbientActive(readAmbientActive());
+    window.addEventListener(AMBIENT_TOGGLE_EVENT, handleAmbientToggle);
+    return () => window.removeEventListener(AMBIENT_TOGGLE_EVENT, handleAmbientToggle);
   }, []);
 
   const [unreadCount, setUnreadCount] = useState(0);
@@ -103,7 +100,10 @@ const Header: React.FC = () => {
   // Calque de l'en-tête où coulent les menus d'ordinateur du profil (rendu
   // par ProfileMenu, en portail) : sous la ligne d'icônes, comme Explorer.
   const [panelHost, setPanelHost] = useState<HTMLDivElement | null>(null);
-  const headerPanels = useMemo<HeaderPanels>(() => ({ host: panelHost, onProfileOpenChange: setIsProfileOpen }), [panelHost]);
+  const headerPanels = useMemo<HeaderPanels>(
+    () => ({ host: panelHost, onProfileOpenChange: setIsProfileOpen, onCommunityOpenChange: setIsCommunityOpen }),
+    [panelHost],
+  );
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const location = useLocation();
   const navigate = useNavigate();
@@ -422,12 +422,13 @@ const Header: React.FC = () => {
             haut du panneau. Il se retire de bas en haut : il remonte hors de
             l'écran en s'effaçant, sans être écrasé, et redescend par le même
             chemin à la fermeture (transform et opacity seulement : composité). */}
-        <div className={`absolute inset-0 pointer-events-none z-0 bg-gradient-to-b from-black/90 via-black/70 to-transparent [will-change:opacity,transform] transition-[opacity,transform] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-opacity motion-reduce:!translate-y-0 ${isExploreOpen || showNotifications || isProfileOpen ? 'max-lg:!opacity-0 max-lg:-translate-y-full' : ''}`} aria-hidden="true" />
+        <div className={`absolute inset-0 pointer-events-none z-0 bg-gradient-to-b from-black/90 via-black/70 to-transparent [will-change:opacity,transform] transition-[opacity,transform] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-opacity motion-reduce:!translate-y-0 ${pauseDecor ? 'max-lg:!opacity-0 max-lg:-translate-y-full' : ''}`} aria-hidden="true" />
         {/* Même grille que le cadre du HeroSlider : 100vw comme `body`
             (index.css), 1920 px au plus, marges px-3 / sm:px-6 / md:px-12 /
             lg:px-20. Le logo et le profil tombent sur ses bords. 100vw et non
             la largeur de l'en-tête fixe : selon le navigateur, 100vw inclut
             la barre de défilement, sous laquelle passe toute la page. */}
+        <HalloweenDayBanner hidden={pauseDecor || isMobileSearchOpen} />
         <div className="relative z-10 w-screen">
           <div className="max-w-[1920px] mx-auto">
             {/* La citrouille ajoute un bouton : sous 390 px, les écarts passent
@@ -459,16 +460,8 @@ const Header: React.FC = () => {
                 </span>
               </Link>
 
-              <a
-                href={IX_MATRIX_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={t('telegram.joinTelegram')}
-                title={t('telegram.joinTelegram')}
-                className="pointer-events-auto inline-flex h-11 w-11 shrink-0 items-center justify-center p-2 text-white group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-              >
-                <MatrixIcon className="h-5 w-5 shrink-0 opacity-80 transition-opacity duration-150 group-hover:opacity-100 motion-reduce:transition-none" />
-              </a>
+              {/* Canaux officiels : un petit menu Matrix. */}
+              <CommunityMenu />
 
               {/* Desktop Nav: 3 items principaux + Explorer */}
               <nav className="hidden lg:flex items-center gap-1" data-main-nav>
@@ -868,16 +861,10 @@ const Header: React.FC = () => {
       {/* Spacer */}
       <div className="w-full h-0" aria-hidden="true" />
 
-      {isSnowfallActive && effectivePrefs.bgAnimations && (
-        <Snowfall
-          style={{
-            position: 'fixed',
-            width: '100vw',
-            height: '100vh',
-            zIndex: 2147483647,
-            pointerEvents: 'none',
-          }}
-        />
+      {isAmbientActive && effectivePrefs.bgAnimations && (
+        <Suspense fallback={null}>
+          <AmbientLayer />
+        </Suspense>
       )}
     </HeaderPanelsContext.Provider>
   );

@@ -27,6 +27,9 @@
  *   - avec un cache existant, un négatif ou une erreur upstream (404, page
  *     nginx, timeout/5xx) conserve son contenu et renouvelle seulement la date
  *     du fichier : la prochaine tentative attend la fenêtre TTL habituelle.
+ *   - un vrai « absent » (404 JSON de l'API) pose aussi une clé Redis
+ *     `swiftflow:absent:<route>` (même TTL d'1h), lue avant tout appel amont par
+ *     tous les workers : le négatif tient même si le fichier disque manque.
  *   - garde-fou: max ~900 appels upstream/min, au-delà on échoue vite (non
  *     caché) au lieu de brûler la limite.
  */
@@ -87,15 +90,58 @@ async function takeUpstreamSlot() {
   }
 }
 
+// === Négatif partagé (Redis) ===
+// Le négatif disque tient dans un fichier par titre : s'il manque (cache vidé,
+// écriture ratée), chaque visite relançait l'appel amont. La clé Redis est
+// posée UNIQUEMENT sur un vrai « absent » : 404 avec le corps JSON de l'API.
+// Timeout, erreur réseau, 5xx, 403/429 ou 404 non JSON (page nginx, domaine
+// déplacé) ne la posent jamais. Même TTL que le négatif disque (1h) : un titre
+// ajouté chez SwiftFlow doit apparaître en moins d'une heure.
+const NEGATIVE_TTL_S = Math.round(NEGATIVE_TTL_MS / 1000);
+const absentKey = (route) => `swiftflow:absent:${route}`;
+// Redis en reconnexion : on ne l'attend pas, on garde le comportement d'avant.
+const redisUsable = () => !redis.status || redis.status === 'ready';
+
+async function isKnownAbsent(route) {
+  if (!redisUsable()) return false;
+  try {
+    return (await redis.get(absentKey(route))) != null;
+  } catch {
+    return false;
+  }
+}
+
+async function rememberAbsent(route) {
+  if (!redisUsable()) return;
+  try {
+    await redis.set(absentKey(route), '1', 'EX', NEGATIVE_TTL_S);
+  } catch {
+    // Négatif optionnel : le cache disque prend le relais.
+  }
+}
+
+const isAbsentAnswer = (res) =>
+  res.status === 404
+  && res.data !== null
+  && typeof res.data === 'object'
+  && !Array.isArray(res.data)
+  && res.data.success !== true;
+
 // GET upstream. 404 = négatif (cachable uniquement à froid). Tout autre échec
 // HTTP = throw ; fetchAndCache conserve le cache existant et reporte le refresh.
 async function fetchUpstream(route) {
+  // Titre connu absent : même résultat qu'un 404, sans appel ni budget consommé.
+  if (await isKnownAbsent(route)) return null;
   if (!(await takeUpstreamSlot())) throw new Error('budget upstream épuisé (>900 req/min)');
   const res = await axios.get(apiUrl(route), {
     timeout: UPSTREAM_TIMEOUT_MS,
     validateStatus: (s) => s === 200 || s === 404,
   });
-  if (res.status === 404 || !res.data || res.data.success !== true) return null;
+  if (res.status === 404) {
+    if (isAbsentAnswer(res)) await rememberAbsent(route);
+    return null;
+  }
+  if (!res.data || res.data.success !== true) return null;
   return res.data.data;
 }
 
@@ -129,7 +175,11 @@ function fetchAndCache(key, fetcher, cached = null) {
       if (cached && (!fresh || fresh.notFound)) {
         // Ne réécrit ni les données ni _ts : seule la date du fichier avance,
         // y compris pour les autres workers et après expiration du cache mémoire.
-        await touchCacheEntry(CACHE_DIR.SWIFTFLOW, key);
+        // Fichier disparu alors que la copie Redis L1 vit encore : touch échoue
+        // et chaque hit relançait l'amont ; on réécrit l'entrée telle quelle.
+        if (!(await touchCacheEntry(CACHE_DIR.SWIFTFLOW, key))) {
+          await saveToCache(CACHE_DIR.SWIFTFLOW, key, cached);
+        }
         return cached;
       }
       await saveToCache(CACHE_DIR.SWIFTFLOW, key, fresh);

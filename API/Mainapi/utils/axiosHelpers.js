@@ -13,6 +13,8 @@ const path = require('path');
 const writeFileAtomic = require('write-file-atomic');
 const { isHydrackerBlackout, buildBlackoutError } = require('./hydrackerBlackout');
 const { canonicalFStreamUrl } = require('../config/fstream');
+const { isFStreamSocketReset } = require('./fstreamProxyPicker');
+const { adoptFStreamChallengeCookie } = require('./fstreamChallenge');
 
 const {
   ENABLE_DARKINO_PROXY,
@@ -46,12 +48,14 @@ let deps = {
   FSTREAM_BASE_URL: '',
   ensureFStreamSession: async () => {},
   fstreamCookies: {},
+  // Groupe stable de proxys FStream (routes/fstream.js) ; sans lui, un proxy au hasard.
+  fstreamProxyPicker: null,
   fstreamRequestCounter: 0,
   getFstreamRequestCounter: () => 0,
   incrementFstreamRequestCounter: () => {}
 };
 
-const WIFLIX_BASE_URL = process.env.WIFLIX_BASE_URL || 'https://flemmix.rip';
+const WIFLIX_BASE_URL = process.env.WIFLIX_BASE_URL || 'https://flemmix.land';
 
 const truncateForLog = (value, maxLength = 300) => {
   if (typeof value !== 'string') return value;
@@ -605,6 +609,35 @@ function withOptionalFStreamCookies(headers = {}) {
   };
 }
 
+// Page anti-robot avec une nouvelle valeur de fsschal : la requête repart une
+// fois, et withOptionalFStreamCookies y met le cookie à jour.
+async function sendPastFStreamChallenge(send) {
+  const response = await send();
+  return adoptFStreamChallengeCookie(deps.fstreamCookies, response) ? send() : response;
+}
+
+// Repli sans groupe configuré : un proxy au hasard, sans recopier tout le pool.
+function randomFStreamProxyEntry() {
+  const socks = PROXIES?.length || 0;
+  const http = DARKINO_PROXIES?.length || 0;
+  if (socks + http === 0) return null;
+  const index = Math.floor(Math.random() * (socks + http));
+  return index < socks
+    ? { proxy: PROXIES[index], type: 'socks5' }
+    : { proxy: DARKINO_PROXIES[index - socks], type: 'darkino' };
+}
+
+// Seule la recherche est limitée par IP chez French-Stream (voir fstreamProxyPicker).
+function isFStreamSearchUrl(url) {
+  return /\/engine\/ajax\/search\.php(?:[?#]|$)/.test(String(url || ''));
+}
+
+function pickFStreamProxyEntry(config) {
+  const picker = deps.fstreamProxyPicker;
+  if (!picker) return randomFStreamProxyEntry();
+  return isFStreamSearchUrl(config.url) ? picker.nextSearch() : picker.next();
+}
+
 async function axiosFStreamRequest(config) {
   // Éviter le 301 qui transforme le POST de recherche en GET sans son formulaire.
   config = { ...config, url: canonicalFStreamUrl(config.url) };
@@ -624,43 +657,37 @@ async function axiosFStreamRequest(config) {
   if (!ENABLE_FSTREAM_PROXY || !isFStream) {
     await deps.ensureFStreamSession();
     const existingHeaders = config.headers || {};
-    const response = await deps.axiosFStream({
+    const response = await sendPastFStreamChallenge(() => deps.axiosFStream({
       ...config,
       timeout: 8000,
       headers: withOptionalFStreamCookies(existingHeaders)
-    });
+    }));
     deps.incrementFstreamRequestCounter();
     return response;
   }
 
-  // Pool combine SOCKS5 + Darkino HTTP, 1 proxy aleatoire
-  const allProxies = [];
-  if (PROXIES && PROXIES.length > 0) {
-    PROXIES.forEach(p => allProxies.push({ proxy: p, type: 'socks5' }));
-  }
-  if (DARKINO_PROXIES && DARKINO_PROXIES.length > 0) {
-    DARKINO_PROXIES.forEach(p => allProxies.push({ proxy: p, type: 'darkino' }));
-  }
+  // Pool SOCKS5 + Darkino HTTP : un proxy du groupe stable, dont l'agent
+  // keep-alive réutilise ses connexions (voir fstreamProxyPicker).
+  const entry = pickFStreamProxyEntry(config);
 
-  if (allProxies.length === 0) {
+  if (!entry) {
     await deps.ensureFStreamSession();
     const existingHeaders = config.headers || {};
-    const response = await deps.axiosFStream({
+    const response = await sendPastFStreamChallenge(() => deps.axiosFStream({
       ...config,
       timeout: 8000,
       headers: withOptionalFStreamCookies(existingHeaders)
-    });
+    }));
     deps.incrementFstreamRequestCounter();
     return response;
   }
 
-  const entry = allProxies[Math.floor(Math.random() * allProxies.length)];
   const proxyLabel = `${entry.type}:${entry.proxy.host}:${entry.proxy.port}`;
 
   try {
     await deps.ensureFStreamSession();
     const existingHeaders = config.headers || {};
-    const response = await withFStreamProxy(entry, (agents) => deps.axiosFStream({
+    const send = () => withFStreamProxy(entry, (agents) => deps.axiosFStream({
       ...config,
       timeout: 8000,
       decompress: true,
@@ -669,6 +696,15 @@ async function axiosFStreamRequest(config) {
       proxy: false,
       headers: withOptionalFStreamCookies(existingHeaders)
     }));
+    let response;
+    try {
+      response = await sendPastFStreamChallenge(send);
+    } catch (error) {
+      // Socket keep-alive fermée juste avant d'être reprise : l'agent fautif est
+      // retiré, un seul nouvel essai part sur une connexion neuve.
+      if (!isFStreamSocketReset(error)) throw error;
+      response = await sendPastFStreamChallenge(send);
+    }
     deps.incrementFstreamRequestCounter();
     return response;
   } catch (error) {

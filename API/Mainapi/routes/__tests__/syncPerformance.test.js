@@ -18,6 +18,7 @@ async function fixture(t, profile = { user_language: 'fr' }) {
   await fs.writeFile(profilePath, JSON.stringify(profile));
   let serial = Promise.resolve();
   let writes = 0;
+  let lockedWrites = 0;
   let validations = 0;
   const accountCache = createAccountDataCache();
   const filename = path.resolve(__dirname, '../sync.js');
@@ -42,6 +43,8 @@ async function fixture(t, profile = { user_language: 'fr' }) {
       async safeWriteFile(target, data) { writes++; await fs.writeFile(target, data); return true; },
       async safeWriteJsonFile(target, data) { writes++; await fs.writeFile(target, JSON.stringify(data)); return true; },
     },
+    // Écritures faites sous le verrou du profil (sans verrou Redis).
+    'write-file-atomic': async (target, data) => { writes++; lockedWrites++; await fs.writeFile(target, data); },
     '../utils/discord': { logSyncErrorToDiscord: async () => {} },
     '../utils/redisRateLimitStore': { createRedisRateLimitStore: () => ({}) },
     'express-rate-limit': Object.assign(() => (_req, _res, next) => next(), { ipKeyGenerator: value => value }),
@@ -71,7 +74,12 @@ async function fixture(t, profile = { user_language: 'fr' }) {
     await serial;
     await fs.rm(dir, { recursive: true, force: true });
   });
-  return { router, request, accountPath, profilePath, read: async () => JSON.parse(await fs.readFile(profilePath, 'utf8')), counts: () => ({ writes, validations }) };
+  return {
+    router, request, accountPath, profilePath,
+    read: async () => JSON.parse(await fs.readFile(profilePath, 'utf8')),
+    counts: () => ({ writes, validations }),
+    lockedWrites: () => lockedWrites,
+  };
 }
 
 test('une sync sans changement évite toute écriture et toute validation en double', async t => {
@@ -114,6 +122,31 @@ test('le nettoyage de données anciennes reste écrit même sans opération', as
   assert.equal(response.statusCode, 200);
   assert.deepEqual(await f.read(), { user_language: 'fr' });
   assert.equal(f.counts().writes, 1);
+});
+
+function progressAt(position, seconds) {
+  return JSON.stringify({ position, timestamp: new Date(Date.parse('2026-10-19T10:00:00.000Z') + seconds * 1000).toISOString(), duration: 3600 });
+}
+
+test('un lecteur en pause qui renvoie la même position ne réécrit pas le profil', async t => {
+  const stored = progressAt(600, 0);
+  const f = await fixture(t, { user_language: 'fr', progress_550: stored });
+  // Ops réelles du site : objPatch du seul horodatage, ou valeur complète.
+  const patch = await f.request([{ op: 'objPatch', key: 'progress_550', delta: { set: { timestamp: JSON.parse(progressAt(600, 10)).timestamp } } }]);
+  const set = await f.request([{ op: 'set', key: 'progress_550', value: progressAt(602, 20) }]);
+  assert.equal(patch.statusCode, 200);
+  assert.equal(set.statusCode, 200);
+  assert.equal(f.counts().writes, 0);
+  assert.equal((await f.read()).progress_550, stored);
+});
+
+test('une position qui avance est écrite une fois, sous le verrou du profil et sans verrou Redis', async t => {
+  const f = await fixture(t, { user_language: 'fr', progress_550: progressAt(600, 0) });
+  const response = await f.request([{ op: 'objPatch', key: 'progress_550', delta: { set: { position: 630, timestamp: JSON.parse(progressAt(630, 30)).timestamp } } }]);
+  assert.equal(response.statusCode, 200);
+  assert.equal(f.counts().writes, 1);
+  assert.equal(f.lockedWrites(), 1);
+  assert.equal(JSON.parse((await f.read()).progress_550).position, 630);
 });
 
 test('un autre profil, compte ou type d’authentification ne peut pas être modifié', async t => {

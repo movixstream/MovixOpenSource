@@ -31,6 +31,7 @@ import {
   collectTmdbNames,
   type AnimeSamaCandidate,
 } from '../utils/animeMatcher';
+import { fetchAnimeByTmdb } from '../services/animeSamaService';
 import EmblaCarousel from '../components/EmblaCarousel';
 import { encodeId, getTmdbId } from '../utils/idEncoder';
 import AntiSpoilerSettingsModal from '../components/AntiSpoilerSettings';
@@ -2392,13 +2393,25 @@ const TVDetails: React.FC = () => {
         return response.data || [];
       };
 
-      const results = await searchWithFallback(searchFunction, searchName, 'TVDetails');
+      // D'abord l'œuvre que la fiche d'anime-sama relie à cet ID TMDB : aucun
+      // nom à comparer. Les œuvres réglées à la main (getAnimeMatcherForId) et
+      // celles sans fiche liée gardent la recherche par nom.
+      const specialMatcher = getAnimeMatcherForId(tvShow.id || '');
+      const linkedResults = specialMatcher
+        ? []
+        : (await fetchAnimeByTmdb<AnimeSamaCandidate>('tv', tvShow.id))
+          .filter((anime) => Array.isArray(anime.seasons) && anime.seasons.length > 0);
+      const results = linkedResults.length > 0
+        ? linkedResults
+        : await searchWithFallback(searchFunction, searchName, 'TVDetails');
 
       if (results.length > 0) {
         // --- PATCH SPECIAL ANIMES (cas fixés par TMDB id) ---
-        const specialMatcher = getAnimeMatcherForId(tvShow.id || '');
         let bestMatch: AnimeSamaCandidate | null = null;
-        if (specialMatcher) {
+        if (linkedResults.length > 0) {
+          // Trouvée par son ID TMDB : rien à départager.
+          bestMatch = linkedResults[0];
+        } else if (specialMatcher) {
           bestMatch = (results as AnimeSamaCandidate[]).find((anime) =>
             specialMatcher({ name: anime.name || '', seasons: anime.seasons })
           ) || null;
@@ -2739,7 +2752,8 @@ const TVDetails: React.FC = () => {
         }).join(', ');
         return {
           value: ep.index.toString(),
-          label: `${ep.index}. ${ep.name} ${allLanguages ? `(${allLanguages})` : ''}`,
+          // Le nom vient d'Anime-Sama (« Episode 62 ») : pas de rang devant.
+          label: `${ep.name || ep.index} ${allLanguages ? `(${allLanguages})` : ''}`,
         };
       } else {
         const airing = getEpisodeAiring(selectedSeason!, ep.episode_number);
@@ -2863,7 +2877,7 @@ const TVDetails: React.FC = () => {
                       >
                         <div className="flex flex-col">
                           <h4 className="text-lg font-medium group-hover:text-red-500 transition-colors mb-2">
-                            {ep.index}. {ep.name}
+                            {ep.name || ep.index}
                           </h4>
                           <div className="flex flex-wrap gap-2 mt-2">
                             {availableLanguages.map((language: string, i: number) => (

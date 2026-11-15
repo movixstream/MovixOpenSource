@@ -25,11 +25,25 @@ const {
   shouldRotateAnimeSamaResponse,
 } = require("./animeSamaProxyPolicy");
 const {
+  WIFLIX_GLOBAL_MIN_INTERVAL_MS,
+  WIFLIX_REQUEST_DEADLINE_MS,
+  WIFLIX_RESPONSE_MAX_BYTES,
+  classifyWiflixProxyFailure,
+  createWiflixDeadProxies,
+  createWiflixGlobalGate,
   createWiflixProxyAffinity,
-  isSocksWiflixProxyUrl,
+  createWiflixProxyAgents,
+  createWiflixSessionCookies,
+  hasFreeWiflixSocket,
+  isWiflixRateLimited,
+  isWiflixSocketReset,
+  isWiflixTransportFailure,
   mergeWiflixProxySources,
   redactWiflixProxyUrl,
   runWiflixProxyAttempts,
+  runWithWiflixDeadline,
+  runWithWiflixPriority,
+  wiflixFailureStatus,
 } = require("./wiflixProxyAffinity");
 const {
   createWiflixProxyTelemetry,
@@ -80,10 +94,15 @@ const proxyRotationState = new Map();
 const fstreamAgentPool = createProxyAgentPool({
   maxEntries: 64,
   createAgent(proxyUrl, keepAlive) {
-    const options = { keepAlive, maxSockets: 16, maxTotalSockets: 16, maxFreeSockets: 2, timeout: 15000 };
+    // Groupe stable (fstreamProxyPicker) : ~3 req/s par proxy et par worker,
+    // 4 sockets libres absorbent les rafales sans fermer de connexion.
+    const options = { keepAlive, maxSockets: 16, maxTotalSockets: 16, maxFreeSockets: 4, timeout: 15000 };
     const socks = proxyUrl.startsWith('socks');
     const httpAgent = socks ? new SocksProxyAgent(proxyUrl, options) : new HttpProxyAgent(proxyUrl, options);
     const httpsAgent = socks ? httpAgent : new HttpsProxyAgent(proxyUrl, options);
+    // https-proxy-agent remplace this.options : sans ce rappel, une socket libre
+    // vers French-Stream (HTTPS) ne serait jamais fermée pour inactivité.
+    if (httpsAgent.options && httpsAgent.options.timeout === undefined) httpsAgent.options.timeout = options.timeout;
     return {
       httpAgent, httpsAgent,
       destroy() { httpAgent.destroy(); if (httpsAgent !== httpAgent) httpsAgent.destroy(); },
@@ -132,18 +151,28 @@ const MAX_PROXYSCRAPE_PROXY_ATTEMPTS = 2;
 // Après 3 échecs d'affilée (délai, 408, 5xx, blocage 403/429), la source est
 // mise en pause 5 min : les appels échouent tout de suite (SOURCE_CIRCUIT_OPEN)
 // au lieu de garder des requêtes CycleTLS/proxy en attente jusqu'au délai.
+// Coflix : une requête en délai ne rend son verdict qu'après ses 2 proxys
+// (2 × 7 s) ; sans plafond, chaque titre visité entre-temps lançait sa propre
+// recherche (~130 appels CycleTLS par worker avant la pause). Au plus 8 appels
+// en vol par worker, 32 en attente : le reste repart en pause dès qu'elle tombe.
 const coflixCircuit = createSourceCircuitBreaker({
   name: "Coflix",
   neutralCodes: ["COFLIX_PROXIES_UNAVAILABLE"],
+  maxConcurrent: 8,
+  maxQueued: 32,
 });
 const cpasmalCircuit = createSourceCircuitBreaker({
   name: "Cpasmal",
   neutralCodes: ["CPASMAL_PROXY_COOLDOWN"],
 });
-const flemmixCircuit = createSourceCircuitBreaker({
-  name: "Flemmix",
-  neutralCodes: ["WIFLIX_NO_EGRESS"],
-});
+// Lecture seule de la pause Coflix de ce worker, sans effet de bord : à
+// l'échéance, elle vaut false et la requête d'essai passe.
+function isCoflixCircuitOpen() {
+  return coflixCircuit.isOpen();
+}
+// Pas de disjoncteur pour Flemmix : ses échecs viennent surtout des proxys, et
+// chaque proxy fautif est déjà écarté seul (wiflixDeadProxies). Couper toute la
+// source punissait les proxys sains pour les échecs des autres.
 
 // Constante pour l'enhancement Darkino
 const darkiworld_premium = false; // Passe \u00e0 false pour d\u00e9sactiver l'enhancement Darkino
@@ -413,7 +442,7 @@ async function axiosCpasmalRequest(config) {
 }
 
 // Coflix (recherche + pages film/s\u00e9rie) via CycleTLS (JA3 Chrome) sur les proxys
-// ProxyScrape (HTTP pr\u00e9f\u00e9r\u00e9, SOCKS5 en repli). Sur 429/403/5xx/erreur r\u00e9seau
+// ProxyScrape (SOCKS5 pr\u00e9f\u00e9r\u00e9, HTTP en repli). Sur 429/403/5xx/erreur r\u00e9seau
 // on passe \u00e0 l'IP suivante (2 max). Si tout est 429, le flag coflixSiteRateLimited
 // coupe le spam de log par titre c\u00f4t\u00e9 route (coflix.js).
 // Interface inchang\u00e9e pour les appelants : timeout en millisecondes, r\u00e9ponse
@@ -460,7 +489,15 @@ async function requestCoflixThroughProxies(targetUrl, options = {}) {
     ),
   };
 
-  const { proxies, useSocks, totalAvailable } = pickProxyscrapeCandidates(coflixProxyPolicy.isAvailable);
+  // Coflix passe par les SOCKS5 (trop de 403 Cloudflare sur les HTTP) ;
+  // COFLIX_PROXY_TYPE=http remet les proxys HTTP sans changer le code.
+  // Les SOCKS5 du .env (SOCKS5_PROXIES) passent avant ceux de ProxyScrape : le
+  // rafraîchissement ProxyScrape remplace PROXIES, et Cloudflare impose son défi
+  // JavaScript (403 « Just a moment ») aux IP datacenter de ProxyScrape.
+  const { proxies, useSocks, totalAvailable } = pickProxyscrapeCandidates(coflixProxyPolicy.isAvailable, {
+    preferSocks: String(process.env.COFLIX_PROXY_TYPE || "socks5").toLowerCase() !== "http",
+    socksPool: COFLIX_SOCKS5_PROXIES,
+  });
   if (totalAvailable > 0 && proxies.length === 0) {
     throw Object.assign(new Error('Proxys Coflix temporairement indisponibles'), { code: 'COFLIX_PROXIES_UNAVAILABLE' });
   }
@@ -507,6 +544,18 @@ async function requestCoflixThroughProxies(targetUrl, options = {}) {
 
   // Rotation sur 2 proxies ProxyScrape max (egress différent = bucket 429 distinct).
   for (let i = 0; i < proxies.length; i++) {
+    // Coflix mis en pause pendant l'essai précédent (par d'autres requêtes) :
+    // pas de proxy suivant, l'appelant reçoit une pause et non un échec à
+    // mettre en cache. La requête d'essai (circuit mi-ouvert) garde ses 2 proxys.
+    if (i > 0 && coflixCircuit.isOpen()) {
+      throw Object.assign(new Error("Source Coflix en pause pendant la requête"), {
+        code: "SOURCE_CIRCUIT_OPEN",
+        isSourceCircuitOpen: true,
+        source: "Coflix",
+        httpStatus: 503,
+        cause: lastError,
+      });
+    }
     const proxy = proxies[i];
     const auth = proxy.auth ? `${proxy.auth}@` : "";
     const proxyUrl = useSocks
@@ -532,8 +581,9 @@ async function requestCoflixThroughProxies(targetUrl, options = {}) {
         continue;
       }
 
-      // 403 (Cloudflare), 5xx, ou erreur réseau/délai -> proxy suivant.
-      if (!statusCode || statusCode === 403 || (statusCode >= 500 && statusCode < 600)) {
+      // 403 (Cloudflare), 451 (Coflix bloqué dans le pays du proxy, écarté
+      // 12 h par coflixProxyPolicy), 5xx, ou erreur réseau/délai -> proxy suivant.
+      if (!statusCode || statusCode === 403 || statusCode === 451 || (statusCode >= 500 && statusCode < 600)) {
         continue;
       }
 
@@ -601,7 +651,10 @@ const CHROME_JA3 =
 const CHROME_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-function pickProxyscrapeCandidates(isAvailable) {
+// preferSocks : SOCKS5 d'abord (HTTP seulement si aucun SOCKS5 configuré).
+// socksPool : pool SOCKS5 propre à l'appelant, utilisé à la place de PROXIES s'il
+// n'est pas vide.
+function pickProxyscrapeCandidates(isAvailable, { preferSocks = false, socksPool: ownSocksPool = [] } = {}) {
   const httpPool =
     HTTP_PROXIES.length > 0
       ? HTTP_PROXIES
@@ -610,16 +663,19 @@ function pickProxyscrapeCandidates(isAvailable) {
           .filter(Boolean);
 
   const socksPool =
-    PROXIES.length > 0
+    ownSocksPool.length > 0
+      ? ownSocksPool
+      : PROXIES.length > 0
       ? PROXIES
       : parseProxyPayload(process.env.SOCKS5_PROXIES, "socks5")
           .map((entry) => sanitizeProxyEntry(entry, "socks5"))
           .filter(Boolean);
 
-  const preferredPool =
-    httpPool.length > 0
-      ? { proxies: httpPool, useSocks: false, label: "HTTP_PROXIES" }
-      : { proxies: socksPool, useSocks: true, label: "SOCKS5_PROXIES" };
+  const httpChoice = { proxies: httpPool, useSocks: false, label: "HTTP_PROXIES" };
+  const socksChoice = { proxies: socksPool, useSocks: true, label: "SOCKS5_PROXIES" };
+  const preferredPool = preferSocks
+    ? (socksPool.length > 0 ? socksChoice : httpChoice)
+    : (httpPool.length > 0 ? httpChoice : socksChoice);
 
   if (!preferredPool.proxies || preferredPool.proxies.length === 0) {
     return {
@@ -1520,81 +1576,6 @@ function markVavooProxyAsFailed(proxy, status) {
   return vavooProxyPolicy.recordFailure(proxy, status);
 }
 
-async function makeVavooBrowserRequest(targetUrl, payload, options = {}) {
-  const headers = options.headers && typeof options.headers === "object"
-    ? options.headers
-    : {};
-  const timeout = Math.max(1, Math.floor(Number(options.timeout) || 4));
-  const userAgent = headers["User-Agent"] || headers["user-agent"] || CHROME_UA;
-  const url = String(targetUrl).trim();
-  const body = JSON.stringify(payload);
-  const cycleTLS = await getCycleTLS();
-  let lastError = null;
-
-  // Un seul aller-retour CycleTLS : renvoie le JSON, ou lève avec le statut
-  // HTTP attaché pour que la politique de santé sache doser la quarantaine.
-  async function attempt(proxyUrl) {
-    const response = await cycleTLS(
-      url,
-      {
-        body,
-        ja3: CHROME_JA3,
-        userAgent,
-        ...(proxyUrl ? { proxy: proxyUrl } : {}),
-        headers,
-        timeout,
-      },
-      "post",
-    );
-    const status = Number(response?.status) || 0;
-    if (status < 200 || status >= 300) {
-      const error = new Error(`[VAVOO CYCLETLS] status ${status || "unknown"}`);
-      error.response = { status: status || undefined };
-      throw error;
-    }
-
-    let data = response?.body;
-    if (typeof data === "string") {
-      try {
-        data = JSON.parse(data);
-      } catch {
-        data = null;
-      }
-    }
-    if (!data || typeof data !== "object") {
-      const error = new Error("[VAVOO CYCLETLS] invalid JSON response");
-      error.response = { status };
-      throw error;
-    }
-    return data;
-  }
-
-  // Chemin nominal : direct. kool.to répond sans géoblocage, et le pool DE est
-  // trop petit (2 IP) pour encaisser toutes les résolutions à lui seul.
-  try {
-    return await attempt(null);
-  } catch (error) {
-    lastError = error;
-  }
-
-  for (let i = 0; i < 15; i += 1) {
-    const proxy = await pickVavooSocks5Proxy();
-    if (!proxy) break;
-
-    const auth = proxy.auth ? `${proxy.auth}@` : "";
-    try {
-      const data = await attempt(`socks5h://${auth}${proxy.host}:${proxy.port}`);
-      markVavooProxyAsHealthy(proxy);
-      return data;
-    } catch (error) {
-      lastError = error;
-      markVavooProxyAsFailed(proxy, error?.response?.status);
-    }
-  }
-
-  throw lastError || new Error("[VAVOO CYCLETLS] aucun proxy SOCKS5 disponible");
-}
-
 const splitCsvEnv = (envName, fallback = []) => {
   const rawValue = process.env[envName];
   if (!rawValue) return [...fallback];
@@ -2284,6 +2265,15 @@ const WIFLIX_PROXY_MAX_ATTEMPTS = WIFLIX_PROXYSCRAPE_SAMPLE + 1;
 const WIFLIX_PROXY_POOL_NAME = "WIFLIX";
 const WIFLIX_PROXY_MIN_INTERVAL_MS = 1000;
 const WIFLIX_PROXY_SCAN_LIMIT = 50;
+// Proxys dont ce worker garde le cookie de session, proposés en tête d'une
+// recherche : elle y coûte une requête au lieu de deux, sur une connexion
+// souvent encore ouverte (8 448 sockets TLS neuves en 2 min le 2026-10-19).
+const WIFLIX_WARM_PROXY_MAX = 2;
+// Intervalle de la porte de débit globale vers Flemmix ; 0 la désactive.
+const configuredWiflixGlobalInterval = String(process.env.WIFLIX_GLOBAL_MIN_INTERVAL_MS ?? "").trim();
+const WIFLIX_GLOBAL_INTERVAL_MS = /^\d+$/.test(configuredWiflixGlobalInterval)
+  ? Number(configuredWiflixGlobalInterval)
+  : WIFLIX_GLOBAL_MIN_INTERVAL_MS;
 
 function wiflixProxyIdentity(proxyUrl) {
   try {
@@ -2301,32 +2291,35 @@ function wiflixProxyIdentity(proxyUrl) {
 
 // Bouclier du site (« Bot shield active. ») ou page d'attente JS
 // (« Un instant, s'il vous plaît… ») : réponse 200 mais sans contenu utile.
+// Page d'accès (« Flemmix - Acces securise », bouton « Accéder maintenant »
+// puis redirection en JS) : servie en 200 sans le site, comme le bouclier.
 function isWiflixShieldBody(body) {
-  return /Bot shield active|Un instant, s.il vous pla[iî]t/i.test(body);
+  return /Bot shield active|Un instant, s.il vous pla[iî]t|Flemmix - Acc[eè]s s[eé]curis[eé]|window\._isBot\b/i.test(body);
 }
 
-// Ordre : dernier proxy gagnant, ProxyScrape, proxys configurés, liste gratuite.
-// Seuls les proxys réservés pour `requestCount` requêtes sont retenus, en un
-// seul script Redis pour toute la liste.
-async function wiflixProxyCandidates(requestCount = 1) {
+// Ordre : proxys au cookie de session connu (`warmProxies`, recherches), dernier
+// proxy gagnant, ProxyScrape, proxys configurés, liste gratuite. Seuls les
+// proxys réservés pour `requestCount` requêtes sont retenus, en un seul script
+// Redis pour toute la liste.
+async function wiflixProxyCandidates(requestCount = 1, warmProxies = []) {
   const entries = [];
+  const parked = [];
   const seen = new Set();
   const add = (proxyUrl, group, cap) => {
-    if (!proxyUrl || seen.has(proxyUrl) || wiflixDeadProxies.has(proxyUrl)) return;
+    if (!proxyUrl || seen.has(proxyUrl)) return;
     const proxy = wiflixProxyIdentity(proxyUrl);
     if (!proxy) return;
     seen.add(proxyUrl);
-    entries.push({ proxyUrl, proxy, group, cap });
+    (wiflixDeadProxies.has(proxyUrl) ? parked : entries).push({ proxyUrl, proxy, group, cap });
   };
+
+  for (const proxyUrl of warmProxies) add(proxyUrl, "warm", WIFLIX_WARM_PROXY_MAX);
 
   const preferred = await wiflixProxyAffinity.getPreferred();
   if (preferred && wiflixDeadProxies.has(preferred)) await wiflixProxyAffinity.forget(preferred);
   else add(preferred, "preferred", 1);
 
   const pool = HTTP_PROXIES.slice();
-  // Une IP refusée ne l'est souvent que temporairement : la liste noire est
-  // vidée avant de couvrir une bonne part du pool.
-  if (wiflixDeadProxies.size > Math.max(50, pool.length / 3)) wiflixDeadProxies.clear();
   if (pool.length > 0) {
     // Le curseur avance d'un échantillon : deux requêtes simultanées partent
     // de fenêtres différentes au lieu de se disputer les mêmes proxys.
@@ -2353,11 +2346,28 @@ async function wiflixProxyCandidates(requestCount = 1) {
     add(proxyUrl, "others", WIFLIX_PROXY_MAX_ATTEMPTS);
   }
 
+  // Plancher : quand la liste noire écarte presque tout l'échantillon, les
+  // proxys dont l'exclusion finit le plus tôt reviennent avant l'échéance.
+  // La liste n'est jamais vide à cause d'elle seule (sans pause de la source).
+  if (entries.length < WIFLIX_PROXY_MAX_ATTEMPTS && parked.length > 0) {
+    parked.sort((a, b) =>
+      wiflixDeadProxies.remainingMs(a.proxyUrl) - wiflixDeadProxies.remainingMs(b.proxyUrl));
+    for (const entry of parked.slice(0, WIFLIX_PROXY_MAX_ATTEMPTS - entries.length)) {
+      entries.push({ ...entry, parked: true });
+    }
+  }
+
   const reserved = await reserveRateLimitedProxyBatch(WIFLIX_PROXY_POOL_NAME, entries, {
     minIntervalMs: WIFLIX_PROXY_MIN_INTERVAL_MS * requestCount,
     maxTotal: WIFLIX_PROXY_MAX_ATTEMPTS,
     digestIdentity: true,
   });
+  // Seul un proxy écarté réservé ici sort de la liste noire : celui que le
+  // plafond de son groupe ou une réservation concurrente laisse de côté garde
+  // son échéance.
+  for (const entry of reserved) {
+    if (entry.parked) wiflixDeadProxies.delete(entry.proxyUrl);
+  }
   return reserved.map((entry) => entry.proxyUrl);
 }
 
@@ -2368,11 +2378,16 @@ const wiflixCandidateAffinity = {
   forget: (proxyUrl) => wiflixProxyAffinity.forget(proxyUrl),
 };
 const wiflixFreeProxies = [...wiflixConfiguredProxies];
-const wiflixProxyAgentCache = new LruMap({
-  max: PROXY_AGENT_CACHE_MAX,
-  onEvict: destroyHttpAgentLike,
+// Agents keep-alive par proxy, pris à bail le temps d'un essai : un agent
+// n'est retiré que sur une panne de transport, et jamais détruit pendant
+// qu'une autre requête de ce worker l'utilise encore.
+const wiflixProxyAgentPool = createProxyAgentPool({
+  maxEntries: PROXY_AGENT_CACHE_MAX,
+  createAgent: (proxyUrl, keepAlive) => createWiflixProxyAgents(proxyUrl, { keepAlive }),
 });
-const wiflixDeadProxies = new Set(); // Proxies who echoue — survit entre les requetes, reset au refresh
+// Proxys en échec, chacun avec son échéance (2 min après un blocage, 30 s
+// après un délai dépassé) ; vidés au rafraîchissement de la liste gratuite.
+const wiflixDeadProxies = createWiflixDeadProxies();
 const wiflixProxyAffinity = createWiflixProxyAffinity({ redis });
 const wiflixProxyTelemetry = createWiflixProxyTelemetry({
   redis,
@@ -2384,6 +2399,9 @@ const wiflixProxyTelemetry = createWiflixProxyTelemetry({
     proxy: false,
   }),
 });
+// Un créneau du débit global par requête vers Flemmix, pour tout le cluster.
+const wiflixGlobalGate = createWiflixGlobalGate({ redis, minIntervalMs: WIFLIX_GLOBAL_INTERVAL_MS });
+const wiflixSessionCookies = createWiflixSessionCookies();
 
 async function fetchWiflixFreeProxies() {
   if (!WIFLIX_FREE_PROXY_ENABLED) return;
@@ -2411,7 +2429,7 @@ async function fetchWiflixFreeProxies() {
     // Keep configured SOCKS5 first, then append the refreshed public HTTP pool.
     wiflixFreeProxies.length = 0;
     wiflixFreeProxies.push(...mergedProxies);
-    wiflixProxyAgentCache.clear();
+    wiflixProxyAgentPool.clear();
     wiflixDeadProxies.clear();
 
     console.log(
@@ -2424,24 +2442,83 @@ async function fetchWiflixFreeProxies() {
   }
 }
 
-function getWiflixFreeProxyAgent(proxyUrl) {
-  if (wiflixProxyAgentCache.has(proxyUrl)) {
-    return wiflixProxyAgentCache.get(proxyUrl);
-  }
+// === Essais Wiflix par proxy (bail, délai dur, reprise d'un socket coupé) ===
+// Créneaux du débit global pour un appel : le premier est pris avant le choix
+// des proxys (un refus ne réserve ni proxy ni agent), les suivants avant
+// chaque nouvelle requête, essais sur un autre proxy compris.
+function wiflixRequestSlots() {
+  let prepaid = false;
+  return {
+    async first() {
+      await wiflixGlobalGate.reserve();
+      prepaid = true;
+    },
+    async next() {
+      if (prepaid) {
+        prepaid = false;
+        return;
+      }
+      await wiflixGlobalGate.reserve();
+    },
+  };
+}
 
-  let agents;
-  if (isSocksWiflixProxyUrl(proxyUrl)) {
-    const agent = new SocksProxyAgent(proxyUrl);
-    agents = { httpAgent: agent, httpsAgent: agent };
-  } else {
-    agents = {
-      httpAgent: new HttpProxyAgent(proxyUrl),
-      httpsAgent: new HttpsProxyAgent(proxyUrl),
-    };
-  }
+// Le même agent sert du GET d'accueil au POST d'un essai.
+function acquireWiflixProxy(proxyUrl) {
+  let lease = wiflixProxyAgentPool.acquire(proxyUrl);
+  return {
+    get agents() { return lease.agent; },
+    // Agent neuf ; l'ancien finit ses autres requêtes avant d'être détruit.
+    renew() {
+      lease.release(true);
+      lease = wiflixProxyAgentPool.acquire(proxyUrl);
+    },
+    release(discard) { lease.release(discard); },
+  };
+}
 
-  wiflixProxyAgentCache.set(proxyUrl, agents);
-  return agents;
+async function withWiflixProxyLease(proxyUrl, run) {
+  const lease = acquireWiflixProxy(proxyUrl);
+  let transportFailure = false;
+  try {
+    return await run(lease);
+  } catch (error) {
+    // Un 403, un 503, une page bouclier ou un refus du débit global laissent
+    // la connexion saine : seule une panne de transport retire l'agent.
+    transportFailure = isWiflixTransportFailure(error);
+    throw error;
+  } finally {
+    lease.release(transportFailure);
+  }
+}
+
+// Une requête par le proxy du bail, bornée par un délai dur et un plafond de
+// taille, après son créneau du débit global (hors délai dur). Un socket gardé
+// ouvert que le proxy a fermé entre deux requêtes a droit à un second essai
+// sur une connexion neuve, sans écarter le proxy.
+async function sendWiflixProxyRequest(proxyUrl, lease, config, slots) {
+  const send = async () => {
+    await slots.next();
+    const { httpAgent, httpsAgent } = lease.agents;
+    return wiflixProxyTelemetry.trackRequest(proxyUrl, () => runWithWiflixDeadline(
+      (signal) => axios({
+        maxContentLength: WIFLIX_RESPONSE_MAX_BYTES,
+        ...config,
+        httpAgent,
+        httpsAgent,
+        signal,
+      }),
+      WIFLIX_REQUEST_DEADLINE_MS,
+    ));
+  };
+  const reused = hasFreeWiflixSocket(lease.agents);
+  try {
+    return await send();
+  } catch (error) {
+    if (!reused || !isWiflixSocketReset(error)) throw error;
+    lease.renew();
+    return send();
+  }
 }
 
 // Wiflix ne passe plus par les relais Cloudflare : ils restaient pendus jusqu'au
@@ -2456,13 +2533,9 @@ function wiflixProxiesExhausted(outcome) {
 /**
  * Wiflix request — proxys uniquement (dernier gagnant, ProxyScrape, proxys
  * configurés, liste gratuite), sans repli par relais Cloudflare.
- * Flemmix en échec 3 fois d'affilée est mis en pause 5 min (flemmixCircuit).
+ * Un proxy en échec est écarté seul, Flemmix n'est jamais mis en pause.
  */
 async function makeWiflixRequest(targetUrl, options = {}) {
-  return flemmixCircuit.run(() => requestWiflixPage(targetUrl, options));
-}
-
-async function requestWiflixPage(targetUrl, options = {}) {
   const {
     timeout = 10000,
     headers = {},
@@ -2493,26 +2566,24 @@ async function requestWiflixPage(targetUrl, options = {}) {
   };
 
   // --- Phase 1: last Redis success first, then ProxyScrape, configured and free proxies ---
+  // Débit global atteint : refus (WIFLIX_RATE_LIMITED) avant tout proxy.
+  const slots = wiflixRequestSlots();
+  await slots.first();
   const outcome = await runWiflixProxyAttempts({
     affinity: wiflixCandidateAffinity,
     proxies: await wiflixProxyCandidates(1),
     deadProxies: wiflixDeadProxies,
     maxAttempts: WIFLIX_PROXY_MAX_ATTEMPTS,
-    attempt: async (proxyUrl) => {
-      const agents = getWiflixFreeProxyAgent(proxyUrl);
-      const response = await wiflixProxyTelemetry.trackRequest(
-        proxyUrl,
-        () => axios({
-          url: targetUrl,
-          method,
-          headers: defaultHeaders,
-          timeout: WIFLIX_FREE_PROXY_TIMEOUT,
-          decompress,
-          ...agents,
-          ...(requestData !== undefined ? { data: requestData } : {}),
-          ...otherOptions,
-        }),
-      );
+    attempt: (proxyUrl) => withWiflixProxyLease(proxyUrl, async (lease) => {
+      const response = await sendWiflixProxyRequest(proxyUrl, lease, {
+        url: targetUrl,
+        method,
+        headers: defaultHeaders,
+        timeout: WIFLIX_FREE_PROXY_TIMEOUT,
+        decompress,
+        ...(requestData !== undefined ? { data: requestData } : {}),
+        ...otherOptions,
+      }, slots);
 
       // Verify we got a real response (not a proxy error page).
       const body = typeof response.data === "string" ? response.data : "";
@@ -2524,9 +2595,12 @@ async function requestWiflixPage(targetUrl, options = {}) {
       );
       invalidResponse.wiflixStatus = response.status;
       throw invalidResponse;
-    },
+    }),
+    // 404 ou débit global atteint : arrêt et erreur rendue telle quelle ;
+    // 503 : proxy gardé.
+    classifyFailure: classifyWiflixProxyFailure,
     onFailure: async (proxyUrl, error) => {
-      wiflixProxyAgentCache.delete(proxyUrl);
+      if (isWiflixRateLimited(error)) return;
       await wiflixProxyTelemetry.reportFailure(proxyUrl, error, {
         requestKind: "page",
         targetUrl,
@@ -2541,7 +2615,7 @@ async function requestWiflixPage(targetUrl, options = {}) {
     return outcome.response;
   }
 
-  if (outcome.attemptedCount > 0) {
+  if (outcome.attemptedCount > 0 && !outcome.stopped) {
     console.log(`[WIFLIX FREE PROXY] ${outcome.attemptedCount} proxys en échec`);
   }
   throw wiflixProxiesExhausted(outcome);
@@ -2556,48 +2630,74 @@ function extractCookieHeader(setCookie) {
     .join("; ");
 }
 
-// One GET (harvest the bot-shield session cookie) + one POST (search) over the
-// given axios proxy agents. Returns the response if it's a real result page,
-// else throws so the caller rotates to the next proxy.
-async function wiflixHandshake(homeUrl, searchUrl, baseHeaders, pdata, agents, timeout, proxyUrl) {
-  const home = await wiflixProxyTelemetry.trackRequest(
-    proxyUrl,
-    () => axios({
-      url: homeUrl,
-      method: "GET",
-      headers: { ...baseHeaders, referer: homeUrl },
-      timeout,
-      decompress: true,
-      ...agents,
-    }),
-  );
+// Vraie page de résultats : ni page bouclier, ni réponse tronquée.
+function isWiflixSearchPage(res) {
+  const body = typeof res?.data === "string" ? res.data : "";
+  return res?.status === 200 && body.length > 100 && !isWiflixShieldBody(body);
+}
+
+// Recherche par les agents du bail. Un cookie de session déjà connu pour ce
+// proxy est repris : un seul POST, sans le GET d'accueil (5 763 accueils de
+// 145 Ko décompressés en 2 min le 2026-10-19). Refusé (403 ou page bouclier),
+// il est oublié et la poignée de main complète est refaite sur le même proxy,
+// sans l'écarter : seuls l'accueil et le POST frais jugent le proxy, comme
+// avant. Poignée de main : GET d'accueil (cookie de session du bouclier) puis
+// POST avec ce cookie et h_check=25. Rend la page de résultats, sinon lève
+// une erreur pour passer au proxy suivant.
+async function wiflixHandshake(homeUrl, searchUrl, baseHeaders, pdata, lease, timeout, proxyUrl, slots) {
+  const search = (cookie) => sendWiflixProxyRequest(proxyUrl, lease, {
+    url: searchUrl,
+    method: "POST",
+    headers: { ...baseHeaders, cookie },
+    data: pdata,
+    timeout,
+    decompress: true,
+  }, slots);
+
+  const known = wiflixSessionCookies.get(proxyUrl);
+  if (known) {
+    const reused = await search(known).catch((error) => {
+      if (wiflixFailureStatus(error) === 403) return null;
+      throw error;
+    });
+    if (isWiflixSearchPage(reused)) {
+      wiflixSessionCookies.confirm(proxyUrl);
+      return reused;
+    }
+    wiflixSessionCookies.forget(proxyUrl);
+  }
+
+  const home = await sendWiflixProxyRequest(proxyUrl, lease, {
+    url: homeUrl,
+    method: "GET",
+    headers: { ...baseHeaders, referer: homeUrl },
+    timeout,
+    decompress: true,
+  }, slots);
+
+  // Page d'attente dès l'accueil : le POST qui suivrait n'atteint jamais
+  // l'origine (rapport du 2026-10-19 : autant de POST rapides que d'accueils
+  // bouclier). On passe au proxy suivant sans l'envoyer.
+  const homeBody = typeof home.data === "string" ? home.data : "";
+  if (isWiflixShieldBody(homeBody)) {
+    const shielded = new Error(`wiflix home shield page (status ${home.status}, ${homeBody.length}b)`);
+    shielded.wiflixStatus = home.status;
+    shielded.wiflixShield = true;
+    shielded.wiflixTargetUrl = homeUrl;
+    throw shielded;
+  }
 
   const harvested = extractCookieHeader(home.headers["set-cookie"]);
   const cookie = harvested
     ? `${harvested}; h_check=${WIFLIX_H_CHECK}`
     : `h_check=${WIFLIX_H_CHECK}`;
 
-  const res = await wiflixProxyTelemetry.trackRequest(
-    proxyUrl,
-    () => axios({
-      url: searchUrl,
-      method: "POST",
-      headers: { ...baseHeaders, cookie },
-      data: pdata,
-      timeout,
-      decompress: true,
-      ...agents,
-    }),
-  );
-
-  const body = typeof res.data === "string" ? res.data : "";
-  if (
-    res.status === 200 &&
-    body.length > 100 &&
-    !isWiflixShieldBody(body)
-  ) {
+  const res = await search(cookie);
+  if (isWiflixSearchPage(res)) {
+    wiflixSessionCookies.remember(proxyUrl, cookie, { replaced: Boolean(known) });
     return res;
   }
+  const body = typeof res.data === "string" ? res.data : "";
   const invalidResponse = new Error(`wiflix search bad response (status ${res.status}, ${body.length}b)`);
   invalidResponse.wiflixStatus = res.status;
   invalidResponse.wiflixTargetUrl = searchUrl;
@@ -2609,13 +2709,9 @@ async function wiflixHandshake(homeUrl, searchUrl, baseHeaders, pdata, agents, t
  * real session cookie issued by the homepage GET (plus h_check=25). The session
  * cookie is IP-bound, so the GET (harvest) and the POST (search) MUST run on the
  * same proxy. Port of vStream wiflix.py showMovies() handshake.
- * Même disjoncteur Flemmix que les pages (flemmixCircuit).
+ * Comme les pages : un proxy en échec est écarté seul.
  */
 async function makeWiflixSearchRequest(homeUrl, searchUrl, options = {}) {
-  return flemmixCircuit.run(() => requestWiflixSearch(homeUrl, searchUrl, options));
-}
-
-async function requestWiflixSearch(homeUrl, searchUrl, options = {}) {
   const { timeout = 10000, headers = {}, data: pdata } = options;
 
   const baseHeaders = {
@@ -2628,19 +2724,25 @@ async function requestWiflixSearch(homeUrl, searchUrl, options = {}) {
   };
 
   // --- Phase 1: last Redis success first, then ProxyScrape, configured and free proxies ---
-  // GET d'accueil + POST de recherche : deux requêtes par proxy.
+  // Débit global atteint : refus (WIFLIX_RATE_LIMITED) avant tout proxy.
+  const slots = wiflixRequestSlots();
+  await slots.first();
+  // GET d'accueil + POST de recherche : deux requêtes par proxy, un seul POST
+  // sur un proxy au cookie connu (réservé pour deux : un cookie refusé en
+  // coûte trois).
   const outcome = await runWiflixProxyAttempts({
     affinity: wiflixCandidateAffinity,
-    proxies: await wiflixProxyCandidates(2),
+    proxies: await wiflixProxyCandidates(2, wiflixSessionCookies.warm(WIFLIX_WARM_PROXY_MAX)),
     deadProxies: wiflixDeadProxies,
     maxAttempts: WIFLIX_PROXY_MAX_ATTEMPTS,
-    attempt: (proxyUrl) =>
+    attempt: (proxyUrl) => withWiflixProxyLease(proxyUrl, (lease) =>
       wiflixHandshake(
         homeUrl, searchUrl, baseHeaders, pdata,
-        getWiflixFreeProxyAgent(proxyUrl), WIFLIX_FREE_PROXY_TIMEOUT, proxyUrl,
-      ),
+        lease, WIFLIX_FREE_PROXY_TIMEOUT, proxyUrl, slots,
+      )),
+    classifyFailure: classifyWiflixProxyFailure,
     onFailure: async (proxyUrl, error) => {
-      wiflixProxyAgentCache.delete(proxyUrl);
+      if (isWiflixRateLimited(error)) return;
       await wiflixProxyTelemetry.reportFailure(proxyUrl, error, {
         requestKind: "search",
         targetUrl: error?.config?.url || error?.wiflixTargetUrl || searchUrl,
@@ -2655,7 +2757,7 @@ async function requestWiflixSearch(homeUrl, searchUrl, options = {}) {
     return outcome.response;
   }
 
-  if (outcome.attemptedCount > 0) {
+  if (outcome.attemptedCount > 0 && !outcome.stopped) {
     console.log(`[WIFLIX SEARCH] ${outcome.attemptedCount} proxys en échec`);
   }
   throw wiflixProxiesExhausted(outcome);
@@ -2700,7 +2802,14 @@ async function withFStreamProxy(entry, request) {
   const lease = acquireFStreamProxy(entry);
   let failed = false;
   try { return await request(lease); }
-  catch (error) { failed = true; throw error; }
+  catch (error) {
+    // Une réponse HTTP (404, 429…) laisse la connexion saine : l'agent garde ses
+    // sockets keep-alive. Seul un échec de transport le retire.
+    failed = !error?.response;
+    // Groupe stable de fstreamProxyPicker : un proxy fautif en sort.
+    try { entry.onFailure?.(error); } catch (_) { /* le suivi ne masque jamais l'erreur */ }
+    throw error;
+  }
   finally { lease.release(failed); }
 }
 
@@ -2791,10 +2900,11 @@ module.exports = {
   // Request helpers
   makeWiflixRequest,
   makeWiflixSearchRequest,
+  runWithWiflixPriority,
   makeCoflixRequest,
+  isCoflixCircuitOpen,
   makeLecteurVideoRequest,
   makeAnimeSamaRequest,
-  makeVavooBrowserRequest,
   makeCinestreamRequest,
   acquireFStreamProxy,
   withFStreamProxy,

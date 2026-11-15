@@ -1206,6 +1206,7 @@ const Home: React.FC = () => {
     { id: 119, src: "https://u.cubeupload.com/mystic/b222691607d658c2fa52.png", video: "https://media.tenor.com/T7L_NCdPIvAAAAPo/prime-video.mp4", alt: "Prime Video", route: "/provider/119", label: t('home.filmsAndSeries', { count: 2799 }) },
     { id: 531, src: "https://u.cubeupload.com/mystic/35734306149c1a6eb0a9.png", video: "https://media4.giphy.com/media/qCEXQzkScYOBIRusVA/giphy.mp4", alt: "Paramount+", route: "/provider/531", label: t('home.filmsAndSeries', { count: 502 }) },
     { id: 337, src: "https://u.cubeupload.com/mystic/c40fe782c450e170eea6.png", video: "https://media.tenor.com/h6-0yzk8pbAAAAPo/disney-disney-plus.mp4", alt: "Disney+", route: "/provider/337", label: t('home.filmsAndSeries', { count: 1152 }) },
+    { id: 1899, src: "/platforms/hbo-max.svg", video: "/platforms/hbo-max-anim.svg", alt: "HBO Max", route: "/provider/1899", label: t('home.filmsAndSeries', { count: 2047 }) },
     { id: 338, src: "https://u.cubeupload.com/mystic/hUzeosd33nzE5MCNsZxC.png", video: "https://i.giphy.com/media/vBjLa5DQwwxbi/giphy.mp4", alt: "Marvel Studios", route: "/provider/338", label: t('home.filmsAndSeries', { count: 65 }) },
     { id: 350, src: "https://u.cubeupload.com/mystic/b2fb6956993e2ee5b4e3.png", video: "https://media.tenor.com/Oxl9xEn7kTEAAAPo/applo-tv.mp4", alt: "Apple TV+", route: "/provider/350", label: t('home.filmsAndSeries', { count: 138 }) },
     { id: 355, src: "https://u.cubeupload.com/mystic/ky0xOc5OrhzkZ1N6KyUx.png", video: "https://i.giphy.com/media/3o7TKt3pMpzozdUsus/giphy.mp4", alt: "Warner Bros", route: "/provider/355", label: t('home.filmsAndSeries', { count: 645 }) },
@@ -1242,7 +1243,7 @@ const Home: React.FC = () => {
           <>
             {heroItems.length > 0 && (
               <div className="relative w-full pt-16 md:pt-20 lg:pt-24">
-                <HeroSlider items={heroItems} />
+                <HeroSlider items={heroItems} promoPage="home" />
               </div>
             )}
 

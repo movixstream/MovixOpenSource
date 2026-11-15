@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  AlertTriangle,
   AtSign,
   Copy,
   ExternalLink,
@@ -124,6 +125,17 @@ const GiftCardDonation: React.FC<GiftCardDonationProps> = ({ settings, exampleAm
                 </li>
               ))}
             </ul>
+          )}
+          {/* Une carte achetée sur paysafecard.com reste liée au compte de
+              l'acheteur : on ne peut pas l'encaisser. */}
+          {cards.some((card) => card.id === 'paysafecard') && (
+            <p
+              role="note"
+              className="mt-3 flex gap-2.5 rounded-xl border border-yellow-500/20 bg-yellow-500/[0.06] p-3 text-xs leading-5 text-yellow-50/80"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-400" aria-hidden="true" />
+              <span>{t('vipDonations.donate.giftCard.paysafecardWarning')}</span>
+            </p>
           )}
         </li>
 

@@ -31,18 +31,26 @@ async function resolveImdbId(mediaType, tmdbId) {
   const apiKey = process.env.TMDB_API_KEY;
   if (!apiKey) return null;
 
-  return cached(`segments:${CACHE_VERSION}:imdb:${mediaType}:${tmdbId}`, async () => {
-    try {
-      const res = await axios.get(`${TMDB_BASE}/${mediaType}/${tmdbId}/external_ids`, {
-        params: { api_key: apiKey },
-        timeout: UPSTREAM_TIMEOUT_MS,
-      });
-      const imdbId = res.data?.imdb_id;
-      return typeof imdbId === 'string' && /^tt\d+$/.test(imdbId) ? imdbId : null;
-    } catch {
-      return null;
-    }
-  });
+  try {
+    return await cached(`segments:${CACHE_VERSION}:imdb:${mediaType}:${tmdbId}`, async () => {
+      try {
+        const res = await axios.get(`${TMDB_BASE}/${mediaType}/${tmdbId}/external_ids`, {
+          params: { api_key: apiKey },
+          timeout: UPSTREAM_TIMEOUT_MS,
+        });
+        const imdbId = res.data?.imdb_id;
+        return typeof imdbId === 'string' && /^tt\d+$/.test(imdbId) ? imdbId : null;
+      } catch (error) {
+        // Seule une réponse définitive est mémorisée 6 h : un 429, un 5xx ou un
+        // délai dépassé laisse la clé vide pour que la lecture suivante réessaie.
+        const status = Number(error?.response?.status) || 0;
+        if (status && status !== 429 && status < 500) return null;
+        throw error;
+      }
+    });
+  } catch {
+    return null;
+  }
 }
 
 /**

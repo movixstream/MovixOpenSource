@@ -4,6 +4,8 @@ const { httpLabel, redisLabel, sqlLabel } = require('./labels');
 
 function safeCall(fn) { try { return fn?.(); } catch { return undefined; } }
 function isActive(collector) { return Boolean(collector?.active); }
+// Pendant la chauffe, les appels sont exclus : ne calculer ni libellé ni span.
+function isRecording(collector) { return isActive(collector) && collector.recording !== false; }
 function bytesOf(value) {
   if (Buffer.isBuffer(value)) return value.length;
   if (typeof value === 'string') return Buffer.byteLength(value);
@@ -11,6 +13,8 @@ function bytesOf(value) {
   return 0;
 }
 function responseBytes(value, state = { seen: 0, truncated: false, unknown: false }, depth = 0) {
+  // Réponses entières (INCR, PTTL, EXPIRE…) : taille connue, comme pour une chaîne.
+  if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') return { bytes: String(value).length, ...state };
   const own = bytesOf(value);
   if (own || value == null) return { bytes: own, ...state };
   if (!Array.isArray(value)) return { bytes: 0, ...state, unknown: true };
@@ -68,13 +72,13 @@ function instrumentRedis(client, collector) {
     let output;
     try { output = original.apply(this, arguments); }
     catch (error) {
-      if (isActive(collector) && command && typeof command === 'object' && !observed.has(command)) {
+      if (isRecording(collector) && command && typeof command === 'object' && !observed.has(command)) {
         observed.add(command);
         finish(start(collector, 'redis', redisLabel(command)), undefined, error);
       }
       throw error;
     }
-    if (!isActive(collector) || !command || typeof command !== 'object' || observed.has(command)) return output;
+    if (!isRecording(collector) || !command || typeof command !== 'object' || observed.has(command)) return output;
     observed.add(command);
     const span = start(collector, 'redis', redisLabel(command), 'redis-values');
     safeCall(() => span?.send?.(commandBytes(command)));
@@ -122,7 +126,7 @@ function instrumentMysqlPool(pool, collector) {
       if (typeof target[method] !== 'function') continue;
       const original = target[method];
       const wrapped = function instrumentedMysqlQuery(sql) {
-        if (!installed || !isActive(collector)) return original.apply(this, arguments);
+        if (!installed || !isRecording(collector)) return original.apply(this, arguments);
         const span = start(collector, 'mysql', sqlLabel(sql), 'sql-text');
         safeCall(() => span?.send?.(bytesOf(String(sql ?? ''))));
         let output;
@@ -188,7 +192,7 @@ function wrapCycleTLS(fn, collector) {
   if (typeof fn !== 'function' || !isActive(collector)) return fn;
   return new Proxy(fn, {
     apply(target, thisArg, args) {
-      if (!isActive(collector)) return Reflect.apply(target, thisArg, args);
+      if (!isRecording(collector)) return Reflect.apply(target, thisArg, args);
       const [url, options = {}, method] = args;
       const span = start(collector, 'cycletls', httpLabel(url, method || options?.method || 'GET'), 'decoded-body');
       safeCall(() => span?.send?.(bytesOf(options?.body)));
@@ -201,7 +205,7 @@ function wrapCycleTLS(fn, collector) {
 }
 function observeTextRequest(collector, kind, url, options, operation) {
   let output;
-  if (!isActive(collector)) return operation();
+  if (!isRecording(collector)) return operation();
   const span = start(collector, kind, httpLabel(url, options?.method || 'GET'), 'decoded-body');
   safeCall(() => span?.send?.(bytesOf(options?.body)));
   try { output = operation(); }

@@ -250,6 +250,21 @@ test('les compteurs se posent sur la valeur exacte et comptent chaque nombre sé
     assert.deepEqual(text.trace.drawn, ['WATCH_TIME_FACT']);
 });
 
+test('la dernière image du film porte la période du bilan, pour chaque sélection', () => {
+    const lastFrame = WRAPPED_VIDEO_DURATION - 1 / 30;
+    for (const options of optionCombinations()) {
+        const timeline = buildWrappedVideoTimeline(options);
+        const withPeriod = mockCanvas();
+        drawWrappedVideoFrame(withPeriod.ctx, { ...data, period: 'PERIOD_FACT' }, options, texts, new Map(), lastFrame, timeline);
+        assert.equal(withPeriod.trace.drawn.filter(text => text === 'PERIOD_FACT').length, 1, JSON.stringify(options));
+
+        // Sans période fournie, rien n'est inventé.
+        const without = mockCanvas();
+        drawWrappedVideoFrame(without.ctx, data, options, texts, new Map(), lastFrame, timeline);
+        assert.ok(!without.trace.drawn.join(' ').includes('undefined'), JSON.stringify(options));
+    }
+});
+
 test('les titres très longs restent bornés sans interrompre le rendu', () => {
     const longData = {
         ...data,

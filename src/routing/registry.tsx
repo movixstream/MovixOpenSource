@@ -66,6 +66,8 @@ export const ROUTES: RouteEntry[] = [
 
   // Watch routes (no skeleton — RouteProgressBar fallback)
   { path: '/watch/movie/:tmdbid',                         loader: lz(() => import('../pages/Watch/WatchMovie')) },
+  // Version alternative (ex. Encore) : chemin distinct pour remonter le lecteur.
+  { path: '/watch/movie/:tmdbid/version/:version',        loader: lz(() => import('../pages/Watch/WatchMovie')) },
   { path: '/watch/tv/:tmdbid/s/:season/e/:episode',       loader: lz(() => import('../pages/Watch/WatchTv')) },
   { path: '/watch/anime/:id/season/:season/episode/:episode', loader: lz(() => import('../pages/Watch/WatchAnime')) },
   { path: '/live-tv',                 loader: lz(() => import('../pages/LiveTV')) },

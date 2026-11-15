@@ -25,7 +25,7 @@ const episodeHtml = `<div class="liens-c">
   <div class="lien" onclick="getxfield(this, '136435', 'voe_vf', 'serial'); return false;">voe</div>
 </div><script>function getxfield() { turnstile.render('#xf_lock', {}); }</script>`;
 
-function harness({ cached = null, request, tmdb = { name: 'Chicago Fire', first_air_date: '2012-10-10' }, stale = false, alternativeTitles = [] } = {}) {
+function harness({ cached = null, request, tmdb = { name: 'Chicago Fire', first_air_date: '2012-10-10' }, stale = false, alternativeTitles = [], enabled = true } = {}) {
   const cache = new Map();
   const writes = [];
   const requests = [];
@@ -55,7 +55,7 @@ function harness({ cached = null, request, tmdb = { name: 'Chicago Fire', first_
   const filename = path.resolve(__dirname, '../cpasmal.js');
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
     module, exports: module.exports, URL, URLSearchParams, Date,
-    process: { env: {} }, console: { log: message => logs.push(message), warn() {} },
+    process: { env: enabled ? { CPASMAL_ENABLED: 'true' } : {} }, console: { log: message => logs.push(message), warn() {} },
     require(name) {
       assert.ok(Object.hasOwn(stubs, name), `Dépendance inattendue : ${name}`);
       return stubs[name];
@@ -119,6 +119,25 @@ function harness({ cached = null, request, tmdb = { name: 'Chicago Fire', first_
     },
   };
 }
+
+test('Cpasmal coupé par défaut : aucune requête, 404 sans cache, cache servi sans actualisation', async () => {
+  const request = async () => assert.fail('Cpasmal coupé ne doit rien demander au site');
+  const empty = harness({ enabled: false, request });
+  const movie = await empty.callMovie();
+  assert.equal(movie.statusCode, 404);
+  assert.equal(movie.body.error, 'Cpasmal désactivé');
+  assert.equal((await empty.call()).statusCode, 404);
+
+  const links = { vf: [{ server: 'voe', url: 'https://player.test/voe_vf' }], vostfr: [] };
+  const cached = harness({ enabled: false, stale: true, request,
+    cached: { _tvCacheVersion: 1, _cpasmalPartial: true, links } });
+  const res = await cached.call();
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.links, links);
+  await new Promise(setImmediate);
+  assert.equal(cached.requests.length + empty.requests.length, 0);
+  assert.equal(cached.writes.length, 0);
+});
 
 test('Chicago Fire S14E05 : le vieux faux 404 est remplacé par les lecteurs VF et VOSTFR sans captcha', async () => {
   const h = harness({

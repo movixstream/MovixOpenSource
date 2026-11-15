@@ -20,6 +20,7 @@ import {
 } from '../ui/select';
 import ReusableModal from '../ui/reusable-modal';
 import { getTmdbLanguage } from '../../i18n';
+import { openInNewTab } from '../../utils/openInNewTab';
 
 const MAIN_API = import.meta.env.VITE_MAIN_API;
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
@@ -389,7 +390,7 @@ const AdminLinkSubmissions: React.FC = () => {
                         </Button>
                     </>
                 )}
-                <Button size="sm" variant="ghost" onClick={() => window.open(sub.url, '_blank')} className="h-6 w-6 p-0 text-white/20 hover:text-white group/icon" title={t('admin.open')}>
+                <Button size="sm" variant="ghost" onClick={() => openInNewTab(sub.url)} className="h-6 w-6 p-0 text-white/20 hover:text-white group/icon" title={t('admin.open')}>
                     <ExternalLink className="w-3 h-3 text-white opacity-20 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" />
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => handleDelete(sub.id)} className="h-6 w-6 p-0 text-white/20 hover:text-red-400 group/icon" title={t('admin.delete')}>

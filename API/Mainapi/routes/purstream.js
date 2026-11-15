@@ -12,7 +12,7 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 const { generateCacheKey, CACHE_DIR } = require('../utils/cacheManager');
-const { fetchTmdbDetails, fetchTmdbImages } = require('../utils/tmdbCache');
+const { fetchTmdbDetails, fetchTmdbImages, isTmdbDetailsMissing } = require('../utils/tmdbCache');
 const { pickRandomProxy, getProxyAgent } = require('../utils/proxyManager');
 const { buildSignedProxyUrl, signingConfigured } = require('../utils/mediaSigning');
 const { createWiflixRefreshState } = require('../utils/wiflixRefreshState');
@@ -207,9 +207,19 @@ async function resolvePurstreamId(tmdbId, type, { waitForRefresh = false, forceR
 
 /** Recherche et cache le mapping TMDB → PurStream */
 async function fetchAndCacheMapping(tmdbId, type, cacheKey) {
-  const tmdbData = await fetchTmdbDetails(TMDB_API_URL, TMDB_API_KEY, tmdbId, type, 'fr-FR');
+  // Mode strict : un échec temporaire de TMDB (429, 5xx, délai, porte saturée)
+  // lève TMDB_TRANSIENT et garde la reprise espacée de backgroundUpdateMapping.
+  // Un 404 (ID inconnu de TMDB pour ce type, souvent un ID de film envoyé sur la
+  // route série) est un vrai négatif, mis en cache comme une recherche sans
+  // résultat au lieu de redemander TMDB à chaque visite. Un autre null (401/403,
+  // clé API refusée) reste une panne : jamais d'« absent » gravé pour lui.
+  const tmdbData = await fetchTmdbDetails(TMDB_API_URL, TMDB_API_KEY, tmdbId, type, 'fr-FR', { strict: true });
   if (!tmdbData) {
-    throw new Error(`Métadonnées TMDB indisponibles pour ${type}:${tmdbId}`);
+    if (!await isTmdbDetailsMissing(type, tmdbId)) {
+      throw new Error(`Métadonnées TMDB indisponibles pour ${type}:${tmdbId}`);
+    }
+    await saveMapping(cacheKey, NOT_FOUND_MARKER);
+    return null;
   }
 
   const tmdbTitle = type === 'movie' ? tmdbData.title : tmdbData.name;

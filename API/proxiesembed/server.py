@@ -10,6 +10,7 @@ import json
 import base64
 import re
 import urllib.parse
+import urllib.request
 from urllib.parse import urlparse, urljoin
 from aiohttp import web, ClientTimeout, TCPConnector
 from aiohttp.abc import AbstractResolver
@@ -705,8 +706,87 @@ DB_CONFIG = {
     'autocommit': True,
 }
 
-# Proxies SOCKS5H configuration
+# Pool de sorties SOCKS. PROXY_SOURCE choisit d'où il vient :
+# - `socks5` (défaut) : la liste fixe de PROXIES_SOCKS5_JSON ;
+# - `proxyscrape` : les proxys SOCKS du compte ProxyScrape (même API que le
+#   Main API), tirés au hasard jusqu'à PROXYSCRAPE_MAX_PROXIES et rechargés
+#   toutes les PROXYSCRAPE_REFRESH_SECONDS. Si ProxyScrape ne répond pas au
+#   démarrage, on retombe sur PROXIES_SOCKS5_JSON.
+PROXY_SOURCE = str(os.environ.get('PROXY_SOURCE', '') or 'socks5').strip().lower()
+PROXYSCRAPE_API_TOKEN = str(
+    os.environ.get('PROXYSCRAPE_API_TOKEN') or os.environ.get('PROXYSCRAPE_API_KEY') or ''
+).strip()
+PROXYSCRAPE_ACCOUNT_ID = str(os.environ.get('PROXYSCRAPE_ACCOUNT_ID', '') or '').strip()
+PROXYSCRAPE_MAX_PROXIES = max(1, _get_env_int('PROXYSCRAPE_MAX_PROXIES', 50))
+PROXYSCRAPE_REFRESH_SECONDS = max(300, _get_env_int('PROXYSCRAPE_REFRESH_SECONDS', 3600))
+PROXYSCRAPE_TIMEOUT_SECONDS = 15
+# Délai avant de fermer les sessions d'un pool remplacé : laisse finir les
+# segments en cours.
+PROXY_POOL_DRAIN_SECONDS = 300
+_PROXYSCRAPE_LINE = re.compile(
+    r'^(?:(?P<auth>[^@\s]+)@)?(?P<host>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d{1,5})$'
+)
+
+
+def _proxyscrape_list_url() -> str:
+    account = urllib.parse.quote(PROXYSCRAPE_ACCOUNT_ID, safe='')
+    query = urllib.parse.urlencode({
+        'type': 'getproxies', 'protocol': 'socks', 'format': 'credentials',
+        'credential_format': 2, 'status': 'online',
+    })
+    return f'https://api.proxyscrape.com/v4/account/{account}/datacenter_shared/proxy-list?{query}'
+
+
+def _parse_proxyscrape_socks(text: str) -> list:
+    """Lignes `user:pass@ip:port` (ou `ip:port`) -> entrées du pool, au hasard."""
+    proxies = []
+    seen = set()
+    for line in (text or '').splitlines():
+        match = _PROXYSCRAPE_LINE.match(line.strip())
+        if not match or match.group('host') in seen:
+            continue
+        seen.add(match.group('host'))
+        proxy = {'host': match.group('host'), 'port': int(match.group('port')), 'type': 'socks5h'}
+        if match.group('auth'):
+            proxy['auth'] = match.group('auth')
+        proxies.append(proxy)
+    random.shuffle(proxies)
+    return proxies[:PROXYSCRAPE_MAX_PROXIES]
+
+
+def _fetch_proxyscrape_socks_sync() -> list:
+    """Chargement initial, avant la création des sessions."""
+    if not (PROXYSCRAPE_API_TOKEN and PROXYSCRAPE_ACCOUNT_ID):
+        logging.getLogger(__name__).warning(
+            '[PROXYSCRAPE] PROXYSCRAPE_API_TOKEN ou PROXYSCRAPE_ACCOUNT_ID manquant'
+        )
+        return []
+    request = urllib.request.Request(
+        _proxyscrape_list_url(),
+        headers={'api-token': PROXYSCRAPE_API_TOKEN, 'User-Agent': 'movix-proxiesembed/1.0'},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=PROXYSCRAPE_TIMEOUT_SECONDS) as response:
+            return _parse_proxyscrape_socks(response.read().decode('utf-8', 'replace'))
+    except Exception as e:  # noqa: BLE001 — repli sur la liste fixe
+        logging.getLogger(__name__).warning(f'[PROXYSCRAPE] Chargement impossible : {type(e).__name__}')
+        return []
+
+
 PROXIES = _load_proxy_list_env('PROXIES_SOCKS5_JSON')
+if PROXY_SOURCE == 'proxyscrape':
+    _proxyscrape_pool = _fetch_proxyscrape_socks_sync()
+    if _proxyscrape_pool:
+        PROXIES[:] = _proxyscrape_pool
+    else:
+        logging.getLogger(__name__).warning(
+            '[PROXYSCRAPE] Liste vide : repli sur PROXIES_SOCKS5_JSON (%s proxys)', len(PROXIES)
+        )
+elif PROXY_SOURCE != 'socks5':
+    logging.getLogger(__name__).warning(
+        "[config] PROXY_SOURCE=%r inconnu : 'socks5' ou 'proxyscrape' ; on garde 'socks5'", PROXY_SOURCE
+    )
+    PROXY_SOURCE = 'socks5'
 
 DEEPBRID_API_KEY = os.environ.get('DEEPBRID_API_KEY', '').strip()
 REAL_DEBRID_API_KEY = os.environ.get('REAL_DEBRID_API_KEY', '').strip()
@@ -912,6 +992,11 @@ PROVIDER_MEDIA_ACCEPT_ENCODING = 'identity, gzip;q=0, deflate;q=0, br;q=0, zstd;
 # compression pour les segments.
 FSVID_VIDZY_MEDIA_ACCEPT_ENCODING = 'gzip, deflate, br, zstd'
 _FSVID_VIDZY_DECOY_PATH = re.compile(r'^/e/seg\d+\.ts$', re.IGNORECASE)
+# Marque interne d'une réponse leurre, pour réessayer par une autre sortie SOCKS.
+FSVID_VIDZY_DECOY_HEADER = 'X-Movix-Decoy'
+FSVID_VIDZY_DECOY_MAX_EGRESS = 4
+# Sorties SOCKS essayées pour charger une page d'embed Fsvid/Vidzy/Uqload.
+EMBED_SOCKS_ATTEMPTS = 3
 
 
 def is_fsvid_vidzy_decoy_url(url: str) -> bool:
@@ -938,6 +1023,46 @@ def is_fsvid_vidzy_decoy_playlist(text: str, base_url: str) -> bool:
         if line.strip() and not line.lstrip().startswith('#')
     ]
     return bool(uris) and all(is_fsvid_vidzy_decoy_url(uri) for uri in uris)
+
+
+# Code vidéo Fsvid/Vidzy dans le chemin : `/<code>_o/`, `/,<code>_n,…`.
+_FSVID_VIDZY_VIDEO_CODE = re.compile(r'([a-z0-9]{12})_[a-z]+', re.IGNORECASE)
+
+
+def is_fsvid_vidzy_fake_master(text: str, target_url: str, response_url: str) -> bool:
+    """Vrai pour le faux master « en boucle » de Fsvid/Vidzy.
+
+    Depuis novembre 2026, le CDN sert aux IP qu'il juge suspectes (nos sorties
+    SOCKS de datacenter) un master statique dont la variante pointe vers une
+    autre vidéo (`…/kt9yhz08i92s_o/index.m3u8`) et renvoie ce même master :
+    le lecteur boucle sans jamais recevoir de segment. On le reconnaît à une
+    variante `index.m3u8` sans jeton (les vraies sont `index-v1-a1.m3u8?t=…`),
+    à une variante qui ne porte pas le code de la vidéo demandée, ou à une
+    playlist de variante qui répond par un master.
+    """
+    if '#EXT-X-STREAM-INF' not in (text or ''):
+        return False
+    try:
+        target_path = urlparse(str(target_url or '')).path
+    except ValueError:
+        return False
+    if not target_path.lower().endswith('/master.m3u8'):
+        return True
+    codes = {code.lower() for code in _FSVID_VIDZY_VIDEO_CODE.findall(target_path)}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        try:
+            variant = urlparse(urljoin(response_url, line))
+        except ValueError:
+            return True
+        variant_path = variant.path.lower()
+        if variant_path.endswith('/index.m3u8') and not variant.query:
+            return True
+        if codes and not any(code in variant_path for code in codes):
+            return True
+    return False
 
 # Un vrai Chrome n'émet jamais Sec-Ch-Ua seul : les trois indices client
 # partent ensemble, avec un User-Agent dont la version majeure correspond à
@@ -1553,22 +1678,8 @@ class ProxyServer:
         )
         
         # Proxy Sessions - Optimized for SOCKS5
-        for i, proxy in enumerate(PROXIES):
-            if proxy and _build_socks5_proxy_url(proxy):
-                connector = self._create_socks5_connector(proxy)
-                self.sessions[f'proxy_{i}'] = aiohttp.ClientSession(
-                    connector=connector,
-                    timeout=ClientTimeout(total=None),
-                    read_bufsize=SOCKET_READ_BUFFER,
-                )
-                streamed_proxy_url = _build_aiohttp_socks_proxy_url(proxy)
-                if urlparse(streamed_proxy_url).scheme == 'socks5':
-                    self.sessions[f'streamed_{i}'] = aiohttp.ClientSession(
-                        connector=StreamedSocksConnector(streamed_proxy_url),
-                        timeout=ClientTimeout(total=20),
-                        cookie_jar=aiohttp.DummyCookieJar(),
-                        read_bufsize=SOCKET_READ_BUFFER,
-                    )
+        self.sessions.update(self._build_proxy_sessions(PROXIES))
+        logger.info('[PROXIES] Source %s : %s sorties SOCKS', PROXY_SOURCE, len(PROXIES))
 
         # Sibnet n'a pas de session dédiée : ses jetons de flux ne sont pas liés
         # à l'IP, et une sortie figée finit par tomber sur un nœud CDN que ce
@@ -1905,6 +2016,77 @@ class ProxyServer:
         except:
             return False
     
+    def _build_proxy_sessions(self, proxies: list) -> Dict[str, aiohttp.ClientSession]:
+        """Sessions `proxy_N` (et `streamed_N`) d'un pool, indexées comme la liste."""
+        sessions: Dict[str, aiohttp.ClientSession] = {}
+        for i, proxy in enumerate(proxies):
+            if not (proxy and _build_socks5_proxy_url(proxy)):
+                continue
+            sessions[f'proxy_{i}'] = aiohttp.ClientSession(
+                connector=self._create_socks5_connector(proxy),
+                timeout=ClientTimeout(total=None),
+                read_bufsize=SOCKET_READ_BUFFER,
+            )
+            streamed_proxy_url = _build_aiohttp_socks_proxy_url(proxy)
+            if urlparse(streamed_proxy_url).scheme == 'socks5':
+                sessions[f'streamed_{i}'] = aiohttp.ClientSession(
+                    connector=StreamedSocksConnector(streamed_proxy_url),
+                    timeout=ClientTimeout(total=20),
+                    cookie_jar=aiohttp.DummyCookieJar(),
+                    read_bufsize=SOCKET_READ_BUFFER,
+                )
+        return sessions
+
+    async def _fetch_proxyscrape_socks(self) -> list:
+        if not (PROXYSCRAPE_API_TOKEN and PROXYSCRAPE_ACCOUNT_ID):
+            return []
+        try:
+            async with self.sessions['normal'].get(
+                _proxyscrape_list_url(),
+                headers={'api-token': PROXYSCRAPE_API_TOKEN, 'User-Agent': 'movix-proxiesembed/1.0'},
+                timeout=ClientTimeout(total=PROXYSCRAPE_TIMEOUT_SECONDS),
+            ) as response:
+                if response.status != 200:
+                    logger.warning('[PROXYSCRAPE] Rechargement HTTP %s', response.status)
+                    return []
+                return _parse_proxyscrape_socks(await response.text())
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.warning('[PROXYSCRAPE] Rechargement impossible : %s', type(e).__name__)
+            return []
+
+    async def _replace_proxy_pool(self, proxies: list) -> None:
+        """Remplace le pool à chaud ; les anciennes sessions finissent leurs flux."""
+        new_sessions = self._build_proxy_sessions(proxies)
+        old_sessions = {
+            key: session for key, session in self.sessions.items()
+            if re.fullmatch(r'(?:proxy|streamed)_\d+', key)
+        }
+        PROXIES[:] = proxies
+        for key in old_sessions:
+            if key not in new_sessions:
+                del self.sessions[key]
+        self.sessions.update(new_sessions)
+        logger.info('[PROXYSCRAPE] Pool rechargé : %s sorties SOCKS', len(proxies))
+
+        async def drain():
+            await asyncio.sleep(PROXY_POOL_DRAIN_SECONDS)
+            await asyncio.gather(
+                *(session.close() for session in old_sessions.values() if not session.closed),
+                return_exceptions=True,
+            )
+
+        asyncio.create_task(drain())
+
+    async def _periodic_proxyscrape_refresh(self) -> None:
+        while True:
+            await asyncio.sleep(PROXYSCRAPE_REFRESH_SECONDS)
+            try:
+                proxies = await self._fetch_proxyscrape_socks()
+                if proxies:
+                    await self._replace_proxy_pool(proxies)
+            except Exception as e:  # noqa: BLE001 — la boucle ne doit jamais mourir
+                logger.warning('[PROXYSCRAPE] Erreur de rechargement : %s', e)
+
     def _get_random_proxy(self) -> Dict:
         valid_proxies = [proxy for proxy in PROXIES if _build_socks5_proxy_url(proxy)]
         return random.choice(valid_proxies) if valid_proxies else {}
@@ -2594,6 +2776,8 @@ class ProxyServer:
             "caches": cache_stats,
             "sessions": session_stats,
             "config": {
+                "proxy_source": PROXY_SOURCE,
+                "proxy_count": len(PROXIES),
                 "chunk_ts": CHUNK_TS,
                 "chunk_mp4": CHUNK_MP4,
                 "chunk_default": CHUNK_DEFAULT,
@@ -3384,7 +3568,9 @@ class ProxyServer:
                 return web.HTTPFound(location=location, headers=CORS_HEADERS)
 
             uqload_origin = get_uqload_site_origin(media_url)
-            
+            # Le CDN Uqload refuse l'IP du serveur : MP4 aussi par le pool SOCKS.
+            session = self._random_socks5_session()
+
             mp4_headers = self._prepare_headers(media_url, request)
             mp4_headers.update({
                 'Accept': '*/*',
@@ -4138,38 +4324,30 @@ class ProxyServer:
             }
             
             
-            async with self.sessions['normal'].request('GET', url, headers=headers,
-                                        timeout=ClientTimeout(total=8)) as response:
-                if response.status != 200:
-                    logger.warning(
-                        '[FSVID-EXTRACT] Page embed HTTP %s pour %s',
-                        response.status,
-                        redact_url_for_log(url),
-                    )
-                    return web.json_response({'error': 'Fetch failed'}, status=500)
+            _status, html, page_session = await self._fetch_embed_page_via_socks(url, headers, 'FSVID')
+            if html is None:
+                return web.json_response({'error': 'Fetch failed'}, status=500)
 
-                html = await response.text(encoding='utf-8')
+            m3u8_url = await self._resolve_fsvid_vidzy_m3u8(html, url, 'fsvid')
+            if not m3u8_url:
+                logger.warning(
+                    '[FSVID-EXTRACT] M3U8 introuvable dans la page %s (%s octets)',
+                    redact_url_for_log(url),
+                    len(html),
+                )
+                return web.json_response({'error': 'M3U8 not found'}, status=404)
 
-                m3u8_url = await self._resolve_fsvid_vidzy_m3u8(html, url, 'fsvid')
-                if not m3u8_url:
-                    logger.warning(
-                        '[FSVID-EXTRACT] M3U8 introuvable dans la page %s (%s octets)',
-                        redact_url_for_log(url),
-                        len(html),
-                    )
-                    return web.json_response({'error': 'M3U8 not found'}, status=404)
+            m3u8_url = await self._with_fsvid_vidzy_gate_key(m3u8_url, html, 'fsvid', page_session)
+            result = {
+                'm3u8Url': _signed_service_url('/fsvid-proxy', m3u8_url),
+                'source': 'fsvid'
+            }
 
-                m3u8_url = await self._with_fsvid_vidzy_gate_key(m3u8_url, html, 'fsvid')
-                result = {
-                    'm3u8Url': _signed_service_url('/fsvid-proxy', m3u8_url),
-                    'source': 'fsvid'
-                }
-
-                if _FSVID_VIDZY_HAS_GATE_KEY.search(m3u8_url):
-                    self.fsvid_cache.set(cache_key, result)
-                resp = web.json_response(result)
-                resp.headers['X-Cache'] = 'MISS'
-                return resp
+            if _FSVID_VIDZY_HAS_GATE_KEY.search(m3u8_url):
+                self.fsvid_cache.set(cache_key, result)
+            resp = web.json_response(result)
+            resp.headers['X-Cache'] = 'MISS'
+            return resp
 
         except Exception as e:
             # Sans trace ici, mainapi ne voit qu'un « HTTP 500 » muet et la
@@ -4538,7 +4716,9 @@ class ProxyServer:
             if parsed.username or parsed.password or parsed.port not in (None, 443):
                 return False
             hostname = parsed.hostname.lower().rstrip('.')
-            allowed_suffixes = ('fsvid.lol',) if provider == 'fsvid' else ('vidzy.cc',)
+            # Vidzy alterne son CDN entre u*.vidzy.cc et u*.vidzy.org (retour
+            # de vidzy.org constaté le 2026-11-09) : accepter les deux.
+            allowed_suffixes = ('fsvid.lol',) if provider == 'fsvid' else ('vidzy.cc', 'vidzy.org')
             return any(
                 hostname == suffix or hostname.endswith(f'.{suffix}')
                 for suffix in allowed_suffixes
@@ -4613,8 +4793,18 @@ class ProxyServer:
                 urls.append(url)
         return urls
 
-    async def _fsvid_vidzy_gate_key(self, html: str, provider: str) -> Optional[str]:
-        """Clé `gk` en cache, sinon demandée aux portes Vidzy/Fsvid."""
+    async def _fsvid_vidzy_gate_key(
+        self,
+        html: str,
+        provider: str,
+        session: Optional[aiohttp.ClientSession] = None,
+    ) -> Optional[str]:
+        """Clé `gk` en cache, sinon demandée aux portes Vidzy/Fsvid.
+
+        `session` : la sortie qui a chargé la page (pool SOCKS), pour ne pas
+        présenter l'IP du serveur à la porte.
+        """
+        gate_session = session or self.sessions['normal']
         entry = self._fsvid_vidzy_gate_key_entry
         if entry and entry[1] > time.monotonic():
             return entry[0]
@@ -4624,7 +4814,7 @@ class ProxyServer:
                 return entry[0]
             for gate_url in self._fsvid_vidzy_gate_urls(html, provider):
                 try:
-                    async with self.sessions['normal'].get(
+                    async with gate_session.get(
                         f'{gate_url}?{FSVID_VIDZY_GATE_QUERY}',
                         headers={'Accept': '*/*', **FSVID_VIDZY_CLIENT_HINTS},
                         timeout=ClientTimeout(total=4),
@@ -4657,10 +4847,16 @@ class ProxyServer:
             )
             return None
 
-    async def _with_fsvid_vidzy_gate_key(self, m3u8_url: str, html: str, provider: str) -> str:
+    async def _with_fsvid_vidzy_gate_key(
+        self,
+        m3u8_url: str,
+        html: str,
+        provider: str,
+        session: Optional[aiohttp.ClientSession] = None,
+    ) -> str:
         if _FSVID_VIDZY_HAS_GATE_KEY.search(m3u8_url):
             return m3u8_url
-        gate_key = await self._fsvid_vidzy_gate_key(html, provider)
+        gate_key = await self._fsvid_vidzy_gate_key(html, provider, session)
         if not gate_key:
             return m3u8_url
         separator = '&' if '?' in m3u8_url else '?'
@@ -4697,37 +4893,34 @@ class ProxyServer:
             }
             
             
-            async with self.sessions['no_ssl'].request('GET', url, headers=headers,
-                                        timeout=ClientTimeout(total=8)) as response:
-                if response.status != 200:
-                    logger.warning(
-                        '[VIDZY-EXTRACT] Page embed HTTP %s pour %s',
-                        response.status,
-                        redact_url_for_log(url),
-                    )
-                    return web.json_response({'error': 'Fetch failed'}, status=500)
+            # Vidzy a des certificats douteux : pas de vérification TLS (comme
+            # l'ancienne session `no_ssl`).
+            _status, html, page_session = await self._fetch_embed_page_via_socks(
+                url, headers, 'VIDZY', ssl=self.ssl_context,
+            )
+            if html is None:
+                return web.json_response({'error': 'Fetch failed'}, status=500)
 
-                html = await response.text()
-                m3u8_url = await self._resolve_fsvid_vidzy_m3u8(html, url, 'vidzy')
-                if not m3u8_url:
-                    logger.warning(
-                        '[VIDZY-EXTRACT] M3U8 introuvable dans la page %s (%s octets)',
-                        redact_url_for_log(url),
-                        len(html),
-                    )
-                    return web.json_response({'error': 'M3U8 not found'}, status=404)
+            m3u8_url = await self._resolve_fsvid_vidzy_m3u8(html, url, 'vidzy')
+            if not m3u8_url:
+                logger.warning(
+                    '[VIDZY-EXTRACT] M3U8 introuvable dans la page %s (%s octets)',
+                    redact_url_for_log(url),
+                    len(html),
+                )
+                return web.json_response({'error': 'M3U8 not found'}, status=404)
 
-                m3u8_url = await self._with_fsvid_vidzy_gate_key(m3u8_url, html, 'vidzy')
-                result = {
-                    'm3u8Url': _signed_service_url('/vidzy-proxy', m3u8_url),
-                    'source': 'vidzy'
-                }
+            m3u8_url = await self._with_fsvid_vidzy_gate_key(m3u8_url, html, 'vidzy', page_session)
+            result = {
+                'm3u8Url': _signed_service_url('/vidzy-proxy', m3u8_url),
+                'source': 'vidzy'
+            }
 
-                if _FSVID_VIDZY_HAS_GATE_KEY.search(m3u8_url):
-                    self.vidzy_cache.set(cache_key, result)
-                resp = web.json_response(result)
-                resp.headers['X-Cache'] = 'MISS'
-                return resp
+            if _FSVID_VIDZY_HAS_GATE_KEY.search(m3u8_url):
+                self.vidzy_cache.set(cache_key, result)
+            resp = web.json_response(result)
+            resp.headers['X-Cache'] = 'MISS'
+            return resp
 
         except Exception as e:
             logger.error(
@@ -4949,31 +5142,32 @@ class ProxyServer:
         site_origin = get_uqload_site_origin(validated)
         urls = [validated, validated.replace('/embed-', '/')]
         
+        # En-têtes d'un vrai Chrome : l'ancien « Mozilla/5.0 Chrome/91 » n'existe
+        # chez aucun navigateur et se fait plus facilement filtrer depuis une IP
+        # de datacenter.
         headers = {
-            'User-Agent': 'Mozilla/5.0 Chrome/91.0.0.0',
-            'Accept': 'text/html,*/*',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Referer': f'{site_origin}/',
-            'Origin': site_origin,
+            'Sec-Fetch-Dest': 'iframe',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'cross-site',
+            **FSVID_VIDZY_CLIENT_HINTS,
         }
-        
+
         html = None
         page_url = validated
         for url in urls:
-            try:
-                # UQLOAD generic fetch -> normal session
-                async with self.sessions['normal'].request('GET', url, headers=headers,
-                                           timeout=ClientTimeout(total=5)) as resp:
-                    if resp.status == 200:
-                        html = await resp.text()
-                        page_url = url
-                        break
-            except (aiohttp.ClientError, asyncio.TimeoutError):
-                continue
+            # Par le pool SOCKS : le CDN Uqload répond 403 à l'IP du serveur.
+            _status, html, _session = await self._fetch_embed_page_via_socks(url, headers, 'UQLOAD')
+            if html is not None:
+                page_url = url
+                break
 
         if not html:
             raise ValueError('No content from UQLOAD')
 
-        if 'File was deleted' in html:
+        # Fichier supprimé : ancienne et nouvelle formulation d'Uqload.
+        if 'File was deleted' in html or 'no longer available' in html:
             raise ValueError('Video deleted')
 
         media_url = extract_uqload_media_url(html)
@@ -5626,7 +5820,10 @@ class ProxyServer:
         """502 au lieu de relayer la playlist leurre que Fsvid/Vidzy servent en 200."""
         if service_name not in ('fsvid', 'vidzy'):
             return None
-        if not is_fsvid_vidzy_decoy_playlist(text, response_url):
+        if not (
+            is_fsvid_vidzy_decoy_playlist(text, response_url)
+            or is_fsvid_vidzy_fake_master(text, target_url, response_url)
+        ):
             return None
         logger.warning(
             "[%s-PROXY] Decoy playlist refused for %s",
@@ -5636,7 +5833,7 @@ class ProxyServer:
         return web.json_response(
             {"error": "Upstream returned a decoy stream"},
             status=502,
-            headers=CORS_HEADERS,
+            headers={**CORS_HEADERS, FSVID_VIDZY_DECOY_HEADER: '1'},
         )
 
     def _rewrite_m3u8_for_service(self, content: str, base_url: str, proxy_route: str, extra_query: str = '') -> str:
@@ -6223,6 +6420,52 @@ class ProxyServer:
         key = self._random_socks5_session_key()
         return self.sessions.get(key, self.sessions['normal']) if key else self.sessions['normal']
 
+    async def _fetch_embed_page_via_socks(
+        self,
+        url: str,
+        headers: Dict,
+        tag: str,
+        ssl: Any = True,
+    ) -> Tuple[int, Optional[str], Optional[aiohttp.ClientSession]]:
+        """Page d'embed par le pool SOCKS : (statut, HTML, session utilisée).
+
+        Fsvid, Vidzy et Uqload jugent l'IP qui charge la page : depuis l'IP
+        du serveur (OVH, 2026-11-12), Fsvid/Vidzy servent ensuite leur faux
+        master à toutes les sorties et le CDN Uqload répond 403, alors que les
+        mêmes liens extraits par une sortie SOCKS se lisent. Une sortie
+        injoignable ou refusée est remplacée par une autre ; sans pool, on
+        reste en direct. La session est rendue pour demander la clé `gk` par
+        la même sortie.
+        """
+        keys = [
+            key for key, session in self.sessions.items()
+            if re.fullmatch(r'proxy_\d+', key) and not getattr(session, 'closed', False)
+        ]
+        random.shuffle(keys)
+        attempts = keys[:EMBED_SOCKS_ATTEMPTS] or ['normal']
+        last_status = 0
+        for key in attempts:
+            session = self.sessions[key]
+            try:
+                async with session.get(
+                    url, headers=headers, ssl=ssl, timeout=ClientTimeout(total=8),
+                ) as response:
+                    if response.status == 200:
+                        return 200, await response.text(encoding='utf-8', errors='replace'), session
+                    last_status = response.status
+                    logger.warning(
+                        '[%s-EXTRACT] Page embed HTTP %s via %s pour %s',
+                        tag, response.status, key, redact_url_for_log(url),
+                    )
+                    if response.status in (404, 410):
+                        break
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+                logger.warning(
+                    '[%s-EXTRACT] Page embed injoignable (%s) via %s pour %s',
+                    tag, type(e).__name__, key, redact_url_for_log(url),
+                )
+        return last_status, None, None
+
     async def _service_proxy_via_random_socks(
         self,
         request: Request,
@@ -6247,12 +6490,41 @@ class ProxyServer:
                 status=503,
                 headers=CORS_HEADERS,
             )
-        return await self._service_proxy(
-            request,
-            service_name,
-            default_headers,
-            session_key=session_key,
-        )
+
+        # Fsvid/Vidzy jugent chaque IP de sortie : une sortie qui reçoit le
+        # leurre est réessayée par une autre du pool avant de rendre un 502
+        # (que le lecteur traite comme une source en panne, au lieu de boucler).
+        tried = {session_key}
+        while True:
+            response = await self._service_proxy(
+                request,
+                service_name,
+                default_headers,
+                session_key=session_key,
+            )
+            if (
+                response.status != 502
+                or response.headers.get(FSVID_VIDZY_DECOY_HEADER) != '1'
+                or len(tried) >= FSVID_VIDZY_DECOY_MAX_EGRESS
+            ):
+                break
+            candidates = [
+                key for key in self.sessions
+                if re.fullmatch(r'proxy_\d+', key)
+                and key not in tried
+                and not getattr(self.sessions[key], 'closed', False)
+            ]
+            if not candidates:
+                break
+            session_key = random.choice(candidates)
+            tried.add(session_key)
+            logger.info(
+                '[%s-PROXY] Decoy received, retrying via %s (%s/%s)',
+                service_name.upper(), session_key, len(tried), FSVID_VIDZY_DECOY_MAX_EGRESS,
+            )
+        if FSVID_VIDZY_DECOY_HEADER in response.headers:
+            del response.headers[FSVID_VIDZY_DECOY_HEADER]
+        return response
     
     # --- Service proxy thin wrappers ---
 
@@ -6395,7 +6667,10 @@ class ProxyServer:
                 headers=CORS_HEADERS,
             )
 
-        return await self._service_proxy(request, 'uqload', {
+        # Le CDN Uqload (strm*.uqload.*) répond 403 à l'IP du serveur depuis le
+        # 2026-11-12 ; ses liens ne sont pas liés à l'IP (`i=0.0`), une sortie
+        # SOCKS quelconque du pool les lit.
+        return await self._service_proxy_via_random_socks(request, 'uqload', {
             'Accept': '*/*',
             'Accept-Encoding': PROVIDER_MEDIA_ACCEPT_ENCODING,
             'Origin': uqload_origin,
@@ -7013,6 +7288,8 @@ class ProxyServer:
         
         # Start background cache cleanup
         asyncio.create_task(self._periodic_cache_cleanup())
+        if PROXY_SOURCE == 'proxyscrape':
+            asyncio.create_task(self._periodic_proxyscrape_refresh())
         
         logger.info(f"Server running on port {PORT} - Ready for HIGH LOAD!")
         logger.info("Endpoints: /proxy, /health, /stats, /drm/*")

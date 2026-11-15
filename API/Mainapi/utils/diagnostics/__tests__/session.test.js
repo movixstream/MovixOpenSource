@@ -76,6 +76,110 @@ test('worker sans callback IPC ne publie qu’une fois et stop reste borné', { 
   assert.equal(proc.listenerCount('message'), 0);
 });
 
+function measuringProcess() {
+  const messages = [];
+  const proc = Object.assign(new EventEmitter(), { env: { MOVIX_WORKER_SLOT: '0' }, pid: 5151, connected: true, messages,
+    cpuUsage: () => ({ user: 0, system: 0 }), memoryUsage: () => ({ rss: 100, heapTotal: 1, heapUsed: 1, external: 0, arrayBuffers: 0 }),
+    send(message, callback) { messages.push(message); callback(); } });
+  return proc;
+}
+const settle = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
+const fakeLag = () => ({ enable() {}, disable() {}, reset() { this.resets++; }, resets: 0, percentile: () => 25e6, max: 32e6 });
+
+test('une capture juste après le relevé régulier ne crée pas de point de quelques ms', { timeout: 5000 }, async () => {
+  const proc = measuringProcess();
+  const capture = () => proc.emit('message', { type: 'mainapi-resource-probe-v1', runId: 'capture', action: 'capture' });
+  const session = createWorkerSession({ runId: 'capture', startsAt: Date.now() - 1, endsAt: Date.now() + 10000 }, {
+    process: proc, instrumentHttp: false, sampleMs: 1000, snapshotMs: 60000, eventLoopMonitor: fakeLag(),
+    cpuOptions: { profileMs: 60000, intervalMs: 60000, sessionFactory: () => ({ connect() { throw new Error('off'); }, disconnect() {}, post() {} }) },
+  });
+  await settle();
+  capture();
+  await settle();
+  assert.equal(proc.messages.length, 2, 'la capture publie quand même un état frais');
+  assert.deepEqual(proc.messages[1].resources, [], 'pas de point de capture moins de sampleMs/5 après le dernier relevé');
+  await settle(300);
+  capture();
+  await settle();
+  const [point] = proc.messages[2].resources;
+  assert.equal(point.capture, true);
+  assert.ok(point.elapsedMs >= 200);
+  await session.stop();
+});
+
+test('le retard de boucle retire la résolution et garde un blocage qui retarde le relevé', { timeout: 5000 }, async () => {
+  const proc = measuringProcess();
+  const lag = fakeLag();
+  const session = createWorkerSession({ runId: 'lag', startsAt: Date.now() - 1, endsAt: Date.now() + 10000 }, {
+    process: proc, instrumentHttp: false, sampleMs: 100, snapshotMs: 60000, eventLoopMonitor: lag,
+    cpuOptions: { profileMs: 60000, intervalMs: 60000, sessionFactory: () => ({ connect() { throw new Error('off'); }, disconnect() {}, post() {} }) },
+  });
+  await settle(10);
+  const blockedUntil = Date.now() + 300;
+  while (Date.now() < blockedUntil) { /* blocage synchrone du thread principal */ }
+  await settle(30);
+  await session.stop();
+  const points = proc.messages.flatMap((message) => message.resources);
+  const regular = points.find((point) => point.eventLoopTimerLateMs !== null);
+  assert.ok(regular, JSON.stringify(points));
+  assert.equal(regular.eventLoopP99Ms, 5, 'p99 de 25 ms brut = 5 ms de retard réel');
+  assert.ok(regular.eventLoopTimerLateMs >= 150, `retard du minuteur ${regular.eventLoopTimerLateMs}`);
+  assert.ok(regular.eventLoopMaxMs >= regular.eventLoopTimerLateMs, 'le blocage n’est pas effacé par reset()');
+  assert.ok(regular.gc && Number.isFinite(regular.gc.durationMs));
+  assert.ok(regular.heap.spaces.old_space.usedBytes > 0);
+  assert.ok(lag.resets >= 1);
+});
+
+test('une alerte dès les premières secondes attend une minute de mesure et garde le délai de 5 min', { timeout: 5000 }, async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'movix-probe-deferred-'));
+  const cluster = Object.assign(new EventEmitter(), { workers: {} });
+  const calls = [];
+  let samples = 0;
+  const master = createMasterSession(cluster, {
+    env: cleanProbeEnv({ MAINAPI_PROBE_SECONDS: '20', MAINAPI_PROBE_DIR: directory }), sampleMs: 15, alertMinMeasurementMs: 400,
+    systemSampler: { sample: async () => ({ at: Date.now(), warnings: [], processes: [], network: null, cgroup: { cpuUsageUs: ++samples * 60e6 } }) },
+    notify: async (request) => {
+      calls.push({ reason: request.reason, report: JSON.parse(await fs.readFile(path.join(request.runDir, 'report.json'), 'utf8')) });
+      return { status: 'sent' };
+    },
+  });
+  t.after(async () => { await master.stop('cleanup'); await fs.rm(directory, { recursive: true, force: true }); });
+  await settle(150);
+  assert.equal(master.state.alerts.length, 1, 'alerte enregistrée dès la détection');
+  assert.equal(master.state.alerts[0].notification.status, 'pending');
+  assert.ok(master.state.alerts[0].deferredUntil >= master.state.measurementStartedAt + 400);
+  assert.equal(calls.length, 0, 'aucun rapport de 5 s');
+  const deadline = Date.now() + 2000;
+  while (!calls.length && Date.now() < deadline) await settle();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].reason, 'threshold');
+  assert.ok(calls[0].report.summary.measurementElapsedMs >= 400);
+  assert.match(await fs.readFile(path.join(master.runDir, 'report.md'), 'utf8'), /rapport différé.*rapport final prévu/);
+  assert.equal(master.state.alerts.length, 1, 'le délai de 5 min a été réservé à la détection');
+});
+
+test('un arrêt avant la minute de mesure inclut l’alerte dans le rapport final sans bloquer stop', { timeout: 5000 }, async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'movix-probe-folded-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const cluster = Object.assign(new EventEmitter(), { workers: {} });
+  const calls = [];
+  let samples = 0;
+  const master = createMasterSession(cluster, {
+    env: cleanProbeEnv({ MAINAPI_PROBE_SECONDS: '20', MAINAPI_PROBE_DIR: directory }), sampleMs: 15, finalWaitMs: 10,
+    systemSampler: { sample: async () => ({ at: Date.now(), warnings: [], processes: [], network: null, cgroup: { cpuUsageUs: ++samples * 60e6 } }) },
+    notify: async (request) => { calls.push(request); return { status: 'sent' }; },
+  });
+  while (!master.state.alerts.length) await settle(10);
+  const started = Date.now();
+  await master.stop('deadline');
+  assert.ok(Date.now() - started < 2000);
+  assert.deepEqual(calls.map((call) => call.reason), ['deadline']);
+  assert.ok(calls[0].alert, 'le message final mentionne l’alerte incluse');
+  const report = JSON.parse(await fs.readFile(path.join(master.runDir, 'report.json'), 'utf8'));
+  assert.deepEqual(report.alerts[0].notification, { status: 'skipped', reason: 'included_in_final_report' });
+  assert.equal(report.schemaVersion, 4);
+});
+
 test('master signale les workers attendus sans snapshot', { timeout: 5000 }, async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'movix-probe-expected-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
@@ -108,7 +212,7 @@ test('un pic capture les workers et envoie un rapport intermédiaire sans bloque
   } };
   cluster.workers = { one: worker };
   master = createMasterSession(cluster, {
-    env: cleanProbeEnv({ MAINAPI_PROBE_SECONDS: '20', MAINAPI_PROBE_DIR: directory }), sampleMs: 15,
+    env: cleanProbeEnv({ MAINAPI_PROBE_SECONDS: '20', MAINAPI_PROBE_DIR: directory }), sampleMs: 15, alertMinMeasurementMs: 0,
     systemSampler: { sample: async () => ({ at: 100000 + (++samples * 5000), warnings: [], processes: [],
       network: { rxBytes: samples * 105 * 1048576, txBytes: 0 }, cgroup: { cpuUsageUs: samples * 16e6 } }) },
     notify: async (request) => {

@@ -87,12 +87,11 @@ test('un ancien propriétaire ne peut ni remplacer le résultat du nouveau worke
   const old = createSharedSourceLookup(options).load(['Serie'], async () => {
     began.resolve(); await gate.promise; return 'ancien';
   });
-  const rejection = assert.rejects(old, { code: 'SOURCE_REFRESH_UNAVAILABLE' });
   await began.promise;
   for (const key of redis.values.keys()) if (key.endsWith(':lock')) redis.values.delete(key);
   assert.equal(await createSharedSourceLookup(options).load(['Serie'], async () => 'récent'), 'récent');
   gate.resolve();
-  await rejection;
+  assert.equal(await old, 'ancien', 'son appelant garde le résultat obtenu');
   assert.equal(await createSharedSourceLookup(options).load(['Serie'], () => assert.fail('résultat déjà partagé')), 'récent');
   assert.equal([...redis.values.keys()].some(key => key.endsWith(':failure')), false);
 });
@@ -104,9 +103,41 @@ test('une perte du verrou au moment de publier est aussi détectée atomiquement
     if (count === 2 && args[1].endsWith(':value')) redis.values.delete(args[0]);
     return original(script, count, ...args);
   };
-  await assert.rejects(createSharedSourceLookup({ redis, namespace: 'search' }).load(['Serie'], async () => 'ancien'),
-    { code: 'SOURCE_REFRESH_UNAVAILABLE' });
+  assert.equal(await createSharedSourceLookup({ redis, namespace: 'search' }).load(['Serie'], async () => 'ancien'), 'ancien');
   assert.equal([...redis.values.keys()].some(key => key.endsWith(':value')), false);
+});
+
+test('un Redis trop lent ne fait pas échouer la recherche, elle se fait localement', async () => {
+  const redis = redisFixture();
+  redis.get = () => new Promise(() => {});
+  let calls = 0;
+  const cache = createSharedSourceLookup({ redis, namespace: 'search', commandTimeoutMs: 5 });
+  assert.equal(await cache.load(['Serie'], async () => { calls++; return 'trouvé'; }), 'trouvé');
+  assert.equal(await cache.load(['Serie'], () => assert.fail('gardé en mémoire locale')), 'trouvé');
+  assert.equal(calls, 1);
+});
+
+test('un verrou tenu trop longtemps par un autre worker ne bloque pas la recherche', async () => {
+  const redis = redisFixture();
+  const gate = deferred(), began = deferred();
+  const options = { redis, namespace: 'search', pollMs: 2 };
+  const stuck = createSharedSourceLookup(options).load(['Serie'], async () => { began.resolve(); await gate.promise; return 'lent'; });
+  await began.promise;
+  const waiter = createSharedSourceLookup({ ...options, waitMs: 20 });
+  try {
+    assert.equal(await waiter.load(['Serie'], async () => 'direct'), 'direct');
+  } finally { gate.resolve(); }
+  assert.equal(await stuck, 'lent');
+});
+
+test('un échec de coordination partagé par un autre worker est ignoré', async () => {
+  const redis = redisFixture();
+  const options = { redis, namespace: 'search', pollMs: 2 };
+  const work = createSharedSourceWork(options);
+  await assert.rejects(work.run(JSON.stringify(['Serie']), async () => {
+    throw Object.assign(new Error('Récupération de source temporairement indisponible'), { code: 'SOURCE_REFRESH_UNAVAILABLE' });
+  }));
+  assert.equal(await createSharedSourceLookup(options).load(['Serie'], async () => 'trouvé'), 'trouvé');
 });
 
 test('Redis déconnecté conserve un repli local borné et les petits caches respectent leur budget', async () => {

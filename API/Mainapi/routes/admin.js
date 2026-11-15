@@ -19,6 +19,7 @@ const { ANIME_SAMA_CACHE_DIR } = require('../utils/cacheManager');
 const { createRedisRateLimitStore } = require('../utils/redisRateLimitStore');
 const { logDownloadLinkAction } = require('../utils/downloadLinksHistory');
 const { resolveAdminIdentity } = require('../utils/adminIdentity');
+const { isHttpUrl, isHttpLinkEntry, isHttpLinkInput } = require('../utils/safeLinkUrl');
 const { readUserData } = require('./sync');
 
 function parseAccessKeyExpiresAt(value) {
@@ -151,12 +152,14 @@ router.get('/links/:type/:id', async (req, res) => {
     }
 
     // Parser les liens JSON. On retire le stamp `added_by` (identité de
-    // l'uploader) car cet endpoint est PUBLIC — pas de fuite d'IDs.
+    // l'uploader) car cet endpoint est PUBLIC — pas de fuite d'IDs. Un lien
+    // qui n'est pas en http(s) n'est jamais servi : le lecteur le mettrait
+    // dans un `<iframe src>`.
     const result = rows.map(row => {
       const parsed = typeof row.links === 'string' ? JSON.parse(row.links) : row.links;
       return {
         ...row,
-        links: Array.isArray(parsed) ? parsed.map(stripLinkOwner) : parsed
+        links: Array.isArray(parsed) ? parsed.filter(isHttpLinkEntry).map(stripLinkOwner) : parsed
       };
     });
 
@@ -312,6 +315,8 @@ router.get('/check-vip', async (req, res) => {
  * streaming links they added; a full admin may remove any. Un-stamped links
  * (legacy strings/objects) have no owner and are therefore admin-only.
  */
+const INVALID_LINK_URL_ERROR = 'URL invalide : seuls les liens http ou https sont acceptés';
+
 function streamingLinkUrl(link) {
   return typeof link === 'string' ? link : (link && link.url) || JSON.stringify(link);
 }
@@ -363,6 +368,10 @@ router.post('/admin/links', isUploaderOrAdmin, async (req, res) => {
         success: false,
         error: 'Pour les séries, season et episode sont requis'
       });
+    }
+
+    if (!links.every(isHttpLinkInput)) {
+      return res.status(400).json({ success: false, error: INVALID_LINK_URL_ERROR });
     }
 
     const pool = getPool();
@@ -679,6 +688,10 @@ router.put('/admin/links', isUploaderOrAdmin, async (req, res) => {
       });
     }
 
+    if (!links.every(isHttpLinkInput)) {
+      return res.status(400).json({ success: false, error: INVALID_LINK_URL_ERROR });
+    }
+
     const pool = getPool();
     const linksJson = JSON.stringify(links);
 
@@ -966,7 +979,7 @@ router.get('/admin/team/history', isAdmin, async (req, res) => {
 /**
  * GET /admin/vip-keys
  * Retrieve all VIP keys
- * Query: active (optional, true/false), used (optional, true/false), search, page, limit
+ * Query: active (optional, true/false), used (optional, true/false), source (optional, referral), search, page, limit
  */
 router.get('/admin/vip-keys', isAdmin, async (req, res) => {
   try {
@@ -987,6 +1000,12 @@ router.get('/admin/vip-keys', isAdmin, async (req, res) => {
     if (used !== undefined) {
       conditions.push('used = ?');
       params.push(used === 'true' ? 1 : 0);
+    }
+
+    // Origine de la clé : `referral` = créée par le parrainage.
+    if (req.query.source === 'referral') {
+      conditions.push('source = ?');
+      params.push('referral');
     }
 
     if (search) {
@@ -1323,6 +1342,9 @@ router.post('/admin/download-links', isUploaderOrAdmin, async (req, res) => {
       if (!l || !l.url || !l.language || !l.quality || !l.host) {
         return res.status(400).json({ success: false, error: 'Each link must have url, language, quality, host' });
       }
+      if (!isHttpUrl(l.url)) {
+        return res.status(400).json({ success: false, error: INVALID_LINK_URL_ERROR });
+      }
     }
 
     const pool = getPool();
@@ -1474,6 +1496,9 @@ router.put('/admin/download-links', isUploaderOrAdmin, async (req, res) => {
     const { type, id, season, episode, oldUrl, newLink, fullSeason } = req.body;
     if (!type || !id || !oldUrl || !newLink || !newLink.url) {
       return res.status(400).json({ success: false, error: 'Required: type, id, oldUrl, newLink.url' });
+    }
+    if (!isHttpUrl(newLink.url)) {
+      return res.status(400).json({ success: false, error: INVALID_LINK_URL_ERROR });
     }
     if (!['movie', 'tv'].includes(type)) {
       return res.status(400).json({ success: false, error: 'Type must be movie or tv' });

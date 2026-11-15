@@ -163,6 +163,55 @@ test('inbound route context labels outgoing calls and compression counts wire bo
   assert.equal(outgoing.source, 'route GET /api/kisskh/tv/:id');
 });
 
+test('un rafraîchissement lancé après la réponse compressée est libellé comme travail détaché', async (t) => {
+  const upstream = await fixture(t, (_req, res) => res.end('upstream'));
+  const collector = createCollector();
+  const originalRequest = http.request;
+  const undo = instrumentHttp(collector);
+  t.after(() => { collector.stop(); undo(); });
+  const express = require('express'), compression = require('compression');
+  const app = express(); app.use(inboundMiddleware(collector)); app.use(compression());
+  let refreshed;
+  const refresh = new Promise((resolve) => { refreshed = resolve; });
+  app.get('/api/wiflix/movie/:id', async (_req, res) => {
+    await collect(upstream);
+    res.status(202).json({ status: 'pending', padding: 'x'.repeat(4000) });
+    // Comme updateWiflixCache : lancé sans attente, juste après la réponse.
+    collect(upstream).then(refreshed, refreshed);
+  });
+  const url = await fixture(t, app);
+  await new Promise((resolve, reject) => {
+    const req = originalRequest(`${url}/api/wiflix/movie/550`, { headers: { 'accept-encoding': 'gzip' } }, (res) => { res.resume(); res.on('end', resolve); });
+    req.on('error', reject); req.end();
+  });
+  await refresh;
+  const sources = collector.snapshot().groups.filter((group) => group.kind === 'http').map((group) => group.source).sort();
+  assert.deepEqual(sources, ['background after route GET /api/wiflix/movie/:id', 'route GET /api/wiflix/movie/:id']);
+});
+
+test('pendant la chauffe, ni contexte de route ni enveloppe de requête, mais la socket reste suivie', async (t) => {
+  const url = await fixture(t, (req, res) => { req.resume(); res.end('ok'); });
+  const collector = createCollector({ paused: true });
+  const undo = instrumentHttp(collector);
+  t.after(() => { collector.stop(); undo(); });
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  t.after(() => agent.destroy());
+  const warm = await new Promise((resolve, reject) => {
+    const req = http.request(`${url}/warmup`, { agent }, (res) => { res.resume(); res.on('end', () => resolve(req)); });
+    req.on('error', reject); req.end();
+  });
+  assert.equal(Object.hasOwn(warm, 'write'), false, 'aucune enveloppe write/end pendant la chauffe');
+  let store = 'unset';
+  inboundMiddleware(collector)({ originalUrl: '/api/x', method: 'GET' }, { once() {} }, () => { store = 'next'; });
+  assert.equal(store, 'next');
+  collector.begin();
+  await collect(`${url}/measured`, { agent });
+  const snapshot = collector.snapshot();
+  assert.equal(snapshot.groups.length, 1);
+  assert.equal(snapshot.groups[0].started, 1);
+  assert.equal(snapshot.sockets[0].connections, 1, 'la socket keep-alive ouverte pendant la chauffe est comptée une fois');
+});
+
 test('undo detaches active request wrappers without cancelling the request', async (t) => {
   let respond;
   const waiting = new Promise((resolve) => { respond = resolve; });

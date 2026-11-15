@@ -16,6 +16,7 @@ function loadTmdbCache({ axios, redis }) {
     if (request === 'axios') return axios;
     if (request === '../config/redis') return { redis };
     if (request === './singleFlight') return { createSingleFlight };
+    if (request === './sourceRefreshTelemetry') return { refreshStep: () => {} };
     throw new Error(`Dépendance non simulée : ${request}`);
   }, module);
   return module.exports;
@@ -31,6 +32,7 @@ test('TMDB mutualise un miss identique puis revalide le cache dans la tâche par
     redis: {
       status: 'ready',
       get: async (key) => redisValues.get(key) || null,
+      mget: async (...keys) => keys.map((key) => redisValues.get(key) || null),
       set: async (key, value) => redisValues.set(key, value),
     },
   });
@@ -43,6 +45,24 @@ test('TMDB mutualise un miss identique puis revalide le cache dans la tâche par
   assert.equal(calls, 1);
   await api.fetchTmdbDetails('https://tmdb.test', 'key', 7, 'tv');
   assert.equal(calls, 1, 'le hit Redis évite un nouveau transport');
+});
+
+test('la relecture de la tâche partagée trouve la valeur écrite entre-temps par un autre worker', async () => {
+  let calls = 0;
+  const mgets = [];
+  const api = loadTmdbCache({
+    axios: { get: async () => { calls++; return { data: { id: 8 } }; } },
+    redis: {
+      status: 'ready',
+      get: async () => null,
+      mget: async (...keys) => { mgets.push(keys); return [JSON.stringify({ id: 8, name: 'Déjà là' }), null]; },
+      set: async () => 'OK',
+    },
+  });
+  assert.deepEqual(await api.fetchTmdbDetails('https://tmdb.test', 'key', 8, 'tv'), { id: 8, name: 'Déjà là' });
+  assert.equal(calls, 0);
+  assert.deepEqual(mgets, [['tmdb:details:tv:8:fr-FR', 'tmdb:transient:tmdb:details:tv:8:fr-FR', 'tmdb:missing:details:tv:8']],
+    'valeur, marqueur d’échec et marqueur d’absence relus en un seul MGET');
 });
 
 test('l’annulation d’un appelant TMDB ne coupe pas le transport partagé', async () => {

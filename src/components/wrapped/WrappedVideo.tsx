@@ -9,6 +9,7 @@ import WrappedThemePicker from './WrappedThemePicker';
 import { SmoothRange } from '@/components/ui/SmoothRange';
 import { prepareWrappedScore, startWrappedScore } from '@/utils/wrappedVideoAudio';
 import { ensureShareFonts, loadCanvasImage } from '@/utils/wrappedCanvas';
+import { baseMimeType, saveWrappedFile, shareWrappedFile } from '@/utils/wrappedShareFile';
 import { drawWrappedVideoFrame, WRAPPED_VIDEO_SIZE, type WrappedVideoImages, type WrappedVideoTexts } from '@/utils/wrappedVideo';
 import { buildWrappedVideoTimeline, DEFAULT_WRAPPED_VIDEO_OPTIONS, getEffectiveWrappedVideoOptions, normalizeWrappedVideoOptions, WRAPPED_VIDEO_DURATION, WRAPPED_VIDEO_FPS, type WrappedVideoOptions } from '@/utils/wrappedVideoTimeline';
 
@@ -22,14 +23,6 @@ function getSupportedMime() {
 }
 
 function extensionFor(mime: string) { return mime.startsWith('video/mp4') ? 'mp4' : 'webm'; }
-
-function download(blob: Blob, name: string) {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url; link.download = name;
-    document.body.appendChild(link); link.click(); link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
-}
 
 export default function WrappedVideo({ data, theme, autoTheme, onTheme }: {
     data: WrappedShareCardData; theme?: WrappedThemeId; autoTheme?: WrappedThemeId; onTheme?: (id: WrappedThemeId) => void;
@@ -280,7 +273,8 @@ export default function WrappedVideo({ data, theme, autoTheme, onTheme }: {
                 activeRecorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
                 activeRecorder.onerror = () => fail(new Error('MediaRecorder error'));
                 activeRecorder.onstop = () => {
-                    const result = new Blob(chunks, { type: mime });
+                    // Type sans ses codecs : la feuille de partage refuse « video/mp4;codecs=… ».
+                    const result = new Blob(chunks, { type: baseMimeType(mime) });
                     finish(result.size ? undefined : new Error('Empty video'), result);
                 };
                 const started = performance.now();
@@ -326,13 +320,25 @@ export default function WrappedVideo({ data, theme, autoTheme, onTheme }: {
         }
     };
 
+    // Dans l'application, un téléchargement ne produit aucun fichier : le dire plutôt que de ne rien faire.
+    const download = (blob: Blob, name: string) => {
+        if (!saveWrappedFile(blob, name)) toast.error(t('wrapped.appSaveUnavailable'));
+    };
+
     const share = async () => {
         if (!finalVideo) return;
-        const file = new File([finalVideo.blob], `movix-wrapped-${data.year}.${extensionFor(finalVideo.mime)}`, { type: finalVideo.mime });
         try {
-            if (navigator.canShare?.({ files: [file] }) && navigator.share) await navigator.share({ title: t('wrapped.shareTitle', { year: data.year }), files: [file] });
-            else { download(finalVideo.blob, file.name); toast.success(t('wrapped.imageShareFallback')); }
-        } catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) toast.error(t('wrapped.shareError')); }
+            // Après 18 s d'export, le système peut refuser le partage (geste
+            // expiré) : shareWrappedFile retombe alors sur le téléchargement.
+            const outcome = await shareWrappedFile({
+                blob: finalVideo.blob, name: `movix-wrapped-${data.year}.${extensionFor(finalVideo.mime)}`,
+                type: finalVideo.mime, title: t('wrapped.shareTitle', { year: data.year }),
+            });
+            if (outcome === 'downloaded') toast.success(t('wrapped.imageShareFallback'));
+            else if (outcome === 'unavailable') toast.error(t('wrapped.appSaveUnavailable'));
+        } catch {
+            toast.error(t('wrapped.shareError'));
+        }
     };
 
     return <section className="mx-auto w-full max-w-5xl space-y-5" aria-labelledby="wrapped-video-title">

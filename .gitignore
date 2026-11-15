@@ -101,6 +101,7 @@ app-tv/dist/
 **/__pycache__/
 *.pyc
 *.pyo
+.venv/
 
 # Secrets de signature — ce dépôt est public
 #

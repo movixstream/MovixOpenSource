@@ -20,7 +20,7 @@ function bytes(field, value) {
 }
 
 // Exact routes and parsers, fake clocks/transports/files; no app bootstrap or real service.
-function fixture() {
+function fixture({ hubPages = null } = {}) {
   const base = path.resolve(__dirname, '../..');
   const filename = path.join(base, 'liveTvRoutes.js');
   const localRequire = createRequire(filename);
@@ -55,27 +55,25 @@ function fixture() {
     async readdir() { return [...files.keys()].map(name => path.basename(name)); },
   } };
   const axios = {
-    async post(url) {
-      assert.ok(url.includes('mediahubmx-catalog.json'));
-      counts.posts++;
-      if (failCatalog) throw new Error('catalogue indisponible');
-      return { data: { items: [{ ids: { id: 'channel-1' }, name: 'Canal Test',
-        url: 'https://kool.to/kool-iptv/play/channel-1' }], nextCursor: null } };
-    },
-    async get(url) {
-      if (url.startsWith('https://streamed.pk/api/matches/')) {
-        counts.streamedMatches++;
-        return { data: [{ id: 'fixture-live', title: 'Match Streamed', category: 'football',
-          date: time - 60000, sources: [{ source: 'admin', id: 'fixture-source' }] }] };
+    async get(url, config) {
+      if (url === 'https://geil.to/live/catalog/live/channels.json') {
+        assert.equal(config.params['filter[group]'], 'France');
+        counts.posts++;
+        if (failCatalog) throw new Error('catalogue indisponible');
+        return { data: { items: [{ id: 'channel-1', name: 'Canal Test',
+          url: 'https://geil.to/live/play/channel-1' }], nextCursor: null } };
       }
-      if (url === 'https://streamed.pk/api/stream/admin/fixture-source') {
-        counts.streamedStreams++;
-        return { data: [{ streamNo: 1, language: 'French', hd: true,
-          embedUrl: 'https://embed.st/embed/admin/fixture-source/1' }] };
+      if (url === 'https://api.ppv.st/api/streams') {
+        counts.streamedMatches++;
+        return { data: { success: true, streams: [{ category: 'Football', streams: [{
+          id: 4242, name: 'Match PPV', category_name: 'Football', starts_at: time / 1000 - 60,
+          ends_at: time / 1000 + 3600, locale: 'fr', source_tag: 'HD | Canal+',
+          iframe: 'https://embed.example/fixture-live', substreams: [] }] }] } };
       }
       if (url.includes('hubu.ru')) {
         counts.hub++;
         if (failConfig) throw new Error('config indisponible');
+        if (hubPages) return { data: hubPages[url] ?? '' };
         return { data: '<a href="https://fctv33hd.example">FCTV</a>' };
       }
       if (url === 'https://fctv33hd.example/fr') {
@@ -134,19 +132,19 @@ function fixture() {
     },
     './utils/proxyManager': {
       pickVavooSocks5Proxy: async () => null, markVavooProxyAsHealthy() {}, markVavooProxyAsFailed() {},
-      getProxyAgent() {}, makeVavooBrowserRequest: async () => ({ url: 'https://stream.example/live.m3u8' }),
+      getProxyAgent() {},
     },
   };
   const context = vm.createContext({ module, exports: module.exports, __dirname: base, Buffer, URL, URLSearchParams,
     Date: class extends Date { static now() { return time; } }, setTimeout, clearTimeout,
     setInterval: () => ({ unref() {} }), console: { log() {}, error() {}, warn() {} },
-    process: { env: { VAVOO_BASE_URL: 'https://kool.to' } },
+    process: { env: { VAVOO_BASE_URL: 'https://geil.to' } },
     require: name => name in dependencies ? dependencies[name] : localRequire(name),
   });
   vm.runInContext(fs.readFileSync(filename, 'utf8'), context, { filename });
   context.resolveVavooFixture = async () => { counts.vavooStreams++; return 'https://stream.example/live.m3u8'; };
   vm.runInContext('resolveVavooStream = resolveVavooFixture;', context);
-  const functions = vm.runInContext('({ getFctvApiBase, getFctvPlayerBaseUrl, fetchFctvBsKeys, getFctvAvailableSportTypes, fetchFctvMatchDetail, resolveFctvUpstreamPlaylist, fctvPlaylistTarget })', context);
+  const functions = vm.runInContext('({ getFctvApiBase, getFctvPlayerBaseUrl, fetchFctvBsKeys, getFctvAvailableSportTypes, fetchFctvMatchDetail, resolveFctvUpstreamPlaylist, fctvPlaylistTarget, proxifyFctvImage })', context);
   async function request(routePath = '/catalog/:type/:catalogId', { catalogId = 'vavoo_france', channelId = 'vavoo_one', query = {} } = {}) {
     const req = { params: { type: 'tv', catalogId, channelId }, query, headers: {}, protocol: 'https', get() {} };
     const res = { statusCode: 200, set() { return this; }, vary() { return this; }, setHeader() {},
@@ -176,14 +174,14 @@ test('Streamed reste à côté de FCTV dans le manifeste et sert catalogue et le
   assert.ok(manifest.body.catalogs.some(c => c.id === 'streamed_all' && c._free));
   assert.equal(f.counts.streamedMatches, 0);
   const catalogs = await burst(() => f.request(undefined, { catalogId: 'streamed_football' }));
-  assert.ok(catalogs.every(r => r.body.metas[0]?.id === 'streamed_fixture-live'));
-  assert.equal(f.counts.streamedMatches, 2);
-  const streams = await burst(() => f.request('/stream/:type/:channelId', { channelId: 'streamed_fixture-live' }));
+  assert.ok(catalogs.every(r => r.body.metas[0]?.id === 'streamed_4242'));
+  assert.equal(f.counts.streamedMatches, 1);
+  // Les lecteurs viennent de la même liste PPV : aucun appel amont en plus.
+  const streams = await burst(() => f.request('/stream/:type/:channelId', { channelId: 'streamed_4242' }));
   assert.ok(streams.every(r => r.statusCode === 200 && r.body.streams[0]?._isEmbed));
-  assert.equal(f.counts.streamedStreams, 1);
-  f.advance(31000);
-  await f.request('/stream/:type/:channelId', { channelId: 'streamed_fixture-live' });
-  assert.equal(f.counts.streamedStreams, 2);
+  assert.equal(f.counts.streamedMatches, 1);
+  f.advance(61000);
+  await f.request('/stream/:type/:channelId', { channelId: 'streamed_4242' });
   assert.equal(f.counts.streamedMatches, 2);
 });
 
@@ -200,7 +198,7 @@ test('salve Vavoo à froid : 20 réponses, un POST et trois publications ; frais
 
 test('catalogue périmé : un échec, aucune publication, anciennes données conservées et reprise espacée', async () => {
   const f = fixture();
-  f.seed('catalog_tv_vavoo_france_v7', { metas: [{ id: 'old' }] }, 3600001);
+  f.seed('catalog_tv_vavoo_france_v8', { metas: [{ id: 'old' }] }, 3600001);
   f.failCatalog(true);
   let responses = await burst(() => f.request());
   assert.ok(responses.every(r => r.body.metas[0].id === 'old'));
@@ -265,6 +263,26 @@ test('FCTV résolution inclut le sport, partage le renouvellement forcé et resp
   assert.equal(await resolve(), current); assert.equal(f.counts.detail, 5);
   f.advance(15001);
   assert.notEqual((await resolve()).token, current.token); assert.equal(f.counts.detail, 6);
+});
+
+test('FCTV : la page bio-link relais est suivie et les logos suivent le domaine de l’API', async () => {
+  const f = fixture({ hubPages: {
+    'https://hubu.ru/fctvlink': '<a href="https://hubu.ru/">Hubu</a><a href="https://hubu.ru/fclink">🔗 FCTV33 - Pages</a>',
+    'https://hubu.ru/fclink': '<a href="https://fctv33hd.example/">🔗Link - FCTV33</a>',
+  } });
+  assert.equal(await f.getFctvApiBase(), 'https://apis-data-defra10.example');
+  assert.equal(f.counts.hub, 2);
+  assert.equal(f.proxifyFctvImage('https://logos1.dead.cfd/aelogo/team.png!w80'),
+    'https://logos1.example/aelogo/team.png!w80');
+});
+
+test('un catalogue FCTV de plus de 3 h n’est plus servi pendant une panne', async () => {
+  const f = fixture();
+  f.seed('catalog_tv_matches_all_v3', { metas: [{ id: 'old-match' }] }, 3 * 3600000 + 1);
+  f.failCatalog(true);
+  const response = await f.request(undefined, { catalogId: 'matches_all' });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.metas.length, 0);
 });
 
 test('FCTV configuration indisponible à froid : fallback partagé puis reprise après 15 secondes', async () => {
@@ -342,8 +360,8 @@ test('publication impossible à froid : liste vide contractuelle sans nouveau sc
 });
 
 test('échec de publication du groupe Vavoo : aucun catalogue partiel publié et reprise temporisée', async () => {
-  const f = fixture(); const groupKey = 'vavoo_group_France_v4';
-  f.seed('catalog_tv_vavoo_france_v7', { metas: [{ id: 'old' }] }, 3600001);
+  const f = fixture(); const groupKey = 'vavoo_group_France_v5';
+  f.seed('catalog_tv_vavoo_france_v8', { metas: [{ id: 'old' }] }, 3600001);
   f.failPublication(groupKey);
   assert.equal((await f.request()).body.metas[0].id, 'old');
   const writes = f.counts.writes;

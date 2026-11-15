@@ -81,6 +81,8 @@ function WrappedContent({ year, session, version, onClose }: { year: number; ses
                 </div>)}</dl>
             </section>}
             <button type="button" onClick={() => navigate('/')} className="min-h-12 rounded-xl bg-[#a9dfff] px-6 font-bold text-[#101318]">{t('wrapped.backToHome')}</button>
+            {/* Dès février, /wrapped ouvre la nouvelle année, presque vide : l'année terminée reste à un clic. */}
+            {year - 1 >= 2024 && <button type="button" onClick={() => navigate(`/wrapped/${year - 1}`)} className="min-h-11 underline underline-offset-4">{t('wrapped.viewPreviousYear', { year: year - 1 })}</button>}
         </WrappedGate>;
     }
 

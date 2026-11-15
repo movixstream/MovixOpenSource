@@ -168,6 +168,7 @@ export const SearchGridCard: React.FC<GridCardProps> = React.memo(({ item, index
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: Math.min(index * 0.03, 0.5) }}
             whileHover={{ scale: 1.05 }}
+            data-ambient-surface
             className={`${palette ? 'media-color-card' : ''} relative group rounded-xl overflow-hidden bg-white/5 border border-white/10 hover:border-white/20 transition-colors`}
             style={palette?.style}
         >

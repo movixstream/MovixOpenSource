@@ -75,6 +75,18 @@ test('recordProgress : film à 96 % → watch_history reçoit finished = 1', asy
   assert.match(history.sql, /last_watched_at = GREATEST\(last_watched_at, VALUES\(last_watched_at\)\)/);
 });
 
+test('recordProgress avec refreshHistory: false : position écrite, ligne watch_history et TMDB laissées', async () => {
+  const fake = createFakeHistoryPool();
+  const media = fakeMediaStore();
+  const store = createHistoryStore({ pool: fake.pool, mediaStore: media });
+
+  await store.recordProgress(OWNER, { mediaType: 'tv', tmdbId: 1399, season: 1, episode: 3, position: 3000, duration: 3100, updatedAt: AT }, { refreshHistory: false });
+
+  assert.equal(fake.callsMatching('INSERT INTO watch_progress').length, 1);
+  assert.equal(fake.callsMatching('INSERT INTO watch_history').length, 0);
+  assert.equal(media.calls.getMany.length, 0);
+});
+
 test('listContinue : faux pool sans ligne → []', async () => {
   const fake = createFakeHistoryPool((sql) => (sql.startsWith('SELECT') ? [] : undefined));
   const media = fakeMediaStore();

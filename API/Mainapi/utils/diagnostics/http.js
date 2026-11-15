@@ -3,7 +3,7 @@
 const http = require('node:http');
 const https = require('node:https');
 const diagnostics = require('node:diagnostics_channel');
-const { httpLabel } = require('./labels');
+const { httpLabel, httpDestination } = require('./labels');
 
 const safe = (fn) => { try { return fn(); } catch { return undefined; } };
 const bytes = (chunk, encoding) => typeof chunk === 'string' ? Buffer.byteLength(chunk, typeof encoding === 'string' ? encoding : undefined)
@@ -48,6 +48,15 @@ function instrumentHttp(collector) {
     function request() {
       const req = original.apply(this, arguments);
       if (!collector.active) return req;
+      if (!collector.recording) {
+        // Chauffe exclue : ni libellé complet ni span, seulement la base des sockets persistantes.
+        safe(() => {
+          const label = `http:${httpDestination(req)}`;
+          if (req.socket) collector.trackSocket(req.socket, label);
+          else req.once('socket', (socket) => safe(() => collector.trackSocket(socket, label)));
+        });
+        return req;
+      }
       safe(() => {
         const label = httpLabel(req, req.method);
         const span = collector.start({ kind: 'http', ...label, byteMode: 'encoded-body' });
@@ -114,6 +123,7 @@ function instrumentHttp(collector) {
     channel.subscribe(listener); subscriptions.push(() => channel.unsubscribe(listener));
   }
   subscribe('undici:request:create', ({ request }) => {
+    if (!collector.recording) return;
     requests.set(request, { received: false, method: request.method,
       span: collector.start({ kind: 'fetch', ...httpLabel(`${request.origin}${request.path}`, request.method), byteMode: 'encoded-body' }) });
   });
@@ -144,16 +154,22 @@ function instrumentHttp(collector) {
 
 function inboundMiddleware(collector) {
   return function resourceProbe(req, res, next) {
-    if (!collector.active) return next();
+    // Pendant la chauffe, aucun contexte : les chaînes lancées alors restent « background/startup ».
+    if (!collector.recording) return next();
     const label = httpLabel({ path: req.originalUrl || req.url, hostname: 'mainapi', method: req.method });
     const source = `route ${label.operation.replace('mainapi', '')}`;
-    return collector.withSource(source, () => {
+    return collector.withSource(source, (store) => {
+      // En-têtes envoyés = réponse engagée : la suite est du travail détaché. headersSent
+      // passe à true dès res.end(), même quand compression n'écrit le corps que plus tard.
+      if (store) store.isResponded = () => res.headersSent;
       const span = collector.start({ kind: 'inbound', ...label, destination: 'mainapi', byteMode: 'encoded-body' });
       const restoreRead = observeReadable(req, span);
       const restoreWrite = observeWrites(res, { send: (amount) => span.send(amount) });
       let done = false;
       function finish() {
         if (done) return; done = true;
+        // Ne pas retenir res dans le contexte des tâches de fond encore en cours.
+        if (store) { store.responded = true; store.isResponded = null; }
         safe(() => span.finish({ status: res.statusCode, error: res.writableFinished ? undefined : 'aborted' }));
         restoreRead(); restoreWrite(); res.removeListener('finish', finish); res.removeListener('close', finish);
       }

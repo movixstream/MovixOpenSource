@@ -28,7 +28,7 @@ JavaScript servis au navigateur. Ils ne doivent pas contenir de secret.
 
 Le Dockerfile accepte aussi les paramètres publics documentés dans
 `.env.example` pour Turnstile, les notifications, le support, l'analytique, les
-publicités, les miroirs et le DSN GlitchTip. `VITE_APP_BUILD_ID` identifie le
+miroirs et le DSN GlitchTip. `VITE_APP_BUILD_ID` identifie le
 build ; à défaut, Vite utilise `COMMIT_REF`, puis la date de construction.
 Fournir le SHA du commit permet de retrouver la version déployée.
 

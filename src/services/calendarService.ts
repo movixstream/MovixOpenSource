@@ -38,6 +38,7 @@
  */
 import axios from 'axios';
 import { AlertService } from './alertService';
+import { fetchAnimePlanning } from './animeSamaService';
 import { getTmdbLanguage } from '../i18n';
 import { parseDateKey, toDateKey, todayKey } from '../utils/calendarEntries';
 import { readContinueWatchingShows, readWatchlist } from '../utils/calendarSources';
@@ -147,7 +148,8 @@ const DISCOVER_PAGES_SECONDARY = 2;
  * longtemps à s'afficher pour ce que ça rapporte. Quarante, soit les deux pages
  * de `/discover` : la liste est triée par popularité, et personne ne suit la
  * trois-centième série du moment sans l'avoir mise en watchlist — auquel cas
- * l'autre source la couvre.
+ * l'autre source la couvre. Les séries très connues mais peu agitées passent
+ * en plus de ce plafond (voir `airingEpisodesOf`).
  */
 const MAX_AIRING_SHOWS = 40;
 
@@ -661,7 +663,7 @@ const airingEpisodesOf = async (
   const now = todayKey();
   const coversToday = now >= fromKey && now <= toKey;
 
-  const [today, week, airing] = await Promise.all([
+  const [today, week, airing, known] = await Promise.all([
     coversToday
       ? discoverAll('/tv/airing_today', { region: tmdbRegion() }, 1)
       : Promise.resolve([]),
@@ -673,6 +675,14 @@ const airingEpisodesOf = async (
       'air_date.lte': toKey,
       without_genres: TV_GENRES_EXCLUDED_AIRING,
       sort_by: 'popularity.desc',
+      include_adult: 'false',
+    }, DISCOVER_PAGES_SECONDARY),
+    // Les mêmes séries, classées par nombre de votes : voir `knownIds` plus bas.
+    discoverAll('/discover/tv', {
+      'air_date.gte': fromKey,
+      'air_date.lte': toKey,
+      without_genres: TV_GENRES_EXCLUDED_AIRING,
+      sort_by: 'vote_count.desc',
       include_adult: 'false',
     }, DISCOVER_PAGES_SECONDARY),
   ]);
@@ -695,10 +705,23 @@ const airingEpisodesOf = async (
     candidates.set(item.id, best);
   }
 
-  const ids = [...candidates.entries()]
+  const popularIds = [...candidates.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, MAX_AIRING_SHOWS)
     .map(([id]) => id);
+
+  /**
+   * La popularité TMDB mesure l'agitation du moment, pas la notoriété : elle
+   * grimpe après une sortie, pas avant. Le jour où Lupin a sorti sa saison 3,
+   * la série pesait 43 quand il en fallait 107 pour entrer dans les quarante —
+   * elle n'apparaissait nulle part, alors que c'était l'épisode attendu ce
+   * jour-là. Le nombre de votes dit, lui, qu'une série est connue : ces
+   * séries-là passent en plus du plafond, sans y prendre de place. Elles
+   * recoupent presque toutes la liste par popularité ; une dizaine au plus
+   * s'y ajoute.
+   */
+  const knownIds = known.map((item) => item.id);
+  const ids = [...new Set([...popularIds, ...knownIds])];
 
   const perShow = await mapLimited(ids, async (id) => {
     const show = await getShow(cache, id);
@@ -710,6 +733,55 @@ const airingEpisodesOf = async (
   });
 
   return perShow.flat();
+};
+
+/**
+ * Sorties d'animes annoncées par le planning d'anime-sama, la source anime du
+ * site. TMDB donne la date de diffusion au Japon ; le planning donne l'heure à
+ * laquelle l'épisode devient lisible ici, et dans quelle langue. Le Main API le
+ * relit pour tout le monde (voir `services/animeSamaService.ts`) : une seule
+ * requête, quelle que soit la fenêtre.
+ *
+ * Seules les œuvres reliées à une fiche TMDB sont gardées : sans fiche, la
+ * ligne ne mènerait nulle part et resterait sans affiche.
+ */
+const animeReleasesOf = async (fromKey: string, toKey: string): Promise<CalendarOccurrence[]> => {
+  // Le planning range chaque sortie au jour de la France. Un jour de marge de
+  // chaque côté, puis tri sur la date locale : une sortie de 23 h 30 à Paris
+  // tombe le lendemain plus à l'est.
+  const entries = await fetchAnimePlanning(shiftDateKey(fromKey, -1), shiftDateKey(toKey, 1));
+  if (entries === null) {
+    networkFailures += 1;
+    return [];
+  }
+
+  const twoDigits = (value: number): string => String(value).padStart(2, '0');
+  const occurrences: CalendarOccurrence[] = [];
+  for (const entry of entries) {
+    if (!entry.tmdb) continue;
+    const releasedAt = entry.releaseAt ? new Date(entry.releaseAt * 1000) : null;
+    const date = releasedAt ? toDateKey(releasedAt) : entry.day;
+    if (date < fromKey || date > toKey) continue;
+
+    const subtitle = [
+      entry.label,
+      entry.lang.toUpperCase(),
+      entry.state === 'delayed' ? i18n.t('calendar.animeRelease.delayed') : '',
+    ].filter(Boolean).join(' · ');
+
+    occurrences.push({
+      key: `animeReleases:${entry.slug}:${entry.seasonPath}:${entry.lang}:${entry.day}`,
+      source: 'animeReleases',
+      category: 'anime',
+      date,
+      time: releasedAt ? `${twoDigits(releasedAt.getHours())}:${twoDigits(releasedAt.getMinutes())}` : undefined,
+      title: entry.name,
+      subtitle,
+      posterPath: entry.posterPath ?? undefined,
+      href: `/${entry.tmdb.type}/${encodeId(entry.tmdb.id)}`,
+    });
+  }
+  return occurrences;
 };
 
 export interface BuildCalendarOptions {
@@ -830,18 +902,19 @@ export const buildCalendarOccurrences = async (
     collected.push(...perMovie);
   }
 
-  // ── Sorties du moment et séries en diffusion ──────────────────────────────
+  // ── Sorties du moment, séries en diffusion et sorties anime ───────────────
   // En dernier volontairement : le dédoublonnage ci-dessous garde la première
   // occurrence, donc un film déjà présent par la watchlist conserve sa source,
   // et le filtre « ma watchlist » continue de le montrer.
   //
-  // Les deux partent ensemble : elles ne partagent que le cache de fiches, et
-  // les enchaîner doublerait l'attente du premier affichage.
+  // Elles partent ensemble : elles ne partagent que le cache de fiches, et
+  // les enchaîner allongerait d'autant l'attente du premier affichage.
   const publicSources = await Promise.all([
     wanted.has('newReleases') ? newReleasesOf(fromKey, toKey) : Promise.resolve([]),
     wanted.has('airingEpisodes')
       ? airingEpisodesOf(showCache, fromKey, toKey)
       : Promise.resolve([]),
+    wanted.has('animeReleases') ? animeReleasesOf(fromKey, toKey) : Promise.resolve([]),
   ]);
   for (const list of publicSources) collected.push(...list);
 

@@ -21,7 +21,7 @@ async function fixture(t, options = {}) {
   const cluster = Object.assign(new EventEmitter(), { workers: {} });
   const master = createMasterSession(cluster, {
     env: { MAINAPI_PROBE_SECONDS: '3600', MAINAPI_PROBE_DIR: directory },
-    shutdownBudgetMs: 300, finalWaitMs: 0, sampleMs: 20,
+    shutdownBudgetMs: 300, finalWaitMs: 0, sampleMs: 20, alertMinMeasurementMs: 0,
     systemSampler: { sample: async () => ({ at: Date.now(), warnings: [], processes: [], network: null, cgroup: null }) },
     notify: async () => ({ status: 'disabled' }), ...options,
   });

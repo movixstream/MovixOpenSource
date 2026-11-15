@@ -27,7 +27,7 @@ test('TMDB movie alternative titles use the movie endpoint and cache namespace',
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
-    const { fetchTmdbAlternativeTitles, TTL_DETAILS } = require(tmdbPath);
+    const { fetchTmdbAlternativeTitles, TTL_STABLE } = require(tmdbPath);
     assert.deepEqual(
       await fetchTmdbAlternativeTitles('https://api.themoviedb.org/3', 'test-key', 9910, 'movie'),
       payload,
@@ -36,12 +36,14 @@ test('TMDB movie alternative titles use the movie endpoint and cache namespace',
       'https://api.themoviedb.org/3/movie/9910/alternative_titles',
       { params: { api_key: 'test-key' }, timeout: 10_000 },
     ]]);
-    assert.deepEqual(redisWrites, [[
+    // Titres quasi immuables : 30 jours, avec ±15 % d'écart par clé.
+    const [[key, value, mode, ttl]] = redisWrites;
+    assert.deepEqual([key, value, mode], [
       'tmdb:alternative_titles:movie:9910',
       JSON.stringify(payload),
       'EX',
-      TTL_DETAILS,
-    ]]);
+    ]);
+    assert.ok(ttl >= TTL_STABLE * 0.85 && ttl <= TTL_STABLE * 1.15);
   } finally {
     Module._load = originalLoad;
     delete require.cache[tmdbPath];

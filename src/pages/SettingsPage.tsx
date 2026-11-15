@@ -7,8 +7,9 @@ import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import {
   ArrowLeft, Settings, Shield, Monitor, Smartphone, Tablet, Tv,
   Copy, X, Snowflake, Activity, Trash2, Crown, Volume2,
-  Database, Key, Lock, Palette, Eye, Download, Upload, Globe, AlertTriangle, History, CalendarClock, FlaskConical, Link2, MessageCircle, BellOff, Sparkles,
-  Zap, RefreshCw, ChevronDown, ListOrdered, Gauge, Megaphone, Square, Captions, Ghost
+  Database, Key, Lock, Palette, Eye, Download, Upload, Globe, AlertTriangle, History, CalendarClock, Clapperboard, Link2, MessageCircle, BellOff, Sparkles,
+  Zap, RefreshCw, ChevronDown, ListOrdered, Gauge, Megaphone, Square, Captions, Ghost, Leaf, CloudRain, Flower2, Popcorn,
+  type LucideIcon,
 } from 'lucide-react';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
@@ -77,6 +78,11 @@ import { PerformanceSettings } from '@/components/Settings/PerformanceSettings';
 import { HeroSliderSettings } from '@/components/Settings/HeroSliderSettings';
 import { MediaColorSettings } from '@/components/Settings/MediaColorSettings';
 import { SettingsToggle } from '@/components/Settings/SettingsToggle';
+import {
+  AMBIENT_EFFECTS, AMBIENT_INTENSITIES, AMBIENT_MIN_OPACITY, AMBIENT_SETTLES, clearAmbient, readAmbientActive,
+  readAmbientOptions, toggleAmbientEffect, writeAmbientActive, writeAmbientOptions,
+  type AmbientEffect, type AmbientOptions,
+} from '@/components/ambient/ambientOptions';
 import { BgColorPickerPanel } from '../components/Settings/BgColorPickerPanel';
 import { useLightMode } from '../context/LightModeContext';
 import { setHalloweenTheme, useHalloweenTheme } from '../hooks/useHalloweenTheme';
@@ -100,8 +106,16 @@ import {
 import { getOverlayPortalRoot } from '@/utils/overlayPortal';
 import { useMovieReleaseWarnings } from '@/hooks/useMovieReleaseWarnings';
 import { setMovieReleaseWarningsEnabled } from '@/utils/movieReleasePreferences';
+import { resetAllSettings } from '@/utils/resetAllSettings';
 
 const API_URL = import.meta.env.VITE_MAIN_API;
+// Délai minimal entre deux lectures de GET /api/sync/stats déclenchées par
+// des événements (le serveur en accepte 60 par minute et par adresse IP).
+const SYNC_STATS_REFRESH_MS = 30_000;
+
+const AMBIENT_EFFECT_ICONS: Record<AmbientEffect, LucideIcon> = {
+  snow: Snowflake, leaves: Leaf, rain: CloudRain, petals: Flower2, popcorn: Popcorn, halloween: Ghost,
+};
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -426,9 +440,8 @@ const SettingsPage: React.FC = () => {
     return areSoundEffectsEnabled();
   });
 
-  const [isSnowfallActive, setIsSnowfallActive] = useState(() => {
-    return sessionStorage.getItem('snowfall_active') === 'true';
-  });
+  const [isAmbientActive, setIsAmbientActive] = useState(readAmbientActive);
+  const [ambientOptions, setAmbientOptions] = useState<AmbientOptions>(readAmbientOptions);
 
   // M11 — toggle "se souvenir du dernier lecteur choisi".
   const [rememberLastPlayer, setRememberLastPlayerState] = useState<boolean>(() => getRememberLastPlayer());
@@ -673,6 +686,8 @@ const SettingsPage: React.FC = () => {
   const [extractionSessionStats, setExtractionSessionStats] = useState<{ extractions: number; corsFixed: number; cached: number; byType?: Record<string, number> } | null>(null);
   const [showResetExtractionsConfirm, setShowResetExtractionsConfirm] = useState(false);
   const [isClosingResetExtractionsConfirm, setIsClosingResetExtractionsConfirm] = useState(false);
+  const [showResetAllSettingsConfirm, setShowResetAllSettingsConfirm] = useState(false);
+  const [isClosingResetAllSettingsConfirm, setIsClosingResetAllSettingsConfirm] = useState(false);
   const [m3u8SectionExpanded, setM3u8SectionExpanded] = useState(false);
   const [livetvSectionExpanded, setLivetvSectionExpanded] = useState(false);
   const extensionPresent = isExtensionAvailable();
@@ -775,18 +790,34 @@ const SettingsPage: React.FC = () => {
   useEffect(() => {
     loadServerSyncStats();
 
-    const handleSyncStatsRefresh = () => {
+    // Un lecteur ouvert dans un autre onglet écrit sa position plusieurs fois
+    // par seconde (événement « storage ») : au plus une lecture des quotas
+    // toutes les 30 s, la dernière demande étant servie à la fin du délai.
+    // Un changement de compte recharge tout de suite.
+    let lastLoadAt = Date.now();
+    let pendingTimer: ReturnType<typeof setTimeout> | undefined;
+    const loadNow = () => {
+      if (pendingTimer !== undefined) clearTimeout(pendingTimer);
+      pendingTimer = undefined;
+      lastLoadAt = Date.now();
       loadServerSyncStats();
+    };
+    const handleSyncStatsRefresh = () => {
+      if (pendingTimer !== undefined) return;
+      const wait = SYNC_STATS_REFRESH_MS - (Date.now() - lastLoadAt);
+      if (wait <= 0) loadNow();
+      else pendingTimer = setTimeout(loadNow, wait);
     };
 
     window.addEventListener('storage', handleSyncStatsRefresh);
-    window.addEventListener('auth_changed', handleSyncStatsRefresh);
+    window.addEventListener('auth_changed', loadNow);
     window.addEventListener('sync_storage_updated', handleSyncStatsRefresh as EventListener);
     window.addEventListener('focus', handleSyncStatsRefresh);
 
     return () => {
+      if (pendingTimer !== undefined) clearTimeout(pendingTimer);
       window.removeEventListener('storage', handleSyncStatsRefresh);
-      window.removeEventListener('auth_changed', handleSyncStatsRefresh);
+      window.removeEventListener('auth_changed', loadNow);
       window.removeEventListener('sync_storage_updated', handleSyncStatsRefresh as EventListener);
       window.removeEventListener('focus', handleSyncStatsRefresh);
     };
@@ -969,7 +1000,7 @@ const SettingsPage: React.FC = () => {
   // ─── Lock body scroll on popups ──────────────────────────────────────────
 
   useEffect(() => {
-    if (!showIdPopup && !showLocalStoragePopup && !showNonSyncablePopup && !showImportPopup && !linkModal && !showResetExtractionsConfirm) return;
+    if (!showIdPopup && !showLocalStoragePopup && !showNonSyncablePopup && !showImportPopup && !linkModal && !showResetExtractionsConfirm && !showResetAllSettingsConfirm) return;
     const original = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     const lenis = (window as Window & { lenis?: { stop: () => void; start: () => void } }).lenis;
@@ -978,7 +1009,7 @@ const SettingsPage: React.FC = () => {
       document.body.style.overflow = original;
       if (lenis) lenis.start();
     };
-  }, [showIdPopup, showLocalStoragePopup, showNonSyncablePopup, showImportPopup, linkModal, showResetExtractionsConfirm]);
+  }, [showIdPopup, showLocalStoragePopup, showNonSyncablePopup, showImportPopup, linkModal, showResetExtractionsConfirm, showResetAllSettingsConfirm]);
 
   // ─── Handlers ────────────────────────────────────────────────────────────
 
@@ -1021,11 +1052,16 @@ const SettingsPage: React.FC = () => {
     setSoundEffectsEnabled(newValue);
   };
 
-  const handleSnowfallToggle = () => {
-    const newValue = !isSnowfallActive;
-    setIsSnowfallActive(newValue);
-    sessionStorage.setItem('snowfall_active', String(newValue));
-    window.dispatchEvent(new CustomEvent('snowfall_toggled'));
+  const handleAmbientToggle = () => {
+    const newValue = !isAmbientActive;
+    setIsAmbientActive(newValue);
+    writeAmbientActive(newValue);
+  };
+
+  const updateAmbientOptions = (patch: Partial<AmbientOptions>) => {
+    const next = { ...ambientOptions, ...patch };
+    setAmbientOptions(next);
+    writeAmbientOptions(next);
   };
 
   const handleBgModeChange = (newMode: 'combined' | 'static' | 'animated') => {
@@ -1037,10 +1073,6 @@ const SettingsPage: React.FC = () => {
     const newValue = !introEnabled;
     setIntroEnabled(newValue);
     localStorage.setItem('movix_intro_enabled', String(newValue));
-    if (newValue) {
-      localStorage.removeItem('movix_intro_seen');
-    }
-    window.dispatchEvent(new Event('intro_settings_changed'));
   };
 
   const handleScreensaverToggle = () => {
@@ -1399,6 +1431,22 @@ const SettingsPage: React.FC = () => {
     void pushPrefsToExtension();
     handleCloseResetExtractionsConfirm();
   }, [handleCloseResetExtractionsConfirm]);
+
+  const handleCloseResetAllSettingsConfirm = useCallback(() => {
+    setIsClosingResetAllSettingsConfirm(true);
+    setTimeout(() => {
+      setShowResetAllSettingsConfirm(false);
+      setIsClosingResetAllSettingsConfirm(false);
+    }, 300);
+  }, []);
+
+  const handleConfirmResetAllSettings = useCallback(() => {
+    resetAllSettings();
+    // Les réglages sont lus par des dizaines de hooks et de contextes au
+    // montage : un rechargement les remet tous d'aplomb d'un coup. La
+    // suppression des clés part vers /api/sync au pagehide.
+    window.location.reload();
+  }, []);
 
   // Data handlers
   const openIdPopup = () => {
@@ -1995,23 +2043,141 @@ const SettingsPage: React.FC = () => {
                   {renderToggle(commentsSectionHidden, handleCommentsSectionToggle, 'blue')}
                 </motion.div>
 
-                {/* Effet neige */}
+                {/* Effets d'ambiance */}
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.15 }}
-                  className="flex items-center justify-between p-4 bg-gray-800/30 rounded-xl border border-gray-700/40 hover:border-gray-600/50 transition-colors group"
+                  className="p-4 bg-gray-800/30 rounded-xl border border-gray-700/40 hover:border-gray-600/50 transition-colors group"
                 >
-                  <div className="flex-1 mr-4">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <Snowflake className="w-3.5 h-3.5 text-blue-400" />
-                      <h4 className="font-medium text-white text-sm">{t('settings.snowEffect')}</h4>
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1 mr-4">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                        <h4 className="font-medium text-white text-sm">{t('settings.ambientEffects')}</h4>
+                      </div>
+                      <p className="text-xs text-gray-500 leading-relaxed">
+                        {t('settings.ambientEffectsDesc')}
+                      </p>
                     </div>
-                    <p className="text-xs text-gray-500 leading-relaxed">
-                      {t('settings.snowEffectDesc')}
-                    </p>
+                    {renderToggle(isAmbientActive, handleAmbientToggle, 'blue')}
                   </div>
-                  {renderToggle(isSnowfallActive, handleSnowfallToggle, 'blue')}
+
+                  {isAmbientActive && (
+                    <div className="mt-4 pt-4 border-t border-gray-700/40 space-y-4">
+                      <div>
+                        <h5 className="font-medium text-white text-sm mb-0.5">{t('settings.ambientMix')}</h5>
+                        <p className="text-xs text-gray-500 leading-relaxed mb-2">{t('settings.ambientMixDesc')}</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {AMBIENT_EFFECTS.map((effect) => {
+                            const active = ambientOptions.effects.includes(effect);
+                            const Icon = AMBIENT_EFFECT_ICONS[effect];
+                            return (
+                              <button
+                                key={effect}
+                                type="button"
+                                onClick={() => updateAmbientOptions(toggleAmbientEffect(ambientOptions, effect))}
+                                aria-pressed={active}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                                  active
+                                    ? 'bg-blue-500/15 border-blue-400/50 text-white'
+                                    : 'border-gray-700/60 text-gray-400 hover:bg-white/5 hover:text-white'
+                                }`}
+                              >
+                                <Icon className="w-3.5 h-3.5 shrink-0" />
+                                <span className="truncate">{t(`settings.ambientEffect_${effect}`)}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h5 className="font-medium text-white text-sm mb-2">{t('settings.ambientIntensity')}</h5>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {AMBIENT_INTENSITIES.map((level) => {
+                            const active = ambientOptions.intensity === level;
+                            return (
+                              <button
+                                key={level}
+                                type="button"
+                                onClick={() => updateAmbientOptions({ intensity: level })}
+                                aria-pressed={active}
+                                className={`px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                                  active
+                                    ? 'bg-blue-500/15 border-blue-400/50 text-white'
+                                    : 'border-gray-700/60 text-gray-400 hover:bg-white/5 hover:text-white'
+                                }`}
+                              >
+                                {t(`settings.ambientIntensity_${level}`)}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <h5 className="font-medium text-white text-sm">{t('settings.ambientOpacity')}</h5>
+                          <span className="text-xs text-gray-400 tabular-nums">{Math.round(ambientOptions.opacity * 100)} %</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={AMBIENT_MIN_OPACITY * 100}
+                          max={100}
+                          step={5}
+                          value={Math.round(ambientOptions.opacity * 100)}
+                          onChange={(e) => updateAmbientOptions({ opacity: Number(e.target.value) / 100 })}
+                          aria-label={t('settings.ambientOpacity')}
+                          className="w-full accent-blue-500 cursor-pointer"
+                        />
+                      </div>
+
+                      <div>
+                        <h5 className="font-medium text-white text-sm mb-2">{t('settings.ambientSettle')}</h5>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {AMBIENT_SETTLES.map((where) => {
+                            const active = ambientOptions.settle === where;
+                            return (
+                              <button
+                                key={where}
+                                type="button"
+                                onClick={() => updateAmbientOptions({ settle: where })}
+                                aria-pressed={active}
+                                className={`px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                                  active
+                                    ? 'bg-blue-500/15 border-blue-400/50 text-white'
+                                    : 'border-gray-700/60 text-gray-400 hover:bg-white/5 hover:text-white'
+                                }`}
+                              >
+                                {t(`settings.ambientSettle_${where}`)}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {ambientOptions.settle !== 'off' && (
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="min-w-0">
+                            <h5 className="font-medium text-white text-sm mb-0.5">{t('settings.ambientFade')}</h5>
+                            <p className="text-xs text-gray-500 leading-relaxed">{t('settings.ambientFadeDesc')}</p>
+                          </div>
+                          {renderToggle(ambientOptions.fade, () => updateAmbientOptions({ fade: !ambientOptions.fade }), 'blue')}
+                        </div>
+                      )}
+
+                      {ambientOptions.settle !== 'off' && (
+                        <button
+                          type="button"
+                          onClick={clearAmbient}
+                          className="px-3 py-2 rounded-lg border border-gray-700/60 text-xs font-medium text-gray-300 hover:bg-white/5 hover:text-white transition-colors"
+                        >
+                          {t('settings.ambientClear')}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </motion.div>
 
                 {/* Thème Halloween */}
@@ -2322,7 +2488,7 @@ const SettingsPage: React.FC = () => {
                   </AnimatePresence>
                 </motion.div>
 
-                {/* Intro Breaking Bad */}
+                {/* Intro du logo (crochets qui claquent) */}
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -2332,14 +2498,14 @@ const SettingsPage: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <div className="flex-1 mr-4">
                       <div className="flex items-center gap-2 mb-0.5">
-                        <FlaskConical className="w-3.5 h-3.5 text-green-400" />
+                        <Clapperboard className="w-3.5 h-3.5 text-red-500" />
                         <h4 className="font-medium text-white text-sm">{t('settings.introAnimation')}</h4>
                       </div>
                       <p className="text-xs text-gray-500 leading-relaxed">
                         {t('settings.introAnimationDesc')}
                       </p>
                     </div>
-                    {renderToggle(introEnabled, handleIntroToggle, 'green')}
+                    {renderToggle(introEnabled, handleIntroToggle)}
                   </div>
                 </motion.div>
               </div>
@@ -3409,6 +3575,20 @@ const SettingsPage: React.FC = () => {
                     <p className="text-xs text-gray-500">{t('settings.importDataDesc')}</p>
                   </div>
                 </button>
+
+                {/* Réinitialiser tous les réglages */}
+                <button
+                  onClick={() => setShowResetAllSettingsConfirm(true)}
+                  className="w-full flex items-center gap-4 p-4 bg-red-500/5 rounded-xl border border-red-500/20 hover:border-red-500/40 hover:bg-red-500/10 transition-colors text-left group"
+                >
+                  <div className="p-2.5 rounded-xl bg-red-500/10 group-hover:bg-red-500/20 transition-colors">
+                    <RefreshCw className="w-4 h-4 text-red-400" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="font-medium text-red-300 text-sm">{t('settings.resetAllSettings')}</h4>
+                    <p className="text-xs text-gray-500">{t('settings.resetAllSettingsDesc')}</p>
+                  </div>
+                </button>
               </motion.div>
             </section>
             )}
@@ -3498,6 +3678,69 @@ const SettingsPage: React.FC = () => {
                       : linkModal.action === 'link'
                         ? t('settings.linkedAccountsConfirmLink', 'Confirmer la liaison')
                         : t('settings.linkedAccountsConfirmUnlink', 'Désactiver la liaison')}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        getOverlayPortalRoot()
+      )}
+
+      {/* Reset All Settings Confirmation Popup */}
+      {showResetAllSettingsConfirm && createPortal(
+        <AnimatePresence mode="wait">
+          {showResetAllSettingsConfirm && !isClosingResetAllSettingsConfirm && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100000]"
+              onClick={(e) => { if (e.target === e.currentTarget) handleCloseResetAllSettingsConfirm(); }}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="bg-gray-900 rounded-2xl p-6 max-w-md w-full border border-gray-800 shadow-2xl"
+                data-lenis-prevent
+              >
+                <div className="flex items-start gap-4 mb-5">
+                  <div className="shrink-0 p-3 rounded-xl bg-gradient-to-br from-red-600/20 to-orange-600/20 border border-red-500/20">
+                    <AlertTriangle className="w-6 h-6 text-red-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-lg font-bold text-white mb-1">
+                      {t('settings.resetAllSettings')}
+                    </h3>
+                    <p className="text-sm text-gray-400">
+                      {t('settings.resetAllSettingsConfirm')}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleCloseResetAllSettingsConfirm}
+                    className="shrink-0 text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-gray-800 transition-colors"
+                    aria-label={t('common.cancel')}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-4 border-t border-white/5">
+                  <button
+                    onClick={handleCloseResetAllSettingsConfirm}
+                    className="px-4 py-2 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-colors"
+                  >
+                    {t('common.cancel')}
+                  </button>
+                  <button
+                    onClick={handleConfirmResetAllSettings}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-red-600 hover:bg-red-700 text-white transition-colors"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    {t('common.confirm')}
                   </button>
                 </div>
               </motion.div>

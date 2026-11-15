@@ -8,6 +8,8 @@ export interface HeaderPanels {
   /** Le menu profil signale son ouverture : sur mobile, l'en-tête efface son
       dégradé et fige le décor pendant que le panneau couvre la page. */
   onProfileOpenChange?: (open: boolean) => void;
+  /** Même chose pour le menu des canaux officiels (Matrix). */
+  onCommunityOpenChange?: (open: boolean) => void;
 }
 
 export const HeaderPanelsContext = createContext<HeaderPanels>({ host: null });

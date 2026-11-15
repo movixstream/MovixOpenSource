@@ -45,6 +45,11 @@ let deps = {
   shouldUpdateCache: async () => true
 };
 
+// Cpasmal met sa recherche derrière un défi Cloudflare et chaque lecteur derrière
+// un captcha Turnstile ; le raccourci /episode/ répond 410. Coupé par défaut :
+// aucune requête ne part vers le site et le cache disque déjà rempli reste servi.
+const CPASMAL_ENABLED = ['true', '1'].includes(String(process.env.CPASMAL_ENABLED ?? '').trim().toLowerCase());
+
 /**
  * Toutes les requêtes Cpasmal passent par CycleTLS (JA3 Chrome), avec priorité
  * aux SOCKS5 dédiés et repli sur le pool partagé dans makeCpasmalRequest.
@@ -53,6 +58,7 @@ let deps = {
  */
 function _createScopedRequest() {
   return async (config) => {
+    if (!CPASMAL_ENABLED) throw cpasmalUpstreamError();
     const response = await limitCpasmalRequest(() => deps.makeCpasmalRequest(config.url, {
       method: config.method || 'get',
       body: config.data || '',
@@ -826,6 +832,7 @@ const refreshCpasmalCache = (cacheKey, type, ...args) => cpasmalRefresh.run(cach
 }));
 
 const updateCpasmalCache = async (cacheKey, type, ...args) => {
+  if (!CPASMAL_ENABLED) return;
   try {
     // Vérifier la date avant de relire un JSON déjà servi depuis le cache.
     if (!await deps.shouldUpdateCache(CACHE_DIR.CPASMAL, cacheKey)) return;
@@ -837,6 +844,9 @@ const updateCpasmalCache = async (cacheKey, type, ...args) => {
 
 function respondWithRetrieval(res, cacheKey, type, ...args) {
   res.setHeader('Cache-Control', 'no-store');
+  if (!CPASMAL_ENABLED) {
+    return res.status(404).json({ error: 'Cpasmal désactivé', tmdb_id: args[0] });
+  }
   // Un échec récent doit être visible au prochain appel, pas rester un 202.
   const failure = cpasmalRefresh.getFailure(cacheKey);
   if (failure) throw failure;
@@ -933,6 +943,7 @@ router.get('/tv/:tmdbid/:season/:episode', async (req, res) => {
         await respondWithSources(req, res, { ...cachedData, prochaineMiseAJour });
       }
 
+      if (!CPASMAL_ENABLED) return;
       if (cachedData._cpasmalPartial) {
         void refreshCpasmalCache(cacheKey, 'tv', tmdbid, season, episode).catch(() => {});
       } else {

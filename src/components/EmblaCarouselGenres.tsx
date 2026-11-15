@@ -100,7 +100,7 @@ const EmblaCarouselGenres: React.FC<EmblaCarouselGenresProps> = ({ title, items 
             {items.map((genre) => (
               <div key={genre.id} className="flex-none">
                 <Link to={genre.route} className="block w-[180px] h-[100px] md:w-[220px] md:h-[120px] group select-none">
-                  <div className="w-full h-full relative rounded-xl overflow-hidden bg-gradient-to-br from-red-600/20 to-red-400/10 ring-1 ring-white/10">
+                  <div data-ambient-surface className="w-full h-full relative rounded-xl overflow-hidden bg-gradient-to-br from-red-600/20 to-red-400/10 ring-1 ring-white/10">
                     {genre.imageUrl && (
                       <img
                         src={genre.imageUrl}

@@ -27,6 +27,22 @@ export function wrappedMediaKey(item: Pick<WrappedTopContent, 'type' | 'tmdbId' 
     return `${item.type}:${item.tmdbId ?? item.title}`;
 }
 
+/**
+ * Les trois affiches de la devinette, dans un ordre stable pour un profil mais
+ * différent d'un profil à l'autre. Décalé par l'année seule, l'ordre était le
+ * même pour tout le monde : en 2026, la bonne réponse était toujours la 3e.
+ */
+export function wrappedQuizOptions<T extends Pick<WrappedTopContent, 'type' | 'tmdbId' | 'title'>>(items: T[]): T[] {
+    const options = items.slice(0, 3);
+    if (options.length < 3) return options;
+    let hash = 0;
+    for (const item of options) {
+        for (const char of wrappedMediaKey(item)) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
+    }
+    const shift = hash % 3;
+    return options.map((_, index) => options[(index + shift) % 3]);
+}
+
 /** Le backend fournit normalement un chemin TMDB ; accepter aussi ses URLs complètes. */
 export function wrappedImageUrl(path: string | null | undefined, size: 'w500' | 'w1280' = 'w500'): string | null {
     if (!path?.trim()) return null;
@@ -37,6 +53,17 @@ export function wrappedImageUrl(path: string | null | undefined, size: 'w500' | 
     } catch {
         return null;
     }
+}
+
+/**
+ * « Top X % » à afficher d'après le classement de l'API (part des membres qui
+ * ont regardé moins, de 1 à 99). null quand le classement manque ou qu'il
+ * place le membre dans la moitié basse : « top 80 % » ne se met pas en avant.
+ */
+export function wrappedTopPercent(percentile: number | null | undefined): number | null {
+    if (typeof percentile !== 'number' || !Number.isFinite(percentile)) return null;
+    const top = Math.max(1, Math.round(100 - percentile));
+    return top <= 50 ? top : null;
 }
 
 export function formatWrappedDuration(minutes: number, locale: string): string {

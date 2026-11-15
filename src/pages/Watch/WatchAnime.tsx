@@ -12,6 +12,7 @@ import { useAdFreePopup } from '../../context/AdFreePopupContext';
 import AdFreePlayerAds from '../../components/AdFreePlayerAds';
 import { serverResolveRequest } from '../../utils/serverResolveRequest';
 import { registerServerResolvedSources } from '../../utils/extractM3u8';
+import { fetchAnimeByTmdb, fetchAnimeEpisodeLinks, hasPendingAnimeLinks } from '../../services/animeSamaService';
 import { runExtractionPass } from '../../utils/runExtractionPass';
 import { pickAutoSelectedLanguage, sortHostersByPriority } from '../../utils/sourceAutoSelect';
 import { detectHoster, toCanonicalHosterDomain, getHosterDisplayName } from '../../utils/hosterRegistry';
@@ -33,6 +34,7 @@ import {
 } from '../../utils/hlsAutoFallbackGuard';
 import { markEpisodeHandoff } from '../../utils/playerFullscreenPersistence';
 import { writeLocalStorage } from '../../utils/browserStorage';
+import { safeEmbedUrl } from '../../utils/safeEmbedUrl';
 
 const MAIN_API = import.meta.env.VITE_MAIN_API;
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
@@ -67,6 +69,8 @@ interface AnimeEpisode {
   streaming_links: Array<{
     language: string;
     players: string[];
+    /** Lecteurs dont l'adresse reste à demander au serveur (voir animeSamaService). */
+    pending?: number;
   }>;
 }
 
@@ -74,14 +78,49 @@ interface AnimeSeason {
   name: string;
   serie_name: string;
   url: string;
+  /** Chemin de la saison sur anime-sama : sert à demander les adresses d'un épisode. */
+  path?: string;
   episodes: AnimeEpisode[];
 }
 
 interface AnimeData {
   name: string;
   url: string;
+  /** Identifiant de l'œuvre sur anime-sama. */
+  slug?: string;
   seasons: AnimeSeason[];
 }
+
+/**
+ * Saison et épisode que désigne l'URL de lecture : par rang dans la liste de
+ * l'œuvre, sinon par nom de saison ou par numéro d'épisode. Même recherche que
+ * les effets du lecteur plus bas.
+ */
+const findAnimeEpisodeTarget = (
+  data: AnimeData,
+  season: string | number,
+  episode: string | number,
+): { seasonEntry: AnimeSeason; episodeEntry: AnimeEpisode } | null => {
+  const seasonIndex = Number(season) - 1;
+  const seasonEntry = seasonIndex >= 0 && seasonIndex < data.seasons.length
+    ? data.seasons[seasonIndex]
+    : data.seasons.find((s) =>
+      s.name.toLowerCase().includes(`saison ${season}`) ||
+      s.name.toLowerCase() === `season ${season}`
+    );
+  if (!seasonEntry) return null;
+  const episodeIndex = Number(episode) - 1;
+  const episodeEntry = episodeIndex >= 0 && episodeIndex < seasonEntry.episodes.length
+    ? seasonEntry.episodes[episodeIndex]
+    : seasonEntry.episodes.find((e) => e.index === Number(episode));
+  return episodeEntry ? { seasonEntry, episodeEntry } : null;
+};
+
+/** Clé d'un épisode pour la demande de ses adresses, ou null s'il n'y a rien à demander. */
+const pendingEpisodeKey = (data: AnimeData, target: { seasonEntry: AnimeSeason; episodeEntry: AnimeEpisode }): string | null =>
+  (data.slug && target.seasonEntry.path && hasPendingAnimeLinks(target.episodeEntry)
+    ? `${data.slug}|${target.seasonEntry.path}|${target.episodeEntry.index}`
+    : null);
 
 interface VideoSource {
   language: string;
@@ -302,6 +341,13 @@ const WatchAnime: React.FC = () => {
   // État pour suivre si c'est la première sélection automatique
   const [isInitialLoad, setIsInitialLoad] = useState<boolean>(true);
 
+  // Épisodes dont les adresses de lecteurs ont été demandées au serveur, et
+  // ceux dont la réponse est arrivée. `episodeLinksVersion` relance le
+  // traitement des sources à l'arrivée d'une réponse.
+  const askedEpisodeLinksRef = useRef<Set<string>>(new Set());
+  const settledEpisodeLinksRef = useRef<Set<string>>(new Set());
+  const [episodeLinksVersion, setEpisodeLinksVersion] = useState(0);
+
   const updateAnimeContinueWatching = useCallback(() => {
     const showIdInt = id ? parseInt(id) : NaN;
     const seasonNumber = Number(season);
@@ -429,7 +475,17 @@ const WatchAnime: React.FC = () => {
         return response.data || [];
       };
 
-      const results = await searchWithFallback(searchFunction, searchName, 'WatchAnime');
+      // D'abord l'œuvre que la fiche d'anime-sama relie à cet ID TMDB : aucun
+      // nom à comparer. Les œuvres réglées à la main (getAnimeMatcherForId) et
+      // celles sans fiche liée gardent la recherche par nom.
+      const linkedResults = getAnimeMatcherForId(id || '')
+        ? []
+        : (await fetchAnimeByTmdb<AnimeData>('tv', id, serverResolveRequest({ season, episode })))
+          .filter((anime) => Array.isArray(anime.seasons) && anime.seasons.length > 0);
+      const matchedByTmdbId = linkedResults.length > 0;
+      const results = matchedByTmdbId
+        ? linkedResults
+        : await searchWithFallback(searchFunction, searchName, 'WatchAnime');
       registerServerResolvedSources(results);
       // --- PATCH SPECIAL ANIMES ---
       if (results.length > 0) {
@@ -445,7 +501,10 @@ const WatchAnime: React.FC = () => {
         let bestMatch;
         // Utiliser la fonction centralisée pour les cas spéciaux
         const specialMatcher = getAnimeMatcherForId(id || '');
-        if (specialMatcher) {
+        if (matchedByTmdbId) {
+          // Trouvée par son ID TMDB : rien à départager.
+          bestMatch = typedResults[0];
+        } else if (specialMatcher) {
           bestMatch = typedResults.find((anime: AnimeResult) => specialMatcher(anime));
         } else {
           const exactMatchNames = [searchName, showDetails.name]
@@ -575,6 +634,35 @@ const WatchAnime: React.FC = () => {
     setIsInitialLoad(true);
   }, [id, season, episode]);
 
+  // Adresses des lecteurs de l'épisode ouvert. La liste de l'œuvre ne les porte
+  // que si quelqu'un a déjà lu cet épisode ; sinon elles se demandent ici, une
+  // seule fois, et remplacent celles de la liste.
+  useEffect(() => {
+    if (!animeData || !season || !episode) return;
+    const target = findAnimeEpisodeTarget(animeData, season, episode);
+    const key = target ? pendingEpisodeKey(animeData, target) : null;
+    const slug = animeData.slug;
+    const seasonPath = target?.seasonEntry.path;
+    if (!target || !key || !slug || !seasonPath || askedEpisodeLinksRef.current.has(key)) return;
+    askedEpisodeLinksRef.current.add(key);
+    const episodeIndex = target.episodeEntry.index;
+
+    fetchAnimeEpisodeLinks(slug, seasonPath, episodeIndex, serverResolveRequest()).then((links) => {
+      if (links && links.streaming_links.length > 0) {
+        registerServerResolvedSources(links);
+        setAnimeData((current) => (current && current.slug === slug ? {
+          ...current,
+          seasons: current.seasons.map((entry) => (entry.path !== seasonPath ? entry : {
+            ...entry,
+            episodes: entry.episodes.map((item) => (item.index !== episodeIndex ? item : { ...item, streaming_links: links.streaming_links })),
+          })),
+        } : current));
+      }
+      settledEpisodeLinksRef.current.add(key);
+      setEpisodeLinksVersion((version) => version + 1);
+    });
+  }, [animeData, season, episode]);
+
   // Process anime data when available
   useEffect(() => {
     if (animeData && season && episode) {
@@ -658,6 +746,18 @@ const WatchAnime: React.FC = () => {
 
         if (currentEpisode) {
           // Ne traiter les sources que si c'est le chargement initial ou si aucune source n'est sélectionnée
+          // Les adresses de cet épisode sont en route : attendre la réponse
+          // plutôt que de partir sur une liste incomplète.
+          const awaitedLinksKey = pendingEpisodeKey(animeData, { seasonEntry: currentSeason, episodeEntry: currentEpisode });
+          if (awaitedLinksKey && !settledEpisodeLinksRef.current.has(awaitedLinksKey)) return;
+          // Aucune adresse, même après la demande : le serveur n'a pas pu les
+          // obtenir (source en panne ou trop sollicitée). Le dire plutôt que
+          // de laisser l'écran de chargement tourner.
+          if (!currentEpisode.streaming_links.some(link => link.players.length > 0)) {
+            setError(t('watch.animeLinksUnavailable'));
+            setLoading(false);
+            return;
+          }
           if (isInitialLoad || !selectedSource) {
             processVideoSources(currentEpisode);
           }
@@ -666,7 +766,7 @@ const WatchAnime: React.FC = () => {
         }
       }
     }
-  }, [animeData, season, episode, isInitialLoad, selectedSource]);
+  }, [animeData, season, episode, isInitialLoad, selectedSource, episodeLinksVersion, t]);
 
   // Check if loading is complete (including extractions)
   useEffect(() => {
@@ -1558,7 +1658,7 @@ const WatchAnime: React.FC = () => {
                 {/* Current Episode (reflects URL, not menu selection) */}
                 <div className="p-4 border-b border-gray-800/50">
                   <div className="text-xs text-gray-400 mb-1">
-                    {animeData.seasons[Number(season) - 1]?.name} • {t('watch.episodeN', { n: episode })} ({t('watch.watching')})
+                    {animeData.seasons[Number(season) - 1]?.name} • {animeData.seasons[Number(season) - 1]?.episodes[Number(episode) - 1]?.name || t('watch.episodeN', { n: episode })} ({t('watch.watching')})
                   </div>
                   <h4 className="text-white font-medium mb-1">{animeData.seasons[Number(season) - 1]?.episodes[Number(episode) - 1]?.name || t('watch.episodeN', { n: episode })}</h4>
                 </div>
@@ -1834,7 +1934,7 @@ const WatchAnime: React.FC = () => {
           {/* Iframe for embed video */}
           {embedUrl && !showHLSPlayer ? (
             <iframe
-              src={embedUrl}
+              src={safeEmbedUrl(embedUrl)}
               className="w-full h-full border-0"
               allowFullScreen
               referrerPolicy={(embedUrl || '').toLowerCase().includes('ezplayer') ? 'no-referrer' : undefined}

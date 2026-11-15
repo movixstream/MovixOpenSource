@@ -155,8 +155,11 @@ function createHistoryStore({ pool, mediaStore, now = () => Date.now() }) {
   /**
    * Enregistre une position puis met à jour la carte « Reprendre » du titre.
    * Film : saison/épisode 0/0 dans `watch_progress`, NULL dans `watch_history`.
+   * `options.refreshHistory: false` : la ligne `watch_history` est déjà à
+   * jour (même épisode, même état, voir `isHistoryRowFresh`), seule la
+   * position est écrite.
    */
-  async function recordProgress(owner, { mediaType, tmdbId, season, episode, position, duration, updatedAt }) {
+  async function recordProgress(owner, { mediaType, tmdbId, season, episode, position, duration, updatedAt }, options = {}) {
     const isTv = mediaType === 'tv';
     const seasonNumber = isTv ? Number(season) : 0;
     const episodeNumber = isTv ? Number(episode) : 0;
@@ -166,6 +169,7 @@ function createHistoryStore({ pool, mediaStore, now = () => Date.now() }) {
       ...ownerParams(owner), mediaType, tmdbId, seasonNumber, episodeNumber,
       toSeconds(position), toSeconds(duration), at,
     ]);
+    if (options && options.refreshHistory === false) return;
 
     const finished = isFinished(position, duration);
     const seasons = isTv && finished ? await seasonsOf(tmdbId) : null;
@@ -353,7 +357,7 @@ function createHistoryStore({ pool, mediaStore, now = () => Date.now() }) {
 
   // Classement complet du profil : 4 lectures indexées (préfixe de la clé
   // primaire pour les tables de l'historique ; `wrapped_viewing_data` par un
-  // index qui commence par `user_id`, `idx_user_year` sur le plan mesuré),
+  // index qui commence par `user_id, profile_id`, `idx_viewing_lookup`),
   // infos TMDB des titres qui en ont besoin, puis classement en mémoire.
   async function computeOverview(owner, language) {
     const [[historyRows], [progressRows], [markRows], viewingRows] = await Promise.all([

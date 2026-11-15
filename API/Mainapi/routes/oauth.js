@@ -11,6 +11,7 @@ const {
   getOAuthClientPublicMetadata,
   resolveClientRedirectUri,
   normalizeRequestedScopes,
+  requiresClientAuthentication,
 } = require('../utils/oauthClients');
 const {
   ensureOAuthStorage,
@@ -715,6 +716,19 @@ router.post('/token', oauthTokenLimiter, async (req, res) => {
     })();
 
     const pkceIsValid = verifyPkce();
+
+    // Un code qui porte une permission engageant l'application (vip.grant)
+    // ne s'échange qu'avec son `client_secret`. Le PKCE seul ne prouve rien
+    // ici : c'est l'utilisateur qui choisit le challenge, il pourrait donc
+    // s'approuver puis échanger le code lui-même.
+    let codeScopes = [];
+    try {
+      const parsedScopes = typeof rows[0].scopes === 'string' ? JSON.parse(rows[0].scopes) : rows[0].scopes;
+      if (Array.isArray(parsedScopes)) codeScopes = parsedScopes;
+    } catch { /* scopes illisibles : l'échange échouera plus bas */ }
+    if (requiresClientAuthentication(codeScopes) && (client.publicClient || !secretIsValid)) {
+      return sendOauthJsonError(res, 401, 'invalid_client', 'client_secret requis pour cette permission');
+    }
 
     if (client.publicClient || client.requirePkce) {
       if (!pkceIsValid) {
@@ -2099,6 +2113,12 @@ router.delete('/ratings/:mediaType/:tmdbId', async (req, res) => {
 router.post('/vip/grant', async (req, res) => {
   try {
     const tokenRecord = await getOauthTokenAuth(req, ['vip.grant']);
+    // Un client public n'a pas de secret : un jeton vip.grant à son nom a
+    // forcément été obtenu sans que l'application s'authentifie.
+    const grantingClient = getOAuthClient(tokenRecord.clientId);
+    if (!grantingClient || grantingClient.publicClient) {
+      return sendOauthJsonError(res, 403, 'unauthorized_client', 'vip.grant est réservé aux applications confidentielles');
+    }
     const days = Number(req.body?.days);
     if (!Number.isInteger(days) || days <= 0 || days > 365) {
       return sendOauthJsonError(res, 400, 'invalid_request', 'days doit être un entier entre 1 et 365');

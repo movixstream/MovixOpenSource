@@ -35,6 +35,10 @@ export const isHalloweenSeason = (date = new Date()): boolean => date.getMonth()
 export const isHalloweenWeek = (date = new Date()): boolean =>
   isHalloweenSeason(date) && date.getDate() >= 25;
 
+/** Le 31 octobre, en heure locale : bandeau « Joyeux Halloween » de l'en-tête. */
+export const isHalloweenDay = (date = new Date()): boolean =>
+  isHalloweenSeason(date) && date.getDate() === 31;
+
 // Stockage bloqué : le choix reste actif jusqu'au rechargement.
 let memoryValue: boolean | null = null;
 

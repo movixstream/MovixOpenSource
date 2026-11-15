@@ -23,9 +23,7 @@ CREATE TABLE IF NOT EXISTS wrapped_viewing_data (
     hour_of_day TINYINT DEFAULT NULL,
     month INT NOT NULL,
     year INT NOT NULL,
-    INDEX idx_user_year (user_id, year),
     INDEX idx_content (content_type, content_id),
-    INDEX idx_user_profile (user_id, profile_id),
     INDEX idx_hour (user_id, year, hour_of_day)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

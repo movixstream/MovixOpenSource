@@ -99,6 +99,7 @@ Les contexts à connaître en premier :
 - Calls backend : `src/services/` puis les pages/composants consommateurs
 - WatchParty : `src/pages/WatchParty*.tsx`, `src/hooks/useWatchParty.ts`, `src/utils/watchparty.ts`, `src/workers/watchpartySync.worker.ts`
 - Lecture vidéo : `src/pages/Watch/` et les composants `*Player*`
+- Miniatures de la barre de progression : `src/services/seekThumbnails/`, `src/workers/seekThumbnails.worker.ts`
 - Traductions : `src/i18n/`
 
 ## Notes de contribution

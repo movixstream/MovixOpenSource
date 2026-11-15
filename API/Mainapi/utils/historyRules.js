@@ -79,13 +79,13 @@ function parseProgressKey(key) {
   return null;
 }
 
-/**
- * JSON `{position, duration, timestamp}` → `{position, duration, updatedAt}`.
- * Position ou durée non finie ou négative, ou date absente/invalide → null.
- */
-function parseProgressValue(raw) {
-  const data = safeJsonParse(raw);
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+function isPlainRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Objet `{position, duration, timestamp}` déjà lu → `{position, duration, updatedAt}` ou null.
+function progressOf(data) {
+  if (!isPlainRecord(data)) return null;
 
   const { position, duration } = data;
   if (typeof position !== 'number' || !Number.isFinite(position) || position < 0) return null;
@@ -95,6 +95,93 @@ function parseProgressValue(raw) {
   if (!updatedAt) return null;
 
   return { position, duration, updatedAt };
+}
+
+/**
+ * JSON `{position, duration, timestamp}` → `{position, duration, updatedAt}`.
+ * Position ou durée non finie ou négative, ou date absente/invalide → null.
+ */
+function parseProgressValue(raw) {
+  return progressOf(safeJsonParse(raw));
+}
+
+// Renvoi d'une progression sans nouveauté : position à 5 s près, durée à
+// 1 s près, horodatage avancé de moins de 2 min.
+const HEARTBEAT_POSITION_SECONDS = 5;
+const HEARTBEAT_DURATION_SECONDS = 1;
+const HEARTBEAT_MAX_AGE_MS = 2 * 60 * 1000;
+const PROGRESS_FIELDS = new Set(['position', 'duration', 'timestamp']);
+
+/**
+ * Vrai si `nextRaw` ne fait que redire `previousRaw` : lecteur en pause ou
+ * onglet resté ouvert, qui réécrit la même position avec un horodatage neuf.
+ * Conditions : deux valeurs de progression lisibles, mêmes champs, aucun
+ * autre champ changé, position à 5 s près, durée à 1 s près, même état
+ * « fini », horodatage plus récent de moins de 2 min. Une pause qui dure
+ * repasse donc au plus une fois toutes les 2 min, et une reprise plus tard
+ * (autre appareil, autre jour) passe toujours.
+ */
+function isProgressHeartbeat(previousRaw, nextRaw) {
+  if (typeof previousRaw !== 'string' || typeof nextRaw !== 'string' || previousRaw === nextRaw) return false;
+  const before = safeJsonParse(previousRaw);
+  const after = safeJsonParse(nextRaw);
+  const previous = progressOf(before);
+  const next = progressOf(after);
+  if (!previous || !next) return false;
+
+  const fields = Object.keys(after);
+  if (fields.length !== Object.keys(before).length) return false;
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(before, field)) return false;
+    if (PROGRESS_FIELDS.has(field)) continue;
+    if (JSON.stringify(before[field]) !== JSON.stringify(after[field])) return false;
+  }
+
+  if (Math.abs(next.position - previous.position) >= HEARTBEAT_POSITION_SECONDS) return false;
+  if (Math.abs(next.duration - previous.duration) >= HEARTBEAT_DURATION_SECONDS) return false;
+  if (isFinished(previous.position, previous.duration) !== isFinished(next.position, next.duration)) return false;
+  const elapsed = next.updatedAt.getTime() - previous.updatedAt.getTime();
+  return elapsed >= 0 && elapsed < HEARTBEAT_MAX_AGE_MS;
+}
+
+// La ligne `watch_history` d'un titre en cours de lecture est réécrite au
+// premier envoi de chaque tranche de 2 min (voir isHistoryRowFresh).
+const HISTORY_REFRESH_MS = 2 * 60 * 1000;
+
+/**
+ * Vrai si la ligne `watch_history` du titre n'a pas besoin d'être réécrite
+ * pour cette nouvelle position de la clé `key` : la valeur précédente de la
+ * clé était déjà la progression la plus récente du titre dans `profileBefore`
+ * (données du profil d'avant l'envoi), donc la ligne pointe déjà cet
+ * épisode ; même état « fini » ; les deux horodatages tombent dans la même
+ * tranche de 2 min. La tranche (et non l'écart entre deux envois, toujours
+ * court pendant une lecture) garantit une réécriture par tranche : seul
+ * `last_watched_at` aurait bougé, il prend au plus 2 min de retard.
+ * Une progression illisible d'un autre épisode est ignorée (jamais recopiée).
+ */
+function isHistoryRowFresh(key, previousRaw, nextRaw, profileBefore) {
+  const target = parseProgressKey(key);
+  if (!target) return false;
+  const previous = parseProgressValue(previousRaw);
+  const next = parseProgressValue(nextRaw);
+  if (!previous || !next) return false;
+  if (isFinished(previous.position, previous.duration) !== isFinished(next.position, next.duration)) return false;
+  const previousAt = previous.updatedAt.getTime();
+  const nextAt = next.updatedAt.getTime();
+  if (nextAt < previousAt) return false;
+  if (Math.floor(previousAt / HISTORY_REFRESH_MS) !== Math.floor(nextAt / HISTORY_REFRESH_MS)) return false;
+
+  if (target.mediaType === 'tv') {
+    const prefix = `progress_tv_${target.tmdbId}_`;
+    for (const otherKey of Object.keys(isPlainRecord(profileBefore) ? profileBefore : {})) {
+      if (otherKey === key || !otherKey.startsWith(prefix)) continue;
+      const other = parseProgressKey(otherKey);
+      if (!other || other.tmdbId !== target.tmdbId) continue;
+      const value = parseProgressValue(profileBefore[otherKey]);
+      if (value && value.updatedAt.getTime() >= previousAt) return false;
+    }
+  }
+  return true;
 }
 
 // Pointeur d'épisode d'une entrée série ; incomplet ou invalide → nulls.
@@ -363,6 +450,8 @@ module.exports = {
   toDate,
   parseProgressKey,
   parseProgressValue,
+  isProgressHeartbeat,
+  isHistoryRowFresh,
   parseContinueWatching,
   parseMarksKey,
   parseMarks,

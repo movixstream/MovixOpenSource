@@ -7,6 +7,7 @@ import binascii
 import hashlib
 import logging
 from pathlib import Path
+import random
 import re
 import sys
 import time
@@ -38,7 +39,8 @@ def load_proxy_headers():
         'fsvid_extract_handler', 'vidzy_extract_handler', '_is_fsvid_vidzy_embed_url',
         '_extract_uqload_media_url', '_extract_uqload_media', '_validate_uqload_url',
         '_extract_m3u8_url', '_fsvid_vidzy_gate_urls', '_fsvid_vidzy_gate_key',
-        '_with_fsvid_vidzy_gate_key',
+        '_with_fsvid_vidzy_gate_key', '_is_fsvid_vidzy_media_candidate',
+        '_fetch_embed_page_via_socks',
     }
     proxy_class.body = [
         node for node in proxy_class.body
@@ -50,7 +52,7 @@ def load_proxy_headers():
     constants = [
         node for node in tree.body if isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name)
-            and target.id.startswith(('FSVID_VIDZY_', '_FSVID_VIDZY_', 'PROVIDER_MEDIA_'))
+            and target.id.startswith(('FSVID_VIDZY_', '_FSVID_VIDZY_', 'PROVIDER_MEDIA_', 'EMBED_SOCKS_'))
             for target in node.targets
         )
     ]
@@ -59,7 +61,7 @@ def load_proxy_headers():
         *constants, proxy_class,
     ], type_ignores=[])
     namespace = {
-        're': re, 'urlparse': urlparse, 'urljoin': urljoin,
+        're': re, 'urlparse': urlparse, 'urljoin': urljoin, 'random': random,
         'base64': base64, 'binascii': binascii,
         'get_uqload_site_origin': get_uqload_site_origin,
         'parse_allowed_uqload_url': parse_allowed_uqload_url,
@@ -70,11 +72,13 @@ def load_proxy_headers():
         'web': web, 'hashlib': hashlib, 'urllib': urllib, 'time': time,
         '_signed_service_url': lambda route, url: url,
         'logger': logging.getLogger(__name__),
+        'redact_url_for_log': lambda url: url,
     }
     exec(compile(ast.fix_missing_locations(module), 'server.py', 'exec'), namespace)
     proxy = namespace['ProxyServer']()
     proxy._fsvid_vidzy_gate_key_entry = None
     proxy._fsvid_vidzy_gate_lock = asyncio.Lock()
+    proxy.ssl_context = None
     return proxy
 
 
@@ -107,8 +111,8 @@ class ProviderEncodingTests(unittest.IsolatedAsyncioTestCase):
                 url = f'https://{host}/hls/master.m3u8?t=example&s=123&i=0.0'
                 request = SimpleNamespace(query={'url': url}, headers={}, method='GET')
                 await getattr(proxy, f'{provider}_proxy_handler')(request)
-                relay = proxy._service_proxy if provider == 'uqload' else proxy._service_proxy_via_random_socks
-                dedicated = relay.call_args.args[2]
+                # Les trois passent par le pool SOCKS : leur CDN refuse l'IP du serveur.
+                dedicated = proxy._service_proxy_via_random_socks.call_args.args[2]
                 generic = proxy._prepare_headers(url, request)
                 for headers in (dedicated, generic):
                     self.assert_media_encoding(provider, headers)
@@ -119,16 +123,18 @@ class ProviderEncodingTests(unittest.IsolatedAsyncioTestCase):
         proxy = self.proxy
         session = MagicMock()
         media = 'https://strm4.uqload.vc/hls/master.m3u8?t=example'
-        session.request.return_value.__aenter__.return_value = SimpleNamespace(
+        session.get.return_value.__aenter__.return_value = SimpleNamespace(
             status=200, text=AsyncMock(return_value=f'<script>var sources=["{media}"];</script>'),
         )
-        proxy.sessions = {'normal': session, 'no_ssl': session}
+        session.closed = False
+        proxy.sessions = {'proxy_0': session}
         proxy._require_internal = lambda request: None
         proxy._check_vip = AsyncMock(return_value=True)
         proxy._resolve_fsvid_vidzy_m3u8 = AsyncMock(return_value=media)
+        proxy._with_fsvid_vidzy_gate_key = AsyncMock(side_effect=lambda url, *args: url)
         for provider, host in [('fsvid', 'fsvid.lol'), ('vidzy', 'vidzy.org'), ('uqload', 'uqload.vc')]:
             with self.subTest(provider=provider):
-                session.request.reset_mock()
+                session.get.reset_mock()
                 url = f'https://{host}/embed-example.html'
                 if provider == 'uqload':
                     self.assertEqual(await proxy._extract_uqload_media_url(url), media)
@@ -136,7 +142,7 @@ class ProviderEncodingTests(unittest.IsolatedAsyncioTestCase):
                     setattr(proxy, f'{provider}_cache', SimpleNamespace(get=lambda key: None, set=lambda *args: None))
                     response = await getattr(proxy, f'{provider}_extract_handler')(SimpleNamespace(query={'url': url}))
                     self.assertEqual(response.status, 200)
-                headers = session.request.call_args.kwargs['headers']
+                headers = session.get.call_args_list[0].kwargs['headers']
                 self.assertNotIn('Accept-Encoding', headers)
 
     def test_rolling_xor_survives_a_misread_width_measurement(self):
@@ -166,6 +172,16 @@ class ProviderEncodingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.proxy._extract_m3u8_url(script, embed), media)
 
+    def test_vidzy_media_accepts_both_cdn_domains(self):
+        # Le CDN Vidzy alterne entre u*.vidzy.cc et u*.vidzy.org.
+        for host in ('u14.vidzy.cc', 'u14.vidzy.org'):
+            url = f'https://{host}/hls2/05/00028/id_o/master.m3u8?t=x'
+            with self.subTest(host=host):
+                self.assertTrue(self.proxy._is_fsvid_vidzy_media_candidate(url, 'vidzy'))
+                self.assertFalse(self.proxy._is_fsvid_vidzy_media_candidate(url, 'fsvid'))
+        self.assertFalse(self.proxy._is_fsvid_vidzy_media_candidate(
+            'https://u14.vidzy.org/troll/master.m3u8', 'vidzy'))
+
 
 class FakeGateSession:
     """Session aiohttp minimale : chaque porte répond par son entrée de `replies`."""
@@ -184,7 +200,11 @@ class FakeGateSession:
                 if isinstance(reply, Exception):
                     raise reply
                 status, payload = reply
-                return SimpleNamespace(status=status, json=AsyncMock(return_value=payload))
+                return SimpleNamespace(
+                    status=status,
+                    json=AsyncMock(return_value=payload),
+                    text=AsyncMock(return_value=payload if isinstance(payload, str) else ''),
+                )
 
             async def __aexit__(self, *exc):
                 return False
@@ -253,13 +273,13 @@ class FsvidVidzyGateKeyTests(unittest.IsolatedAsyncioTestCase):
             for reply, expect_key in [((200, {'ok': 1, 'gk': self.KEY}), True), ((200, {'ok': 0}), False)]:
                 with self.subTest(provider=provider, keyed=expect_key):
                     proxy = load_proxy_headers()
-                    page = MagicMock()
-                    page.request.return_value.__aenter__.return_value = SimpleNamespace(
-                        status=200, text=AsyncMock(return_value='<html></html>'),
-                    )
+                    embed = f'https://{host}/embed-example.html'
                     other = 'https://fsvid.lol/gk' if provider == 'vidzy' else 'https://v6.vidzy.cc/gate.php'
-                    gates = FakeGateSession({gate: reply, other: reply})
-                    proxy.sessions = {'normal': SimpleNamespace(request=page.request, get=gates.get), 'no_ssl': page}
+                    # Page et porte par la même sortie SOCKS ; jamais en direct
+                    # (une session `normal` vide lèverait KeyError).
+                    egress = FakeGateSession({embed: (200, '<html></html>'), gate: reply, other: reply})
+                    direct = FakeGateSession({})
+                    proxy.sessions = {'normal': direct, 'proxy_3': egress}
                     proxy._require_internal = lambda request: None
                     proxy._check_vip = AsyncMock(return_value=True)
                     proxy._resolve_fsvid_vidzy_m3u8 = AsyncMock(return_value=self.MASTER)
@@ -267,16 +287,22 @@ class FsvidVidzyGateKeyTests(unittest.IsolatedAsyncioTestCase):
                     cache.get.return_value = None
                     setattr(proxy, f'{provider}_cache', cache)
                     response = await getattr(proxy, f'{provider}_extract_handler')(
-                        SimpleNamespace(query={'url': f'https://{host}/embed-example.html'}),
+                        SimpleNamespace(query={'url': embed}),
                     )
                     self.assertEqual(response.status, 200)
                     self.assertEqual('gk=' in response.text, expect_key)
                     self.assertEqual(cache.set.called, expect_key)
+                    self.assertEqual(direct.calls, [])
+                    self.assertEqual(egress.calls[0], embed)
+                    self.assertTrue(any(call.startswith(gate) for call in egress.calls[1:]))
 
 
 def load_decoy_helpers():
     tree = ast.parse((PROXY_ROOT / 'server.py').read_text(encoding='utf-8-sig'))
-    names = {'is_fsvid_vidzy_decoy_url', 'is_fsvid_vidzy_decoy_playlist', '_FSVID_VIDZY_DECOY_PATH'}
+    names = {
+        'is_fsvid_vidzy_decoy_url', 'is_fsvid_vidzy_decoy_playlist', '_FSVID_VIDZY_DECOY_PATH',
+        'is_fsvid_vidzy_fake_master', '_FSVID_VIDZY_VIDEO_CODE',
+    }
     body = [
         node for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name in names
@@ -324,6 +350,38 @@ class FsvidVidzyDecoyTests(unittest.TestCase):
         real = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nindex-v1-a1.m3u8?t=x\n'
         self.assertFalse(is_decoy_playlist(real, master))
         self.assertFalse(is_decoy_playlist('#EXTM3U\n', master))
+
+    def test_fake_master_that_loops_on_itself(self):
+        # Relevé le 2026-11-09 en prod : le master d'une vidéo pointe vers la
+        # variante `index.m3u8` d'une autre, qui renvoie ce même master.
+        is_fake = self.helpers['is_fsvid_vidzy_fake_master']
+        target = 'https://v6.vidzy.org/hls2/03/00064/d51sasae2ik1_o/master.m3u8?t=x&gk=k'
+        fake = (
+            '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-INDEPENDENT-SEGMENTS\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=1280x720\n'
+            'https://u14.vidzy.org/hls2/07/00064/kt9yhz08i92s_o/index.m3u8\n'
+        )
+        self.assertTrue(is_fake(fake, target, target))
+        # La variante qui répond par un master : même boucle.
+        variant = 'https://u14.vidzy.org/hls2/07/00064/kt9yhz08i92s_o/index.m3u8'
+        self.assertTrue(is_fake(fake, variant, variant))
+        # Autre forme, relevée via les SOCKS de prod : même vidéo, variante
+        # `index.m3u8` sans jeton.
+        same_video = fake.replace('07/00064/kt9yhz08i92s_o', '03/00064/d51sasae2ik1_o')
+        self.assertTrue(is_fake(same_video, target, target))
+
+        real = (
+            '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=604440\n'
+            'https://v6.vidzy.org/hls2/03/00064/d51sasae2ik1_o/index-v1-a1.m3u8?t=x\n'
+            '#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=1,URI="iframes-v1-a1.m3u8?t=x"\n'
+        )
+        self.assertFalse(is_fake(real, target, target))
+        urlset = 'https://r1.fsvid.lol/hls2/03/00004/,96z2sojktgc1_n,lang/eng/96z2sojktgc1_eng,.urlset/master.m3u8?t=x'
+        self.assertFalse(is_fake(
+            '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nindex-v1-a1.m3u8?t=x\n', urlset, urlset,
+        ))
+        media = '#EXTM3U\n#EXTINF:10,\nseg-1-v1-a1.ts?t=x\n'
+        self.assertFalse(is_fake(media, variant, variant))
 
 
 if __name__ == '__main__':

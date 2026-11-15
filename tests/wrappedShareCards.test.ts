@@ -167,6 +167,38 @@ test('une affiche absente ou en échec garde la même place avec un repli typogr
     }
 });
 
+test('la période du bilan est écrite sur les quatre formats, une seule fois', async () => {
+    for (const format of FORMATS) {
+        // Avec ou sans titre : l'Affiche et la Story changent de composition.
+        for (const data of [fixture(), fixture({ items: [] })]) {
+            const { texts } = await render(data, format);
+            assert.equal(texts.filter(text => text === 'PERIOD_LINE').length, 1, `${format} (${data.items.length} titres)`);
+        }
+    }
+    // Sans période fournie, rien n'est inventé sur l'Affiche ni le Billet.
+    for (const format of ['poster', 'ticket'] as const) {
+        const { texts } = await render(fixture({ period: undefined }), format);
+        assert.ok(!texts.includes('PERIOD_LINE') && !texts.includes('undefined'), format);
+    }
+});
+
+test('le canevas est vidé après l’export pour rendre sa mémoire', async () => {
+    const sizes: number[][] = [];
+    const create = document.createElement;
+    document.createElement = (() => {
+        const canvas = (create as () => { width: number; height: number })();
+        sizes.push([0, 0]);
+        const index = sizes.length - 1;
+        return new Proxy(canvas, { set(target, key, value) { Reflect.set(target, key, value); sizes[index] = [target.width, target.height]; return true; } });
+    }) as typeof document.createElement;
+    try {
+        await generateWrappedShareCard(fixture(), 'ticket');
+    } finally {
+        document.createElement = create;
+    }
+    assert.deepEqual(sizes, [[0, 0]]);
+});
+
 test('seuls les libellés des traits sont dessinés, jamais leur preuve', async () => {
     for (const format of FORMATS) {
         const { texts } = await render(fixture(), format);

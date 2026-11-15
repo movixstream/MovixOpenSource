@@ -4,7 +4,8 @@
  *
  * Performance notes:
  *  - Redis is used for generated-wrapped cache AND TMDB detail cache
- *  - All independent SQL queries run in Promise.all (parallel)
+ *  - /generate : 2 requêtes pour l'éligibilité, puis le reste par 4 à la fois,
+ *    3 Wrapped en phase SQL au plus par worker (le pool est partagé)
  *  - TMDB enrichment uses Redis-backed batch lookup
  */
 
@@ -15,6 +16,11 @@ const { fetchTmdbDetails } = require('./utils/tmdbCache');
 const { fetchWrappedCommunity } = require('./utils/wrappedCommunity');
 const { buildRace, buildFormatWinners, buildEras } = require('./utils/wrappedStory');
 const { runBudgetedBatches } = require('./utils/wrappedEnrichment');
+const { takeWrappedTime } = require('./utils/wrappedTimeBudget');
+const { normalizeViewing, normalizePage, resolveTrackPeriod } = require('./utils/wrappedTrackInput');
+const { getWrappedPercentile } = require('./utils/wrappedPercentile');
+const { createGate } = require('./utils/concurrencyGate');
+const { creditRefereeWatch } = require('./utils/referralProgress');
 
 // Lazy import pour éviter les dépendances circulaires au démarrage
 let _syncModule = null;
@@ -27,10 +33,19 @@ function getSyncModule() {
 const TMDB_API_URL = 'https://api.themoviedb.org/3';
 
 // Redis key prefixes & TTLs
-const WRAPPED_CACHE_PREFIX = 'wrapped:gen:v3:';     // includes narrative and community data
-const PERCENTILE_CACHE_PREFIX = 'wrapped:pctile:';  // percentile ranking (global, heavy query)
-const WRAPPED_CACHE_TTL    = 10 * 60;               // 10 min (seconds)
-const PERCENTILE_CACHE_TTL = 30 * 60;               // 30 min (seconds) - global data, doesn't change fast
+const WRAPPED_CACHE_PREFIX = 'wrapped:gen:v4:';     // includes narrative and community data ; v4 : stats par jour, classement par seuils
+const WRAPPED_CACHE_TTL    = 10 * 60;               // 10 min (seconds), année en cours
+const WRAPPED_SHORT_CACHE_TTL = 60;                 // pas assez de données, ou récap incomplet
+const WRAPPED_CLOSED_YEAR_CACHE_TTL = 6 * 60 * 60;  // année terminée : ses données ne changent plus
+const NOT_ENOUGH_DATA_MESSAGE = 'Pas encore assez de données pour débloquer ce Wrapped.';
+
+// Connexions MySQL prises par /generate sur un worker (pool de 20 partagé avec
+// tout le reste de l'API) : au plus 3 Wrapped en phase SQL à la fois, chacun
+// avec 4 requêtes au plus, soit 12 connexions. Les autres attendent leur tour.
+const QUERIES_PER_GENERATION = 4;
+const sqlPhaseGate = createGate(3);
+// Calculs en cours sur ce worker, par clé de cache.
+const inFlightGenerations = new Map();
 
 // Same secret as server.js
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -67,26 +82,37 @@ async function redisSet(key, value, ttlSeconds) {
 // ─── Rate limiting par profil (Redis-backed) ────────────────────────────────
 const RATE_LIMIT_PREFIX = 'wrapped:rl:';
 
+// INCR et EXPIRE en une seule opération : séparés, un worker coupé entre les
+// deux laissait un compteur sans échéance, donc un 429 définitif pour ce
+// membre. Un compteur trouvé sans échéance en reçoit une au passage.
+const RATE_LIMIT_SCRIPT = `
+local current = redis.call('INCR', KEYS[1])
+if current == 1 or redis.call('TTL', KEYS[1]) < 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+`;
+
 /**
- * Crée un middleware de rate limiting par profileId (fallback userId).
+ * Crée un middleware de rate limiting par compte.
+ * La limite porte toujours sur le compte du jeton vérifié. Un identifiant de
+ * profil envoyé par le client (corps ou en-tête) n'est pas une clé fiable :
+ * il permettait de vider le quota d'un autre membre, ou de contourner le sien
+ * en changeant de valeur à chaque requête.
  * @param {string} endpoint - Nom de l'endpoint (pour la clé Redis)
  * @param {number} maxRequests - Nombre max de requêtes dans la fenêtre
  * @param {number} windowSeconds - Durée de la fenêtre en secondes
- * @param {function} extractId - Fonction (req) => identifiant pour le rate limit
  */
-function rateLimitPerProfile(endpoint, maxRequests, windowSeconds, extractId) {
+function rateLimitPerAccount(endpoint, maxRequests, windowSeconds) {
     return async (req, res, next) => {
         if (!redisReady()) return next(); // pas de Redis = pas de rate limit
 
-        const id = extractId(req);
+        const id = req.user?.sub ? `${req.user.userType || 'oauth'}:${req.user.sub}` : null;
         if (!id) return next(); // pas d'identifiant = skip
 
         const key = `${RATE_LIMIT_PREFIX}${endpoint}:${id}`;
         try {
-            const current = await redis.incr(key);
-            if (current === 1) {
-                await redis.expire(key, windowSeconds);
-            }
+            const current = Number(await redis.eval(RATE_LIMIT_SCRIPT, 1, key, String(windowSeconds)));
             // Headers informatifs
             res.set('X-RateLimit-Limit', String(maxRequests));
             res.set('X-RateLimit-Remaining', String(Math.max(0, maxRequests - current)));
@@ -106,17 +132,20 @@ function rateLimitPerProfile(endpoint, maxRequests, windowSeconds, extractId) {
     };
 }
 
-// /track : le frontend envoie ~2 req/30s en usage normal, avec les changements
-// de visibilité/contenu/épisode ça peut monter. 30 req/min est très confortable.
-const trackRateLimit = rateLimitPerProfile('track', 30, 60, (req) => {
-    return req.body?.profileId || req.user?.sub;
-});
+// /track : chaque onglet suivi envoie ~2 req/min (une page ou un lecteur), plus
+// les changements de visibilité/contenu/épisode. 120 req/min pour le compte
+// couvre ses 5 profils sur plusieurs appareils ; le temps crédité, lui, reste
+// plafonné au temps réel par utils/wrappedTimeBudget.js.
+const trackRateLimit = rateLimitPerAccount('track', 120, 60);
 
-// /generate : requête lourde (SQL + TMDB). 6 req/min suffit largement
-// (un refresh + quelques changements d'année).
-const generateRateLimit = rateLimitPerProfile('generate', 6, 60, (req) => {
-    return req.headers['x-profile-id'] || req.query.profileId || req.user?.sub;
-});
+// /generate : requête lourde (SQL + TMDB). 12 req/min pour le compte suffit
+// largement (ses profils, un refresh, quelques changements d'année).
+const generateRateLimit = rateLimitPerAccount('generate', 12, 60);
+
+// Une ligne de wrapped_viewing_data = un contenu sur une heure d'horloge d'un
+// jour : au plus une heure. Une journée : au plus 24 heures.
+const SECONDS_PER_BUCKET = 3600;
+const MINUTES_PER_DAY = 24 * 60;
 
 const WRAPPED_UNLOCK_REQUIREMENTS = Object.freeze({
     minutes: 120,
@@ -261,7 +290,6 @@ async function initTables() {
         hour_of_day TINYINT DEFAULT NULL,
         month INT NOT NULL,
         year INT NOT NULL,
-        INDEX idx_user_year (user_id, year),
         INDEX idx_content (content_type, content_id),
         INDEX idx_hour (user_id, year, hour_of_day)
       )
@@ -433,10 +461,11 @@ router.post('/track', verifyToken, trackRateLimit, async (req, res) => {
         if (profileId) {
             try {
                 const userType = req.user.userType || 'oauth';
-                const { readUserData } = getSyncModule();
-                const userData = await readUserData(userType, req.user.sub);
-                const profiles = userData?.profiles || [];
-                if (!profiles.some(p => p.id === profileId)) {
+                // Lecture seule des profils du compte (cache partagé, sans la
+                // copie complète des données du compte faite par readUserData).
+                const { readAccountProfiles } = getSyncModule();
+                const profiles = await readAccountProfiles(userType, req.user.sub);
+                if (!profiles.some(p => p && p.id === profileId)) {
                     console.warn(`[Wrapped] Profile ownership denied: ${profileId} not owned by ${req.user.sub}`);
                     return res.status(403).json({ success: false, error: 'Profile does not belong to this user' });
                 }
@@ -458,14 +487,16 @@ router.post('/track', verifyToken, trackRateLimit, async (req, res) => {
         const parsedMonth = parseInt(month);
         const parsedYear = parseInt(year);
         const parsedDuration = parseInt(duration);
-        const currentYear = new Date().getFullYear();
 
         if (isNaN(parsedMonth) || parsedMonth < 1 || parsedMonth > 12) {
             return res.status(400).json({ success: false, error: 'Invalid month (1-12)' });
         }
-        if (isNaN(parsedYear) || parsedYear < 2024 || parsedYear > currentYear) {
-            return res.status(400).json({ success: false, error: `Invalid year (2024-${currentYear})` });
+        if (isNaN(parsedYear)) {
+            return res.status(400).json({ success: false, error: 'Invalid year' });
         }
+        // Année et mois du client seulement s'ils collent à la date du serveur
+        // (à un fuseau près), sinon ceux du serveur : voir utils/wrappedTrackInput.js.
+        const period = resolveTrackPeriod(parsedYear, parsedMonth, new Date());
         if (isNaN(parsedDuration) || parsedDuration < 0 || parsedDuration > 60) {
             return res.status(400).json({ success: false, error: 'Invalid duration (0-60 seconds)' });
         }
@@ -473,80 +504,110 @@ router.post('/track', verifyToken, trackRateLimit, async (req, res) => {
             return res.status(400).json({ success: false, error: 'Invalid type. Must be "viewing" or "page"' });
         }
 
+        // Jamais plus que le temps réel écoulé (utils/wrappedTimeBudget.js) :
+        // la durée annoncée par le navigateur est rognée au besoin.
+        const takeCreditedDuration = () => takeWrappedTime({
+            redis: redisReady() ? redis : null,
+            type,
+            userId,
+            profileId: profileId || null,
+            requestedSeconds: parsedDuration,
+        });
+
         if (type === 'viewing') {
-            // Validate viewing-specific fields
-            if (!contentType || !contentId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Missing required fields for viewing: contentType, contentId'
-                });
+            // Validate viewing-specific fields (heure : celle du client si
+            // elle est entre 0 et 23, sinon celle du serveur)
+            const viewing = normalizeViewing(
+                { contentType, contentId, contentTitle, seasonNumber, episodeNumber, hourOfDay },
+                new Date().getHours()
+            );
+            if (viewing.error) {
+                return res.status(400).json({ success: false, error: viewing.error });
             }
 
-            // Resolve hour: prefer client-sent hourOfDay, fallback to server hour
-            const resolvedHour = hourOfDay !== undefined && hourOfDay !== null ? parseInt(hourOfDay) : new Date().getHours();
+            const creditedDuration = await takeCreditedDuration();
+            if (creditedDuration <= 0) return res.json({ success: true });
 
-            // Try to update existing record for the same content in the same month AND same hour
-            // Splitting by hour ensures accurate listening clock data
-            const [existingRows] = await pool.execute(
-                `SELECT id, watch_duration FROM wrapped_viewing_data 
-         WHERE user_id = ? AND profile_id <=> ? AND content_type = ? AND content_id = ? 
+            // Ajoute la durée à la ligne du même contenu, même jour et même
+            // heure (horloge d'écoute) en une seule requête : plus de SELECT
+            // puis UPDATE à chaque envoi, et deux onglets ne perdent plus de
+            // temps en lisant la même valeur. Pas de clé unique sur ces
+            // colonnes : LIMIT 1 touche une seule ligne comme l'ancien SELECT,
+            // et l'INSERT n'a lieu que si aucune ligne ne correspond
+            // (affectedRows compte les lignes trouvées, option FOUND_ROWS de
+            // mysql2, même pour une durée nulle).
+            // « created_at >= CURDATE() » : une ligne par jour. Sans cela, la
+            // ligne du mois gardait la date de son premier envoi, et tout ce
+            // qui se calcule par jour (jours actifs, série, jour record, jour
+            // de la semaine, titres revus) retombait sur ce premier jour :
+            // une chaîne regardée chaque soir donnait un seul jour actif et
+            // un « jour record » de plus de 24 heures. Même fuseau que les
+            // DATE(created_at) de /generate (celui de la session MySQL).
+            const [updated] = await pool.execute(
+                `UPDATE wrapped_viewing_data SET watch_duration = watch_duration + ?
+         WHERE user_id = ? AND profile_id <=> ? AND content_type = ? AND content_id = ?
          AND month = ? AND year = ? AND hour_of_day <=> ?
          AND season_number <=> ? AND episode_number <=> ?
+         AND created_at >= CURDATE()
          LIMIT 1`,
-                [userId, profileId || null, contentType, contentId, month, year,
-                    resolvedHour, seasonNumber || null, episodeNumber || null]
+                [creditedDuration, userId, profileId || null, viewing.contentType, viewing.contentId,
+                    period.month, period.year,
+                    viewing.hourOfDay, viewing.seasonNumber, viewing.episodeNumber]
             );
 
-            if (existingRows.length > 0) {
-                // Update existing record
-                const newDuration = existingRows[0].watch_duration + Math.floor(duration);
-                await pool.execute(
-                    `UPDATE wrapped_viewing_data SET watch_duration = ? WHERE id = ?`,
-                    [newDuration, existingRows[0].id]
-                );
-            } else {
+            if (!updated || !(Number(updated.affectedRows) > 0)) {
                 // Insert new record
                 await pool.execute(
-                    `INSERT INTO wrapped_viewing_data 
+                    `INSERT INTO wrapped_viewing_data
            (user_id, profile_id, content_type, content_id, content_title, season_number, episode_number, watch_duration, hour_of_day, month, year)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [userId, profileId || null, contentType, contentId, contentTitle || null,
-                        seasonNumber || null, episodeNumber || null, Math.floor(duration), 
-                        resolvedHour, month, year]
+                    [userId, profileId || null, viewing.contentType, viewing.contentId, viewing.contentTitle,
+                        viewing.seasonNumber, viewing.episodeNumber, creditedDuration,
+                        viewing.hourOfDay, period.month, period.year]
                 );
             }
+
+            // Parrainage : ce même temps compte pour un filleul en cours. Sans
+            // attendre (la réponse ne dépend pas du parrainage), erreurs tues.
+            // Le plafond ci-dessus est par profil ; le parrainage, lui, est par
+            // compte : un second plafond empêche plusieurs profils ouverts en
+            // même temps de compter chacun le temps réel.
+            creditRefereeWatch(pool, { userType: req.user.userType || 'oauth', userId }, creditedDuration, new Date(), {
+                capSeconds: (seconds) => takeWrappedTime({
+                    redis: redisReady() ? redis : null,
+                    type: 'referral',
+                    userId,
+                    requestedSeconds: seconds,
+                }),
+            })
+                .catch((error) => console.warn('[Wrapped] Minutes du parrainage non comptées :', error?.message || error));
         } else if (type === 'page') {
             // Validate page-specific fields
-            if (!pageName) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Missing required field for page: pageName'
-                });
+            const page = normalizePage({ pageName, meta });
+            if (page.error) {
+                return res.status(400).json({ success: false, error: page.error });
             }
 
-            // Try to update existing record for the same page in the same month
-            const [existingRows] = await pool.execute(
-                `SELECT id, duration FROM wrapped_pages_data 
+            const creditedDuration = await takeCreditedDuration();
+            if (creditedDuration <= 0) return res.json({ success: true });
+
+            // Même ajout en une requête pour la page du mois (duration peut
+            // être NULL sur une vieille ligne : comptée comme 0, comme avant).
+            const [updated] = await pool.execute(
+                `UPDATE wrapped_pages_data SET duration = COALESCE(duration, 0) + ?
          WHERE user_id = ? AND profile_id <=> ? AND page_name = ? AND month = ? AND year = ?
          LIMIT 1`,
-                [userId, profileId || null, pageName, month, year]
+                [creditedDuration, userId, profileId || null, page.pageName, period.month, period.year]
             );
 
-            if (existingRows.length > 0) {
-                // Update existing record
-                const newDuration = existingRows[0].duration + Math.floor(duration);
-                await pool.execute(
-                    `UPDATE wrapped_pages_data SET duration = ? WHERE id = ?`,
-                    [newDuration, existingRows[0].id]
-                );
-            } else {
+            if (!updated || !(Number(updated.affectedRows) > 0)) {
                 // Insert new record
                 await pool.execute(
-                    `INSERT INTO wrapped_pages_data 
+                    `INSERT INTO wrapped_pages_data
            (user_id, profile_id, page_name, duration, meta_data, month, year)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                    [userId, profileId || null, pageName, Math.floor(duration),
-                        meta ? JSON.stringify(meta) : null, month, year]
+                    [userId, profileId || null, page.pageName, creditedDuration,
+                        page.meta, period.month, period.year]
                 );
             }
         } else {
@@ -564,9 +625,7 @@ router.post('/track', verifyToken, trackRateLimit, async (req, res) => {
 });
 
 // /progress : lu une fois par ouverture de l'onglet « En cours » du profil.
-const progressRateLimit = rateLimitPerProfile('progress', 20, 60, (req) => {
-    return req.headers['x-profile-id'] || req.user?.sub;
-});
+const progressRateLimit = rateLimitPerAccount('progress', 30, 60);
 
 const PROGRESS_MAX_IDS = 50;
 
@@ -623,14 +682,16 @@ router.get('/progress', verifyToken, progressRateLimit, async (req, res) => {
  * Generate Wrapped summary using templates (like Spotify - no AI)
  * Header 'x-profile-id': Optional profile ID to filter stats
  *
- * PERFORMANCE: All independent SQL queries run in Promise.all,
- *   TMDB results are cached in Redis (24 h), generated wrapped in Redis (10 min).
+ * PERFORMANCE : requêtes SQL en nombre limité (voir sqlPhaseGate), résultats
+ *   TMDB en cache Redis (24 h), Wrapped généré en cache Redis (10 min pour
+ *   l'année en cours, 6 h pour une année terminée, 1 min s'il est incomplet).
  */
 router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) => {
     const _t = { start: Date.now() };
     const year = Number(req.params.year);
     const userId = req.user.sub;
-    const profileId = req.headers['x-profile-id'] || req.query.profileId;
+    const requestedProfile = req.headers['x-profile-id'] || req.query.profileId;
+    const profileId = requestedProfile ? String(requestedProfile) : null;
 
     console.log(`[Wrapped][PERF] ── Generate ${year} for user=${userId} profile=${profileId || 'all'} ──`);
 
@@ -641,6 +702,22 @@ router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) =
 
     if (!pool) {
         return res.status(500).json({ success: false, error: 'Database not initialized' });
+    }
+
+    // Un profil qui n'est pas celui du compte n'a aucune ligne (/track le
+    // refuse) : réponse immédiate, sans requête SQL ni entrée de cache par
+    // valeur inventée. Lecture des profils impossible : on continue, les
+    // requêtes restent bornées au compte du jeton.
+    if (profileId) {
+        try {
+            const { readAccountProfiles } = getSyncModule();
+            const profiles = await readAccountProfiles(req.user.userType || 'oauth', userId);
+            if (!profiles.some(p => p && p.id === profileId)) {
+                return res.json({ success: true, wrapped: null, progress: buildWrappedProgress({}), message: NOT_ENOUGH_DATA_MESSAGE });
+            }
+        } catch (error) {
+            console.warn('[Wrapped] Profils du compte illisibles pour /generate :', error?.message || error);
+        }
     }
 
     // ── 0. Redis cache check (skip if ?fresh=1) ────────────────────────────────
@@ -658,7 +735,7 @@ router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) =
         console.log(`[Wrapped][PERF] Cache skipped (?fresh=1)`);
     }
 
-    try {
+    const generate = async () => {
         // Base query conditions
         let whereClause = 'WHERE user_id = ? AND year = ?';
         let queryParams = [userId, year];
@@ -668,12 +745,17 @@ router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) =
         }
 
         // ── Helper: timed query ────────────────────────────────────────────────
+        // Au plus QUERIES_PER_GENERATION requêtes de ce Wrapped à la fois : les
+        // lancer toutes ensemble prenait 15 connexions d'un pool de 20.
         const _sqlTimings = {};
-        async function timedQuery(label, queryFn) {
-            const t0 = Date.now();
-            const result = await queryFn();
-            _sqlTimings[label] = Date.now() - t0;
-            return result;
+        const queryGate = createGate(QUERIES_PER_GENERATION);
+        function timedQuery(label, queryFn) {
+            return queryGate(async () => {
+                const t0 = Date.now();
+                const result = await queryFn();
+                _sqlTimings[label] = Date.now() - t0;
+                return result;
+            });
         }
         let storyAvailable = true;
         async function optionalStoryQuery(label, queryFn) {
@@ -686,50 +768,46 @@ router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) =
             }
         }
 
-        // ── Helper: fetch percentile (Redis cache or SQL fallback) ──────────────
-        async function fetchPercentile() {
-            const pctCacheKey = `${PERCENTILE_CACHE_PREFIX}${year}`;
-            const cachedPct = await redisGet(pctCacheKey);
-            if (cachedPct) {
-                try {
-                    const rankings = JSON.parse(cachedPct);
-                    const totalUsers = rankings.length;
-                    const userRank = rankings.findIndex(u => u.user_id === userId) + 1;
-                    const pct = totalUsers > 1 ? Math.round(((totalUsers - userRank) / totalUsers) * 100) : 99;
-                    _sqlTimings['percentile'] = 0;
-                    console.log(`[Wrapped][PERF] 📊 Percentile: Redis HIT — rank ${userRank}/${totalUsers} = top ${100 - pct}%`);
-                    return pct;
-                } catch { /* fallback to SQL */ }
-            }
-            // Cache froid : ne JAMAIS bloquer la réponse. On renvoie null et on
-            // réchauffe le cache en arrière-plan pour les prochains appels.
-            _sqlTimings['percentile'] = 0;
-            setImmediate(async () => {
-                try {
-                    // Single-flight cluster-wide : un seul worker lance le scan
-                    if (redisReady()) {
-                        const lock = await redis.set(`${PERCENTILE_CACHE_PREFIX}${year}:lock`, '1', 'EX', 300, 'NX');
-                        if (!lock) return;
-                    }
-                    const t0 = Date.now();
-                    const [allUsersStats] = await pool.execute(`
-                        SELECT user_id, ROUND(SUM(watch_duration) / 60) as total
-                        FROM wrapped_viewing_data WHERE year = ?
-                        GROUP BY user_id ORDER BY total DESC
-                    `, [year]);
-                    redisSet(pctCacheKey, JSON.stringify(allUsersStats), PERCENTILE_CACHE_TTL);
-                    console.log(`[Wrapped][PERF] 📊 Percentile warmup (background): ${Date.now() - t0}ms (${allUsersStats.length} users)`);
-                } catch (e) {
-                    console.warn('[Wrapped] Percentile warmup failed:', e.message);
-                }
-            });
-            return null;
+        // ── 1a. Éligibilité d'abord (2 requêtes) ──────────────
+        // Deux requêtes suffisent pour savoir si le Wrapped est débloqué. Un
+        // membre qui n'a pas encore assez regardé ne déclenche pas les autres.
+        _t.sqlStart = Date.now();
+        const [[viewingStats], [dailyActivity]] = await sqlPhaseGate(() => Promise.all([
+            // 1. Viewing Stats
+            timedQuery('viewingStats', () => pool.execute(`
+                SELECT
+                    ROUND(SUM(watch_duration) / 60) as total_duration,
+                    COUNT(DISTINCT content_type, content_id) as unique_titles,
+                    COUNT(DISTINCT DATE(created_at), content_type, content_id,
+                        COALESCE(season_number, 0), COALESCE(episode_number, 0)) as total_sessions
+                FROM wrapped_viewing_data ${whereClause}
+            `, queryParams)),
+
+            // 7. Watching streaks (consecutive days)
+            timedQuery('dailyActivity', () => pool.execute(`
+                SELECT DISTINCT DATE(created_at) as watch_date
+                FROM wrapped_viewing_data ${whereClause}
+                ORDER BY watch_date
+            `, queryParams))
+        ]));
+
+        const totalMinutes = parseInt(viewingStats[0].total_duration) || 0;
+        const uniqueTitles = parseInt(viewingStats[0].unique_titles) || 0;
+        const totalSessions = parseInt(viewingStats[0].total_sessions) || 0;
+        const totalActiveDays = dailyActivity.length;
+        const progress = buildWrappedProgress({ totalMinutes, uniqueTitles, totalSessions, totalActiveDays });
+
+        if (!progress.isEligible) {
+            console.log(`[Wrapped][PERF] Not enough data yet — total ${Date.now() - _t.start}ms`);
+            const notReadyPayload = { success: true, wrapped: null, progress, message: NOT_ENOUGH_DATA_MESSAGE };
+            // Gardé peu de temps : la progression doit suivre le visionnage,
+            // sans relancer les requêtes à chaque ouverture de la page.
+            redisSet(cacheKey, JSON.stringify(notReadyPayload), WRAPPED_SHORT_CACHE_TTL);
+            return notReadyPayload;
         }
 
-        // ── 1. Fire ALL queries in parallel (user-scoped + percentile) ──────────
-        _t.sqlStart = Date.now();
+        // ── 1b. Le reste des requêtes du compte ──────────
         const [
-            [viewingStats],
             [typeStats],
             [topContentAll],
             [storyContentAll],
@@ -737,24 +815,13 @@ router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) =
             [monthlyStats],
             [topPages],
             [hourlyStats],
-            [dailyActivity],
             [firstWatch],
             [lastWatch],
             [recordDayRows],
             [weekdayRows],
             [rewatchRows],
-            percentile,
             communityStats
-        ] = await Promise.all([
-            // 1. Viewing Stats
-            timedQuery('viewingStats', () => pool.execute(`
-                SELECT 
-                    ROUND(SUM(watch_duration) / 60) as total_duration,
-                    COUNT(DISTINCT content_id) as unique_titles,
-                    COUNT(*) as total_sessions
-                FROM wrapped_viewing_data ${whereClause}
-            `, queryParams)),
-
+        ] = await sqlPhaseGate(() => Promise.all([
             // 2. Distribution by Type
             timedQuery('typeStats', () => pool.execute(`
                 SELECT content_type, ROUND(SUM(watch_duration) / 60) as duration, COUNT(DISTINCT content_id) as count
@@ -816,13 +883,6 @@ router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) =
                 GROUP BY hour_of_day ORDER BY hour_of_day
             `, queryParams)),
 
-            // 7. Watching streaks (consecutive days)
-            timedQuery('dailyActivity', () => pool.execute(`
-                SELECT DISTINCT DATE(created_at) as watch_date
-                FROM wrapped_viewing_data ${whereClause}
-                ORDER BY watch_date
-            `, queryParams)),
-
             // 8a. First watch of the year
             timedQuery('firstWatch', () => pool.execute(`
                 SELECT content_title, content_type, content_id, created_at
@@ -839,21 +899,26 @@ router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) =
                 ORDER BY created_at DESC LIMIT 1
             `, queryParams)),
 
-            // 9a. Jour record (journée avec le plus de visionnage)
+            // 9a. Jour record (journée avec le plus de visionnage).
+            // Une ligne couvre une heure d'horloge d'un jour : elle ne peut pas
+            // valoir plus d'une heure. Les lignes d'avant le découpage par jour
+            // (une par mois) cumulent tout le mois sur leur premier jour ; le
+            // plafond par ligne évite d'afficher des journées de 30 heures.
             timedQuery('recordDay', () => pool.execute(`
-                SELECT DATE(created_at) as day, ROUND(SUM(watch_duration) / 60) as minutes
+                SELECT DATE(created_at) as day, ROUND(SUM(LEAST(watch_duration, ${SECONDS_PER_BUCKET})) / 60) as minutes
                 FROM wrapped_viewing_data ${whereClause}
                 GROUP BY DATE(created_at) ORDER BY minutes DESC LIMIT 1
             `, queryParams)),
 
             // 9b. Répartition par jour de semaine (DAYOFWEEK MySQL : 1=dimanche … 7=samedi)
             timedQuery('weekdayStats', () => pool.execute(`
-                SELECT DAYOFWEEK(created_at) as dow, ROUND(SUM(watch_duration) / 60) as minutes
+                SELECT DAYOFWEEK(created_at) as dow, ROUND(SUM(LEAST(watch_duration, ${SECONDS_PER_BUCKET})) / 60) as minutes
                 FROM wrapped_viewing_data ${whereClause}
                 GROUP BY dow
             `, queryParams)),
 
-            // 9c. Rewatch champion : film revu sur ≥3 jours distincts, ou même épisode revu sur ≥2 jours
+            // 9c. Rewatch champion : film ou même épisode revu sur ≥3 jours distincts
+            // (2 jours = le plus souvent une lecture reprise le lendemain)
             timedQuery('rewatch', () => pool.execute(`
                 SELECT content_id, content_type, content_title, distinct_days FROM (
                     SELECT content_id, content_type,
@@ -869,20 +934,27 @@ router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) =
                     FROM wrapped_viewing_data ${whereClause}
                     AND content_type IN ('tv', 'anime') AND season_number IS NOT NULL AND episode_number IS NOT NULL
                     GROUP BY content_id, content_type, season_number, episode_number
-                    HAVING distinct_days >= 2
+                    HAVING distinct_days >= 3
                 ) rw ORDER BY distinct_days DESC LIMIT 1
             `, [...queryParams, ...queryParams])),
 
-            // 10. Percentile (Redis-cached 30min, SQL fallback)
-            fetchPercentile(),
-
             // Optionnel : une indisponibilité des commentaires ne bloque pas le récap.
-            fetchWrappedCommunity(pool, { userId, userType: req.user.userType, profileId, year })
+            queryGate(() => fetchWrappedCommunity(pool, { userId, userType: req.user.userType, profileId, year }))
                 .catch(error => {
                     console.warn('[Wrapped] Community statistics unavailable:', error.code || error.message);
                     return null;
                 })
-        ]);
+        ]));
+
+        // 10. Classement : lu dans le résumé de l'année (quelques Ko en cache),
+        // à partir du temps de ce Wrapped. Jamais de requête ici.
+        const { percentile, pending: percentilePending } = await getWrappedPercentile({
+            pool,
+            redis,
+            year,
+            minutes: totalMinutes,
+            minMinutes: WRAPPED_UNLOCK_REQUIREMENTS.minutes,
+        });
 
         // Derive top5 and top10-for-genres from the single top10 result
         const topContent = topContentAll.slice(0, 5);
@@ -904,23 +976,7 @@ router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) =
 
         _t.sqlEnd = Date.now();
         const timingsStr = Object.entries(_sqlTimings).map(([k, v]) => `${k}=${v}ms`).join(' | ');
-        console.log(`[Wrapped][PERF] 🗄️  SQL+Percentile (10 parallel): ${_t.sqlEnd - _t.sqlStart}ms — ${timingsStr}`);
-
-        const totalMinutes = parseInt(viewingStats[0].total_duration) || 0;
-        const uniqueTitles = parseInt(viewingStats[0].unique_titles) || 0;
-        const totalSessions = parseInt(viewingStats[0].total_sessions) || 0;
-        const totalActiveDays = dailyActivity.length;
-        const progress = buildWrappedProgress({ totalMinutes, uniqueTitles, totalSessions, totalActiveDays });
-
-        if (!progress.isEligible) {
-            console.log(`[Wrapped][PERF] Not enough data yet — total ${Date.now() - _t.start}ms`);
-            return res.json({
-                success: true,
-                wrapped: null,
-                progress,
-                message: "Pas encore assez de données pour débloquer ce Wrapped."
-            });
-        }
+        console.log(`[Wrapped][PERF] 🗄️  SQL (${QUERIES_PER_GENERATION} à la fois): ${_t.sqlEnd - _t.sqlStart}ms — ${timingsStr}`);
 
         // ── 2. TMDB enrichment (parallel, Redis-cached) ────────────────────────
         _t.tmdbStart = Date.now();
@@ -1147,7 +1203,7 @@ router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) =
         // Jour record / weekday / rewatch
         const recordDayRow = recordDayRows[0] || null;
         const recordDay = recordDayRow
-            ? { date: recordDayRow.day, minutes: parseInt(recordDayRow.minutes) }
+            ? { date: recordDayRow.day, minutes: Math.min(MINUTES_PER_DAY, parseInt(recordDayRow.minutes) || 0) }
             : null;
 
         const weekdayMap = new Array(7).fill(0); // index 0 = dimanche … 6 = samedi
@@ -1295,13 +1351,36 @@ router.get('/generate/:year', verifyToken, generateRateLimit, async (req, res) =
 
         // ── 6. Store in Redis cache (fire-and-forget) ───────────────────────────
         const responsePayload = { success: true, wrapped, progress };
-        redisSet(cacheKey, JSON.stringify(responsePayload), WRAPPED_CACHE_TTL);
+        // Durée de garde :
+        // - récap incomplet (un titre du top sans réponse de TMDB, ou classement
+        //   pas encore calculé) : très courte, pour ne pas figer « tv #1399 » ;
+        // - année terminée : ses données ne changent plus, garde longue ;
+        // - année en cours : 10 minutes.
+        const topTitleMissing = topContent.some(c => c.content_type !== 'live-tv' && !tmdbCache.has(`${c.content_type}:${c.content_id}`));
+        const cacheTtl = topTitleMissing || percentilePending
+            ? WRAPPED_SHORT_CACHE_TTL
+            : (year < new Date().getFullYear() ? WRAPPED_CLOSED_YEAR_CACHE_TTL : WRAPPED_CACHE_TTL);
+        redisSet(cacheKey, JSON.stringify(responsePayload), cacheTtl);
 
         const totalTime = Date.now() - _t.start;
-        console.log(`[Wrapped][PERF] ── DONE in ${totalTime}ms ── Breakdown: SQL+Pctile(parallel)=${_t.sqlEnd - _t.sqlStart}ms | TMDB=${_t.tmdbEnd - _t.tmdbStart}ms | Compute=${_t.computeEnd - _t.computeStart}ms | Slides=${_t.slidesEnd - _t.computeEnd}ms | Build+Send=${Date.now() - _t.slidesEnd}ms`);
+        console.log(`[Wrapped][PERF] ── DONE in ${totalTime}ms ── Breakdown: SQL=${_t.sqlEnd - _t.sqlStart}ms | TMDB=${_t.tmdbEnd - _t.tmdbStart}ms | Compute=${_t.computeEnd - _t.computeStart}ms | Slides=${_t.slidesEnd - _t.computeEnd}ms | Build=${Date.now() - _t.slidesEnd}ms`);
 
-        res.json(responsePayload);
+        return responsePayload;
+    };
 
+    // Deux ouvertures du même Wrapped au même moment sur ce worker partagent
+    // un seul calcul (?fresh=1 garde le sien).
+    let job = req.query.fresh ? null : inFlightGenerations.get(cacheKey);
+    if (!job) {
+        job = generate();
+        if (!req.query.fresh) {
+            inFlightGenerations.set(cacheKey, job);
+            job.finally(() => inFlightGenerations.delete(cacheKey)).catch(() => {});
+        }
+    }
+
+    try {
+        res.json(await job);
     } catch (error) {
         console.error('[Wrapped] Error generating wrapped:', error);
         res.status(500).json({ success: false, error: 'Generation failed' });

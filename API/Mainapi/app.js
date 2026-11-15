@@ -45,6 +45,8 @@ const {
 } = require("./utils/proxyManager");
 
 const axios = require("axios");
+const http = require("http");
+const https = require("https");
 const { wrapper } = require("axios-cookiejar-support");
 const tough = require("tough-cookie");
 const axiosHelpers = require("./utils/axiosHelpers");
@@ -132,8 +134,22 @@ const axiosAnimeSama = axios.create({
 
 const { FSTREAM_BASE_URL } = require('./config/fstream');
 const FSTREAM_BASE_URL_VAL = `${FSTREAM_BASE_URL}/`;
+// Accès direct (sans proxy) : agents keep-alive propres à French-Stream, une
+// poignée de main TLS par connexion et non par appel. LIFO garde chaudes les
+// connexions les plus récentes ; une socket libre se ferme après 15 s.
+// Les appels par proxy remplacent ces agents par ceux de fstreamAgentPool.
+const fstreamAgentOptions = {
+  keepAlive: true,
+  keepAliveMsecs: 1000,
+  maxSockets: 32,
+  maxFreeSockets: 8,
+  timeout: 15000,
+  scheduling: "lifo",
+};
 const axiosFStream = axios.create({
   baseURL: FSTREAM_BASE_URL_VAL,
+  httpAgent: new http.Agent(fstreamAgentOptions),
+  httpsAgent: new https.Agent(fstreamAgentOptions),
   timeout: 6000,
   headers: {
     "User-Agent":
@@ -353,6 +369,18 @@ frenchstream.configure({
 
 // --- Configure animeSama ---
 const animeSamaRouter = require("./routes/animeSama");
+const animeSamaShared = require("./utils/animeSamaShared");
+const animeSamaIndexModule = require("./utils/animeSamaIndex");
+// Index du catalogue (ID TMDB de chaque fiche, page Animes, planning). La tâche
+// de fond est lancée plus bas, une fois les tables créées, sur un seul worker.
+const animeSamaIndex = animeSamaIndexModule.createAnimeSamaIndex({
+  store: animeSamaIndexModule.createAnimeSamaStore({ getPool: () => require("./mysqlPool").getPool() }),
+  request: axiosHelpers.axiosAnimeSamaRequest,
+  siteUrl: ANIME_SAMA_URL,
+  acquireLock: animeSamaShared.createRefreshLock({ redis, ttlSeconds: 180 }),
+  // Fiche sans ID TMDB : celui que donne son ID AniList ou MyAnimeList.
+  resolveTmdb: require("./utils/animeSamaTmdbResolver").createArmTmdbResolver(),
+});
 animeSamaRouter.configure({
   ANIME_SAMA_URL,
   axiosAnimeSama,
@@ -362,6 +390,15 @@ animeSamaRouter.configure({
   cleanupOldCacheFiles: axiosHelpers.cleanupOldCacheFiles,
   migrateOldCacheFiles: axiosHelpers.migrateOldCacheFiles,
   limitConcurrency10,
+  // Table des lecteurs « hors service », relue sur une page de saison au plus 1 fois/h.
+  deadPlayerList: require("./utils/animeSamaDeadPlayers").createDeadPlayerList({
+    request: axiosHelpers.axiosAnimeSamaRequest,
+  }),
+  // Un seul worker actualise une œuvre à la fois, et tous partagent le débit
+  // des demandes d'adresses à /api/lien.php.
+  acquireRefreshLock: animeSamaShared.createRefreshLock({ redis, ttlSeconds: 120 }),
+  linkBudget: animeSamaShared.createLinkBudget({ redis, perSecond: 10 }),
+  animeIndex: animeSamaIndex,
 });
 
 // --- Configure tmdb ---
@@ -493,6 +530,12 @@ app.use('/api', require('./routes/debrid'));
 app.use('/api', require('./routes/admin'));
 app.use('/api', vipDonationsRouter);
 app.use('/api', vipPayblisRouter);
+// Pubs pilotées depuis l'admin : /api/go/:placement, /api/go-settings, /api/admin/monetization*.
+app.use('/api', require('./routes/monetization').router);
+// Parrainage : /api/referral/*, /api/admin/referral*.
+app.use('/api', require('./routes/referral').router);
+// Promos du grand carrousel : /api/hero-promos*, /api/admin/hero-promos*.
+app.use('/api', require('./routes/heroPromos').router);
 app.use('/api/darkiworld', darkiworldRouter);
 app.use('/api/drama', voirdramaRouter);
 app.use('/api/ftv', francetvRouter);
@@ -537,6 +580,11 @@ const {
 const { ensureAccountLinksStorage } = require('./utils/accountLinks');
 const { ensureCloneLinksStorage } = require('./utils/cloneLinks');
 const { ensureOAuthStorage } = require('./utils/oauthStorage');
+const { ensureMonetizationSettingsTable } = require('./utils/monetizationSettings');
+const {
+  ensureMonetizationDailyStatsTable,
+  importLegacyRedisStats
+} = require('./utils/monetizationStats');
 const { ensureTableGroup } = require('./db/runtimeEnsure');
 
 const appReady = (async () => {
@@ -571,6 +619,27 @@ const appReady = (async () => {
 
     await ensureVipDonationsTables(pool);
     console.log('VIP donations tables initialized successfully');
+
+      // Sans cette table, les pubs prennent les réglages par défaut (aucune
+      // pub) : une erreur ici ne doit pas empêcher l'API de démarrer.
+      try {
+        await ensureMonetizationSettingsTable(pool);
+        console.log('Monetization settings table initialized successfully');
+      } catch (error) {
+        console.error('Monetization settings table init error:', error?.message || error);
+      }
+
+      // Stats des pubs, gardées sans limite dans MySQL. La reprise des
+      // anciennes stats Redis ne tourne qu'une fois pour tout le cluster et
+      // ne lance jamais d'exception. Sans la table, les stats restent en
+      // attente : l'API démarre quand même.
+      try {
+        await ensureMonetizationDailyStatsTable(pool);
+        console.log('Monetization daily stats table initialized successfully');
+        await importLegacyRedisStats({ redis, pool });
+      } catch (error) {
+        console.error('Monetization daily stats table init error:', error?.message || error);
+      }
 
     await ensureOAuthStorage(pool);
     console.log('OAuth tables initialized successfully');
@@ -689,6 +758,43 @@ const appReady = (async () => {
       // Routes de l'historique, montées une fois les tables créées.
       app.use('/api', require('./routes/history'));
       console.log('History routes initialized successfully');
+
+      // Parrainage (idempotent). Sans ces tables, le parrainage reste coupé
+      // (réglages par défaut) : l'API démarre quand même.
+      try {
+        await ensureTableGroup(pool, 'referral');
+        // Origine d'une clé VIP (`referral` = créée par le parrainage), vue
+        // dans l'admin. Colonne ajoutée en fin de table, sans réécriture.
+        await ensureColumn('access_keys', 'source', 'source VARCHAR(32) DEFAULT NULL');
+        console.log('Referral tables initialized successfully');
+      } catch (error) {
+        console.error('Referral tables init error:', error?.message || error);
+      }
+
+      // Promos du grand carrousel (idempotent). Sans ces tables, la liste
+      // publique reste vide : l'API démarre quand même.
+      try {
+        await ensureTableGroup(pool, 'heroPromo');
+        console.log('Hero promo tables initialized successfully');
+      } catch (error) {
+        console.error('Hero promo tables init error:', error?.message || error);
+      }
+
+      // Index du catalogue d'anime-sama (idempotent). Sans ces tables, la
+      // recherche par ID TMDB répond vide et le site retombe sur la recherche
+      // par nom : l'API démarre quand même.
+      try {
+        await ensureTableGroup(pool, 'animeSama');
+        console.log('Anime-Sama index tables initialized successfully');
+      } catch (error) {
+        console.error('Anime-Sama index tables init error:', error?.message || error);
+      }
+    });
+
+    // Lecture du catalogue et du planning d'anime-sama : un seul worker du
+    // cluster (emplacement 0), ou le processus lancé hors cluster.
+    animeSamaIndex.start({
+      isOwner: process.env.MOVIX_WORKER_SLOT === undefined || process.env.MOVIX_WORKER_SLOT === '0',
     });
   } catch (error) {
     console.error("MySQL connection error:", error.message);

@@ -66,6 +66,12 @@ import { isDnsLikeError, notifyDnsBlocked } from '../utils/dnsErrorDetection';
 import { isPlayerControlInteractionTarget } from '../utils/playerControlInteraction';
 import { focusPlayerControl, getPlayerNavigationKey } from '../utils/playerKeyboardNavigation';
 import { isLowLatencyEnabled } from '../utils/lowLatencyPref';
+import { SeekThumbnailer } from '../services/seekThumbnails/seekThumbnailer';
+import {
+  findFragmentAt,
+  hlsThumbnailTarget,
+  type ThumbnailTarget,
+} from '../services/seekThumbnails/hlsTarget';
 import {
   createHlsAutoFallbackGuard,
   type HlsAutoFallbackGuard,
@@ -124,6 +130,7 @@ import {
 } from '../utils/sourcePriorityPrefs';
 import { detectHoster } from '../utils/hosterRegistry';
 import { sortHostersByPriority } from '../utils/sourceAutoSelect';
+import { isEmbedOriginUrl } from '../utils/embedOrigin';
 import type {
   HosterId, TopLevelSourceId, LanguageId, PriorityCategory,
 } from '../types/sourcePriority';
@@ -192,6 +199,7 @@ import {
 } from '../utils/subtitleDelivery';
 import { useExternalSubtitles } from '../hooks/useExternalSubtitles.ts';
 import type { SubtitleTrack } from '../services/subtitles/index.ts';
+import { translateSubtitleTexts } from '../services/subtitles/translate.ts';
 import { getEmbeddedSubtitleContent, getEmbeddedSubtitleTracks } from '../utils/embeddedSubtitles.ts';
 import { isHiddenOnTv } from '@/routing/registry';
 import { releaseTvSpatialNav, suppressTvSpatialNav } from '@/utils/tvSpatialNav';
@@ -696,6 +704,21 @@ function resolveCastContentType(
     ? 'video/mp4'
     : 'application/vnd.apple.mpegurl';
 }
+
+/** Dessine une miniature de la barre de progression dans son canvas. */
+const paintSeekThumbnail = (canvas: HTMLCanvasElement, bitmap: ImageBitmap) => {
+  // Largeur nulle : l'image a été libérée du cache entre-temps.
+  if (!bitmap.width) return;
+  try {
+    if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+    }
+    canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
+  } catch {
+    /* image libérée pendant le dessin */
+  }
+};
 
 // Utility function to create HLS config based on domain
 const createHlsConfig = (src: string) => {
@@ -1889,6 +1912,12 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   const previewHlsRef = useRef<HlsType | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [previewStyle, setPreviewStyle] = useState({});
+  // Miniatures WebCodecs de la barre de progression (services/seekThumbnails).
+  const seekThumbnailerRef = useRef<SeekThumbnailer | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const shownThumbnailRef = useRef<ImageBitmap | null>(null);
+  const thumbnailTokenRef = useRef(0);
+  const [thumbnailShown, setThumbnailShown] = useState(false);
 
   const [isDragging, setIsDragging] = useState(false);
   const [activeSubtitleCues, setActiveSubtitleCues] = useState<SubtitleCueSnapshot[]>([]);
@@ -2249,6 +2278,9 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     }
     previewHlsRef.current?.destroy();
     previewHlsRef.current = null;
+    thumbnailTokenRef.current++;
+    shownThumbnailRef.current = null;
+    setThumbnailShown(false);
     setHoverState({ time: null, x: 0, showPreview: false, previewUrl: null });
     setLoadingPreview(false);
     setCurrentTime(0);
@@ -3134,6 +3166,43 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       });
     }
 
+    // Lecteurs Movix (base) : embedorigin passe en tête de la liste et
+    // s'affiche au-dessus de Frembed ; les autres suivent Frembed.
+    const isEmbedOrigin = isEmbedOriginUrl;
+    const visibleCustomSources = dedupeSeekStreamingEmbeds(
+      customSources,
+      nexusHlsSources,
+    ).sort((a, b) => Number(isEmbedOrigin(b)) - Number(isEmbedOrigin(a)));
+    const seekStreamingCount = visibleCustomSources.filter(isSeekStreamingEmbedUrl).length;
+    let seekStreamingIndex = 0;
+    const customEntries = visibleCustomSources.map((source, index): SourceOption => {
+      const isSeek = isSeekStreamingEmbedUrl(source);
+      if (isSeek) seekStreamingIndex += 1;
+      // Les lecteurs Movix génériques sont indiscernables entre eux : le ndd
+      // passe en tête du nom. Les entrées SeekStreaming gardent leur nom de
+      // marque, il identifie déjà le lecteur.
+      const domain = isSeek ? null : getEmbedDomainLabel(source);
+      return {
+        type: 'custom',
+        id: `custom_${index}`,
+        label: isSeek
+          ? (
+            seekStreamingCount > 1
+              ? t('watch.seekStreamingPlayer', { n: seekStreamingIndex })
+              : t('watch.seekStreaming')
+          )
+          : (
+            domain
+              ? t('watch.movixPlayerDomain', { n: index + 1, domain })
+              : t('watch.movixPlayer', { n: index + 1 })
+          ),
+        url: source,
+      };
+    });
+    customEntries
+      .filter((entry) => isEmbedOrigin(entry.url))
+      .forEach((entry) => embedSources.push(entry));
+
     // Add Frembed option
     if (frembedAvailable) {
       if (movieId) {
@@ -3154,38 +3223,9 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     }
 
     // Add custom sources (Movix players)
-    const visibleCustomSources = dedupeSeekStreamingEmbeds(
-      customSources,
-      nexusHlsSources,
-    );
-    const seekStreamingCount = visibleCustomSources.filter(isSeekStreamingEmbedUrl).length;
-    let seekStreamingIndex = 0;
-    if (visibleCustomSources.length > 0) {
-      visibleCustomSources.forEach((source, index) => {
-        const isSeek = isSeekStreamingEmbedUrl(source);
-        if (isSeek) seekStreamingIndex += 1;
-        // Les lecteurs Movix génériques sont indiscernables entre eux : le ndd
-        // passe en tête du nom. Les entrées SeekStreaming gardent leur nom de
-        // marque, il identifie déjà le lecteur.
-        const domain = isSeek ? null : getEmbedDomainLabel(source);
-        embedSources.push({
-          type: 'custom',
-          id: `custom_${index}`,
-          label: isSeek
-            ? (
-              seekStreamingCount > 1
-                ? t('watch.seekStreamingPlayer', { n: seekStreamingIndex })
-                : t('watch.seekStreaming')
-            )
-            : (
-              domain
-                ? t('watch.movixPlayerDomain', { n: index + 1, domain })
-                : t('watch.movixPlayer', { n: index + 1 })
-            ),
-          url: source,
-        });
-      });
-    }
+    customEntries
+      .filter((entry) => !isEmbedOrigin(entry.url))
+      .forEach((entry) => embedSources.push(entry));
 
     // Add Omega sources - Add only the main button
     if (omegaSources && omegaSources.length > 0) {
@@ -5460,64 +5500,6 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     }
   }, [activeTranslatedSubtitleId, currentSubtitle]);
 
-  // Batch-translate texts by joining them with a separator in a single request (POST to avoid URL length limits)
-  const batchTranslateChunk = useCallback(async (texts: string[], targetLang: string): Promise<Map<string, string>> => {
-    const SEPARATOR = '\n\n||||\n\n';
-    const results = new Map<string, string>();
-    const plains = texts.map(t => t.replace(/<[^>]*>/g, ''));
-    const joined = plains.join(SEPARATOR);
-
-    let batchOk = false;
-    try {
-      const res = await axios.post(
-        'https://translate.googleapis.com/translate_a/single',
-        new URLSearchParams({ q: joined }),
-        { params: { client: 'gtx', sl: 'auto', tl: targetLang, dt: 't' } }
-      );
-      const fullTranslated = (res.data[0] as Array<[string]>).map(s => s[0]).join('');
-      const parts = fullTranslated.split(/\s*\|{4}\s*/);
-
-      // Only trust the batched result when Google preserved every separator.
-      // Why: if parts.length !== texts.length, the response is unreliable and
-      // the original code fell back to the source-language plain text, which
-      // got stored as "translation" and rendered as if it were one — silent
-      // failure where the user sees the indicator "Translation active" with
-      // untranslated subtitles. Bailing here forces the per-cue fallback.
-      if (parts.length === texts.length) {
-        for (let i = 0; i < texts.length; i++) {
-          const part = (parts[i] || '').trim();
-          if (part) results.set(texts[i], part);
-        }
-        batchOk = true;
-      }
-    } catch {
-      // batched call rejected — fall through to per-cue path
-    }
-
-    if (batchOk) return results;
-
-    // Per-cue fallback: slower but reliable when the batched separator broke.
-    await Promise.all(plains.map(async (plain, i) => {
-      if (!plain.trim()) return;
-      try {
-        const res = await axios.post(
-          'https://translate.googleapis.com/translate_a/single',
-          new URLSearchParams({ q: plain }),
-          { params: { client: 'gtx', sl: 'auto', tl: targetLang, dt: 't' } }
-        );
-        const translated = ((res.data[0] as Array<[string]>) || []).map(s => s[0]).join('').trim();
-        // Only store actual translations. On empty/failure, leave the key
-        // unset so the renderer's `|| cue.text` fallback picks up the
-        // original (with HTML preserved) instead of polluting the Map.
-        if (translated) results.set(texts[i], translated);
-      } catch {
-        // skip — renderer falls back to cue.text on lookup miss
-      }
-    }));
-
-    return results;
-  }, []);
-
   // Start translating all cues of the current active track
   const startSubtitleTranslation = useCallback(async () => {
     if (!translateSubsTo || !videoRef.current) return;
@@ -5583,8 +5565,12 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
       const batch = chunks.slice(i, i + CONCURRENT);
       const batchResults = await Promise.all(
-        batch.map(chunk => batchTranslateChunk(chunk, translateSubsTo))
+        batch.map(chunk => translateSubtitleTexts(chunk, translateSubsTo))
       );
+
+      // Tous les points d'accès Google viennent de refuser : les blocs
+      // suivants seraient refusés aussi, inutile d'insister.
+      if (batchResults.every(map => map.size === 0)) break;
 
       for (const map of batchResults) {
         for (const [key, val] of map) {
@@ -5639,7 +5625,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         setSubtitleContainerVisible(activeCues.length > 0);
       }
     }
-  }, [batchTranslateChunk, currentSubtitle, subtitlePreferences.delay, t, translateSubsTo]);
+  }, [currentSubtitle, subtitlePreferences.delay, t, translateSubsTo]);
 
   // Cancel ongoing translation
   const cancelSubtitleTranslation = useCallback(() => {
@@ -9350,6 +9336,115 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
 
 
+  // ==========================================================================
+  // Miniatures de la barre de progression
+  //
+  // Un worker lit le début du segment survolé (ou, pour un MP4, les octets
+  // d'une image clé), décode cette seule image avec WebCodecs et la renvoie.
+  // Quand la source ne s'y prête pas (DRM, hébergeur sans CORS, navigateur
+  // sans WebCodecs), l'ancien aperçu — une mini-vidéo du segment — reprend.
+  // ==========================================================================
+
+  // Le canvas n'existe qu'une fois l'infobulle montée : la première miniature
+  // peut arriver avant lui, d'où le dessin à la pose de la ref.
+  const setPreviewCanvas = useCallback((node: HTMLCanvasElement | null) => {
+    previewCanvasRef.current = node;
+    if (node && shownThumbnailRef.current) paintSeekThumbnail(node, shownThumbnailRef.current);
+  }, []);
+
+  const showThumbnail = (bitmap: ImageBitmap) => {
+    shownThumbnailRef.current = bitmap;
+    if (previewCanvasRef.current) paintSeekThumbnail(previewCanvasRef.current, bitmap);
+    setThumbnailShown(true);
+  };
+
+  const hideThumbnail = () => {
+    thumbnailTokenRef.current++;
+    shownThumbnailRef.current = null;
+    setThumbnailShown(false);
+  };
+
+  const resolveThumbnailTarget = (time: number): ThumbnailTarget | null => {
+    if (isMp4SourceResolved(src)) {
+      // Sans CORS, la page ne peut pas lire les octets de la vidéo.
+      const url = videoRef.current?.currentSrc ?? '';
+      if (disableCrossOrigin || !/^https?:\/\//i.test(url)) return null;
+      return { job: { kind: 'mp4', url, time } };
+    }
+
+    const hls = hlsRef.current;
+    if (!hls) return null;
+    let details = getActiveLevelDetails();
+    // La plus basse qualité déjà connue donne la même image pour moins
+    // d'octets. En direct, seule la playlist active est tenue à jour.
+    if (details && !details.live) {
+      let lowest = Infinity;
+      for (const level of hls.levels) {
+        if (level?.details?.fragments?.length && level.bitrate < lowest) {
+          lowest = level.bitrate;
+          details = level.details;
+        }
+      }
+    }
+    if (!details) return null;
+    const fragment = findFragmentAt(details.fragments, time);
+    return fragment ? hlsThumbnailTarget(fragment, details.url) : null;
+  };
+
+  /**
+   * Affiche la miniature de `time`. Rend `false` quand ce chemin ne peut rien
+   * pour la source en cours : l'appelant garde alors son comportement d'avant.
+   */
+  const requestSeekThumbnail = (time: number): boolean => {
+    if (!SeekThumbnailer.isSupported()) return false;
+    let thumbnails = seekThumbnailerRef.current;
+    if (!thumbnails) {
+      // 192 px à l'écran, doublés sur les écrans denses.
+      thumbnails = new SeekThumbnailer(Math.round(192 * Math.min(window.devicePixelRatio || 1, 2)));
+      seekThumbnailerRef.current = thumbnails;
+    }
+    if (thumbnails.disabled) return false;
+    const target = resolveThumbnailTarget(time);
+    if (!target) return false;
+
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    const token = ++thumbnailTokenRef.current;
+
+    const cached = thumbnails.peek(time);
+    if (cached) {
+      showThumbnail(cached);
+      setLoadingPreview(false);
+      return true;
+    }
+    if (thumbnails.paused) {
+      setLoadingPreview(false);
+      return true;
+    }
+
+    // Court délai : un curseur qui ne fait que traverser la barre ne charge rien.
+    const loader = thumbnails;
+    hoverTimeoutRef.current = setTimeout(() => {
+      setLoadingPreview(true);
+      void loader.load(target, time).then((bitmap) => {
+        if (token !== thumbnailTokenRef.current) return;
+        setLoadingPreview(false);
+        if (bitmap) {
+          showThumbnail(bitmap);
+          return;
+        }
+        // Mieux vaut rien qu'une image d'un autre instant.
+        shownThumbnailRef.current = null;
+        setThumbnailShown(false);
+        // La source vient d'être écartée : l'ancien aperçu prend le relais.
+        if (loader.disabled && target.job.kind === 'hls') {
+          setLoadingPreview(true);
+          fetchPreviewFor(time);
+        }
+      });
+    }, 60);
+    return true;
+  };
+
   const handleProgressHover = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     const progressBar = progressBarRef.current;
     if (!progressBar || !duration || !containerRef.current) return;
@@ -9368,16 +9463,14 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
     const xRelativeToPlayer = clientX - playerRect.left;
 
-    // Check if source is MP4 - if so, don't show preview
-    const isMP4 = isMp4SourceResolved(src);
-    if (isMP4) {
-      // For MP4 sources, just show time position without preview
-      setHoverState(prev => ({ ...prev, time, x: xRelativeToPlayer, showPreview: false, previewUrl: null }));
-      return;
-    }
-
     // Update hover position and time immediately
     setHoverState(prev => ({ ...prev, time, x: xRelativeToPlayer, showPreview: false, previewUrl: null }));
+
+    // Miniature décodée par le worker : rien d'autre à faire quand elle prend.
+    if (requestSeekThumbnail(time)) return;
+
+    // Pas d'ancien aperçu pour un MP4 : l'heure survolée seule.
+    if (isMp4SourceResolved(src)) return;
 
     // Clear previous timeout
     if (hoverTimeoutRef.current) {
@@ -9441,6 +9534,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       if (hoverTimeoutRef.current) {
         clearTimeout(hoverTimeoutRef.current);
       }
+      hideThumbnail();
       setHoverState({ time: null, x: 0, showPreview: false, previewUrl: null });
       setLoadingPreview(false);
       if (previewHlsRef.current) {
@@ -9479,11 +9573,9 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       if (time === null) return;
       const xRelativeToPlayer = clientX - playerRect.left;
 
-      // Check if source is MP4 - if so, don't show preview
-      const isMP4 = isMp4SourceResolved(src);
-      if (isMP4) {
-        // For MP4 sources, just show time position without preview
-        setHoverState(prev => ({ ...prev, time, x: xRelativeToPlayer, showPreview: false }));
+      // Miniature du worker d'abord ; un MP4 n'a pas d'ancien aperçu derrière.
+      if (requestSeekThumbnail(time) || isMp4SourceResolved(src)) {
+        setHoverState(prev => ({ ...prev, time, x: xRelativeToPlayer, showPreview: false, previewUrl: null }));
         setCurrentTime(time);
         return;
       }
@@ -9523,6 +9615,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     }
     // On garde le preview visible un court instant après le drag
     setTimeout(() => {
+      hideThumbnail();
       setHoverState({ time: null, x: 0, showPreview: false, previewUrl: null });
       setLoadingPreview(false);
     }, 300);
@@ -9598,6 +9691,19 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       });
     }
   }, [isDragging, hoverState.x, hoverState.time]);
+
+  // Les miniatures appartiennent à une source : on les jette quand elle change.
+  useEffect(() => () => {
+    thumbnailTokenRef.current++;
+    shownThumbnailRef.current = null;
+    setThumbnailShown(false);
+    seekThumbnailerRef.current?.reset();
+  }, [src]);
+
+  useEffect(() => () => {
+    seekThumbnailerRef.current?.dispose();
+    seekThumbnailerRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (!Hls) return;
@@ -12117,6 +12223,11 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         >
           {/* Toujours afficher la miniature vidéo + le temps, même en drag */}
           <div className="relative w-48 h-28 bg-gray-900">
+            {/* Miniature du worker ; la mini-vidéo dessous ne sert qu'en repli. */}
+            <canvas
+              ref={setPreviewCanvas}
+              className={`absolute inset-0 w-full h-full object-cover ${thumbnailShown ? '' : 'hidden'}`}
+            />
             {hoverState.showPreview && hoverState.previewUrl && (
               <video
                 ref={previewVideoRef}

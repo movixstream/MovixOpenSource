@@ -99,6 +99,28 @@ test('CycleTLS proxy preserves callable properties and original promise; text ob
   assert.equal(c.spans[1].input.kind, 'impit');
 });
 
+test('pendant la chauffe aucun libellé ni span n’est calculé, et les réponses entières sont mesurées', async () => {
+  const client = new EventEmitter();
+  client.sendCommand = (command) => command.promise;
+  const c = collector();
+  c.recording = false;
+  instrumentRedis(client, c);
+  const warm = { name: 'INCR', args: ['rate-limit:sync:post:198.51.100.189'], promise: Promise.resolve(41) };
+  await client.sendCommand(warm); await flush();
+  assert.equal(c.spans.length, 0, 'la chauffe est exclue : pas de travail de sonde');
+  c.recording = true;
+  const measured = { name: 'INCR', args: ['rate-limit:sync:post:198.51.100.189'], promise: Promise.resolve(42) };
+  await client.sendCommand(measured); await flush();
+  assert.equal(c.spans.length, 1);
+  assert.equal(c.spans[0].received, 2);
+  assert.deepEqual(c.warnings, [], 'un entier n’est pas une réponse « non mesurée »');
+  c.recording = false;
+  const cycle = wrapCycleTLS(() => Promise.resolve({ status: 200, body: 'x' }), c);
+  await cycle('https://a.example/'); await flush();
+  assert.equal(observeTextRequest(c, 'impit', 'https://b.example/', {}, () => 'direct'), 'direct');
+  assert.equal(c.spans.length, 1);
+});
+
 test('inactive collectors install no wrappers', () => {
   const redis = { sendCommand() {} };
   const mysql = { query() {} };

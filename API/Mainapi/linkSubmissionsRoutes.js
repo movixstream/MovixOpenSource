@@ -13,6 +13,7 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs').promises;
 const path = require('path');
 const { verifyAccessKey } = require('./checkVip');
+const { isHttpUrl } = require('./utils/safeLinkUrl');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -227,11 +228,10 @@ function createLinkSubmissionsRouter(mysqlPool, redis) {
                 return res.status(400).json({ error: 'media_type doit être movie ou tv' });
             }
 
-            // Validate URL format
-            try {
-                new URL(url);
-            } catch {
-                return res.status(400).json({ error: 'URL invalide' });
+            // http(s) seulement : `new URL()` accepte aussi `javascript:`, qui
+            // s'exécuterait sur le site à l'ouverture du lien.
+            if (!isHttpUrl(url)) {
+                return res.status(400).json({ error: 'URL invalide (http ou https uniquement)' });
             }
 
             // Basic URL sanitization
@@ -368,7 +368,7 @@ function createLinkSubmissionsRouter(mysqlPool, redis) {
             // Validate all URLs
             for (const [ep, url] of Object.entries(episode_urls)) {
                 if (!url || typeof url !== 'string' || !url.trim()) return res.status(400).json({ error: `URL manquante pour l'épisode ${ep}` });
-                try { new URL(url.trim()); } catch { return res.status(400).json({ error: `URL invalide pour l'épisode ${ep}` }); }
+                if (!isHttpUrl(url)) return res.status(400).json({ error: `URL invalide pour l'épisode ${ep} (http ou https uniquement)` });
                 if (url.trim().length > 2048) return res.status(400).json({ error: `URL trop longue pour l'épisode ${ep}` });
             }
 
@@ -560,6 +560,12 @@ function createLinkSubmissionsRouter(mysqlPool, redis) {
                 return res.status(400).json({ error: 'Cette soumission a déjà été traitée' });
             }
 
+            // Une soumission antérieure au contrôle du schéma ne doit jamais
+            // rejoindre les liens servis au lecteur.
+            if (!isHttpUrl(sub.url)) {
+                return res.status(400).json({ error: 'URL invalide (http ou https uniquement) : rejetez cette soumission' });
+            }
+
             // Add the link to the appropriate table
             if (sub.media_type === 'movie') {
                 // Check if film exists
@@ -695,6 +701,11 @@ function createLinkSubmissionsRouter(mysqlPool, redis) {
                     }
 
                     const sub = submissions[0];
+
+                    if (!isHttpUrl(sub.url)) {
+                        errors++;
+                        continue;
+                    }
 
                     // Add link to appropriate table
                     if (sub.media_type === 'movie') {

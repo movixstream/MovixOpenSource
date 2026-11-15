@@ -811,7 +811,7 @@ const StreamingLinksManager: React.FC = () => {
                 <li>
                   <strong>Une question / un doute ?</strong> MP&nbsp;: Discord{' '}
                   <span className="font-mono text-amber-200">mysticsaba_alt</span> · Telegram{' '}
-                  <span className="font-mono text-amber-200">MysticSaba</span>.
+                  <span className="font-mono text-amber-200">MysticSaba2</span>.
                 </li>
               </ul>
               </div>

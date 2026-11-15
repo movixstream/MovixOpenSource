@@ -3,7 +3,55 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import i18next from 'i18next';
 import type { WrappedData } from '../src/services/wrappedService.ts';
-import { buildWrappedShareData, formatWrappedDuration, formatWrappedDurationParts, wrappedGesture, wrappedImageUrl, wrappedMediaKey, wrappedMonth } from '../src/utils/wrappedPresentation.ts';
+import { buildWrappedShareData, formatWrappedDuration, formatWrappedDurationParts, wrappedGesture, wrappedImageUrl, wrappedMediaKey, wrappedMonth, wrappedQuizOptions, wrappedTopPercent } from '../src/utils/wrappedPresentation.ts';
+
+test('devinette : la place de la bonne réponse dépend des titres, pas de l’année', () => {
+    const top = (ids: number[]) => ids.map((tmdbId, index) => ({ type: 'movie' as const, tmdbId, title: `Titre ${tmdbId}`, rank: index + 1 }));
+    const positions = new Set<number>();
+    for (let seed = 1; seed <= 60; seed += 1) {
+        const items = top([seed * 7, seed * 13 + 1, seed * 29 + 2]);
+        const options = wrappedQuizOptions(items);
+        // Toujours les trois mêmes titres, chacun une fois, et le même ordre à chaque appel.
+        assert.deepEqual([...options].sort((a, b) => a.rank - b.rank), items);
+        assert.deepEqual(wrappedQuizOptions(items), options);
+        positions.add(options.indexOf(items[0]));
+    }
+    // Sur 60 profils, la bonne réponse occupe les trois places.
+    assert.deepEqual([...positions].sort(), [0, 1, 2]);
+    // Moins de trois titres : rien à mélanger, rien d'inventé.
+    assert.deepEqual(wrappedQuizOptions(top([1, 2])), top([1, 2]));
+});
+
+test('le « top X % » ne s’affiche que s’il est connu et flatteur', () => {
+    assert.equal(wrappedTopPercent(99), 1);
+    assert.equal(wrappedTopPercent(97), 3);
+    assert.equal(wrappedTopPercent(88), 12);
+    assert.equal(wrappedTopPercent(50), 50);
+    // Jamais « top 0 % », même si l'API renvoyait 100.
+    assert.equal(wrappedTopPercent(100), 1);
+    // Moitié basse, classement pas encore calculé ou valeur illisible : rien.
+    for (const value of [49, 12, 1, null, undefined, Number.NaN]) assert.equal(wrappedTopPercent(value), null);
+});
+
+test('le texte du « top X % » existe dans les deux langues', () => {
+    for (const locale of ['fr', 'en']) {
+        const messages = JSON.parse(readFileSync(new URL(`../src/i18n/locales/${locale}.json`, import.meta.url), 'utf8'));
+        assert.match(messages.wrappedCinema.topPercent, /\{\{percent\}\}/);
+        assert.match(messages.wrappedCinema.topPercent, /Movix/);
+    }
+});
+
+test('le bouton vers l’année passée a son texte dans les deux langues', () => {
+    for (const locale of ['fr', 'en']) {
+        const messages = JSON.parse(readFileSync(new URL(`../src/i18n/locales/${locale}.json`, import.meta.url), 'utf8'));
+        assert.match(messages.wrapped.viewPreviousYear, /\{\{year\}\}/);
+    }
+    // La page ne propose pas d'année antérieure à la première année de collecte.
+    const page = readFileSync(new URL('../src/pages/WrappedPage.tsx', import.meta.url), 'utf8');
+    assert.ok(page.includes('{year - 1 >= 2024 && <button'));
+    assert.ok(page.includes('navigate(`/wrapped/${year - 1}`)'));
+    assert.ok(page.includes("t('wrapped.viewPreviousYear', { year: year - 1 })"));
+});
 
 const fixture = (): WrappedData => ({
     year: 2026,

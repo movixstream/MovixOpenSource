@@ -6,6 +6,8 @@ const path = require('node:path');
 const express = require('express');
 
 const ROUTES_DIR = path.join(__dirname, '..');
+// Cpasmal est coupé par défaut ; ces tests vérifient son cache quand il tourne.
+process.env.CPASMAL_ENABLED = 'true';
 
 function installModuleStubs(stubs) {
   const snapshots = [];

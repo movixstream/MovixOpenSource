@@ -6,21 +6,20 @@ import { useTranslation } from "react-i18next";
 import { useLightMode } from '@/context/LightModeContext';
 import { useAdFreePopup } from "../context/AdFreePopupContext";
 import { getAdPopupMode, subscribeToAdPopupModeChanges, type AdPopupMode } from "../utils/adPopupMode";
-import { getAdTargetUrls, isAdultAdsEnabled, subscribeToAdultAdsChanges } from "../utils/adAdultMode";
+import { isAdultAdsEnabled, subscribeToAdultAdsChanges } from "../utils/adAdultMode";
 import {
-  SCRIPT_AD_MODE_ENABLED,
-  getAdScriptState,
-  loadAdScript,
-  subscribeToAdScriptState,
-  type AdScriptState,
-} from "../utils/adScriptMode";
+  hasAdToOpen,
+  openGoLinks,
+  subscribeToMonetizationConfig,
+  type MonetizationPlacementId,
+} from "@/services/monetizationConfig";
 import { getOverlayPortalRoot } from "@/utils/overlayPortal";
 import AdPopupCinemaRain from "@/components/AdPopupCinemaRain";
 import { isMobileOrTabletDevice } from "../utils/deviceDetection";
 import { cn } from "@/lib/utils";
 
 // Interrupteurs build-time des avertissements du popup de pub (constantes de
-// code, pas des réglages utilisateur — même principe que SCRIPT_AD_MODE_ENABLED).
+// code, pas des réglages utilisateur ni de l'admin).
 // SHOW_ADULT_AD_WARNING : encart rouge « contenu explicite +18 ».
 // SHOW_AD_PAGE_WARNING : bandeau jaune « ne clique rien, ne scanne rien, ne télécharge rien ».
 const SHOW_ADULT_AD_WARNING: boolean = false;
@@ -64,6 +63,8 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
 
   const finalOnAccept = onAccept || handlePopupAccept;
   const shouldShow = !!onClose || showAdFreePopup;
+  // Chaque variante du popup est un emplacement de pub du Main API.
+  const placement: MonetizationPlacementId = variant;
 
   const [hasClicked, setHasClicked] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
@@ -72,10 +73,10 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
   const isMobile = useMemo(() => isMobileOrTabletDevice(), []);
   const [popupMode, setPopupMode] = useState<AdPopupMode>(() => getAdPopupMode());
   const [adultAdsOn, setAdultAdsOn] = useState<boolean>(() => isAdultAdsEnabled());
-  const [scriptState, setScriptState] = useState<AdScriptState>(() => getAdScriptState());
+  const [adToOpen, setAdToOpen] = useState<boolean>(() => hasAdToOpen(placement));
+  // Un seul déclenchement automatique par popup : mode auto, ou validation
+  // directe quand il n'y a aucune pub à ouvrir.
   const autoFiredRef = useRef(false);
-  const scriptAdFiredRef = useRef(false);
-  const scriptAcceptTimeoutRef = useRef<number | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const continueButtonRef = useRef<HTMLButtonElement>(null);
   const easterEggTapsRef = useRef({ count: 0, lastTapAt: 0 });
@@ -93,10 +94,6 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
 
   const revealEasterEgg = useCallback(() => {
     if (closingRef.current) return;
-    if (scriptAcceptTimeoutRef.current !== null) {
-      window.clearTimeout(scriptAcceptTimeoutRef.current);
-      scriptAcceptTimeoutRef.current = null;
-    }
     easterEggTapsRef.current = { count: 0, lastTapAt: 0 };
     setEasterEggFound(true);
   }, []);
@@ -139,26 +136,28 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
   useEffect(() => () => {
     heightAnimationRef.current?.cancel();
     if (closeTimeoutRef.current !== null) clearTimeout(closeTimeoutRef.current);
-    if (scriptAcceptTimeoutRef.current !== null) window.clearTimeout(scriptAcceptTimeoutRef.current);
   }, []);
-
-  // Le mode script ne s'applique qu'au popup normal avec bouton. Les modes auto
-  // et click-anywhere gardent le lien direct.
-  const scriptAdMode = popupMode === 'normal' && SCRIPT_AD_MODE_ENABLED;
-  // Script réellement utilisable : un bloqueur qui annule son chargement passe
-  // l'état à 'failed' → le clic valide alors directement, sans ouvrir de pub
-  // (ni script ni lien direct) et sans attendre le timer du geste script.
-  const scriptAdActive = scriptAdMode && scriptState !== 'failed';
 
   useEffect(() => subscribeToAdPopupModeChanges(setPopupMode), []);
   useEffect(() => subscribeToAdultAdsChanges(setAdultAdsOn), []);
-  useEffect(() => subscribeToAdScriptState(setScriptState), []);
+
+  // Y a-t-il une pub à ouvrir ici ? Suit la config publique (rafraîchie toutes
+  // les 5 minutes) et le réglage +18 du visiteur.
+  useEffect(() => {
+    const sync = () => setAdToOpen(hasAdToOpen(placement));
+    sync();
+    const unsubscribeConfig = subscribeToMonetizationConfig(sync);
+    const unsubscribeAdult = subscribeToAdultAdsChanges(sync);
+    return () => {
+      unsubscribeConfig();
+      unsubscribeAdult();
+    };
+  }, [placement]);
 
   useEffect(() => {
     // Reset des gardes quand le popup disparaît, pour laisser le suivant se déclencher.
     if (!shouldShow) {
       autoFiredRef.current = false;
-      scriptAdFiredRef.current = false;
       closingRef.current = false;
       setHasClicked(false);
       setIsClosing(false);
@@ -167,16 +166,8 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
       heightAnimationRef.current?.cancel();
       previousHeightRef.current = null;
       if (closeTimeoutRef.current !== null) clearTimeout(closeTimeoutRef.current);
-      if (scriptAcceptTimeoutRef.current !== null) {
-        window.clearTimeout(scriptAcceptTimeoutRef.current);
-        scriptAcceptTimeoutRef.current = null;
-      }
     }
   }, [shouldShow]);
-
-  useEffect(() => {
-    if (shouldShow && scriptAdMode) loadAdScript();
-  }, [shouldShow, scriptAdMode]);
 
   useEffect(() => {
     if (!shouldShow || popupMode !== 'normal') return;
@@ -191,57 +182,15 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
     };
   }, [shouldShow, popupMode]);
 
-  // Ouvre toutes les cibles pub (1 fenêtre par URL) dans le même geste user.
-  // Anchor créé à l'exécution pour éviter le filtrage réseau (Brave Shields /
-  // EasyList). Cibles déterminées par le toggle "Publicités +18" : en +18 = les
-  // 3 directlinks, sinon le lien SFW unique (utils/adAdultMode). Lu frais au clic.
-  // NB: le navigateur n'autorise qu'1 popup non sollicité par geste -> les autres
-  // sont souvent bloqués sauf si l'utilisateur autorise les popups pour le site.
-  const openAdLinks = useCallback(() => {
-    getAdTargetUrls().forEach((url) => {
-      const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    });
-  }, []);
-
+  // Ouvre les liens `/api/go/<emplacement>` dans le même geste user (ancres
+  // créées à la volée, voir services/monetizationConfig). Le Main API choisit
+  // la pub ; le nombre de fenêtres et l'audience (+18 ou SFW) sont lus frais
+  // au clic.
   const handleLinkClick = useCallback(() => {
-    openAdLinks();
+    openGoLinks(placement);
     revealUnlockedState();
     if (onAdClick) onAdClick();
-  }, [openAdLinks, onAdClick, revealUnlockedState]);
-
-  const completeScriptAdGesture = useCallback(() => {
-    if (scriptAcceptTimeoutRef.current !== null) {
-      window.clearTimeout(scriptAcceptTimeoutRef.current);
-      scriptAcceptTimeoutRef.current = null;
-    }
-    if (onAdClick) onAdClick();
-    revealUnlockedState();
-  }, [onAdClick, revealUnlockedState]);
-
-  const beginScriptAdGesture = useCallback(() => {
-    if (scriptAdFiredRef.current) return;
-    scriptAdFiredRef.current = true;
-    loadAdScript();
-    scriptAcceptTimeoutRef.current = window.setTimeout(completeScriptAdGesture, 700);
-  }, [completeScriptAdGesture]);
-
-  // Le popunder peut consommer le onClick React. La capture pointerdown prépare
-  // la détection avant les listeners document du script.
-  useEffect(() => {
-    if (!shouldShow || !scriptAdActive || hasClicked || easterEggFound) return;
-    const onCapturePointer = (e: PointerEvent) => {
-      const target = e.target as Element | null;
-      if (target && target.closest('[data-ad-view-button]')) beginScriptAdGesture();
-    };
-    window.addEventListener('pointerdown', onCapturePointer, true);
-    return () => window.removeEventListener('pointerdown', onCapturePointer, true);
-  }, [shouldShow, scriptAdActive, hasClicked, easterEggFound, beginScriptAdGesture]);
+  }, [placement, onAdClick, revealUnlockedState]);
 
   useEffect(() => {
     if (!shouldShow || isClosing || easterEggFound || popupMode === 'auto') return;
@@ -289,6 +238,16 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
       finalOnAccept();
     }, 150);
   }, [finalOnAccept, effectivePrefs.transitions]);
+
+  // Rien à ouvrir pour ce visiteur (pubs coupées, emplacement inactif, aucune
+  // pub pour son audience) : le popup se valide tout seul, sans s'afficher ni
+  // demander de clic. Déclaré avant le mode auto, qui partage la même garde.
+  const skipPopup = shouldShow && !adToOpen && !hasClicked && !easterEggFound;
+  useEffect(() => {
+    if (!skipPopup || autoFiredRef.current) return;
+    autoFiredRef.current = true;
+    finalOnAccept();
+  }, [skipPopup, finalOnAccept]);
 
   // Auto mode: fire the ad + accept as soon as the popup is requested. The
   // guard ref ensures a single trigger per popup lifecycle (re-renders won't
@@ -339,6 +298,9 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
       : t("adBlocker.viewAd");
 
   if (!shouldShow) return null;
+
+  // Aucune pub à ouvrir : l'effet ci-dessus valide déjà ; rien à afficher.
+  if (skipPopup) return null;
 
   // Auto mode: useEffect above fires the ad + accept; render nothing.
   if (popupMode === 'auto') return null;
@@ -510,9 +472,7 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
           <div className="flex flex-col items-center gap-2 px-4 sm:px-8 pb-4 sm:pb-8 pt-2">
             <button
               data-ad-view-button={hasClicked ? undefined : ''}
-              onClick={hasClicked ? handleClose : scriptAdMode
-                ? scriptAdActive ? beginScriptAdGesture : completeScriptAdGesture
-                : handleLinkClick}
+              onClick={hasClicked ? handleClose : handleLinkClick}
               className={`${PRIMARY_BUTTON_CLASS} ${hasClicked ? '' : 'mb-1'}`}
               autoFocus
             >

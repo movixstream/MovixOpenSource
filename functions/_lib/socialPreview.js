@@ -82,8 +82,10 @@ const COPY = {
     ogLocale: "fr_FR",
     alternateOgLocale: "en_US",
     defaultTitle: "Movix - Films et séries en streaming",
+    defaultImageAlt:
+      "Logo Movix devant un mur d'affiches de films, séries et animés",
     defaultDescription:
-      "Regardez des films, séries, collections et pages communautaires sur Movix.",
+      "Des milliers de films, séries et animés en streaming gratuit, en VF et VOSTFR. À regarder seul ou entre amis en Watch Party.",
     movieWord: "films",
     tvWord: "séries",
     providerFallback: "Plateforme",
@@ -129,9 +131,9 @@ const COPY = {
     watchPartyTitle: "Watch Party - Movix",
     watchPartyDescription:
       "Créez, rejoignez et partagez une watch party synchronisée sur Movix.",
-    homeTitle: "Movix - Streaming films et séries gratuit",
+    homeTitle: "Movix — Films, séries et animés en streaming gratuit",
     homeDescription:
-      "Explorez les films, séries, collections, alertes et recommandations Movix.",
+      "Des milliers de films, séries et animés en streaming gratuit, en VF et VOSTFR. À regarder seul ou entre amis en Watch Party.",
     searchTitle: "Recherche - Movix",
     searchDescription:
       "Cherchez un film, une série, une collection ou une personne sur Movix.",
@@ -196,8 +198,10 @@ const COPY = {
     ogLocale: "en_US",
     alternateOgLocale: "fr_FR",
     defaultTitle: "Movix - Movies and TV streaming",
+    defaultImageAlt:
+      "Movix logo in front of a wall of movie, TV and anime posters",
     defaultDescription:
-      "Watch movies, TV shows, collections and community pages on Movix.",
+      "Thousands of movies, TV shows and anime streaming for free, dubbed or subtitled. Watch alone or with friends in a Watch Party.",
     movieWord: "movies",
     tvWord: "TV shows",
     providerFallback: "Platform",
@@ -241,9 +245,9 @@ const COPY = {
     watchPartyTitle: "Watch Party - Movix",
     watchPartyDescription:
       "Create, join and share synchronized watch parties on Movix.",
-    homeTitle: "Movix - Free movie and TV streaming",
+    homeTitle: "Movix — Free movies, TV shows and anime streaming",
     homeDescription:
-      "Explore movies, TV shows, collections, alerts and recommendations on Movix.",
+      "Thousands of movies, TV shows and anime streaming for free, dubbed or subtitled. Watch alone or with friends in a Watch Party.",
     searchTitle: "Search - Movix",
     searchDescription:
       "Search for a movie, TV show, collection or person on Movix.",
@@ -422,7 +426,16 @@ function formatRating(value) {
     : numberValue.toFixed(1);
 }
 
-function buildImageUrl(origin, payload, fallbackPath = "/movix.png") {
+// Bannière 1200 × 630 (logo devant un mur d'affiches) : image par défaut
+// quand une page n'a ni affiche ni fond TMDB.
+const DEFAULT_SHARE_IMAGE = {
+  path: "/og-image.jpg",
+  width: 1200,
+  height: 630,
+  type: "image/jpeg",
+};
+
+function buildImageUrl(origin, payload, fallbackPath = DEFAULT_SHARE_IMAGE.path) {
   const imagePath =
     payload.backdrop_path || payload.poster_path || payload.profile_path;
   if (!imagePath) return new URL(fallbackPath, origin).toString();
@@ -430,7 +443,7 @@ function buildImageUrl(origin, payload, fallbackPath = "/movix.png") {
   return `${TMDB_IMAGE_BASE}/${size}${imagePath}`;
 }
 
-function resolveExternalImageUrl(origin, value, fallbackPath = "/movix.png") {
+function resolveExternalImageUrl(origin, value, fallbackPath = DEFAULT_SHARE_IMAGE.path) {
   const normalized = String(value || "").trim();
 
   if (!normalized) {
@@ -504,6 +517,15 @@ function renderHeadTags(metadata) {
     `<meta property="og:image" content="${escapeHtml(metadata.imageUrl)}" />`,
     `<meta property="og:image:secure_url" content="${escapeHtml(metadata.imageUrl)}" />`,
     `<meta property="og:image:alt" content="${escapeHtml(metadata.imageAlt)}" />`,
+    // Taille connue seulement pour la bannière par défaut ; Facebook s'en
+    // sert pour afficher l'image dès le premier partage.
+    ...(metadata.imageWidth
+      ? [
+          `<meta property="og:image:type" content="${escapeHtml(metadata.imageType)}" />`,
+          `<meta property="og:image:width" content="${metadata.imageWidth}" />`,
+          `<meta property="og:image:height" content="${metadata.imageHeight}" />`,
+        ]
+      : []),
     `<meta property="og:site_name" content="${escapeHtml(SITE_NAME)}" />`,
     `<meta property="og:locale" content="${escapeHtml(metadata.ogLocale)}" />`,
     `<meta property="og:locale:alternate" content="${escapeHtml(metadata.alternateOgLocale)}" />`,
@@ -528,6 +550,9 @@ function injectMetadata(html, metadata) {
 
 function buildBaseMetadata(requestUrl, previewLanguage, payload) {
   const copy = COPY[previewLanguage];
+  const defaultImage = new URL(DEFAULT_SHARE_IMAGE.path, requestUrl.origin).toString();
+  const imageUrl = payload.imageUrl || defaultImage;
+  const isDefaultImage = imageUrl === defaultImage;
 
   return {
     title: payload.title || copy.defaultTitle,
@@ -536,9 +561,11 @@ function buildBaseMetadata(requestUrl, previewLanguage, payload) {
       260,
     ),
     canonicalUrl: requestUrl.toString(),
-    imageUrl:
-      payload.imageUrl || new URL("/movix.png", requestUrl.origin).toString(),
-    imageAlt: payload.imageAlt || SITE_NAME,
+    imageUrl,
+    imageWidth: isDefaultImage ? DEFAULT_SHARE_IMAGE.width : null,
+    imageHeight: isDefaultImage ? DEFAULT_SHARE_IMAGE.height : null,
+    imageType: isDefaultImage ? DEFAULT_SHARE_IMAGE.type : null,
+    imageAlt: payload.imageAlt || (isDefaultImage ? copy.defaultImageAlt : SITE_NAME),
     ogType: payload.ogType || "website",
     ogLocale: copy.ogLocale,
     alternateOgLocale: copy.alternateOgLocale,

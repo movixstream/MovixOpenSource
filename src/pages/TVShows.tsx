@@ -797,7 +797,7 @@ const TVShows: React.FC = () => {
       {/* Hero Section */}
       <div className="relative w-full pt-16 md:pt-20 lg:pt-24">
         {featuredShows.length > 0 && (
-          <HeroSlider items={featuredShows as any} />
+          <HeroSlider items={featuredShows as any} promoPage="tv" />
         )}
       </div>
 

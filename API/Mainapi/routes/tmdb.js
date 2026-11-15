@@ -49,6 +49,27 @@ const {
   applyCloneUrlsToPlayerLinks,
   syncCloneLinksForPlayerLinks
 } = require('../utils/cloneLinks');
+// Disjoncteur Coflix de ce worker. app.js charge déjà proxyManager ; un banc de
+// test qui ne le fournit pas garde simplement le comportement sans pause.
+let coflixProxyManager = null;
+try {
+  coflixProxyManager = require('../utils/proxyManager');
+} catch {
+  coflixProxyManager = null;
+}
+
+// Vrai seulement pendant la pause : à l'échéance, la requête d'essai passe.
+function isCoflixPausedOnThisWorker() {
+  const isCoflixCircuitOpen = coflixProxyManager?.isCoflixCircuitOpen;
+  return typeof isCoflixCircuitOpen === 'function' && isCoflixCircuitOpen();
+}
+
+// Le cache Coflix range `tmdb_details` au format de getTMDBDetails (le nom
+// d'une série y est déjà dans `title`) : inutile de relire TMDB pour l'actualiser.
+function storedTmdbDetails(cached) {
+  const details = cached?.tmdb_details;
+  return details && typeof details.title === 'string' && details.title.trim() ? details : null;
+}
 
 // ---------------------------------------------------------------------------
 // Dependencies injected via configure()
@@ -445,22 +466,29 @@ router.get('/tmdb/:type/:id', async (req, res) => {
       dataReturned = true;
     }
 
+    // Renvoie le cache à jour (la version écrite, sinon celle lue), ou undefined
+    // sans lecture : updateCache s'en sert au lieu de relire la même entrée.
     const syncCachedClones = () => coflixCloneRefresh.run(cacheKey, async () => {
-      if (coflixCloneRefresh.recentlyChecked(cacheKey, COFLIX_CHECK_INTERVAL)) return;
+      if (coflixCloneRefresh.recentlyChecked(cacheKey, COFLIX_CHECK_INTERVAL)) return undefined;
       const latest = await getFromCacheNoExpiration(CACHE_DIR.COFLIX, cacheKey);
-      if (!latest) return;
+      if (!latest) return undefined;
       const withClones = await applyCloneUrlsToTmdbResult(latest, type, id, season, episode);
       const synced = await syncCloneUrlsOnTmdbResult(withClones, type, id, season, episode);
+      let current = latest;
       if (JSON.stringify(latest) !== JSON.stringify(synced)) {
-        await saveCoflixCachePreservingPlayable(cacheKey, type, synced);
+        // Écriture refusée : le cache a changé depuis la lecture, updateCache le relira.
+        current = await saveCoflixCachePreservingPlayable(cacheKey, type, synced) ? synced : undefined;
       }
       coflixCloneRefresh.markChecked(cacheKey);
+      return current;
     });
 
     // 3. Fonction pour recuperer les donnees fraiches et mettre a jour le cache
-    const updateCache = () => coflixRefresh.run(cacheKey, async () => {
+    const updateCache = (knownLatest) => coflixRefresh.run(cacheKey, async () => {
       try {
-        const latest = await getFromCacheNoExpiration(CACHE_DIR.COFLIX, cacheKey);
+        const latest = knownLatest !== undefined
+          ? knownLatest
+          : await getFromCacheNoExpiration(CACHE_DIR.COFLIX, cacheKey);
         if (latest && (coflixRefresh.recentlyChecked(cacheKey, COFLIX_CHECK_INTERVAL) ||
             Date.now() - (Number(latest._coflixRefreshedAt) || 0) < COFLIX_CHECK_INTERVAL)) {
           return { status: 200, data: latest };
@@ -481,13 +509,30 @@ router.get('/tmdb/:type/:id', async (req, res) => {
           return { status: 400, data: { message: 'Parametres de saison/episode manquants' } };
         }
 
-        // Recuperer les details TMDB
-        const tmdbDetails = await getTMDBDetails(id, type);
+        // Coflix en pause sur ce worker : ni lecture TMDB ni recherche vouée à
+        // l'échec, le cache existant reste servi tel quel (pas d'erreur levée).
+        const coflixPaused = isCoflixPausedOnThisWorker();
+        if (coflixPaused && latest) {
+          return { status: 200, data: latest };
+        }
+
+        // Récupérer les détails TMDB (ceux du cache s'il les contient déjà)
+        const reusedTmdbDetails = storedTmdbDetails(latest);
+        let tmdbDetails = reusedTmdbDetails || await getTMDBDetails(id, type);
         if (!tmdbDetails) {
           const error = new Error('Contenu non trouve sur TMDB');
           error.code = 'TMDB_DETAILS_UNAVAILABLE';
           error.httpStatus = 404;
           throw error;
+        }
+        if (coflixPaused) {
+          // Sans cache : même réponse qu'avant (« Contenu non disponible en raison
+          // d'une erreur »), rien d'enregistré, nouvel essai après 60 s.
+          throw Object.assign(new Error('Source Coflix en pause'), {
+            code: 'SOURCE_CIRCUIT_OPEN',
+            isSourceCircuitOpen: true,
+            httpStatus: 503,
+          });
         }
 
         // Extraire l'annee de la date de sortie
@@ -516,15 +561,23 @@ router.get('/tmdb/:type/:id', async (req, res) => {
           }
         }
 
-        // Si toujours pas de bon resultat, essayer avec le titre francais localise
-        if ((!bestResults || !bestResults.length || (bestResults[0] && bestResults[0].similarity < 0.8))) {
+        // Toujours pas de bon résultat avec des détails repris du cache : relire
+        // les détails actuels, le titre français a pu changer depuis. Des détails
+        // tout juste lus sont déjà ceux en fr-FR, il n'y a rien à relire.
+        if (reusedTmdbDetails && (!bestResults || !bestResults.length || (bestResults[0] && bestResults[0].similarity < 0.8))) {
           try {
-            const frenchData = await fetchTmdbDetails(TMDB_API_URL, TMDB_API_KEY, id, type, 'fr-FR');
+            const freshDetails = await getTMDBDetails(id, type);
 
-            if (frenchData) {
-              const frenchTitle = type === 'movie' ? frenchData.title : frenchData.name;
-              if (frenchTitle && frenchTitle !== tmdbDetails.title && frenchTitle !== tmdbDetails.original_title) {
-                const frenchResults = await searchCoflixByTitle(frenchTitle, type, releaseYear);
+            if (freshDetails) {
+              const frenchTitle = freshDetails.title;
+              const previousDetails = tmdbDetails;
+              // La date de sortie d'un film à venir bouge souvent : chercher avec l'année actuelle.
+              const freshYear = freshDetails.release_date ? parseInt(freshDetails.release_date.split('-')[0]) : null;
+              // Le cache gardera les détails à jour.
+              tmdbDetails = freshDetails;
+              if (frenchTitle && (freshYear !== releaseYear ||
+                  (frenchTitle !== previousDetails.title && frenchTitle !== previousDetails.original_title))) {
+                const frenchResults = await searchCoflixByTitle(frenchTitle, type, freshYear);
 
                 if (frenchResults && frenchResults.length > 0) {
                   if (!bestResults || !bestResults.length) {
@@ -627,8 +680,9 @@ router.get('/tmdb/:type/:id', async (req, res) => {
           // Un résultat null peut aussi être temporaire ; ne pas publier de cache négatif.
         } else if (updateError && updateError.coflixSiteRateLimited) {
           // Coflix global 429 — announced once by the cooldown; stay silent here.
-        } else if (updateError?.isSourceCircuitOpen) {
+        } else if (updateError?.isSourceCircuitOpen || updateError?.code === 'SOURCE_CIRCUIT_OPEN') {
           // Coflix en pause : annoncé une fois par le disjoncteur, rien par titre.
+          // Un échec relu dans Redis (autre worker) n'a plus que son code.
         } else if (updateError && updateError.isAxiosError) {
           const url = updateError.config && updateError.config.url ? updateError.config.url : '';
           console.error(
@@ -648,8 +702,9 @@ router.get('/tmdb/:type/:id', async (req, res) => {
 
     if (dataReturned) {
       void (async () => {
-        await syncCachedClones();
-        if (COFLIX_ENABLED) await updateCache();
+        const syncedLatest = await syncCachedClones();
+        // Coflix en pause : la réponse est déjà partie, inutile de relire le cache.
+        if (COFLIX_ENABLED && !isCoflixPausedOnThisWorker()) await updateCache(syncedLatest);
       })().catch(() => {});
     } else {
       const result = await updateCache();
@@ -658,7 +713,9 @@ router.get('/tmdb/:type/:id', async (req, res) => {
     }
 
   } catch (error) {
-    if (error?.code !== 'TMDB_DETAILS_UNAVAILABLE' && !error?.isSourceCircuitOpen) {
+    // L'échec mémorisé 60 s par sourceRefresh perd isSourceCircuitOpen, pas son code.
+    if (error?.code !== 'TMDB_DETAILS_UNAVAILABLE' && !error?.isSourceCircuitOpen &&
+        error?.code !== 'SOURCE_CIRCUIT_OPEN') {
       console.error(`Erreur lors de la recuperation des liens TMDB ${id} (${type}):`, error);
     }
     if (!res.headersSent) {

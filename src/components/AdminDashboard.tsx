@@ -3,11 +3,14 @@ import { useTranslation } from 'react-i18next';
 import {
   Clapperboard,
   Flag,
+  GalleryHorizontalEnd,
+  Gift,
   HandCoins,
   HelpCircle,
   KeyRound,
   Link2,
   ListOrdered,
+  Megaphone,
   MessageSquare,
   Plug,
   ShieldCheck,
@@ -19,9 +22,12 @@ import {
 
 import AdminComments from './AdminComments';
 import AdminHelpFeedback from './AdminHelpFeedback';
+import AdminHeroPromos from './AdminHeroPromos';
+import AdminMonetizationSettings from './AdminMonetizationSettings';
 import AdminLinkSubmissions from './Greenlight/AdminLinkSubmissions';
 import AdminWishboard from './Greenlight/AdminWishboard';
 import AdminOAuthApps from './AdminOAuthApps';
+import AdminReferralSettings from './AdminReferralSettings';
 import AdminReports from './AdminReports';
 import AdminSharedLists from './AdminSharedLists';
 import AdminTeam from './AdminTeam';
@@ -37,6 +43,9 @@ type AdminSection =
   | 'vip-keys'
   | 'vip-invoices'
   | 'vip-donation-settings'
+  | 'monetization'
+  | 'hero-promos'
+  | 'referral'
   | 'oauth-apps'
   | 'wishboard'
   | 'link-submissions'
@@ -104,6 +113,30 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ role }) => {
         icon: HandCoins,
         accent: 'text-amber-300',
         highlight: '245 158 11'
+      },
+      {
+        id: 'monetization',
+        title: t('admin.monetization.dashboardTitle'),
+        description: t('admin.monetization.dashboardDescription'),
+        icon: Megaphone,
+        accent: 'text-lime-300',
+        highlight: '132 204 22'
+      },
+      {
+        id: 'hero-promos',
+        title: t('heroPromo.admin.dashboardTitle'),
+        description: t('heroPromo.admin.dashboardDescription'),
+        icon: GalleryHorizontalEnd,
+        accent: 'text-orange-300',
+        highlight: '251 146 60'
+      },
+      {
+        id: 'referral',
+        title: t('referral.admin.dashboardTitle'),
+        description: t('referral.admin.dashboardDescription'),
+        icon: Gift,
+        accent: 'text-pink-300',
+        highlight: '236 72 153'
       },
       {
         id: 'oauth-apps',
@@ -296,6 +329,36 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ role }) => {
                 {t('vipDonations.settings.dashboardTitle')}
               </h2>
               <AdminVipDonationSettings />
+            </div>
+          )}
+
+          {activeSection === 'monetization' && role === 'admin' && (
+            <div>
+              <h2 className="mb-6 flex items-center gap-3 text-2xl font-bold text-white">
+                <Megaphone className="h-6 w-6 text-lime-300" />
+                {t('admin.monetization.dashboardTitle')}
+              </h2>
+              <AdminMonetizationSettings />
+            </div>
+          )}
+
+          {activeSection === 'hero-promos' && role === 'admin' && (
+            <div>
+              <h2 className="mb-6 flex items-center gap-3 text-2xl font-bold text-white">
+                <GalleryHorizontalEnd className="h-6 w-6 text-orange-300" />
+                {t('heroPromo.admin.dashboardTitle')}
+              </h2>
+              <AdminHeroPromos />
+            </div>
+          )}
+
+          {activeSection === 'referral' && role === 'admin' && (
+            <div>
+              <h2 className="mb-6 flex items-center gap-3 text-2xl font-bold text-white">
+                <Gift className="h-6 w-6 text-pink-300" />
+                {t('referral.admin.dashboardTitle')}
+              </h2>
+              <AdminReferralSettings />
             </div>
           )}
 

@@ -1,4 +1,5 @@
 import builtins
+import html
 import json
 import re
 from os.path import join
@@ -58,10 +59,22 @@ class tf1_fr(BaseService):
         api_key = re.findall(r'"apiKey":"([^"]+)"', response)[0]
         consent_ids = re.findall(r'neededConsentIds":\[(.*?)]', response)[0].replace("\"", "").split(",")
 
+        # TF1 a déplacé la version du lecteur : elle est désormais dans
+        # "player":{…,"env":{"mode":"prod","version":"x.y.z"}}. L'ancien
+        # format (playerEndpoint) reste en secours.
         player_version = re.findall(
+            r'"player":\{[^{}]*"env":\{[^{}]*"version":"(\d+\.\d+\.\d+)"', response
+        ) or re.findall(
             rf'"playerEndpoint":"{tf1_fr.PLAYER_URL}/","version":"([^"]+)"', response
-        )[0]
-        return api_key, consent_ids, tf1_fr.format_version(player_version)
+        )
+        if len(player_version) == 0:
+            raise CustomException(ERR_MSG.format(
+                type=f'{APP_ERROR}',
+                url=f"from the {tf1_fr.__name__} service",
+                reason="Player version not found on the TF1 home page",
+                solution="Debug the service"
+            ))
+        return api_key, consent_ids, tf1_fr.format_version(player_version[0])
 
     @staticmethod
     def get_bearer_token():
@@ -113,8 +126,24 @@ class tf1_fr(BaseService):
         return tf1_fr
 
     @staticmethod
+    def get_additional_params(additional):
+        # Le CDN vidéo de TF1 répond 403 sans User-Agent de navigateur :
+        # N_m3u8DL-RE doit envoyer le même que nos requêtes.
+        return [
+            ("MUXER", lambda s: s.format(args="mkv")),
+            ("HEADER", lambda s: s.format(key="User-Agent", value=builtins.CONFIG["USER_AGENT"]))
+        ]
+
+    @staticmethod
+    def get_headers():
+        return {"User-Agent": builtins.CONFIG["USER_AGENT"]}
+
+    @staticmethod
     def get_keys(challenge, additional):
-        licence = requests.post(tf1_fr.LICENSE_URL, data=challenge)
+        # Chaque vidéo a maintenant sa propre adresse de licence Widevine,
+        # donnée par mediainfo (delivery.drms). L'ancien proxy sert de secours.
+        license_url = additional.get("license_url", None) or tf1_fr.LICENSE_URL
+        licence = requests.post(license_url, data=challenge, headers=tf1_fr.get_headers())
         licence.raise_for_status()
         return licence.content
 
@@ -166,17 +195,36 @@ class tf1_fr(BaseService):
             )
 
         manifest = response["delivery"]["url"]
+        license_url = None
+        for drm in response["delivery"].get("drms", None) or []:
+            if drm.get("name", "") == "widevine" and drm.get("url", None):
+                license_url = drm["url"]
+                break
+
         try:
             pssh_value = str(min(re.findall(
                 r'<cenc:pssh>(.+?)</cenc:pssh>',
-                requests.get(manifest).content.decode()
+                requests.get(manifest, headers=tf1_fr.get_headers()).content.decode()
             ), key=len))
         except:
             pssh_value = None
 
         if builtins.CONFIG.get("BASIC", False) is True:
             manifest = re.sub(r'/eyJ[^/]*/', '/<TOKEN>/', manifest)
-        return manifest, pssh_value, {}
+        return manifest, pssh_value, {"license_url": license_url}
+
+    @staticmethod
+    def find_video_links(re_href, response):
+        # Chaque vidéo est un <a href="….html"> ; le titre est le texte du lien,
+        # aujourd'hui enveloppé dans <p><span>…</span></p>. On prend tout le
+        # contenu du lien et on retire les balises, pour ne plus dépendre de
+        # la structure exacte. [^"]* empêche un lien de déborder sur le suivant.
+        matches = []
+        for href, inner in re.findall(fr'({re_href}[^"#]*?\.html)"[^>]*>(.*?)</a>', response, re.S):
+            title = html.unescape(re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', inner))).strip()
+            if len(title) > 0:
+                matches.append((href, title))
+        return list(dict.fromkeys(matches))
 
     @staticmethod
     def get_episode_index(label):
@@ -219,10 +267,7 @@ class tf1_fr(BaseService):
                 collection_name = collection_name + "_" + section
                 collection_name = get_valid_filename(collection_name)
 
-                matches = re.findall(fr'({re_href}.*?\.html)"[^>]*><div[^>]*>([^<]+)</div>', response)
-                if len(matches) == 0:
-                    matches = re.findall(fr'({re_href}.*?\.html)"[^>]*>([^<]+)<', response)
-
+                matches = tf1_fr.find_video_links(re_href, response)
                 matches = [(
                     tf1_fr.BASE_URL + m[0].split('"')[1], m[1]
                 ) for m in matches]
@@ -279,10 +324,7 @@ class tf1_fr(BaseService):
                         response = requests.get(f'{season_url}/{page}')
 
                     response = response.content.decode()
-                    matches = re.findall(fr'({re_href}.*?\.html)"[^>]*><div[^>]*>([^<]+)</div>', response)
-                    if len(matches) == 0:
-                        matches = re.findall(fr'({re_href}.*?\.html)"[^>]*>([^<]+)<', response)
-
+                    matches = tf1_fr.find_video_links(re_href, response)
                     matches = [(
                         tf1_fr.BASE_URL + m[0].split('"')[1],
                         m[1],

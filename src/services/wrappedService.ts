@@ -64,7 +64,8 @@ export interface WrappedStats {
     avgSessionMinutes?: number;
     totalActiveDays?: number;
     longestStreak?: number;
-    percentile?: number;
+    /** Part des membres qui ont regardé moins (1 à 99) ; null tant que le classement n'est pas calculé. */
+    percentile?: number | null;
 }
 
 export interface WrappedGenre {

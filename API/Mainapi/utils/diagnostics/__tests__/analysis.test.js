@@ -117,7 +117,7 @@ test('analyse repart des compteurs après la chauffe, alerte ensuite et finalise
   const notifications = [];
   const master = createMasterSession(cluster, {
     env: { MAINAPI_PROBE_SECONDS: '1', MAINAPI_PROBE_MODE: 'analyse', MAINAPI_PROBE_DIR: directory },
-    warmupMs: 200, sampleMs: 40,
+    warmupMs: 200, sampleMs: 40, alertMinMeasurementMs: 0,
     systemSampler: { sample: async () => {
       samples++;
       const at = Date.now(); baseline ??= at;

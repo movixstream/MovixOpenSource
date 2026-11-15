@@ -33,6 +33,18 @@ function domainRestriction(req, res, next) {
     return next();
   }
 
+  // Pubs : /api/go est une navigation (Referer du miroir ou de l'app) et
+  // /api/go-settings ne contient aucune URL. Un 404 ici couperait la pub.
+  if (req.path.startsWith('/api/go/') || req.path === '/api/go-settings') {
+    return next();
+  }
+
+  // Promos du carrousel : /api/hero-promos/<id>/go est une navigation, comme
+  // /api/go (Referer du miroir ou de l'app). Un 404 ici couperait le lien.
+  if (/^\/api\/hero-promos\/[a-f0-9]{10}\/go$/.test(req.path)) {
+    return next();
+  }
+
   // Autoriser le callback serveur-à-serveur PayGate sans dépendre d'un Origin/Referer navigateur
   if (
     req.path === '/api/vip/paygate/callback'
@@ -64,6 +76,7 @@ function domainRestriction(req, res, next) {
     'movix.men',
     'movix.college',
     'movix.luxe',
+    'vovu.tv',
     'movix.dog',
     'movix.miami'
   ];

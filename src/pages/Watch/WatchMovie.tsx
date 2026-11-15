@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { getFrembedBase } from '../../utils/frembedConfig';
 import { openInNewTab } from '../../utils/openInNewTab';
-import { useParams, useNavigate } from 'react-router-dom';
+import { safeEmbedUrl } from '../../utils/safeEmbedUrl';
+import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import axios from 'axios';
+import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios';
 import HLSPlayer from '../../components/HLSPlayer';
 import PlayerOverlayPortal from '../../components/PlayerOverlayPortal';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -14,11 +15,15 @@ import { extractM3u8FromEmbed, extractUqloadFile, extractVidzyM3u8, extractFsvid
 import type { SeekStreamingHlsSource } from '../../utils/seekStreamingCandidates';
 import { runExtractionPass, type ExtractionPassResult } from '../../utils/runExtractionPass';
 import { pickAutoSelectedSource, sortHostersByPriority, hosterKeyOf, type SourceAvailability } from '../../utils/sourceAutoSelect';
+import {
+  isEmbedOriginUrl, EMBED_SOURCE_IDS, isRememberedPick, hasRememberedPlayer, pickCustomLink,
+} from '../../utils/embedOrigin';
 import type { TopLevelSourceId } from '../../types/sourcePriority';
 import { getSourcePriorityPrefs, buildDefaults, subscribeToPriorityChanges } from '../../utils/sourcePriorityPrefs';
 import { detectHoster } from '../../utils/hosterRegistry';
 import { setLastPlayer } from '../../utils/lastPlayerPref';
-import { getTmdbId } from '../../utils/idEncoder';
+import { encodeId, getTmdbId } from '../../utils/idEncoder';
+import { buildWatchMoviePath, getMovieVersion, getVersionForRetiredId } from '../../config/movieVersions';
 import { useWrappedTracker } from '../../hooks/useWrappedTracker';
 import { useTmdbImages, withTmdbImageSize } from '../../hooks/useTmdbImages';
 import { isUserVip, getVipHeaders } from '../../utils/authUtils';
@@ -359,13 +364,17 @@ function getMultiFromCoflix(coflixData: CoflixResponse | null) {
 }
 
 const WatchMovie: React.FC = () => {
-  const { tmdbid: encodedId } = useParams<{ tmdbid: string }>();
+  const { tmdbid: encodedId, version: versionKey } = useParams<{ tmdbid: string; version?: string }>();
 
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { currentProfile } = useProfile();
 
   const id = encodedId ? getTmdbId(encodedId) : null;
+  // Version alternative (ex. Encore) : infos du film parent, liens de la
+  // version seulement (voir src/config/movieVersions.ts).
+  const movieVersion = getMovieVersion(id, versionKey);
+  const linksId = movieVersion?.linksId ?? id;
   const autoFallbackGuard = useMemo(() => createHlsAutoFallbackGuard(2), [id]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingText, setLoadingText] = useState(t('watch.loadingSources'));
@@ -689,7 +698,8 @@ const WatchMovie: React.FC = () => {
     setKisskhSubtitles([]);
     setLoadingKisskh(true);
 
-    if (!id) {
+    // KissKH cherche par ID TMDB : il rendrait la version cinéma.
+    if (!id || movieVersion) {
       setLoadingKisskh(false);
       return () => kisskhController.abort();
     }
@@ -801,7 +811,9 @@ const WatchMovie: React.FC = () => {
         return { data: { title: '', backdrop_path: null, release_date: '' } };
       });
 
-      setMovieTitle(tmdbResponse.data.title);
+      setMovieTitle(movieVersion && tmdbResponse.data.title
+        ? `${tmdbResponse.data.title} — ${t(movieVersion.labelKey)}`
+        : tmdbResponse.data.title);
       setBackdropPath(tmdbResponse.data.backdrop_path);
       setPosterPath(tmdbResponse.data.poster_path);
 
@@ -889,6 +901,12 @@ const WatchMovie: React.FC = () => {
       setLoadingExtractions(true);
 
       // =========== INITIATE ALL ASYNCHRONOUS SOURCE CHECKS (NON-BLOCKING) ===========
+      // Version alternative : les catalogues scrapés cherchent par ID TMDB et
+      // rendraient la version cinéma. Ils répondent vide ; seuls les liens
+      // Movix de la version (`linksId`) sont lus.
+      const fetchCatalog = (url: string, config?: AxiosRequestConfig): Promise<Pick<AxiosResponse, 'data'>> =>
+        movieVersion ? Promise.resolve({ data: null }) : axios.get(url, config);
+
       const darkinoPromise = checkDarkinoAvailability(
         tmdbResponse.data.title,
         tmdbResponse.data.release_date,
@@ -899,7 +917,7 @@ const WatchMovie: React.FC = () => {
         return false; // Return a default/error state
       }).finally(() => setLoadingDarkino(false));
 
-      const availabilityPromise = checkMovieAvailability(id)
+      const availabilityPromise = checkMovieAvailability(linksId ?? id)
         .catch(error => {
           console.error('Error checking Firebase/Frembed availability:', error);
           return { customLinks: [], mp4Links: [], frembedAvailable: false }; // Default/error state
@@ -907,7 +925,7 @@ const WatchMovie: React.FC = () => {
 
       // `resolve=1` : le serveur résout lui-même les m3u8 de ce film. Réservé
       // à la lecture — la navigation ne doit pas déclencher d'extraction.
-      const coflixPromise = axios.get(`${MAIN_API}/api/tmdb/movie/${id}`, resolveRequest())
+      const coflixPromise = fetchCatalog(`${MAIN_API}/api/tmdb/movie/${id}`, resolveRequest())
         .then(response => response.data)
         .catch(error => {
           console.error('Error fetching Coflix sources:', error);
@@ -916,7 +934,7 @@ const WatchMovie: React.FC = () => {
 
       const omegaPromise = (async () => {
         try {
-          const imdbResponse = await axios.get(`https://api.themoviedb.org/3/movie/${id}/external_ids`, {
+          const imdbResponse = await fetchCatalog(`https://api.themoviedb.org/3/movie/${id}/external_ids`, {
             params: { api_key: TMDB_API_KEY },
           });
           if (imdbResponse.data && imdbResponse.data.imdb_id) {
@@ -942,7 +960,7 @@ const WatchMovie: React.FC = () => {
       // =========== CHECK PURSTREAM (BRAVO) SOURCE ==========
       const purstreamPromise = (async () => {
         try {
-          const purstreamResponse = await axios.get(`${MAIN_API}/api/purstream/movie/${id}/stream`, {
+          const purstreamResponse = await fetchCatalog(`${MAIN_API}/api/purstream/movie/${id}/stream`, {
             headers: { ...getVipHeaders() }
           });
           return purstreamResponse.data;
@@ -957,7 +975,7 @@ const WatchMovie: React.FC = () => {
         try {
           // Méthode serveur : clé VIP + `resolve=1` (résolution serveur des
           // m3u8). Méthode extension/userscript : liens bruts, extraction locale.
-          const fstreamResponse = await axios.get(`${MAIN_API}/api/fstream/movie/${id}`, resolveRequest());
+          const fstreamResponse = await fetchCatalog(`${MAIN_API}/api/fstream/movie/${id}`, resolveRequest());
           return fstreamResponse.data;
         } catch (error) {
           console.error('Error fetching FStream movie sources:', error);
@@ -966,7 +984,7 @@ const WatchMovie: React.FC = () => {
       })().finally(() => setLoadingFstream(false));
 
       // =========== CHECK WIFLIX (LYNX) SOURCE ===========
-      const wiflixPromise: Promise<WiflixMovieResponse | null> = axios.get(`${MAIN_API}/api/wiflix/movie/${id}`, resolveRequest())
+      const wiflixPromise: Promise<WiflixMovieResponse | null> = fetchCatalog(`${MAIN_API}/api/wiflix/movie/${id}`, resolveRequest())
         .then(response => response.data as WiflixMovieResponse)
         .catch(error => {
           console.error('Error fetching Wiflix/Lynx source:', error);
@@ -974,7 +992,7 @@ const WatchMovie: React.FC = () => {
         }).finally(() => setLoadingWiflix(false));
 
       // =========== CHECK J1F (1JOUR1FILM) SOURCE ===========
-      const j1fPromise: Promise<J1fMovieResponse | null> = axios.get(`${MAIN_API}/api/j1f/movie/${id}`, resolveRequest())
+      const j1fPromise: Promise<J1fMovieResponse | null> = fetchCatalog(`${MAIN_API}/api/j1f/movie/${id}`, resolveRequest())
         .then(response => response.data as J1fMovieResponse)
         .catch(error => {
           console.error('Error fetching 1jour1film source:', error);
@@ -982,7 +1000,7 @@ const WatchMovie: React.FC = () => {
         }).finally(() => setLoadingJ1f(false));
 
       // =========== CHECK SWIFTFLOW SOURCE ===========
-      const swiftflowPromise: Promise<SwiftflowMovieResponse | null> = axios.get(`${MAIN_API}/api/swiftflow/movie/${id}`, resolveRequest())
+      const swiftflowPromise: Promise<SwiftflowMovieResponse | null> = fetchCatalog(`${MAIN_API}/api/swiftflow/movie/${id}`, resolveRequest())
         .then(response => response.data as SwiftflowMovieResponse)
         .catch(error => {
           console.error('Error fetching SwiftFlow source:', error);
@@ -990,7 +1008,7 @@ const WatchMovie: React.FC = () => {
         }).finally(() => setLoadingSwiftflow(false));
 
       // =========== CHECK VIPER (CPASMAL) SOURCE ===========
-      const viperPromise: Promise<ViperMovieResponse | null> = axios.get(`${MAIN_API}/api/cpasmal/movie/${id}`, resolveRequest())
+      const viperPromise: Promise<ViperMovieResponse | null> = fetchCatalog(`${MAIN_API}/api/cpasmal/movie/${id}`, resolveRequest())
         .then(response => response.data as ViperMovieResponse)
         .catch(error => {
           console.error('Error fetching Viper/Cpasmal source:', error);
@@ -1072,8 +1090,11 @@ const WatchMovie: React.FC = () => {
       // =========== TRAITEMENT DES RÉSULTATS DE FIREBASE/FREMBED ===========
       const customLinks = availabilityResult.customLinks || [];
       const uqloadLink: string | undefined = customLinks.find((link: string) => link.toLowerCase().includes('uqload.'));
+      const embedOriginLink: string | undefined = customLinks.find(isEmbedOriginUrl);
       const fetchedMp4Sources: { url: string; label?: string; language?: string; isVip?: boolean }[] = availabilityResult.mp4Links || [];
-      const isFrembedAvailable = availabilityResult.frembedAvailable;
+      // Le lecteur Frembed est construit avec l'ID du film parent : il lirait
+      // la version cinéma.
+      const isFrembedAvailable = movieVersion ? false : availabilityResult.frembedAvailable;
 
       setMp4Sources(fetchedMp4Sources);
       setCustomSources(customLinks);
@@ -2017,9 +2038,9 @@ const WatchMovie: React.FC = () => {
           }
           case 'custom': {
             if (!customLinks.length) return false;
-            // Un lien Uqload uploadé en custom passe devant les autres
+            // Lecteur gardé en mémoire, puis embedorigin, puis Uqload
             setSelectedSource('custom');
-            setEmbedUrl(uqloadLink ?? customLinks[0]);
+            setEmbedUrl(pickCustomLink(customLinks) ?? customLinks[0]);
             setEmbedType('custom');
             currentSourceRef.current = 'custom';
             return true;
@@ -2067,7 +2088,12 @@ const WatchMovie: React.FC = () => {
       // Lien Uqload uploadé en custom : il passe en tête quand aucun lecteur
       // direct (HLS / Viblix) n'existe et que l'user n'a pas réglé sa priorité.
       let uqloadPromoted = false;
-      if (uqloadLink && finalHlsSources.length === 0 && fetchedMp4Sources.length === 0) {
+      if (
+        (embedOriginLink || uqloadLink)
+        && finalHlsSources.length === 0
+        && fetchedMp4Sources.length === 0
+        && !hasRememberedPlayer()
+      ) {
         const prefs = getSourcePriorityPrefs();
         const userOrderIds = prefs.categories.moviesTv.sourceOrder.map((s) => s.id);
         const defaultOrderIds = buildDefaults().categories.moviesTv.sourceOrder.map((s) => s.id);
@@ -2076,7 +2102,7 @@ const WatchMovie: React.FC = () => {
           || userOrderIds.some((sid, i) => sid !== defaultOrderIds[i]);
         if (!hasUserCustomized) {
           setSelectedSource('custom');
-          setEmbedUrl(uqloadLink);
+          setEmbedUrl(embedOriginLink ?? uqloadLink ?? null);
           setEmbedType('custom');
           currentSourceRef.current = 'custom';
           setOnlyVostfrAvailable(false);
@@ -2121,8 +2147,13 @@ const WatchMovie: React.FC = () => {
         for (let i = 0; i < availList.length; i++) {
           const pick = pickAutoSelectedSource(availList);
           if (!pick) break;
+          // Tout choix d'un lecteur embed lance embedorigin s'il existe, sauf
+          // si ce choix vient du dernier lecteur gardé en mémoire.
+          const target = embedOriginLink && EMBED_SOURCE_IDS.has(pick) && !isRememberedPick(pick)
+            ? 'custom'
+            : pick;
           // eslint-disable-next-line no-await-in-loop
-          if (await applyEmbedConfig(pick)) {
+          if (await applyEmbedConfig(target)) {
             applied = true;
             break;
           }
@@ -3001,7 +3032,7 @@ const WatchMovie: React.FC = () => {
           {/* Iframe pour les sources FStream */}
           <iframe
             key={`iframe-fstream-${embedUrl || ''}`}
-            src={embedUrl || ''}
+            src={safeEmbedUrl(embedUrl)}
             className="w-full h-full border-0"
             allowFullScreen
             referrerPolicy={(embedUrl || '').toLowerCase().includes('ezplayer') ? 'no-referrer' : 'strict-origin-when-cross-origin'}
@@ -3856,7 +3887,7 @@ const WatchMovie: React.FC = () => {
           {/* Iframe pour les sources embed */}
           <iframe
             key={`iframe-${embedType || ''}-${embedUrl || ''}`}
-            src={embedUrl || ''}
+            src={safeEmbedUrl(embedUrl)}
             className="w-full h-full border-0"
             allowFullScreen
             referrerPolicy={(embedUrl || '').toLowerCase().includes('ezplayer') ? 'no-referrer' : 'strict-origin-when-cross-origin'}
@@ -4091,4 +4122,19 @@ const WatchMovie: React.FC = () => {
   );
 };
 
-export default WatchMovie;
+// Redirige les anciens ID TMDB supprimés (liens partagés, historique) vers
+// la version qui les remplace, et une version inconnue vers le film seul.
+const WatchMovieRoute: React.FC = () => {
+  const { tmdbid: encodedId, version: versionKey } = useParams<{ tmdbid: string; version?: string }>();
+  const id = encodedId ? getTmdbId(encodedId) : null;
+  const retired = getVersionForRetiredId(id);
+  if (retired) {
+    return <Navigate replace to={buildWatchMoviePath(encodeId(retired.tmdbId), retired.key)} />;
+  }
+  if (encodedId && versionKey && !getMovieVersion(id, versionKey)) {
+    return <Navigate replace to={buildWatchMoviePath(encodedId)} />;
+  }
+  return <WatchMovie />;
+};
+
+export default WatchMovieRoute;

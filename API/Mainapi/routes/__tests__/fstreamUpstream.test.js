@@ -59,6 +59,7 @@ test('les recherches FStream se mutualisent en préservant la variante AJAX sans
   const context = vm.createContext({
     searchCache: createFStreamSearchCache(), FSTREAM_BASE_URL: 'https://source.test',
     FSTREAM_SEARCH_URL: 'https://source.test/engine/ajax/search.php', URLSearchParams, cheerio,
+    refreshStep: () => {},
     axiosFStreamRequest: async config => {
       calls++;
       assert.equal(config.data.get('query'), 'Serie Test');
@@ -99,7 +100,8 @@ test('les données statiques gardent leur version pendant 30 secondes puis voien
     extractPageIdFromUrl: () => '42', extractBaseUrlFromLink: () => 'https://source.test',
     getShuffledAllProxies: () => [{ type: 'socks5' }],
     withFStreamProxy: (_entry, request) => request({}),
-    buildFStreamCookieHeader: () => '', parseEpisodesPayload: value => value,
+    buildFStreamCookieHeader: () => '', sendPastFStreamChallenge: send => send(),
+    parseEpisodesPayload: value => value, refreshStep: () => {},
     axios: async config => { urls.push(config.url); return { status: 200, data: { episodes: time >= 30_000 ? [1, 2] : [1] } }; },
     console,
   });

@@ -175,7 +175,7 @@ const DonButton: React.FC = () => {
                       </a>
                     </p>
                     <p className="text-sm">
-                      📱 <span className="font-medium">Telegram:</span> MysticSaba
+                      📱 <span className="font-medium">Telegram:</span> MysticSaba2
                     </p>
                   </div>
                 </div>

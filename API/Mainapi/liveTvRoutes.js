@@ -256,7 +256,10 @@ const TVMIO_CATEGORIES = {};
 // EU endpoint (defra) is used by default for European users.
 // Fallback API base — normally auto-resolved at runtime (getFctvApiBase); this
 // hardcoded value is used only when the cache is empty / auto-resolve fails.
-const FCTV_API_BASE_URL = "https://apis-data-defra10.tcore131ybdf.ru";
+const FCTV_API_BASE_URL = "https://apis-data-defra10.tcpwe138stya.ru";
+// Dernier site connu, essayé quand la page bio-link ne donne plus de lien.
+const FCTV_FRONT_FALLBACK_URL =
+  process.env.FCTV_FRONT_URL || "https://www.fctv33hd.press";
 // Fallback embed player origin — normally auto-resolved (getFctvPlayerBaseUrl).
 // Used for the iframe player + referer when the lookup is unavailable.
 const FCTV_PLAYER_BASE_URL = "https://zac07eo.mpipzni2naturally32kistomach.ru";
@@ -281,22 +284,39 @@ const FCTV_TOKEN_KEYSTREAM = Buffer.from(
 const FCTV_LANGUAGE_FR = 6;
 const FCTV_DEFAULT_SITE_TYPE = 2001;
 
+// Domaine des logos lu sur le site (LOGOS_URL), mis à jour avec l'API.
+let fctvLogosHostCache = null;
+
+// Les logos ne suivent pas l'API : elle renvoie un domaine de logos déjà mort.
+// À défaut de LOGOS_URL, on prend logos1.<domaine de l'API>, qui a toujours
+// tourné avec elle.
+function getFctvLogosHost() {
+  if (fctvLogosHostCache) return fctvLogosHostCache;
+  try {
+    const apiHost = new URL(fctvApiBaseCache || FCTV_API_BASE_URL).hostname;
+    return `logos1.${apiHost.split(".").slice(1).join(".")}`;
+  } catch {
+    return "logos1.tcpwe138stya.ru";
+  }
+}
+
 // Les logos FCTV ne sont plus proxifies : le proxy partage a ete retire pour
 // cause de faille SSRF. On se contente de corriger le domaine mort.
 function proxifyFctvImage(url) {
   if (!url) return "";
 
   // Replace dead domains with the working one
+  const logosHost = getFctvLogosHost();
   let fixedUrl = url;
   try {
     const urlObj = new URL(url);
     if (urlObj.hostname.startsWith("logos1.")) {
-      urlObj.hostname = "logos1.tcore131ybdf.ru";
+      urlObj.hostname = logosHost;
     }
     fixedUrl = urlObj.toString();
   } catch (e) {
     // fallback if it's not a full URL
-    fixedUrl = url.replace(/logos1\.[a-z0-9]+\.(cfd|ru|com)/g, "logos1.tcore131ybdf.ru");
+    fixedUrl = url.replace(/logos1\.[a-z0-9]+\.(cfd|ru|com)/g, logosHost);
   }
 
   return fixedUrl;
@@ -560,47 +580,45 @@ function northliveEmbedUrl(slug) {
 }
 
 // === VAVOO (FREE source — direct HLS, no extension / no proxy / no VIP) ======
-// Vavoo exposes IPTV channels grouped by country/region (MediaHubMX API).
-// The catalog is a POST (mediahubmx-catalog.json, paginated via `nextCursor`);
-// each play URL resolves to a raw .m3u8 (mediahubmx-resolve.json) that the
-// client plays as-is (_directPlay) — no proxy, no headers. Groups double as UI
+// Vavoo exposes IPTV channels grouped by country/region. Groups double as UI
 // categories. Refreshed hourly, cached to disk.
 //
-// L'API vit désormais sur kool.to : vavoo.to renvoie 451 (« Unavailable For
-// Legal Reasons ») depuis la plupart des IP, y compris derrière les proxies
-// allemands où il n'est que partiellement joignable (mélange 200/451/503).
-// kool.to et kool.ws répondent tous deux 200 en direct, sans proxy.
+// Le service vit désormais sur geil.to (kool.to et vavoo.to répondent 500 à
+// tout appel). geil.to sert un « addon » MediaHubMX v2 : un manifeste racine
+// `/mhub-addon.json` liste des sous-addons, dont la TV en direct sous `/live`.
+// Tout passe en GET, avec les paramètres dans la query string :
+// - catalogue : `/live/catalog/live/channels.json?filter[group]=France&cursor=N`
+//   (300 chaînes par page, `nextCursor` numérique, `id` à la racine de l'item) ;
+// - résolution : `/live/resolve?url=<item.url>` → `{ url, format: "hls" }`.
+// Le flux résolu est un .m3u8 en http sur IP nue : le lecteur le fait passer
+// par le proxy (contenu mixte), comme avant.
 //
 // L'URL de lecture envoyée au resolver est une donnée, pas une convention : le
-// catalogue la fournit déjà par chaîne dans `item.url`. Ce champ est une
-// étiquette, pas un lien — un GET dessus redirige vers kool.ws puis renvoie
-// 404, alors que la même chaîne en payload résout parfaitement. Le resolver
-// compare simplement le DOMAINE à sa liste de règles : kool.to et vavoo.to y
-// figurent, kool.ws non (d'où 500 « No resolver found »), et le segment de
-// chemin n'entre pas en jeu. Le préfixe n'est donc jamais reconstruit ni
-// configuré : il est lu dans le catalogue, ce qui suit tout seul le prochain
-// changement de domaine.
-const VAVOO_BASE = process.env.VAVOO_BASE_URL || "https://kool.to";
-const VAVOO_PLAY_PREFIX_CACHE_KEY = "vavoo_play_prefix_v1";
+// catalogue la fournit par chaîne dans `item.url`, et le resolver ne
+// l'accepte que si elle suit son motif (`*/live/play/*`). Le préfixe est donc
+// lu dans le catalogue plutôt que reconstruit, ce qui suit tout seul le
+// prochain changement de domaine.
+const VAVOO_BASE = String(process.env.VAVOO_BASE_URL || "https://geil.to").replace(/\/+$/, "");
+const VAVOO_LIVE_ADDON_URL = `${VAVOO_BASE}/live`;
+const VAVOO_PLAY_PREFIX_CACHE_KEY = "vavoo_play_prefix_v2";
 const VAVOO_PLAY_PREFIX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const VAVOO_CATALOG_URL = `${VAVOO_BASE}/mediahubmx-catalog.json`;
-const VAVOO_RESOLVE_URL = `${VAVOO_BASE}/mediahubmx-resolve.json`;
+const VAVOO_CATALOG_URL = `${VAVOO_LIVE_ADDON_URL}/catalog/live/channels.json`;
+const VAVOO_RESOLVE_URL = `${VAVOO_LIVE_ADDON_URL}/resolve`;
+// v5 : identifiants geil.to (ceux de kool.to ne se résolvent plus).
+const VAVOO_GROUP_CACHE_VERSION = "v5";
 const VAVOO_HEADERS = {
-  "User-Agent": "MediaHubMX/2",
-  "Content-Type": "application/json",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
   Accept: "application/json",
 };
 
-// Le pool SOCKS5 allemand ne sert plus que de repli : chaque appel part en
-// direct, et ne bascule sur les proxies (avec suivi de santé dédié) que si
-// l'origine bloque. Resolve ajoute l'impersonation Chrome via CycleTLS.
-// Playback stays direct — the resolved m3u8 is fetched client-side (in-region).
+// Le pool SOCKS5 allemand ne sert que de repli : chaque appel part en direct,
+// et ne bascule sur les proxies (avec suivi de santé dédié) que si l'origine
+// bloque. Playback stays direct — the resolved m3u8 is fetched client-side.
 const {
   pickVavooSocks5Proxy,
   markVavooProxyAsHealthy,
   markVavooProxyAsFailed,
   getProxyAgent,
-  makeVavooBrowserRequest,
 } = require("./utils/proxyManager");
 
 const vavooMetadataService = createVavooMetadataService({
@@ -609,18 +627,33 @@ const vavooMetadataService = createVavooMetadataService({
   writeCache: (key, value) => saveToCache(generateCacheKey(key), value),
 });
 
-async function vavooPost(url, payload, options = {}) {
+function vavooGroupCacheKey(group) {
+  return generateCacheKey(`vavoo_group_${group}_${VAVOO_GROUP_CACHE_VERSION}`);
+}
+
+// Paramètres de catalogue au format attendu par l'addon : les objets sont
+// aplatis en `clé[sous-clé]`, comme le fait le client web de geil.to.
+function buildVavooCatalogParams(group, cursor) {
+  const params = {
+    language: "fr",
+    region: "FR",
+    sort: "name",
+    "filter[group]": group,
+  };
+  if (cursor) params.cursor = String(cursor);
+  return params;
+}
+
+async function vavooGet(url, params, options = {}) {
   const timeout = Number(options.timeout) || 4_000;
-  const requestHeaders = options.headers && typeof options.headers === "object"
-    ? options.headers
-    : {};
   let lastErr;
 
   // Chemin nominal : sans proxy. Les proxies allemands sont plus lents et
   // moins fiables que l'origine, on ne les sollicite qu'en repli.
   try {
-    const resp = await axios.post(url, payload, {
-      headers: { ...VAVOO_HEADERS, ...requestHeaders },
+    const resp = await axios.get(url, {
+      params,
+      headers: VAVOO_HEADERS,
       timeout,
       proxy: false,
     });
@@ -646,8 +679,9 @@ async function vavooPost(url, payload, options = {}) {
       continue;
     }
     try {
-      const resp = await axios.post(url, payload, {
-        headers: { ...VAVOO_HEADERS, ...requestHeaders },
+      const resp = await axios.get(url, {
+        params,
+        headers: VAVOO_HEADERS,
         timeout,
         httpAgent: agent,
         httpsAgent: agent,
@@ -667,13 +701,20 @@ const VAVOO_SLUG_TO_GROUP = Object.fromEntries(
   VAVOO_GROUPS.map((g) => [vavooGroupSlug(g), g]),
 );
 
-// `item.url` vaut « https://kool.to/kool-iptv/play/<id> » : on n'en garde que
-// le préfixe, l'id étant reconstruit à la résolution (les doublons de nom
+// geil.to place l'identifiant à la racine de l'item ; l'ancien format
+// MediaHubMX le rangeait dans `ids.id`.
+function vavooItemId(item) {
+  const id = item?.id ?? item?.ids?.id;
+  return id == null || id === "" ? null : String(id);
+}
+
+// `item.url` vaut « https://geil.to/live/play/<id> » : on n'en garde que le
+// préfixe, l'id étant reconstruit à la résolution (les doublons de nom
 // portent un suffixe `~n` côté Movix qui n'existe pas en amont).
 function extractVavooPlayPrefix(items) {
   for (const item of items) {
     const url = typeof item?.url === "string" ? item.url : "";
-    const id = item?.ids?.id;
+    const id = vavooItemId(item);
     if (!id || !url.startsWith("https://") || !url.endsWith(`/${id}`)) continue;
     return url.slice(0, url.length - id.length);
   }
@@ -699,12 +740,10 @@ async function getVavooPlayPrefix() {
   if (typeof cached === "string" && cached.startsWith("https://")) return cached;
 
   try {
-    const data = await vavooPost(VAVOO_CATALOG_URL, {
-      language: "fr", region: "FR", catalogId: "iptv", id: "",
-      adult: false, search: "", sort: "name",
-      filter: { group: VAVOO_GROUPS[0] },
-      cursor: 0,
-    });
+    const data = await vavooGet(
+      VAVOO_CATALOG_URL,
+      buildVavooCatalogParams(VAVOO_GROUPS[0], null),
+    );
     return await rememberVavooPlayPrefix(
       Array.isArray(data?.items) ? data.items : [],
     );
@@ -720,7 +759,7 @@ async function fetchVavooGroup(group) {
 }
 
 async function loadVavooGroup(group) {
-  const cacheKey = generateCacheKey(`vavoo_group_${group}_v4`);
+  const cacheKey = vavooGroupCacheKey(group);
   const disk = await getFromCache(cacheKey, 1); // 1h
   if (disk && Array.isArray(disk) && disk.length) return disk;
   const metadataIndex = await vavooMetadataService.getIndexForGroup(group);
@@ -733,14 +772,7 @@ async function loadVavooGroup(group) {
     // hard cap: 50 pages guards against a broken nextCursor loop
     let data;
     try {
-      const payload = {
-        language: "fr", region: "FR", catalogId: "iptv", id: "",
-        adult: false, search: "", sort: "name",
-        filter: { group },
-        cursor: cursor ? Number(cursor) : 0
-      };
-
-      data = await vavooPost(VAVOO_CATALOG_URL, payload);
+      data = await vavooGet(VAVOO_CATALOG_URL, buildVavooCatalogParams(group, cursor));
     } catch (e) {
       const failureStatus = e.response?.status || e.code || "unknown";
       console.warn(
@@ -754,7 +786,7 @@ async function loadVavooGroup(group) {
     await rememberVavooPlayPrefix(items);
 
     for (const it of items) {
-      const baseId = it?.ids?.id;
+      const baseId = vavooItemId(it);
       if (!baseId) continue;
 
       const name = it.name || baseId;
@@ -769,7 +801,10 @@ async function loadVavooGroup(group) {
       const uniqueId = count === 1 ? baseId : `${baseId}~${count}`;
 
       const metadata = findVavooMetadata(metadataIndex, group, name);
-      const nativeLogo = isHttpsArtworkUrl(it.logo) ? it.logo : null;
+      // Les logos de geil.to sont relatifs (`images.logo`) et renvoient 404 :
+      // seuls les liens https absolus sont gardés.
+      const rawLogo = it.logo || it.images?.logo;
+      const nativeLogo = isHttpsArtworkUrl(rawLogo) ? rawLogo : null;
       const artwork = metadata?.logo || nativeLogo;
       channels.push({
         id: `vavoo_${uniqueId}`,
@@ -803,37 +838,10 @@ async function getVavooChannels(catalogId) {
   return fetchVavooGroup(group);
 }
 
-function buildVavooResolveHeaders(id) {
-  return {
-    Accept: "*/*",
-    // CycleTLS ne décompresse ni brotli ni zstd : annoncer autre chose que gzip
-    // ramène un corps binaire, JSON.parse échoue et le proxy est marqué en
-    // panne à tort (puis mis en quarantaine 10 min).
-    "Accept-Encoding": "gzip",
-    "Accept-Language": "fr-FR,fr;q=0.9",
-    "Cache-Control": "no-cache",
-    "Content-Type": "application/json; charset=utf-8",
-    Origin: VAVOO_BASE,
-    Pragma: "no-cache",
-    Priority: "u=1, i",
-    Referer: `${VAVOO_BASE}/watch?live=${id}`,
-    "Sec-CH-UA": '"Not=A?Brand";v="99", "Brave";v="151", "Chromium";v="151"',
-    "Sec-CH-UA-Mobile": "?0",
-    "Sec-CH-UA-Platform": '"Windows"',
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-GPC": "1",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
-  };
-}
-
-// Resolve a channel id to its raw .m3u8 (played client-side as-is).
-// Each resolve lands on a random edge: usually https on a rotating domain,
-// sometimes plain http on a bare IP — unplayable from the https site (mixed
-// content). Re-resolve up to 5 times to get an https URL; if none shows up,
-// return the http one as a last resort. Chaque resolve passe par CycleTLS en
-// direct, et ne retombe sur le pool SOCKS5 allemand que si l'origine bloque.
+// Resolve a channel id to its raw .m3u8 (played client-side).
+// geil.to renvoie un .m3u8 en http sur IP nue : le lecteur le relaie par le
+// proxy (contenu mixte). Une URL https éventuelle reste préférée ; une
+// seconde tentative couvre une réponse vide ou une erreur passagère.
 async function resolveVavooStream(channelId) {
   let id = channelId.slice("vavoo_".length);
   if (id.includes("~")) {
@@ -843,29 +851,29 @@ async function resolveVavooStream(channelId) {
   const playPrefix = await getVavooPlayPrefix();
   if (!playPrefix) return null;
   const playUrl = `${playPrefix}${id}`;
-  const headers = buildVavooResolveHeaders(id);
   let httpFallback = null;
 
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     let data;
     try {
-      data = await makeVavooBrowserRequest(
+      data = await vavooGet(
         VAVOO_RESOLVE_URL,
-        { language: "de", region: "DE", url: playUrl },
-        { timeout: 4, headers },
+        { language: "fr", region: "FR", url: playUrl },
+        { timeout: 6_000 },
       );
     } catch (e) {
-      // CycleTLS already exhausted the dedicated German proxy candidates.
+      // vavooGet a déjà essayé l'origine puis le pool SOCKS5 allemand.
       const failureStatus = e.response?.status || e.code || "unknown";
       console.warn(`[VAVOO] resolve failed; status=${failureStatus}`);
       break;
     }
     const values = Array.isArray(data) ? data : [];
     const resolvedUrl = values[0]?.url || data?.url || data?.data?.url || null;
-    if (!resolvedUrl) continue;
+    if (typeof resolvedUrl !== "string" || !resolvedUrl) continue;
     if (resolvedUrl.startsWith("https://")) return resolvedUrl;
-    if (!httpFallback && resolvedUrl.startsWith("http://")) {
+    if (resolvedUrl.startsWith("http://")) {
       httpFallback = resolvedUrl;
+      break;
     }
   }
 
@@ -1324,16 +1332,15 @@ async function loadFctvApiBase() {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
   try {
     // 1) bio-link page -> current front domain (the "FCTV33" button).
-    const hub = await axios.get(FCTV_BIOLINK_URL, {
-      headers: { "User-Agent": ua },
-      timeout: 10000,
-      responseType: "text",
-      transformResponse: [(d) => d],
-    });
-    const front = [...String(hub.data).matchAll(/<a[^>]+href="([^"]+)"/gi)]
-      .map((mm) => mm[1])
-      .find((h) => /fctv33hd/i.test(h));
-    if (!front) throw new Error("front domain not found on bio-link page");
+    let front;
+    try {
+      front = await findFctvFrontUrl(ua);
+    } catch (error) {
+      // La page relais peut changer de forme : le dernier domaine connu reste
+      // un meilleur pari que l'ancienne API figée.
+      console.warn(`[FCTV] bio-link: ${error.message}, essai de ${FCTV_FRONT_FALLBACK_URL}`);
+      front = FCTV_FRONT_FALLBACK_URL;
+    }
 
     // 2) front /fr -> API base embedded (unicode-escaped) in the SSR payload.
     const idx = await axios.get(front.replace(/\/+$/, "") + "/fr", {
@@ -1348,6 +1355,9 @@ async function loadFctvApiBase() {
     const html = String(idx.data).replace(/\\u002[fF]/g, "/");
     const m = html.match(/https?:\/\/apis-data-defra\d+\.[a-z0-9.-]+/i);
     if (!m) throw new Error("API base not found on front page");
+    // LOGOS_URL du site : l'API renvoie des logos sur un domaine déjà mort.
+    const logos = html.match(/https?:\/\/(logos1\.[a-z0-9.-]+)/i);
+    if (logos) fctvLogosHostCache = logos[1].toLowerCase();
     fctvApiBaseCache = m[0].replace(/\/+$/, "");
     fctvApiBaseCacheTime = Date.now();
     console.log(`[FCTV] Auto API base: ${fctvApiBaseCache} (via ${front})`);
@@ -1356,6 +1366,43 @@ async function loadFctvApiBase() {
     console.warn(`[FCTV] API base auto-fetch failed: ${error.message}`);
     throw error;
   }
+}
+
+// La page bio-link renvoie parfois vers une autre page du même service
+// (hubu.ru/fctvlink -> hubu.ru/fclink) avant le bouton du site : on suit ces
+// relais sur deux niveaux.
+async function findFctvFrontUrl(ua) {
+  const visited = new Set();
+  let pages = [FCTV_BIOLINK_URL];
+  for (let depth = 0; depth < 3 && pages.length; depth++) {
+    const relays = [];
+    for (const pageUrl of pages) {
+      if (visited.has(pageUrl)) continue;
+      visited.add(pageUrl);
+      const hub = await axios.get(pageUrl, {
+        headers: { "User-Agent": ua },
+        timeout: 10000,
+        responseType: "text",
+        transformResponse: [(d) => d],
+      });
+      const hrefs = [...String(hub.data).matchAll(/<a[^>]+href="([^"]+)"/gi)].map((mm) => mm[1]);
+      const front = hrefs.find((h) => /fctv33hd/i.test(h));
+      if (front) return front;
+      const origin = new URL(pageUrl).origin;
+      for (const href of hrefs) {
+        try {
+          const target = new URL(href, pageUrl);
+          if (target.origin === origin && /^\/[a-z0-9_-]+\/?$/i.test(target.pathname)) {
+            relays.push(target.origin + target.pathname);
+          }
+        } catch {
+          // Lien illisible : ignoré.
+        }
+      }
+    }
+    pages = relays.filter((url) => !visited.has(url)).slice(0, 5);
+  }
+  throw new Error("front domain not found on bio-link page");
 }
 
 // Auto-discover the current player origin (used for the embed iframe AND as the
@@ -2068,7 +2115,8 @@ router.get("/catalog/:type/:catalogId", async (req, res) => {
     const catalogCacheVersion = catalogId.startsWith("matches_")
       ? "v3"
       : catalogId.startsWith("vavoo_")
-        ? "v7"
+        ? "v8" // v8 = identifiants geil.to
+
         : catalogId.startsWith("northlive_")
           ? "v5"
           : "v1";
@@ -2163,11 +2211,15 @@ router.get("/catalog/:type/:catalogId", async (req, res) => {
 
       return catalog;
     }, async () => {
-      const stale = await getFromCache(cacheKey, catalogId.startsWith("streamed_") ? 5 / 60 : 24 * 365);
+      // Une liste de matchs de plus de 3 h annonce en direct des rencontres
+      // finies depuis longtemps : mieux vaut une liste vide.
+      const staleMaxHours = catalogId.startsWith("streamed_") ? 5 / 60
+        : catalogId.startsWith("matches_") ? 3 : 24 * 365;
+      const stale = await getFromCache(cacheKey, staleMaxHours);
       if (stale && Array.isArray(stale.metas)) return stale;
       if (catalogId.startsWith("vavoo_")) {
         const group = VAVOO_SLUG_TO_GROUP[catalogId.slice("vavoo_".length)];
-        const channels = group && await getFromCache(generateCacheKey(`vavoo_group_${group}_v4`), 24 * 365);
+        const channels = group && await getFromCache(vavooGroupCacheKey(group), 24 * 365);
         if (channels?.length) return { metas: channels };
       }
       // Même contrat à froid pour ces sources, mais sans publier le vide d'une panne.

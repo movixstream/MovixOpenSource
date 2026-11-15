@@ -11,10 +11,14 @@ import AdFreePlayerAds from '../../components/AdFreePlayerAds';
 import AdWaitingScreen from '@/components/AdWaitingScreen';
 import { getAdPopupMode } from '../../utils/adPopupMode';
 import { openInNewTab } from '../../utils/openInNewTab';
+import { safeEmbedUrl } from '../../utils/safeEmbedUrl';
 import { extractM3u8FromEmbed, extractUqloadFile, extractVidzyM3u8, extractFsvidM3u8, registerServerResolvedSources, type M3u8Result } from '../../utils/extractM3u8';
 import type { SeekStreamingHlsSource } from '../../utils/seekStreamingCandidates';
 import { runExtractionPass, type ExtractionPassResult } from '../../utils/runExtractionPass';
 import { pickAutoSelectedSource, sortHostersByPriority, hosterKeyOf, type SourceAvailability } from '../../utils/sourceAutoSelect';
+import {
+  isEmbedOriginUrl, EMBED_SOURCE_IDS, isRememberedPick, hasRememberedPlayer, pickCustomLink,
+} from '../../utils/embedOrigin';
 import { getSourcePriorityPrefs, buildDefaults, subscribeToPriorityChanges } from '../../utils/sourcePriorityPrefs';
 import { detectHoster } from '../../utils/hosterRegistry';
 import { setLastPlayer } from '../../utils/lastPlayerPref';
@@ -161,6 +165,10 @@ interface FStreamTvResponse {
 }
 
 
+
+// Séries pour lesquelles Lynx (Wiflix) et Viper (Cpasmal) sont coupées :
+// leurs liens y sont mauvais. Clé = ID TMDB de la série.
+const LYNX_VIPER_DISABLED_TV_IDS = new Set(['96677']); // Lupin
 
 // Interface pour la source Wiflix TV (Lynx)
 interface WiflixTvResponse {
@@ -1439,8 +1447,10 @@ const WatchTv: React.FC = () => {
         })();
 
         // ========== CHECK WIFLIX (LYNX) SOURCE ==========
+        const lynxViperDisabled = LYNX_VIPER_DISABLED_TV_IDS.has(String(id));
         const wiflixPromise = (async () => {
           try {
+            if (lynxViperDisabled) return null;
             const wiflixResponse = await axios.get(`${MAIN_API}/api/wiflix/tv/${id}/${seasonNumber}`,
               serverResolveRequest({ episode: episodeNumber }));
             return wiflixResponse.data;
@@ -1483,6 +1493,7 @@ const WatchTv: React.FC = () => {
         // ========== CHECK VIPER SOURCE ==========
         const viperPromise = (async () => {
           try {
+            if (lynxViperDisabled) return null;
             const viperResponse = await axios.get(`${MAIN_API}/api/cpasmal/tv/${id}/${seasonNumber}/${episodeNumber}`,
               serverResolveRequest());
             return viperResponse.data;
@@ -2283,6 +2294,8 @@ const WatchTv: React.FC = () => {
         const uqloadLink = customLinksResult.customLinks?.find((link: string) =>
           link.toLowerCase().includes('uqload.')
         );
+        // embedorigin passe devant tous les autres lecteurs embed.
+        const embedOriginLink = customLinksResult.customLinks?.find(isEmbedOriginUrl);
 
         // Helper : applique la config d'embed pour l'id choisi. Close sur toutes les
         // variables locales de `initialFetch`. Retourne true si géré.
@@ -2581,7 +2594,8 @@ const WatchTv: React.FC = () => {
             case 'custom': {
               if (!customLinksResult.customLinks || !customLinksResult.customLinks.length) return false;
               // Uqload passe devant les autres liens custom ; sinon 1er custom link
-              const url = uqloadLink ?? customLinksResult.customLinks[0];
+              // Lecteur gardé en mémoire, puis embedorigin, puis Uqload
+              const url = pickCustomLink(customLinksResult.customLinks) ?? customLinksResult.customLinks[0];
               console.log(uqloadLink
                 ? `✅ Selecting UQLOAD (Custom) — URL: ${url}`
                 : '✅ Selecting CUSTOM as source');
@@ -2638,7 +2652,12 @@ const WatchTv: React.FC = () => {
         //    est classé bien avant `custom` dans l'ordre par défaut ;
         //  - si l'user a customisé l'ordre (pin ou drag), on laisse le picker.
         let uqloadPromoted = false;
-        if (uqloadLink && finalHlsSources.length === 0 && fetchedMp4Sources.length === 0) {
+        if (
+          (embedOriginLink || uqloadLink)
+          && finalHlsSources.length === 0
+          && fetchedMp4Sources.length === 0
+          && !hasRememberedPlayer()
+        ) {
           const prefs = getSourcePriorityPrefs();
           const userOrderIds = prefs.categories.moviesTv.sourceOrder.map((s) => s.id);
           const defaultOrderIds = buildDefaults().categories.moviesTv.sourceOrder.map((s) => s.id);
@@ -2679,7 +2698,12 @@ const WatchTv: React.FC = () => {
           for (let i = 0; i < availList.length; i++) {
             const pick = pickAutoSelectedSource(availList);
             if (!pick) break;
-            if (applyEmbedConfig(pick)) {
+            // Tout choix d'un lecteur embed lance embedorigin s'il existe, sauf
+            // si ce choix vient du dernier lecteur gardé en mémoire.
+            const target = embedOriginLink && EMBED_SOURCE_IDS.has(pick) && !isRememberedPick(pick)
+              ? 'custom'
+              : pick;
+            if (applyEmbedConfig(target)) {
               applied = true;
               break;
             }
@@ -4310,7 +4334,7 @@ const WatchTv: React.FC = () => {
           {/* The Embed Iframe */}
           <iframe
             key={`iframe-${embedType || ''}-${embedUrl || ''}`}
-            src={embedUrl || ''}
+            src={safeEmbedUrl(embedUrl)}
             className="w-full h-full border-0"
             allowFullScreen
             referrerPolicy={(embedUrl || '').toLowerCase().includes('ezplayer') ? 'no-referrer' : 'strict-origin-when-cross-origin'}

@@ -84,6 +84,42 @@ test('la chauffe exclut les anciens appels et remet les sockets persistants à l
   assert.equal(collector.recording, false, 'un arrêt est définitif');
 });
 
+test('le travail lancé après la réponse et les chaînes de la chauffe ne sont pas attribués à la route', async () => {
+  const collector = createCollector({ paused: true });
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  // Chaîne commencée pendant la chauffe et qui appelle après le début de la mesure.
+  const warmupChain = collector.withSource('route GET /api/wiflix/movie/:id', async () => {
+    await gate;
+    collector.start({ kind: 'http', destination: 'flemmix.test', operation: 'POST flemmix.test/' }).finish({ status: 200 });
+  });
+  collector.begin();
+  release(); await warmupChain;
+  await collector.withSource('route GET /api/wiflix/movie/:id', async (store) => {
+    collector.start({ kind: 'http', destination: 'flemmix.test', operation: 'GET flemmix.test/' }).finish({ status: 200 });
+    store.responded = true;
+    // Rafraîchissement lancé sans attente après la réponse 202.
+    await Promise.resolve();
+    collector.start({ kind: 'http', destination: 'flemmix.test', operation: 'GET flemmix.test/' }).finish({ status: 200 });
+  });
+  await collector.withSource('route GET /api/tmdb/movie/:id', async (store) => {
+    let headersSent = false;
+    store.isResponded = () => headersSent;
+    collector.start({ kind: 'redis', destination: 'redis', operation: 'GET tmdb' }).finish();
+    headersSent = true;
+    collector.start({ kind: 'redis', destination: 'redis', operation: 'GET tmdb' }).finish();
+  });
+  const sources = collector.snapshot().groups.map((row) => `${row.operation} <- ${row.source}`).sort();
+  assert.deepEqual(sources, [
+    'GET flemmix.test/ <- background after route GET /api/wiflix/movie/:id',
+    'GET flemmix.test/ <- route GET /api/wiflix/movie/:id',
+    'GET tmdb <- background after route GET /api/tmdb/movie/:id',
+    'GET tmdb <- route GET /api/tmdb/movie/:id',
+    'POST flemmix.test/ <- background/startup',
+  ]);
+  collector.stop();
+});
+
 test('detail overflow retains destinations, protocol totals and each heavy call attribution', () => {
   const collector = createCollector({ maxGroups: 1 });
   const calls = [

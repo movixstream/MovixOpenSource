@@ -79,6 +79,53 @@ test('l’échec de la requête d’essai rouvre la pause pour cinq minutes', as
   await assert.rejects(breaker.run(async () => 'x'), error => error.retryAfterMs === 5 * 60 * 1000);
 });
 
+test('avec maxConcurrent, une source muette ne reçoit que ce nombre d’appels avant la pause', async () => {
+  const { breaker } = fixture({ maxConcurrent: 3 });
+  let started = 0;
+  let fail;
+  const silentSource = new Promise((_, reject) => { fail = reject; });
+  const calls = Array.from({ length: 8 }, () => breaker.run(() => { started++; return silentSource; }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(started, 3);
+  assert.equal(breaker.snapshot().queued, 5);
+  fail(timeout());
+  const results = await Promise.allSettled(calls);
+  assert.equal(started, 3);
+  assert.deepEqual(results.map(result => result.reason?.code),
+    [...Array(3).fill('ETIMEDOUT'), ...Array(5).fill('SOURCE_CIRCUIT_OPEN')]);
+  assert.equal(breaker.isOpen(), true);
+  assert.equal(breaker.snapshot().queued, 0);
+});
+
+test('avec maxConcurrent, une source saine sert les appels en attente un par un', async () => {
+  const { breaker } = fixture({ maxConcurrent: 1 });
+  const order = [];
+  let release;
+  const first = breaker.run(() => new Promise(resolve => { release = resolve; }));
+  const second = breaker.run(async () => { order.push('deuxième'); return 'deuxième'; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(order, []);
+  release('premier');
+  assert.equal(await first, 'premier');
+  assert.equal(await second, 'deuxième');
+  assert.equal(breaker.snapshot().state, 'closed');
+});
+
+test('file d’attente pleine : refus immédiat traité comme une pause, sans compter de panne', async () => {
+  const { breaker } = fixture({ maxConcurrent: 1, maxQueued: 1, failureThreshold: 1 });
+  let release;
+  const first = breaker.run(() => new Promise(resolve => { release = resolve; }));
+  const second = breaker.run(async () => 'deuxième');
+  let calls = 0;
+  await assert.rejects(breaker.run(async () => { calls++; }), error =>
+    isSourceCircuitOpenError(error) && error.code === 'SOURCE_CIRCUIT_OPEN' && error.saturated === true);
+  assert.equal(calls, 0);
+  assert.equal(breaker.isOpen(), false);
+  release('premier');
+  assert.equal(await first, 'premier');
+  assert.equal(await second, 'deuxième');
+});
+
 test('les réponses en vol pendant la coupure ne prolongent ni ne lèvent la pause', async () => {
   const { breaker, advance } = fixture({ failureThreshold: 1 });
   let finishLate;

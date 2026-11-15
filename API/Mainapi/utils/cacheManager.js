@@ -7,7 +7,7 @@ const fsp = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const writeFileAtomic = require('write-file-atomic');
-const { redis, memoryCache } = require('../config/redis');
+const { redis } = require('../config/redis');
 
 // === CACHE DIRECTORIES ===
 // NOTE: __dirname is API/utils/, so we go up one level to reach API/
@@ -59,16 +59,7 @@ const correctStreamType = (streamData) => {
 // Fonction pour v\u00e9rifier si une donn\u00e9e est en cache avec expiration de 8h
 const getFromCacheWithExpiration = async (cacheDir, key, expirationHours = 8) => {
   try {
-    // 1. V\u00e9rifier le cache m\u00e9moire (L1) (rapide)
-    // Si c'est en m\u00e9moire (TTL 5 min), c'est forc\u00e9ment valide (< 8h)
-    const memKey = `${cacheDir}:${key}`;
-    const memData = await memoryCache.get(memKey);
-    if (memData) {
-      if (process.env.DEBUG_CACHE) console.log(`[Cache] Memory hit for ${key}`);
-      return memData;
-    }
-
-    // 2. V\u00e9rifier le cache fichier (L2) (lent)
+    // Le fichier seul fait foi (voir getFromCacheNoExpiration).
     const cacheFilePath = path.join(cacheDir, `${key}.json`);
     let stats;
     try {
@@ -88,12 +79,7 @@ const getFromCacheWithExpiration = async (cacheDir, key, expirationHours = 8) =>
     }
 
     const fileContent = await fsp.readFile(cacheFilePath, 'utf8');
-    const cacheData = JSON.parse(fileContent);
-
-    // Mettre \u00e0 jour le cache m\u00e9moire pour les prochaines fois
-    await memoryCache.set(memKey, cacheData);
-
-    return cacheData;
+    return JSON.parse(fileContent);
   } catch (error) {
     if (error.code === 'ENOENT') {
       return null;
@@ -115,9 +101,6 @@ const saveToCache = async (cacheDir, key, data) => {
     // lockfile (utilis\u00e9 dans safeWriteFile) ajoute 50-100ms de latence par \u00e9criture
     // Pour des fichiers de cache temporaires, atomic write suffit largement
     await writeFileAtomic(cacheFilePath, JSON.stringify(data), { encoding: 'utf8', fsync: false });
-
-    // Mettre aussi en cache m\u00e9moire pour \u00e9viter les lectures disque
-    await memoryCache.set(`${cacheDir}:${key}`, data);
     return true;
   } catch (error) {
     console.error(`Erreur lors de la sauvegarde en cache pour ${key}:`, error);
@@ -197,13 +180,11 @@ const refreshFStreamCache = (cacheKey, scrape, validate) => fstreamCacheStore.ge
 // Fonction pour vérifier si une donnée est en cache sans vérifier la date d'expiration
 const getFromCacheNoExpiration = async (cacheDir, key) => {
   try {
-    // 1. Vérifier le cache mémoire (L1)
-    const memKey = `${cacheDir}:${key}`;
-    const memData = await memoryCache.get(memKey);
-    if (memData) {
-      return memData;
-    }
-
+    // Le fichier seul fait foi, sans copie Redis de 5 min devant lui : les six
+    // workers lisent le même disque, et la plupart des titres ne sont pas revus
+    // dans les 5 min. Chaque visite payait un GET Redis presque toujours vide,
+    // puis un SET de recopie (rapport du 2026-10-19 : 2 948 SET Swiftflow pour
+    // 3 232 lectures, 2 933 Coflix pour 3 297, ~2 700 Purstream).
     const cacheFilePath = path.join(cacheDir, `${key}.json`);
     let fileContent;
     try {
@@ -228,9 +209,6 @@ const getFromCacheNoExpiration = async (cacheDir, key) => {
       try { await fsp.unlink(cacheFilePath); } catch (unlinkError) { }
       return null;
     }
-
-    // Mettre en cache mémoire
-    await memoryCache.set(memKey, cacheData);
 
     return cacheData;
   } catch (error) {

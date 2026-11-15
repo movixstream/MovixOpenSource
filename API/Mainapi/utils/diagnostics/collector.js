@@ -34,10 +34,23 @@ function createCollector(options = {}) {
     warnings.set(key, (warnings.get(key) || 0) + 1);
   }
 
+  function sourceOf(store) {
+    if (!store) return 'background/startup';
+    if (typeof store === 'string') return store;
+    // Chaîne lancée pendant la chauffe : ni la requête ni ses appels de départ ne sont mesurés.
+    if (store.warmup) return 'background/startup';
+    // Travail détaché après la réponse (rafraîchissement lancé sans attente, par exemple).
+    if (store.responded || safeResponded(store)) return `background after ${store.source}`;
+    return store.source;
+  }
+  function safeResponded(store) {
+    try { return Boolean(store.isResponded?.()); } catch { return false; }
+  }
+
   function labelsFor(meta) {
     return {
       kind: clean(meta.kind || 'unknown', 32),
-      source: clean(meta.source || context.getStore() || 'background/startup'),
+      source: clean(meta.source || sourceOf(context.getStore())),
       destination: clean(meta.destination || 'local', 180),
       operation: clean(meta.operation || 'unknown'),
       byteMode: clean(meta.byteMode || 'unavailable', 40),
@@ -174,7 +187,12 @@ function createCollector(options = {}) {
       recording = true;
     },
     start, warn, trackSocket,
-    withSource(source, fn) { return active ? context.run(clean(source), fn) : fn(); },
+    // Le contexte est un objet : la route peut signaler sa réponse (responded) sans changer de contexte.
+    withSource(source, fn) {
+      if (!active) return fn();
+      const store = { source: clean(source), responded: false, warmup: !recording };
+      return context.run(store, () => fn(store));
+    },
     snapshot() {
       for (const [socket, state] of sockets) flushSocket(socket, state);
       return {

@@ -45,7 +45,8 @@ interface ParsedVavooName {
   variant: VavooChannelVariant;
 }
 
-const SERVER_SUFFIX = /\s+\.([a-z0-9]+)\s*$/iu;
+// Serveur en fin de nom : « .b » (ancien Vavoo) ou « (7) » (geil.to).
+const SERVER_SUFFIX = /\s+(?:\.([a-z0-9]+)|\((\d{1,3})\))\s*$/iu;
 const PARENTHESIZED_QUALITY_SUFFIX = /\s+\((ULTRA\s+4K|4K\s+ULTRA|FULL\s*HD|FHD\+?|UHD|4K|HD\+?|HD|SD|\d{3,4}P)\)\s*$/iu;
 const QUALITY_SUFFIX = /\s+(ULTRA\s+4K|4K\s+ULTRA|FULL\s*HD|FHD\+?|UHD|4K|HD\+?|HD|SD|\d{3,4}P)\s*$/iu;
 
@@ -106,7 +107,7 @@ export const parseVavooChannelName = (id: string, name: string): ParsedVavooName
 
   const serverMatch = remainingName.match(SERVER_SUFFIX);
   if (serverMatch && serverMatch.index !== undefined) {
-    server = serverMatch[1].toLowerCase();
+    server = (serverMatch[1] ?? serverMatch[2]).toLowerCase();
     remainingName = remainingName.slice(0, serverMatch.index).trim();
   }
 
@@ -166,7 +167,7 @@ const compareVariants = (left: VavooChannelVariant, right: VavooChannelVariant):
   const rightIsLimited = right.availability.some((flag) => flag !== 'backup');
   if (leftIsLimited !== rightIsLimited) return leftIsLimited ? 1 : -1;
 
-  return left.server.localeCompare(right.server, 'fr', { sensitivity: 'base' });
+  return left.server.localeCompare(right.server, 'fr', { sensitivity: 'base', numeric: true });
 };
 
 export const formatVavooVariantLabel = (

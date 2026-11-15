@@ -928,8 +928,12 @@ function drawPosterCard(ctx: CanvasRenderingContext2D, tone: Tone, data: Wrapped
         { text: '   ·   ', size: 30, weight: 800, color: alpha(tone.light, 0.8) },
         { text: data.domain, size: 26, weight: 800, color: tone.light, tracking: 4, upper: true },
     ], CONTENT - 240);
-    const releaseTop = height - 70 - (release?.height ?? 0);
+    // Période du bilan sous la ligne de sortie : une année en cours ne doit
+    // pas passer pour une année complète (comme le pied des autres formats).
+    const period = data.period ? layout(ctx, data.period, CONTENT - 240, { size: 22, weight: 600 }) : null;
+    const releaseTop = height - 70 - (release?.height ?? 0) - (period ? period.height + 20 : 0);
     if (release) flanked(ctx, release, releaseTop, alpha(tone.paper, 0.45));
+    if (period) paint(ctx, period, WIDTH / 2, releaseTop + (release?.height ?? 0) + 20, tone.muted, 'center');
 
     if (favorite) {
         brackets(ctx, box, 22, 48, tone.highlight, 3);
@@ -1102,7 +1106,9 @@ function drawTicket(ctx: CanvasRenderingContext2D, tone: Tone, data: WrappedShar
     const digits = Array.from({ length: 13 }, () => Math.floor(next() * 10)).join('');
     const code = layout(ctx, `${digits[0]} ${digits.slice(1, 7)} ${digits.slice(7)}`, inner.width / 2, { size: 22, weight: 600, tracking: 6 });
     const codeHeight = 150;
-    const stub = (admit ? admit.height + 44 : 0) + codeHeight + 16 + 26 + code.height;
+    // Période du bilan en dernière ligne du talon, comme une date de validité.
+    const period = data.period ? layout(ctx, data.period, inner.width, { size: 22, weight: 600 }) : null;
+    const stub = (admit ? admit.height + 44 : 0) + codeHeight + 16 + 26 + code.height + (period ? 24 + period.height : 0);
     let stubTop = notchY + (ticket.y + ticket.height - notchY - stub) / 2;
     if (admit) {
         paint(ctx, admit, inner.x, stubTop, tone.stage);
@@ -1113,6 +1119,7 @@ function drawTicket(ctx: CanvasRenderingContext2D, tone: Tone, data: WrappedShar
     paint(ctx, code, inner.x, codeY, tone.ticketMuted);
     const domain = layout(ctx, data.domain, inner.width / 2, smallCaps(22));
     paint(ctx, domain, inner.x + inner.width, codeY + code.cap - domain.cap, tone.primary, 'right');
+    if (period) paint(ctx, period, inner.x, codeY + code.height + 24, tone.ticketMuted);
 }
 
 // ---------------------------------------------------------------------------
@@ -1136,5 +1143,13 @@ export async function generateWrappedShareCard(data: WrappedShareCardData, forma
     else if (format === 'top-five') drawTopFive(ctx, tone, data, pictures);
     else if (format === 'poster') drawPosterCard(ctx, tone, data, pictures);
     else drawTicket(ctx, tone, data);
-    return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Canvas export failed')), 'image/png'));
+    return new Promise((resolve, reject) => canvas.toBlob(blob => {
+        // Rend tout de suite la mémoire du canevas (8 Mo par image) : sur
+        // iPhone, plusieurs formats et ambiances essayés à la suite
+        // atteignaient la limite de mémoire des canevas avant le ramasse-miettes.
+        canvas.width = 0;
+        canvas.height = 0;
+        if (blob) resolve(blob);
+        else reject(new Error('Canvas export failed'));
+    }, 'image/png'));
 }

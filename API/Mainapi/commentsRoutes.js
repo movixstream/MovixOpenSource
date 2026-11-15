@@ -131,7 +131,11 @@ function decodeHtmlEntities(text) {
 
 // Champs internes jamais exposés au public (fuite de données perso).
 // Les routes /admin/* gardent l'accès brut (bannissement par IP).
-const PRIVATE_ROW_FIELDS = ["ip_address"];
+// `user_id` est l'identifiant brut du compte Discord ou Google de l'auteur :
+// le rendre sur une route publique relierait une vraie identité à ce qu'elle
+// écrit ici. Le site ne s'en sert pas (il compare `profile_id`) ; les routes
+// d'administration, qui en ont besoin pour bannir, ne passent pas par ici.
+const PRIVATE_ROW_FIELDS = ["ip_address", "user_id", "user_type"];
 
 // Retire les champs privés d'une ligne SQL avant de la renvoyer au client.
 function stripPrivateFields(row) {

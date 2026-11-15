@@ -41,6 +41,10 @@ function loadRoute(relative, stubs, suffix = '', timerOverrides = {}) {
     '../utils/sourceRefresh': sourceRefresh,
     '../utils/sharedSourceWork': require('../../utils/sharedSourceWork'),
     '../utils/concurrency': require('../../utils/concurrency'),
+    '../utils/sourceCircuitBreaker': require('../../utils/sourceCircuitBreaker'),
+    '../utils/animeSamaDeadPlayers': require('../../utils/animeSamaDeadPlayers'),
+    '../utils/animeSamaPages': require('../../utils/animeSamaPages'),
+    '../utils/animeSamaLinks': require('../../utils/animeSamaLinks'),
     'write-file-atomic': (...args) => stubs.fs.promises.writeFile(...args),
     axios: { create: () => ({}) },
     '../utils/embedExtraction': {
@@ -279,7 +283,10 @@ function cpasmalHarness(cached) {
     fs: { promises: { ...basicFs, stat: async () => ({ mtime: new Date(now - 7200000) }), writeFile: async () => { counts.writes++; } } },
     cheerio: {}, '../utils/cacheManager': cacheStub, '../utils/tmdbCache': {}, '../utils/redisLock': lockStub,
     '../config/redis': { memoryCache: { set: async (_key, value) => { cache = value; } } },
-  }, `module.exports.audit = { setScrape(fn) { fetchCpasmalMovieData = fn; fetchCpasmalTvData = fn; } };`);
+    '../utils/sourceIdentity': { titleSimilarity: () => 1 },
+    '../utils/sourceRefreshTelemetry': { reportRefreshFailure: () => {} },
+  }, `module.exports.audit = { setScrape(fn) { fetchCpasmalMovieData = fn; fetchCpasmalTvData = fn; } };`,
+  { process: { env: { CPASMAL_ENABLED: 'true' }, pid: 12345 } });
   loaded.exports.configure({ getFromCacheNoExpiration: async () => { counts.reads++; return cache; }, shouldUpdateCache: async () => !fresh });
   loaded.exports.audit.setScrape(async () => { counts.scrapes++; return scrape(); });
   const call = async (type = 'movie') => {

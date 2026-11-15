@@ -51,6 +51,18 @@ const KNOWN_OAUTH_SCOPES = [
   'ratings.manage',
 ];
 const DEFAULT_SCOPE = 'profile.read';
+// Permissions qui engagent l'application elle-même (son solde de jours VIP)
+// et pas seulement les données de l'utilisateur qui consent. Elles exigent
+// que l'application prouve son identité avec son `client_secret` : sinon
+// n'importe quel membre s'approuve lui-même, échange le code avec son propre
+// PKCE et dépense le solde de l'application. Un client public n'a pas de
+// secret, il ne peut donc pas les recevoir.
+const CLIENT_AUTHENTICATED_SCOPES = ['vip.grant'];
+
+function requiresClientAuthentication(scopes) {
+  return Array.isArray(scopes)
+    && scopes.some((scope) => CLIENT_AUTHENTICATED_SCOPES.includes(scope));
+}
 const OAUTH_DEBUG_ENABLED = process.env.MOVIX_OAUTH_DEBUG === 'true';
 
 // Préfixe public servant les icônes d'apps (relatif à l'API : `/oauth-icons/<filename>`).
@@ -447,6 +459,15 @@ function normalizeRequestedScopes(requestedScopes, client) {
     throw error;
   }
 
+  if (client.publicClient && requiresClientAuthentication(normalizedScopes)) {
+    const error = new Error(
+      `Scopes réservées aux applications confidentielles: ${CLIENT_AUTHENTICATED_SCOPES.join(', ')}`,
+    );
+    error.statusCode = 400;
+    error.oauthError = 'invalid_scope';
+    throw error;
+  }
+
   return normalizedScopes;
 }
 
@@ -460,7 +481,9 @@ function isOAuthCorsOriginAllowed(origin) {
 
 module.exports = {
   KNOWN_OAUTH_SCOPES,
+  CLIENT_AUTHENTICATED_SCOPES,
   DEFAULT_SCOPE,
+  requiresClientAuthentication,
   loadOAuthClients,
   getOAuthClient,
   getOAuthClientPublicMetadata,

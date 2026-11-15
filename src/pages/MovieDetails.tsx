@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import axios from 'axios';
 import { Loader, Video, Star, Calendar, List, Check, ChevronRight, Play, Film, X, Building, MapPin, Languages, Library, Info, ArrowLeft, Image, Download, MessageSquare, AlertTriangle, Archive, CheckCircle } from 'lucide-react';
@@ -12,6 +12,7 @@ import ShareButtons from '../components/ShareButtons';
 import { useAdFreePopup } from '../context/AdFreePopupContext';
 import EmblaCarousel from '../components/EmblaCarousel';
 import { encodeId, getTmdbId } from '../utils/idEncoder';
+import { buildWatchMoviePath, getMovieVersions, getVersionForRetiredId } from '../config/movieVersions';
 import CommentsSection from '../components/CommentsSection';
 import LikeDislikeButton, { calculateLikeDislikeRating, type LikeDislikeStats } from '../components/LikeDislikeButton';
 import MovixRatingInfoModal from '../components/MovixRatingInfoModal';
@@ -1157,6 +1158,17 @@ const MovieDetails = (): JSX.Element => {
       const response = await axios.get(
         `https://api.themoviedb.org/3/movie/${id}?api_key=${TMDB_API_KEY}&language=${getTmdbLanguage()}&append_to_response=keywords,alternative_titles`
       );
+      // TMDB renvoie un résumé vide quand la traduction n'existe pas, alors
+      // que son site affiche le texte anglais : on fait pareil.
+      if (!response.data?.overview?.trim() && !getTmdbLanguage().startsWith('en')) {
+        try {
+          const en = await axios.get(`https://api.themoviedb.org/3/movie/${id}`, {
+            params: { api_key: TMDB_API_KEY, language: 'en-US' },
+          });
+          if (en.data?.overview) response.data.overview = en.data.overview;
+          if (!response.data.tagline && en.data?.tagline) response.data.tagline = en.data.tagline;
+        } catch { /* le résumé reste vide */ }
+      }
       setMovie(response.data);
       setKeywords(normalizeKeywords(response.data?.keywords, getTmdbLanguage()));
       setAlternateTitles(normalizeAlternateTitles(response.data?.alternative_titles, [
@@ -1519,6 +1531,28 @@ const MovieDetails = (): JSX.Element => {
           )}
         </div>
 
+        {/* Versions alternatives (ex. Encore) : TMDB n'a qu'une fiche par film */}
+        {getMovieVersions(id).length > 0 && (
+          <div className="flex flex-wrap gap-3 w-full min-w-0">
+            {getMovieVersions(id).map((version) => (
+              <motion.button
+                key={version.key}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                transition={{ type: "spring", stiffness: 400, damping: 17 }}
+                onClick={() => startWatching(version.key)}
+                className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 border border-red-600/60 rounded-lg flex-1 min-w-0 text-xs sm:text-sm"
+              >
+                <Film className="w-4 h-4 flex-shrink-0" />
+                <span className="text-center">
+                  {t('movieVersions.watchVersion', { version: t(version.labelKey) })}
+                  {version.runtime ? ` · ${t('movieVersions.runtime', { minutes: version.runtime })}` : ''}
+                </span>
+              </motion.button>
+            ))}
+          </div>
+        )}
+
         {/* Deuxième ligne avec les autres boutons */}
         <div className="flex flex-wrap gap-3">
           <motion.button
@@ -1638,7 +1672,10 @@ const MovieDetails = (): JSX.Element => {
 
   // Watch progress tracking functionality removed
 
-  const handleWatchClick = () => {
+  const handleWatchClick = () => startWatching();
+
+  // `versionKey` : version alternative (ex. Encore), voir config/movieVersions.
+  const startWatching = (versionKey?: string) => {
     if (!id) return;
     if (movieReleaseWarningsEnabled && needsMovieReleaseWarning(movieReleases, Date.now())) {
       scrollToPlayer();
@@ -1653,7 +1690,7 @@ const MovieDetails = (): JSX.Element => {
       : null;
     if (seed) writeLocalStorage(`progress_${id}`, seed);
     // Mode cinéma toujours actif - naviguer vers la page de visionnage
-    navigate(`/watch/movie/${encodeId(id)}`);
+    navigate(buildWatchMoviePath(encodeId(id), versionKey));
   };
 
   const fetchRecommendations = async () => {
@@ -3828,4 +3865,12 @@ const MovieDetails = (): JSX.Element => {
   );
 };
 
-export default MovieDetails;
+// Ancien ID TMDB supprimé (ex. Avengers Endgame: Encore) → fiche du film parent.
+const MovieDetailsRoute = (): JSX.Element => {
+  const { id: encodedId } = useParams<{ id: string }>();
+  const retired = getVersionForRetiredId(encodedId ? getTmdbId(encodedId) : null);
+  if (retired) return <Navigate replace to={`/movie/${encodeId(retired.tmdbId)}`} />;
+  return <MovieDetails />;
+};
+
+export default MovieDetailsRoute;

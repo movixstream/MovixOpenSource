@@ -421,7 +421,9 @@ function finale(ctx: CanvasRenderingContext2D, shot: Shot) {
     const end = reveal(layout.blocks.length + 1);
     filmLine(ctx, M, layout.footer, filmMix(M, W - M, end), layout.footer, FILM.paper, 0.22);
     filmText(ctx, texts.final, M, layout.footer + 26, 470, { size: 26, weight: 800, color: FILM.paper, alpha: end });
-    filmText(ctx, data.domain, M, layout.footer + 66, 470, { size: 19, weight: 600, color: FILM.light, alpha: end });
+    filmText(ctx, data.domain, M, layout.footer + 66, data.period ? 170 : 470, { size: 19, weight: 600, color: FILM.light, alpha: end });
+    // Période du bilan : le film d'une année en cours ne doit pas passer pour une année complète.
+    if (data.period) filmText(ctx, data.period, W - M, layout.footer + 68, CONTENT - 190, { size: 17, minSize: 13, weight: 600, color: FILM.muted, align: 'right', alpha: end });
     filmText(ctx, 'MOVIX', W - M, layout.footer + 30, 200, { size: 30, display: true, color: FILM.paper, align: 'right', alpha: end });
     // Retour harmonique de la piste : un reflet traverse le souvenir une seule fois.
     const shine = (time - beats(6)) / beats(1.4);

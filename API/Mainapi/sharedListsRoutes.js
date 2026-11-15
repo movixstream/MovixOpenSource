@@ -295,7 +295,9 @@ const requireAdmin = async (req, res, next) => {
       'SELECT * FROM admins WHERE user_id = ? AND auth_type = ?',
       [userId, userType === 'bip39' ? 'bip-39' : userType]
     );
-    if (adminRows.length === 0) {
+    // La table `admins` contient aussi les uploaders (role = 'uploader') : une
+    // ligne ne suffit pas, la modération des listes est réservée au rôle admin.
+    if (adminRows.length === 0 || (adminRows[0].role || 'admin') !== 'admin') {
       return res.status(403).json({ error: 'Accès refusé - Droits admin requis' });
     }
 

@@ -19,6 +19,7 @@ import { Input } from '../components/ui/input';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useWrappedTracker } from '../hooks/useWrappedTracker';
 import AdFreePlayerAds from '../components/AdFreePlayerAds';
+import { hasAdToOpen } from '../services/monetizationConfig';
 import { isUserVip } from '../utils/authUtils';
 import { getVipHeaders } from '../utils/vipUtils';
 import { cn } from '../lib/utils';
@@ -1086,6 +1087,14 @@ const LiveTV: React.FC = () => {
 
     // Les VIPs n'ont pas de publicité
     if (isVip) {
+      openPlayer(channel);
+      return;
+    }
+
+    // Pas de pub à ouvrir (pubs coupées, emplacement inactif, aucune pub pour
+    // l'audience du visiteur) : la chaîne s'ouvre directement, sans popup ni
+    // crédit consommé.
+    if (!hasAdToOpen('livetv')) {
       openPlayer(channel);
       return;
     }

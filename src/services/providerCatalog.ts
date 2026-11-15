@@ -40,6 +40,7 @@ export const PROVIDER_NAMES: Record<number, string> = {
   356: 'DC Comics',
   357: 'OCS',
   384: 'HBO MAX',
+  1899: 'HBO Max',
 };
 
 export interface CatalogStudio {

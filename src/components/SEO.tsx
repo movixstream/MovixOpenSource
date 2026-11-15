@@ -24,7 +24,7 @@ const SEO: React.FC<SEOProps> = (props) => {
     title = t('seo.defaultTitle'),
     description = t('seo.defaultDescription'),
     keywords = t('seo.defaultKeywords'),
-    ogImage = '/movix.png',
+    ogImage = `${SITE_URL}/og-image.jpg`,
     ogUrl = SITE_URL,
     ogType = 'website',
     twitterCard = 'summary_large_image',

@@ -31,6 +31,8 @@ uniform sampler2D tNext;
 uniform vec2 uResolution;
 uniform vec2 uCurrentSize;
 uniform vec2 uNextSize;
+uniform float uCurrentFocus;
+uniform float uNextFocus;
 uniform float uProgress;
 uniform float uTime;
 varying vec2 vUv;
@@ -64,29 +66,29 @@ float fbm(vec2 p) {
   return v * FBM_NORMALIZATION;
 }
 
-vec2 coverUV(vec2 uv, vec2 img) {
+vec2 coverUV(vec2 uv, vec2 img, float focus) {
   float ratio = (uResolution.x / max(uResolution.y, 1.0)) / (img.x / max(img.y, 1.0));
   vec2 s = ratio > 1.0 ? vec2(1.0, 1.0 / ratio) : vec2(ratio, 1.0);
-  // Match object-position: center 30% (WebGL's vertical axis points up).
-  return uv * s + (1.0 - s) * vec2(0.5, 0.7);
+  // Match object-position: center <focus> (WebGL's vertical axis points up).
+  return uv * s + (1.0 - s) * vec2(0.5, 1.0 - focus);
 }
 
 void main() {
   float p = clamp(uProgress, 0.0, 1.0);
   if (p <= 0.0) {
-    gl_FragColor = texture2D(tCurrent, coverUV(vUv, uCurrentSize));
+    gl_FragColor = texture2D(tCurrent, coverUV(vUv, uCurrentSize, uCurrentFocus));
     return;
   }
   if (p >= 1.0) {
-    gl_FragColor = texture2D(tNext, coverUV(vUv, uNextSize));
+    gl_FragColor = texture2D(tNext, coverUV(vUv, uNextSize, uNextFocus));
     return;
   }
 
   float nn = fbm(vUv * 2.4 + uTime * 0.03);
   float warp = fbm(vUv * 2.4 * 1.7 - uTime * 0.02);
   vec2 g = vec2(nn, warp) - 0.5;
-  vec2 sC = coverUV(vUv + g * 0.55 * 0.5 * p, uCurrentSize);
-  vec2 sN = coverUV(vUv - g * 0.55 * 0.5 * (1.0 - p), uNextSize);
+  vec2 sC = coverUV(vUv + g * 0.55 * 0.5 * p, uCurrentSize, uCurrentFocus);
+  vec2 sN = coverUV(vUv - g * 0.55 * 0.5 * (1.0 - p), uNextSize, uNextFocus);
   float m = smoothstep(nn - 0.15, nn + 0.15, p);
 #ifdef MOBILE_MORPH
   // Two samples instead of six: keep the melt without chromatic aberration.
@@ -110,8 +112,13 @@ void main() {
 
 export type MorphStatus = 'loading' | 'ready' | 'unavailable';
 
+// Vertical crop of a TMDB backdrop: same as the HTML image's `center 30%`.
+const DEFAULT_FOCUS_Y = 0.3;
+
 export interface MorphBackdropProps {
   images: string[];
+  /** Vertical crop per image, from 0 (top) to 1 (bottom). Default: 0.3. */
+  focus?: number[];
   selectedIndex: number;
   active: boolean;
   frame: MotionValue<MorphFrame>;
@@ -125,14 +132,16 @@ interface LoadedImage {
   size: [number, number];
 }
 
-export default function MorphBackdrop({ images, selectedIndex, active, frame, onStatusChange, speed, mobile }: MorphBackdropProps) {
+export default function MorphBackdrop({ images, focus, selectedIndex, active, frame, onStatusChange, speed, mobile }: MorphBackdropProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef({ selectedIndex, active });
   const syncRef = useRef<(() => void) | null>(null);
   const speedRef = useRef(speed);
+  const focusRef = useRef(focus);
   const [contextVersion, setContextVersion] = useState(0);
 
   useEffect(() => { speedRef.current = speed; }, [speed]);
+  useEffect(() => { focusRef.current = focus; }, [focus]);
 
   useEffect(() => {
     selectionRef.current = { selectedIndex, active };
@@ -191,6 +200,8 @@ export default function MorphBackdrop({ images, selectedIndex, active, frame, on
           uResolution: { value: [1, 1] },
           uCurrentSize: { value: [1, 1] },
           uNextSize: { value: [1, 1] },
+          uCurrentFocus: { value: DEFAULT_FOCUS_Y },
+          uNextFocus: { value: DEFAULT_FOCUS_Y },
           uProgress: { value: 0 },
           uTime: { value: 0 },
         },
@@ -331,6 +342,11 @@ export default function MorphBackdrop({ images, selectedIndex, active, frame, on
         }
       };
 
+      const focusAt = (index: number) => {
+        const value = focusRef.current?.[index];
+        return typeof value === 'number' && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : DEFAULT_FOCUS_Y;
+      };
+
       const commit = (index: number, image: LoadedImage) => {
         current = index;
         target = null;
@@ -338,6 +354,8 @@ export default function MorphBackdrop({ images, selectedIndex, active, frame, on
         program.uniforms.tNext.value = image.texture;
         program.uniforms.uCurrentSize.value = image.size;
         program.uniforms.uNextSize.value = image.size;
+        program.uniforms.uCurrentFocus.value = focusAt(index);
+        program.uniforms.uNextFocus.value = focusAt(index);
         program.uniforms.uProgress.value = 0;
         pruneTextures();
       };
@@ -412,6 +430,8 @@ export default function MorphBackdrop({ images, selectedIndex, active, frame, on
           program.uniforms.tNext.value = next.texture;
           program.uniforms.uCurrentSize.value = previous.size;
           program.uniforms.uNextSize.value = next.size;
+          program.uniforms.uCurrentFocus.value = focusAt(from);
+          program.uniforms.uNextFocus.value = focusAt(index);
           program.uniforms.uProgress.value = 0;
           frame.set({ from, to: index, progress: 0 });
           try {

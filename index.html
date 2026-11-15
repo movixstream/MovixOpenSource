@@ -15,8 +15,36 @@
         <meta name="theme-color" content="#000000" />
         <meta
             name="description"
-            content="Regardez des milliers de films et séries en streaming HD sur Movix. Catalogue complet en VF et VOSTFR, live TV, collections et watch parties synchronisées entre amis."
+            content="Des milliers de films, séries et animés en streaming gratuit, en VF et VOSTFR. À regarder seul ou entre amis en Watch Party."
         />
+
+        <!-- Aperçu des liens partagés (Discord, WhatsApp, X…). Les robots ne
+             lancent pas le JavaScript : sans ces balises dans le HTML, le lien
+             de l'accueil s'affichait sans image. Les fiches film et série les
+             remplacent côté serveur (functions/_lib/socialPreview.js). -->
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="Movix" />
+        <meta property="og:locale" content="fr_FR" />
+        <meta property="og:url" content="__MOVIX_SITE_URL__/" />
+        <meta property="og:title" content="Movix — Films, séries et animés en streaming gratuit" />
+        <meta
+            property="og:description"
+            content="Des milliers de films, séries et animés en streaming gratuit, en VF et VOSTFR. À regarder seul ou entre amis en Watch Party."
+        />
+        <meta property="og:image" content="__MOVIX_SITE_URL__/og-image.jpg" />
+        <meta property="og:image:secure_url" content="__MOVIX_SITE_URL__/og-image.jpg" />
+        <meta property="og:image:type" content="image/jpeg" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:image:alt" content="Logo Movix devant un mur d'affiches de films, séries et animés" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Movix — Films, séries et animés en streaming gratuit" />
+        <meta
+            name="twitter:description"
+            content="Des milliers de films, séries et animés en streaming gratuit, en VF et VOSTFR. À regarder seul ou entre amis en Watch Party."
+        />
+        <meta name="twitter:image" content="__MOVIX_SITE_URL__/og-image.jpg" />
+        <meta name="twitter:image:alt" content="Logo Movix devant un mur d'affiches de films, séries et animés" />
 
         <!-- Prefetch -->
         <link rel="dns-prefetch" href="//image.tmdb.org" />

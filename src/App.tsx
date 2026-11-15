@@ -23,10 +23,12 @@ import Footer from './components/Footer';
 import { AlertService } from './services/alertService';
 import NotificationToast from './components/NotificationToast';
 import { NotificationData } from './types/alerts';
-import RedirectPopup from './components/RedirectPopup';
-import TelegramAnnouncementPopup from './components/TelegramAnnouncementPopup';
+// Import direct (pas de chunk séparé) : l'intro doit être dans le tout premier
+// rendu, sans attendre un téléchargement pendant lequel la page s'afficherait.
+import IntroAnimation from './components/IntroAnimation';
 import { SITE_URL } from './config/runtime';
 import RequireUsernameChange from './components/RequireUsernameChange';
+import ReferralManager from './components/referral/ReferralManager';
 import { TopProgressBar } from './components/TopProgressBar';
 import SmoothScroll from './components/SmoothScroll';
 import { getProviderCatalogScope, ROUTES, type RouteEntry } from './routing/registry';
@@ -520,8 +522,6 @@ const CreateAccountLazy = lazy(() => import('./pages/CreateAccount'));
 const LoginBip39Lazy = lazy(() => import('./pages/LoginBip39'));
 const ProfileSelectionLazy = lazy(() => import('./pages/ProfileSelection'));
 const AprilFoolsAdminPageLazy = lazy(() => import('./pages/AprilFoolsAdminPage'));
-// IntroAnimation (~38 Ko) est opt-in et off par défaut : chunk séparé (perf)
-const IntroAnimationLazy = lazy(() => import('./components/IntroAnimation'));
 
 // Périmètre V1 sur TV : WatchParty, VIP, admin, Wrapped et CineGraph ne sont
 // pas montés. La plateforme ne change pas en cours de session, donc ce filtre
@@ -1764,7 +1764,6 @@ const ProfileGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
 const AppWithIntro: React.FC = () => {
   const location = useLocation();
-  const [showRedirectPopup, setShowRedirectPopup] = useState(false);
   const { showIntro, completeIntro } = useIntro();
 
   // Couche TV : navigation D-pad, polyfill de la touche Retour et classe
@@ -1880,14 +1879,6 @@ const AppWithIntro: React.FC = () => {
     return () => window.removeEventListener('ad_popup_accepted', onAccepted);
   }, []);
 
-  // Check for redirect parameter
-  React.useEffect(() => {
-    const urlParams = new URLSearchParams(location.search);
-    if (urlParams.get('redirect') !== null) {
-      setShowRedirectPopup(true);
-    }
-  }, [location.search]);
-
   // Source priority prefs ↔ extension sync (Milestone 9.1).
   // Push current prefs on mount (extension may already be ready by then), and
   // subscribe to later local changes so the extension mirror stays in sync.
@@ -1905,11 +1896,7 @@ const AppWithIntro: React.FC = () => {
     <div id={PLAYER_FULLSCREEN_HOST_ID} className="min-h-screen bg-black text-white relative overflow-clip">
       <IdleRoutePrefetch />
       {/* Intro overlay — le site charge derrière */}
-      {showIntro && (
-        <Suspense fallback={null}>
-          <IntroAnimationLazy onAnimationComplete={completeIntro} />
-        </Suspense>
-      )}
+      {showIntro && <IntroAnimation onAnimationComplete={completeIntro} />}
       {/* Global styles for profile pages */}
       <style>
         {`
@@ -1965,17 +1952,6 @@ const AppWithIntro: React.FC = () => {
         </ProfileGate>
         {!isWatchRoute && <Footer />}
       </div>
-
-      {/* Redirect Popup */}
-      <RedirectPopup
-        isOpen={showRedirectPopup}
-        onClose={() => setShowRedirectPopup(false)}
-      />
-
-      {/* Annonce du canal Matrix ix : une seule fois, jamais sur le lecteur */}
-      <TelegramAnnouncementPopup
-        suspended={isWatchRoute || isWrappedRoute || currentPath.startsWith('/oauth/authorize') || showRedirectPopup}
-      />
 
       {/* Screensaver */}
       {shouldEnableScreensaver && <ScreenSaver isIdle={isIdle} onWake={wake} />}
@@ -2078,6 +2054,7 @@ function App() {
                       <Toaster position="bottom-right" richColors />
                       <DnsBlockBanner />
                       <RequireUsernameChange />
+                      <ReferralManager />
                     </IntroProvider>
                   </TurnstileProvider>
                 </ProfileProvider>

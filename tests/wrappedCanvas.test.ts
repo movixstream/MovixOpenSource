@@ -1,6 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { drawCanvasImage, fitCanvasText, wrapCanvasText } from '../src/utils/wrappedCanvasLayout.ts';
+import { drawCanvasImage, drawRoundedRectPath, fitCanvasText, wrapCanvasText } from '../src/utils/wrappedCanvasLayout.ts';
+
+test('sans roundRect (Safari 15, vieux Chrome), le rectangle arrondi est tracé à la main', () => {
+    const calls: [string, ...number[]][] = [];
+    const record = (name: string) => (...args: number[]) => { calls.push([name, ...args]); };
+    // Contexte strict : une méthode absente lève une erreur, comme dans un vrai navigateur.
+    const old = { beginPath: record('beginPath'), moveTo: record('moveTo'), arcTo: record('arcTo'), closePath: record('closePath') };
+    assert.doesNotThrow(() => drawRoundedRectPath(old as unknown as CanvasRenderingContext2D, 10, 20, 200, 100, 30));
+    assert.deepEqual(calls, [
+        ['beginPath'],
+        ['moveTo', 40, 20],
+        ['arcTo', 210, 20, 210, 120, 30],
+        ['arcTo', 210, 120, 10, 120, 30],
+        ['arcTo', 10, 120, 10, 20, 30],
+        ['arcTo', 10, 20, 210, 20, 30],
+        ['closePath'],
+    ]);
+
+    // Navigateur récent : la méthode native, avec le rayon borné à la demi-hauteur.
+    const modern: [string, ...number[]][] = [];
+    drawRoundedRectPath({ beginPath() {}, roundRect: (...args: number[]) => { modern.push(['roundRect', ...args]); } } as unknown as CanvasRenderingContext2D, 0, 0, 100, 40, 99);
+    assert.deepEqual(modern, [['roundRect', 0, 0, 100, 40, 20]]);
+});
 
 function textContext() {
     const ctx = { font: '800 40px Inter', measureText(value: string) { return { width: Array.from(value).length * Number(this.font.match(/(\d+)px/)?.[1] || 40) * 0.5 }; } };

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { readFStreamChallengeCookie, adoptFStreamChallengeCookie } = require('../fstreamChallenge');
 
 function fixture() {
   const filename = path.join(__dirname, '..', 'cacheManager.js');
@@ -64,7 +65,7 @@ test('les POST FrenchStream hérités ciblent directement le domaine canonique s
   const { canonicalFStreamUrl, FSTREAM_BASE_URL } = require('../../config/fstream');
   const sent = [];
   const context = {
-    canonicalFStreamUrl, URL, ENABLE_FSTREAM_PROXY: false,
+    canonicalFStreamUrl, URL, ENABLE_FSTREAM_PROXY: false, adoptFStreamChallengeCookie,
     deps: { FSTREAM_BASE_URL, fstreamCookies: {}, ensureFStreamSession: async () => {},
       incrementFstreamRequestCounter() {}, axiosFStream: async config => { sent.push(config); return { status: 200 }; } },
   };
@@ -83,4 +84,49 @@ test('les POST FrenchStream hérités ciblent directement le domaine canonique s
   assert.equal(sent[1].baseURL, `${FSTREAM_BASE_URL}/`);
   await context.request({ url: 'https://player.test/embed/video' });
   assert.equal(sent[2].url, 'https://player.test/embed/video');
+});
+
+// Extrait de la page servie par French-Stream le 2026-10-19.
+const CHALLENGE = '<!doctype html><html lang="fr"><head><title>Verification...</title></head><body>'
+  + '<h2>Verification de votre navigateur...</h2><script>(function(){function sc(){try{var d=new Date();'
+  + 'd.setTime(d.getTime()+86400000);document.cookie="fsschal=k7x2m9q4v3b8; path=/; expires="+d.toUTCString();'
+  + 'document.cookie="fsschal=k7x2m9q4v3b8; path=/; max-age=86400";}catch(e){}}sc();})();</script></body></html>';
+
+test('la valeur du cookie anti-robot se lit dans la page du challenge, et nulle part ailleurs', () => {
+  assert.equal(readFStreamChallengeCookie(CHALLENGE), 'k7x2m9q4v3b8');
+  assert.equal(readFStreamChallengeCookie('<div class="search-item">fsschal=1</div>'), null);
+  assert.equal(readFStreamChallengeCookie({ players: {} }), null);
+  assert.equal(readFStreamChallengeCookie('document.cookie="fsschal=a\r\nX-Injected: 1"'), 'a');
+
+  const cookies = { fsschal: '1' };
+  assert.equal(adoptFStreamChallengeCookie(cookies, { data: CHALLENGE }), true);
+  assert.equal(cookies.fsschal, 'k7x2m9q4v3b8');
+  assert.equal(adoptFStreamChallengeCookie(cookies, { data: CHALLENGE }), false, 'même valeur : pas de renvoi en boucle');
+});
+
+test('axiosFStreamRequest renvoie la requête une fois avec le nouveau cookie fsschal', async () => {
+  const filename = path.join(__dirname, '..', 'axiosHelpers.js');
+  const source = fs.readFileSync(filename, 'utf8');
+  const section = source.slice(source.indexOf('function withOptionalFStreamCookies('), source.indexOf('function isAnimeSamaRetriableError('));
+  const { FSTREAM_BASE_URL } = require('../../config/fstream');
+  const sent = [];
+  const fstreamCookies = { dle_skin: 'VFV25', fsschal: '1' };
+  let counted = 0;
+  const context = {
+    canonicalFStreamUrl: value => value, URL, ENABLE_FSTREAM_PROXY: false, adoptFStreamChallengeCookie,
+    console: { warn() {} },
+    deps: { FSTREAM_BASE_URL, fstreamCookies, ensureFStreamSession: async () => {},
+      incrementFstreamRequestCounter() { counted++; },
+      axiosFStream: async config => {
+        sent.push(config.headers.Cookie);
+        return { status: 200, data: config.headers.Cookie.includes('fsschal=k7x2m9q4v3b8') ? '<div class="search-item"></div>' : CHALLENGE };
+      } },
+  };
+  vm.runInNewContext(`${section}\nthis.request = axiosFStreamRequest;`, context, { filename });
+  const response = await context.request({ method: 'post', url: `${FSTREAM_BASE_URL}/engine/ajax/search.php` });
+  assert.equal(response.data, '<div class="search-item"></div>');
+  assert.deepEqual(sent, ['dle_skin=VFV25; fsschal=1', 'dle_skin=VFV25; fsschal=k7x2m9q4v3b8']);
+  assert.equal(counted, 1);
+  await context.request({ method: 'get', url: `${FSTREAM_BASE_URL}/films/` });
+  assert.equal(sent.length, 3, 'les requêtes suivantes partent directement avec la bonne valeur');
 });

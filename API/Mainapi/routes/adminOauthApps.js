@@ -26,7 +26,7 @@ const { ipKeyGenerator } = require('express-rate-limit');
 const { isAdmin } = require('../middleware/auth');
 const { getPool } = require('../mysqlPool');
 const oauthClientsDb = require('../utils/oauthClientsDb');
-const { KNOWN_OAUTH_SCOPES } = require('../utils/oauthClients');
+const { KNOWN_OAUTH_SCOPES, requiresClientAuthentication } = require('../utils/oauthClients');
 const { createRedisRateLimitStore } = require('../utils/redisRateLimitStore');
 
 const router = express.Router();
@@ -39,6 +39,7 @@ const ALLOWED_ICON_MIME = {
 const MAX_ICON_SIZE_BYTES = 256 * 1024; // 256 KB
 
 const CLIENT_ID_RE = /^[a-z0-9][a-z0-9-]{1,64}$/;
+const PUBLIC_CLIENT_SCOPE_ERROR = 'vip.grant exige une application confidentielle (avec client_secret) : décochez « client public » ou retirez cette permission';
 
 // Petit rate-limiter pour les routes admin OAuth (anti-bruteforce sur les secrets).
 const adminOauthAppsLimiter = rateLimit({
@@ -256,6 +257,9 @@ router.post('/', async (req, res) => {
     const description = sanitizeDescription(req.body?.description);
     const homepageUrl = sanitizeHttpUrl(req.body?.homepageUrl);
     const publicClient = req.body?.publicClient !== false;
+    if (publicClient && requiresClientAuthentication(allowedScopes)) {
+      return badRequest(res, PUBLIC_CLIENT_SCOPE_ERROR);
+    }
     const requirePkce = publicClient ? true : req.body?.requirePkce === true;
     const generatedSecret = !publicClient ? generateClientSecret() : null;
 
@@ -310,6 +314,18 @@ router.put('/:clientId', async (req, res) => {
 
     const updates = [];
     const params = [];
+
+    // État après la mise à jour : un client public ne garde ni ne reçoit une
+    // permission qui exige le `client_secret`.
+    const nextPublicClient = req.body?.publicClient !== undefined
+      ? req.body.publicClient === true
+      : existing.public_client === 1 || existing.public_client === true;
+    const nextScopes = req.body?.allowedScopes !== undefined
+      ? sanitizeScopes(req.body.allowedScopes)
+      : safeJsonParse(existing.allowed_scopes, []);
+    if (nextPublicClient && requiresClientAuthentication(nextScopes)) {
+      return badRequest(res, PUBLIC_CLIENT_SCOPE_ERROR);
+    }
 
     if (req.body?.clientName !== undefined) {
       const v = sanitizeClientName(req.body.clientName);

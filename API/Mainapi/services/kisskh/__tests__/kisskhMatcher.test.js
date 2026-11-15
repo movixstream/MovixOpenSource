@@ -464,19 +464,21 @@ test('TMDB alternative titles use the exact cache key, endpoint and details TTL'
     return originalLoad.call(this, request, parent, isMain);
   };
   try {
-    const { fetchTmdbAlternativeTitles, TTL_DETAILS } = require(tmdbPath);
+    const { fetchTmdbAlternativeTitles, TTL_STABLE } = require(tmdbPath);
     const result = await fetchTmdbAlternativeTitles('https://api.themoviedb.org/3', 'test-key', 154825);
     assert.equal(result.results[0].title, 'Business Proposal');
     assert.deepEqual(axiosCalls, [[
       'https://api.themoviedb.org/3/tv/154825/alternative_titles',
       { params: { api_key: 'test-key' }, timeout: 10_000 },
     ]]);
-    assert.deepEqual(redisWrites, [[
+    // Titres quasi immuables : 30 jours, avec ±15 % d'écart par clé.
+    const [[key, value, mode, ttl]] = redisWrites;
+    assert.deepEqual([key, value, mode], [
       'tmdb:alternative_titles:tv:154825',
       JSON.stringify(result),
       'EX',
-      TTL_DETAILS,
-    ]]);
+    ]);
+    assert.ok(ttl >= TTL_STABLE * 0.85 && ttl <= TTL_STABLE * 1.15);
   } finally {
     Module._load = originalLoad;
     delete require.cache[tmdbPath];

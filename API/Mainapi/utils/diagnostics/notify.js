@@ -21,9 +21,11 @@ function validUserId(value) { return /^\d{16,22}$/.test(String(value || '')); }
 function enabled(env) { return String(env.MAINAPI_PROBE_DISCORD_ENABLED || '').toLowerCase() !== 'false'; }
 function reportMessage(reason, alert) {
   if (reason === 'threshold') return `Alerte Main API : ${describeThresholdAlert(alert)}. Rapport intermédiaire joint ; la collecte continue.`;
+  // Alerte détectée moins d'une minute avant la fin : pas de rapport à part, elle est dans celui-ci.
+  const included = alert ? ` Alerte incluse : ${describeThresholdAlert(alert)}.` : '';
   return reason === 'deadline'
-    ? 'Sonde Main API terminée. Le rapport est joint.'
-    : `Sonde Main API arrêtée (${String(reason || 'inconnue').slice(0, 80)}). Le rapport est joint.`;
+    ? `Sonde Main API terminée. Le rapport est joint.${included}`
+    : `Sonde Main API arrêtée (${String(reason || 'inconnue').slice(0, 80)}). Le rapport est joint.${included}`;
 }
 function checkAbort(signal) { if (signal?.aborted) throw new Error('aborted'); }
 async function readFileWithin(file, maxBytes, signal) {

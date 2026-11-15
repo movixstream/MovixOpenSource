@@ -120,6 +120,14 @@ function createSharedSourceLookup({ redis = null, namespace, ttlMs = 40 * 60000,
       return entry;
     } catch { return null; }
   };
+  // Redis ne sert qu'à partager le travail : une lecture lente compte comme absente.
+  const readSoft = key => read(key).catch(() => null);
+  const loadLocally = async (key, loader, cacheable) => {
+    const value = await loader();
+    const raw = JSON.stringify({ value, expiresAt: Date.now() + ttlMs });
+    if (cacheable(value)) remember(key, raw, Date.now() + ttlMs);
+    return value;
+  };
   const load = (parts, loader, { cacheable = value => value != null } = {}) => {
     const key = JSON.stringify(parts);
     return flight(key, async () => {
@@ -128,25 +136,36 @@ function createSharedSourceLookup({ redis = null, namespace, ttlMs = 40 * 60000,
       try {
         const deadline = Date.now() + waitMs;
         do {
-          const cached = await read(key);
+          const cached = await readSoft(key);
           if (cached) return cached.value;
-          const result = await work.run(key, async ({ isCurrent, publishValue }) => {
-            const latest = await read(key);
-            if (latest) return latest;
-            const value = await loader();
-            const entry = { value, expiresAt: Date.now() + ttlMs };
-            if (!await isCurrent()) throw unavailable();
-            if (cacheable(value)) {
-              const raw = JSON.stringify(entry);
-              if (Buffer.byteLength(raw) <= maxEntryBytes) {
-                if (!await publishValue(raw, ttlMs)) throw unavailable();
-                remember(key, raw, entry.expiresAt);
+          let loaded = false, result;
+          try {
+            result = await work.run(key, async ({ isCurrent, publishValue }) => {
+              const latest = await readSoft(key);
+              if (latest) return latest;
+              loaded = true;
+              const value = await loader();
+              const entry = { value, expiresAt: Date.now() + ttlMs };
+              // Bail perdu (Redis lent, boucle d'événements chargée) : le résultat reste
+              // bon pour cet appelant, seul le partage est abandonné.
+              if (cacheable(value)) {
+                const raw = JSON.stringify(entry);
+                if (Buffer.byteLength(raw) <= maxEntryBytes && await isCurrent()
+                    && await publishValue(raw, ttlMs).catch(() => false)) {
+                  remember(key, raw, entry.expiresAt);
+                }
               }
-            }
-            return entry;
-          });
+              return entry;
+            });
+          } catch (error) {
+            // Une vraie panne de la source remonte ; une coordination indisponible
+            // (Redis saturé, échec partagé de ce type) ne doit pas bloquer la recherche.
+            if (loaded || error?.code !== 'SOURCE_REFRESH_UNAVAILABLE') throw error;
+            return await loadLocally(key, loader, cacheable);
+          }
           if (result) return result.value;
-          if (Date.now() >= deadline) throw unavailable();
+          // Le propriétaire du verrou traîne : chercher soi-même plutôt qu'échouer.
+          if (Date.now() >= deadline) return await loadLocally(key, loader, cacheable);
           await new Promise(resolve => setTimeout(resolve, pollMs));
         } while (true);
       } finally { pending--; }

@@ -5,6 +5,7 @@ import type MpegtsType from 'mpegts.js';
 import { enterPlayerFullscreen, exitPlayerFullscreen, getFullscreenElement } from '@/utils/playerFullscreenPersistence';
 import { loadHlsModule } from '@/utils/loadHlsModule';
 import { copyText } from '@/utils/clipboard';
+import { safeEmbedUrl } from '@/utils/safeEmbedUrl';
 
 let HlsLib: typeof HlsType | null = null;
 let DashjsLib: typeof DashjsType | null = null;
@@ -2221,7 +2222,7 @@ const LiveTVPlayer: React.FC<LiveTVPlayerProps> = ({
                 <>
                     {/* Fullscreen iframe — fills the whole screen on PC and mobile */}
                     <iframe
-                        src={activeEmbedUrl}
+                        src={safeEmbedUrl(activeEmbedUrl)}
                         className="absolute inset-0 h-full w-full border-0"
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                         allowFullScreen

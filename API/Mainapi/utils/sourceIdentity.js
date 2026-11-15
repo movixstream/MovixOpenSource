@@ -41,8 +41,13 @@ function imagePath(value) {
   } catch { return null; }
 }
 
-function parseSourceIdentity(html) {
-  const $ = cheerio.load(html);
+// Libellés lus dans la fiche : les autres <li> (menus, genres, épisodes) ne sont pas copiés.
+const IDENTITY_LABELS = new Set(['titre original', 'date de sortie', 'realisateur', 'realisateurs',
+  'createur', 'createurs', 'acteurs', 'synopsis']);
+
+// Accepte le HTML brut ou un document Cheerio déjà chargé, lu sans être modifié.
+function parseSourceIdentity(input) {
+  const $ = typeof input === 'function' && typeof input.root === 'function' ? input : cheerio.load(input);
   const heading = $('h1').first().text().replace(/\s+/g, ' ').trim();
   const structured = [];
   $('script[type="application/ld+json"]').each((_, node) => {
@@ -72,6 +77,7 @@ function parseSourceIdentity(html) {
   // Libellés de la fiche uniquement : ni recommandations ni commentaires.
   $('li').each((_, node) => {
     const row = $(node), label = normalize(row.children('.mov-label, span').first().text());
+    if (!IDENTITY_LABELS.has(label)) return;
     const content = row.clone();
     content.children('.mov-label, span').first().remove();
     const value = content.text().replace(/\s+/g, ' ').trim();
@@ -121,16 +127,19 @@ const imageNames = images => [...(images?.posters || []), ...(images?.backdrops 
   .map(p => typeof p === 'string' ? p : p.file_path?.split('/').pop()).filter(Boolean);
 
 // Chargements supplémentaires partagés par tous les candidats d'une recherche.
+// L'enrichissement est strict : un TMDB saturé fait rejeter verify() et aliases()
+// avec `code === 'TMDB_TRANSIENT'`, au lieu d'un faux refus ou d'une liste vide.
 function createIdentityVerifier({ apiUrl, apiKey, type, details, english = null, seasonData = null }) {
   const titles = unique([details.title, details.name, details.original_title, details.original_name,
     english?.title, english?.name]);
   const years = unique([yearOf(details.release_date || details.first_air_date), yearOf(seasonData?.air_date)]);
+  const strict = { strict: true };
   let imagesPromise, creditsPromise, aliasesPromise, homonymsPromise;
   // Sans réponse TMDB, on garde l'ancien comportement (titre + année suffisent).
   const homonyms = () => (homonymsPromise ||= findTmdbHomonyms({ apiUrl, apiKey, type, id: details.id, titles, years })
     .catch(() => []));
   const aliases = async () => {
-    aliasesPromise ||= fetchTmdbAlternativeTitles(apiUrl, apiKey, details.id, type);
+    aliasesPromise ||= fetchTmdbAlternativeTitles(apiUrl, apiKey, details.id, type, strict);
     const result = await aliasesPromise;
     return unique([...titles, ...(result?.titles || result?.results || [])
       .filter(item => ['FR', 'US', 'GB'].includes(item.iso_3166_1)).map(item => item.title)]).slice(0, 12);
@@ -155,7 +164,7 @@ function createIdentityVerifier({ apiUrl, apiKey, type, details, english = null,
     const sourceImages = (candidate.posters || []).map(imagePath).filter(Boolean);
     let posters = [details.poster_path, details.backdrop_path, seasonData?.poster_path].filter(Boolean).map(p => p.split('/').pop());
     if (sourceImages.length && !sourceImages.some(p => posters.includes(p))) {
-      imagesPromise ||= fetchTmdbImages(apiUrl, apiKey, details.id, type);
+      imagesPromise ||= fetchTmdbImages(apiUrl, apiKey, details.id, type, strict);
       const images = await imagesPromise;
       posters = [...posters, ...imageNames(images)];
     }
@@ -165,7 +174,10 @@ function createIdentityVerifier({ apiUrl, apiKey, type, details, english = null,
       for (const item of sameYearHomonyms) {
         const own = [item.poster_path, item.backdrop_path].filter(Boolean).map(p => p.split('/').pop());
         const names = sourceImages.some(p => own.includes(p)) ? own
-          : imageNames(await fetchTmdbImages(apiUrl, apiKey, item.id, type).catch(() => null));
+          : imageNames(await fetchTmdbImages(apiUrl, apiKey, item.id, type, strict).catch(error => {
+            if (error?.code === 'TMDB_TRANSIENT') throw error;
+            return null;
+          }));
         if (sourceImages.some(p => names.includes(p))) return { ...result, reason: 'homonym_image', homonymId: item.id };
       }
     }
@@ -174,7 +186,7 @@ function createIdentityVerifier({ apiUrl, apiKey, type, details, english = null,
     result.titleScore = expandedScore;
     if (expandedScore >= 0.95 && yearMatches && !ambiguous) return { ...result, accepted: true, reason: 'alternative_title_and_year' };
     if (expandedScore < 0.8) return { ...result, reason: 'title_mismatch' };
-    creditsPromise ||= fetchTmdbCredits(apiUrl, apiKey, details.id, type);
+    creditsPromise ||= fetchTmdbCredits(apiUrl, apiKey, details.id, type, strict);
     const credits = await creditsPromise;
     const cast = new Set(names(credits?.cast || []));
     const directors = new Set(names([...(details.created_by || []), ...(credits?.crew || []).filter(person =>

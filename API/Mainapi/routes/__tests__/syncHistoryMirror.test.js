@@ -51,6 +51,8 @@ async function fixture(t, profile, { historyStore, ensureImported } = {}) {
       async safeWriteFile(target, data) { writes++; await fs.writeFile(target, data); return true; },
       async safeWriteJsonFile(target, data) { await fs.writeFile(target, JSON.stringify(data)); return true; },
     },
+    // Écritures faites sous le verrou du profil (sans verrou Redis).
+    'write-file-atomic': async (target, data) => { writes++; await fs.writeFile(target, data); },
     '../utils/discord': { logSyncErrorToDiscord: async () => {} },
     '../utils/redisRateLimitStore': { createRedisRateLimitStore: () => ({}) },
     '../utils/historyStore': { createHistoryStore: () => historyStore },
@@ -120,9 +122,9 @@ function recordingStore({ failWith = null } = {}) {
       calls.hideAll.push(owner);
       return 0;
     },
-    async recordProgress(owner, entry) {
+    async recordProgress(owner, entry, options) {
       if (failWith) throw failWith;
-      calls.recordProgress.push({ owner, entry });
+      calls.recordProgress.push({ owner, entry, options });
     },
     async touch(owner, entry) {
       if (failWith) throw failWith;
@@ -152,6 +154,35 @@ test('un set sur progress_550 est recopié une fois dans l’historique', async 
   const [, , owner, readProfileData] = f.imports[0];
   assert.deepEqual(plain(owner), { userType: 'oauth', userId: 'user', profileId: 'profile-one' });
   assert.deepEqual(plain(await readProfileData('oauth', 'user', 'profile-one')), { user_language: 'fr' });
+});
+
+test('lecture en cours : la position est recopiée, la ligne « Reprendre » seulement quand elle peut changer', async t => {
+  t.mock.method(console, 'warn', () => {});
+  const store = recordingStore();
+  const f = await fixture(t, {
+    progress_550: progress(600, 3600, '2026-10-19T10:00:00.000Z'),
+    progress_tv_1399_s1_e1: progress(100, 3600, '2026-10-19T09:00:00.000Z'),
+  }, { historyStore: store });
+
+  // Même film, 30 s plus tard : la ligne pointe déjà ce film.
+  await f.request([{ op: 'set', key: 'progress_550', value: progress(630, 3600, '2026-10-19T10:00:30.000Z') }]);
+  // Nouvel épisode : la ligne de la série doit bouger.
+  await f.request([{ op: 'set', key: 'progress_tv_1399_s1_e2', value: progress(40, 3600, '2026-10-19T10:01:00.000Z') }]);
+  // Envoi qui touche aussi continueWatching : aucune ligne laissée de côté.
+  await f.request([
+    { op: 'set', key: 'progress_550', value: progress(660, 3600, '2026-10-19T10:01:00.000Z') },
+    { op: 'set', key: 'continueWatching', value: JSON.stringify({ movies: [{ id: 550 }], tv: [] }) },
+  ]);
+  // Même position 10 s plus tard (pause) : rien à recopier.
+  await f.request([{ op: 'set', key: 'progress_550', value: progress(660, 3600, '2026-10-19T10:01:10.000Z') }]);
+  await f.settle();
+
+  const calls = store.calls.recordProgress.map(({ entry, options }) => [`${entry.mediaType}:${entry.tmdbId}:${entry.season}:${entry.episode}`, entry.position, options?.refreshHistory]);
+  assert.deepEqual(calls, [
+    ['movie:550:0:0', 630, false],
+    ['tv:1399:1:2', 40, undefined],
+    ['movie:550:0:0', 660, undefined],
+  ]);
 });
 
 test('une marque « Déjà vu » synchronisée passe par le magasin (ops réelles du site : arrayAdd / arrayRemove / objPatch)', async t => {

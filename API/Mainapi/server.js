@@ -4,6 +4,7 @@ require('dotenv').config();
 const diagnostics = require('./utils/diagnostics');
 const resourceProbe = diagnostics.startProbe(cluster);
 const { createWorkerSlotManager } = require('./utils/workerSlots');
+const workerRecycle = require('./utils/workerRecycle');
 
 // === CLUSTER MODE CONFIGURATION (au tout début pour éviter que le master charge tout) ===
 const NUM_WORKERS = parseInt(process.env.NUM_WORKERS) || 12;
@@ -124,6 +125,36 @@ if (cluster.isPrimary ?? cluster.isMaster) {
   })();
   const WORKER_RECYCLE_STAGGER_MS =
     parseInt(process.env.WORKER_RECYCLE_STAGGER_MS, 10) || (5 * 60 * 1000);
+  // Trois minutes entre deux recyclages laissent le remplaçant démarrer.
+  const recycleGate = workerRecycle.createRecycleGate({ minGapMs: 3 * 60 * 1000 });
+
+  const recycleWorker = (worker, reason) => {
+    try {
+      console.log(`🔁 Recycling worker pid=${worker.process.pid} (${reason})`);
+      worker.send('shutdown');
+      // Force-kill fallback if the worker's graceful 15s server.close +
+      // resource cleanup hasn't exited it within 35s.
+      setTimeout(() => {
+        try {
+          if (!worker.isDead()) worker.kill('SIGKILL');
+        } catch (_) { /* ignore */ }
+      }, 35000);
+    } catch (e) {
+      console.warn(`🔁 Recycle worker ${worker.process?.pid} failed: ${e.message}`);
+    }
+  };
+
+  // Un worker au-delà de WORKER_MAX_RSS_MB le signale chaque minute ; le
+  // master n'en remplace qu'un à la fois.
+  const WORKER_MAX_RSS_MB = workerRecycle.readRssLimitMb(process.env.WORKER_MAX_RSS_MB);
+  if (WORKER_MAX_RSS_MB > 0) {
+    console.log(`🔁 Worker recycle above ${WORKER_MAX_RSS_MB} MB RSS`);
+    cluster.on('message', (worker, message) => {
+      if (message?.type !== workerRecycle.RECYCLE_REQUEST || isShuttingDown || worker.isDead()) return;
+      if (!recycleGate.tryAcquire(worker)) return;
+      recycleWorker(worker, `RSS ${Math.round(Number(message.rssMb) || 0)} MB > ${WORKER_MAX_RSS_MB} MB`);
+    });
+  }
 
   if (WORKER_RECYCLE_INTERVAL_MS > 0) {
     console.log(
@@ -138,19 +169,9 @@ if (cluster.isPrimary ?? cluster.isMaster) {
       workers.forEach((worker, idx) => {
         setTimeout(() => {
           if (isShuttingDown || worker.isDead()) return;
-          try {
-            console.log(`🔁 Recycling worker pid=${worker.process.pid}`);
-            worker.send('shutdown');
-            // Force-kill fallback if the worker's graceful 15s server.close +
-            // resource cleanup hasn't exited it within 35s.
-            setTimeout(() => {
-              try {
-                if (!worker.isDead()) worker.kill('SIGKILL');
-              } catch (_) { /* ignore */ }
-            }, 35000);
-          } catch (e) {
-            console.warn(`🔁 Recycle worker ${worker.process?.pid} failed: ${e.message}`);
-          }
+          // Le recyclage par RSS attend son tour derrière celui-ci.
+          recycleGate.note(worker);
+          recycleWorker(worker, 'periodic');
         }, idx * WORKER_RECYCLE_STAGGER_MS);
       });
     }, WORKER_RECYCLE_INTERVAL_MS);
@@ -168,6 +189,12 @@ if (cluster.isPrimary ?? cluster.isMaster) {
 // =============================================================================
 
 process.env.UV_THREADPOOL_SIZE = 8; // 8 threads libuv par worker
+
+// Avant tout agent de proxy : détection http/https sans pile formatée.
+require('./utils/agentBaseFastProtocol');
+// Avant toute requête HTTPS : une coupure pendant la négociation TLS ne doit
+// plus retenir la connexion en mémoire (voir utils/tlsHandshakeGuard.js).
+require('./utils/tlsHandshakeGuard').installTlsHandshakeGuard();
 
 const http = require('http');
 const https = require('https');
@@ -371,3 +398,19 @@ process.on('SIGINT', shutdownWorker);
 process.on('message', (msg) => {
   if (msg === 'shutdown') shutdownWorker();
 });
+
+// Recyclage selon la mémoire : voir utils/workerRecycle.js et le master.
+const WORKER_MAX_RSS_MB = workerRecycle.readRssLimitMb(process.env.WORKER_MAX_RSS_MB);
+const RECYCLE_MIN_UPTIME_MS = 15 * 60 * 1000;
+if (WORKER_MAX_RSS_MB > 0 && typeof process.send === 'function') {
+  const rssCheckTimer = setInterval(() => {
+    if (isWorkerShuttingDown) return;
+    const rssBytes = process.memoryUsage.rss();
+    if (!workerRecycle.shouldRequestRecycle({
+      rssBytes, uptimeMs: process.uptime() * 1000, limitMb: WORKER_MAX_RSS_MB, minUptimeMs: RECYCLE_MIN_UPTIME_MS,
+    })) return;
+    // Le rappel absorbe l'erreur d'un canal IPC déjà fermé.
+    process.send({ type: workerRecycle.RECYCLE_REQUEST, rssMb: rssBytes / 1024 / 1024 }, () => {});
+  }, 60 * 1000);
+  rssCheckTimer.unref();
+}

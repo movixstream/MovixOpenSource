@@ -4,10 +4,17 @@ const assert = require('node:assert/strict');
 const {
   parseProgressKey,
   parseProgressValue,
+  isProgressHeartbeat,
+  isHistoryRowFresh,
   parseContinueWatching,
   isFinished,
   nextPointer,
 } = require('../historyRules');
+
+// Valeur `progress_*` du lecteur, horodatée `seconds` après 10 h 00.
+function progressAt(position, seconds, duration = 3600, extra = {}) {
+  return JSON.stringify({ position, timestamp: new Date(Date.parse('2026-10-19T10:00:00.000Z') + seconds * 1000).toISOString(), duration, ...extra });
+}
 
 const SEASONS = [{ season: 1, episodes: 10 }, { season: 2, episodes: 8 }];
 
@@ -41,6 +48,74 @@ test('parseProgressValue refuse les valeurs invalides', () => {
   assert.equal(parseProgressValue('{"position":600,"duration":-5,"timestamp":"2026-10-15T10:00:00.000Z"}'), null);
   assert.equal(parseProgressValue('{"position":600,"duration":3600}'), null);
   assert.equal(parseProgressValue('{"position":600,"duration":3600,"timestamp":"pas une date"}'), null);
+});
+
+test('isProgressHeartbeat : même position, horodatage neuf de moins de 2 min → simple renvoi', () => {
+  assert.equal(isProgressHeartbeat(progressAt(600, 0), progressAt(600, 10)), true);
+  // Pause : la position ne bouge pas d'un pouce, ou presque.
+  assert.equal(isProgressHeartbeat(progressAt(600, 0), progressAt(604.9, 30)), true);
+  assert.equal(isProgressHeartbeat(progressAt(600, 0), progressAt(600, 119)), true);
+  // Ordre des champs différent : même valeur.
+  assert.equal(isProgressHeartbeat('{"position":600,"duration":3600,"timestamp":"2026-10-19T10:00:00.000Z"}', progressAt(600, 10)), true);
+});
+
+test('isProgressHeartbeat : toute vraie nouveauté passe', () => {
+  // Lecture : la position avance de 5 s ou plus (ou recule).
+  assert.equal(isProgressHeartbeat(progressAt(600, 0), progressAt(605, 10)), false);
+  assert.equal(isProgressHeartbeat(progressAt(600, 0), progressAt(590, 10)), false);
+  // Pause de plus de 2 min : un renvoi passe, pour l'ordre de « Reprendre ».
+  assert.equal(isProgressHeartbeat(progressAt(600, 0), progressAt(600, 120)), false);
+  // Horodatage plus ancien (autre appareil) : laissé aux règles habituelles.
+  assert.equal(isProgressHeartbeat(progressAt(600, 10), progressAt(600, 0)), false);
+  // Durée changée (autre source), état « fini » franchi, autre champ changé.
+  assert.equal(isProgressHeartbeat(progressAt(600, 0), progressAt(600, 10, 3700)), false);
+  assert.equal(isProgressHeartbeat(progressAt(3418, 0), progressAt(3421, 10)), false);
+  assert.equal(isProgressHeartbeat(progressAt(600, 0, 3600, { source: 'a' }), progressAt(600, 10, 3600, { source: 'b' })), false);
+  assert.equal(isProgressHeartbeat(progressAt(600, 0), progressAt(600, 10, 3600, { source: 'a' })), false);
+  // Valeurs absentes, identiques ou illisibles.
+  assert.equal(isProgressHeartbeat(undefined, progressAt(600, 10)), false);
+  assert.equal(isProgressHeartbeat(progressAt(600, 0), undefined), false);
+  assert.equal(isProgressHeartbeat(progressAt(600, 0), progressAt(600, 0)), false);
+  assert.equal(isProgressHeartbeat('oups', progressAt(600, 10)), false);
+  assert.equal(isProgressHeartbeat('{"position":600,"duration":3600}', progressAt(600, 10)), false);
+});
+
+test('isHistoryRowFresh : même épisode en cours, même tranche de 2 min → ligne déjà à jour', () => {
+  const before = { progress_550: progressAt(600, 0), progress_tv_1399_s1_e2: progressAt(100, -600) };
+  assert.equal(isHistoryRowFresh('progress_550', before.progress_550, progressAt(630, 30), before), true);
+  assert.equal(isHistoryRowFresh('progress_tv_1399_s1_e2', before.progress_tv_1399_s1_e2, progressAt(130, -570), before), true);
+});
+
+test('isHistoryRowFresh : une lecture continue réécrit la ligne une fois par tranche de 2 min', () => {
+  // Envois toutes les 30 s pendant 10 min : la ligne n'est jamais plus
+  // vieille de 2 min, même si chaque envoi suit le précédent de 30 s.
+  const refreshed = [];
+  for (let seconds = 30; seconds <= 600; seconds += 30) {
+    const previous = progressAt(seconds - 30, seconds - 30);
+    if (!isHistoryRowFresh('progress_550', previous, progressAt(seconds, seconds), { progress_550: previous })) refreshed.push(seconds);
+  }
+  assert.deepEqual(refreshed, [120, 240, 360, 480, 600]);
+});
+
+test('isHistoryRowFresh : la ligne est réécrite dès que le pointeur ou l’état peut changer', () => {
+  const before = {
+    progress_tv_1399_s1_e1: progressAt(100, 0),
+    progress_tv_1399_s1_e2: progressAt(100, 30),
+    progress_tv_13990_s1_e1: progressAt(100, 60),
+  };
+  // Un autre épisode de la série est plus récent : la ligne pointe peut-être ailleurs.
+  assert.equal(isHistoryRowFresh('progress_tv_1399_s1_e1', before.progress_tv_1399_s1_e1, progressAt(130, 40), before), false);
+  // Épisode le plus récent de la série (13990 est une autre série).
+  assert.equal(isHistoryRowFresh('progress_tv_1399_s1_e2', before.progress_tv_1399_s1_e2, progressAt(130, 60), before), true);
+  // Première progression de l'épisode, 2 min écoulées, horodatage plus ancien.
+  assert.equal(isHistoryRowFresh('progress_tv_1399_s1_e3', undefined, progressAt(10, 60), before), false);
+  assert.equal(isHistoryRowFresh('progress_tv_1399_s1_e2', before.progress_tv_1399_s1_e2, progressAt(200, 150), before), false);
+  assert.equal(isHistoryRowFresh('progress_tv_1399_s1_e2', before.progress_tv_1399_s1_e2, progressAt(200, 20), before), false);
+  // Épisode qui devient « fini » : le pointeur passe à l'épisode suivant.
+  assert.equal(isHistoryRowFresh('progress_tv_1399_s1_e2', progressAt(3400, 30), progressAt(3430, 60), before), false);
+  // Clé ou valeurs illisibles.
+  assert.equal(isHistoryRowFresh('user_language', 'fr', 'en', before), false);
+  assert.equal(isHistoryRowFresh('progress_550', 'oups', progressAt(10, 60), before), false);
 });
 
 test('parseContinueWatching lit le format {movies,tv} avec nombres seuls', () => {

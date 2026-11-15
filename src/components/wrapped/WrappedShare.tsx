@@ -11,19 +11,9 @@ import type { WrappedTopContent } from '@/services/wrappedService';
 import { motion, useReducedMotion } from 'framer-motion';
 import { WRAPPED_EASE_MORPH, WRAPPED_FRAME_ANIMATION } from '@/utils/wrappedMotion';
 import { copyText } from '@/utils/clipboard';
+import { saveWrappedFile, shareWrappedFile } from '@/utils/wrappedShareFile';
 
 const WrappedVideo = lazy(() => import('./WrappedVideo'));
-
-function download(blob: Blob, name: string) {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = name;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 export default function WrappedShare({ data, favorite, preparedStory, onDetails, theme, autoTheme, onTheme }: {
     data: WrappedShareCardData; favorite?: WrappedTopContent; preparedStory?: Blob; onDetails: () => void;
@@ -73,17 +63,18 @@ export default function WrappedShare({ data, favorite, preparedStory, onDetails,
 
     const share = async () => {
         if (!ready) return;
-        const file = new File([ready.blob], filename, { type: 'image/png' });
         try {
-            if (navigator.canShare?.({ files: [file] }) && navigator.share) {
-                await navigator.share({ title: t('wrapped.shareTitle', { year: data.year }), text, files: [file] });
-            } else {
-                download(ready.blob, filename);
-                toast.success(t('wrapped.imageShareFallback'));
-            }
-        } catch (error) {
-            if (!(error instanceof DOMException && error.name === 'AbortError')) toast.error(t('wrapped.shareError'));
+            const outcome = await shareWrappedFile({ blob: ready.blob, name: filename, type: 'image/png', title: t('wrapped.shareTitle', { year: data.year }), text });
+            if (outcome === 'downloaded') toast.success(t('wrapped.imageShareFallback'));
+            else if (outcome === 'unavailable') toast.error(t('wrapped.appSaveUnavailable'));
+        } catch {
+            toast.error(t('wrapped.shareError'));
         }
+    };
+
+    // Dans l'application, un téléchargement ne produit aucun fichier : le dire plutôt que de ne rien faire.
+    const save = () => {
+        if (ready && !saveWrappedFile(ready.blob, filename)) toast.error(t('wrapped.appSaveUnavailable'));
     };
 
     const copy = async () => {
@@ -132,7 +123,7 @@ export default function WrappedShare({ data, favorite, preparedStory, onDetails,
             </div>
             <div className="grid grid-cols-2 gap-2 md:col-start-1 md:row-start-2">
                 <button type="button" onClick={share} disabled={!ready} className="flex min-h-12 items-center justify-center gap-2 rounded-full bg-[var(--wrapped-accent)] px-3 text-sm font-bold text-[#17121f] hover:bg-white disabled:opacity-40"><Share2 className="h-4 w-4 shrink-0" aria-hidden="true" />{t('wrappedStory.share')}</button>
-                <button type="button" onClick={() => ready && download(ready.blob, filename)} disabled={!ready} className="flex min-h-12 items-center justify-center gap-2 rounded-full border border-white/20 px-3 text-sm font-semibold hover:bg-white/10 disabled:opacity-40"><Download className="h-4 w-4 shrink-0" aria-hidden="true" />{t('wrappedStory.download')}</button>
+                <button type="button" onClick={save} disabled={!ready} className="flex min-h-12 items-center justify-center gap-2 rounded-full border border-white/20 px-3 text-sm font-semibold hover:bg-white/10 disabled:opacity-40"><Download className="h-4 w-4 shrink-0" aria-hidden="true" />{t('wrappedStory.download')}</button>
             </div>
             {/* Le film partage la ligne du dépliant : il est visible sans ajouter de hauteur. */}
             <div className="grid grid-cols-2 items-start gap-2 md:col-start-1 md:row-start-3" data-wrapped-interactive>

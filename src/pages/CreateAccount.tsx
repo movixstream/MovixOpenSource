@@ -15,6 +15,7 @@ import { getSessionCreationHeaders } from '../utils/sessionClientId';
 import { useTurnstileBypass } from '../hooks/useTurnstileBypass';
 import { TURNSTILE_SITE_KEY } from '../utils/turnstileKeys';
 import { copyText } from '../utils/clipboard';
+import ReferralCodeField from '../components/referral/ReferralCodeField';
 
 const API_URL = import.meta.env.VITE_MAIN_API;
 
@@ -450,6 +451,9 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ mode = 'create' }) => {
           maxLength={20}
         />
       </div>
+
+      {/* Code gardé ici, envoyé par ReferralManager une fois le compte créé. */}
+      {!isLinkMode && <ReferralCodeField variant="form" />}
 
       <motion.button
         whileHover={{ scale: 1.02 }}

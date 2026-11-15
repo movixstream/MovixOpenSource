@@ -20,6 +20,7 @@ import FilterSystem, { type FilterItemType, type FilterOptions } from '@/compone
 import { useOptimizedFilter } from '@/hooks/useOptimizedFilter';
 import MemberCard from '@/components/profile/MemberCard';
 import ResumePanel from '@/components/profile/ResumePanel';
+import ReferralCard from '@/components/referral/ReferralCard';
 import ProfileTabs, { tabButtonId, tabPanelId, type ProfileTab } from '@/components/profile/ProfileTabs';
 import LibraryGrid from '@/components/profile/LibraryGrid';
 import AlertsTab from '@/components/profile/AlertsTab';
@@ -279,8 +280,10 @@ const Profile: React.FC = () => {
 
   return (
     <main className="mx-auto w-full max-w-[1440px] px-4 pb-24 pt-4 sm:px-6 sm:pt-6 lg:px-8">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <motion.div {...rise(0)}>
+      {/* grid-cols-1 = minmax(0, 1fr) : sans lui, la bande perforée de la carte
+          (largeur min-content ~566 px) élargit la colonne au-delà de l'écran. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+        <motion.div className="min-w-0" {...rise(0)}>
           <MemberCard
             name={displayName}
             avatar={displayAvatar}
@@ -293,10 +296,13 @@ const Profile: React.FC = () => {
             onRename={handleRename}
           />
         </motion.div>
-        <motion.div {...rise(0.08)}>
+        <motion.div className="min-w-0" {...rise(0.08)}>
           <ResumePanel item={resume.item} loading={resume.loading} />
         </motion.div>
       </div>
+
+      {/* Parrainage : rien pour un compte à code d'accès seul ou si l'admin l'a coupé. */}
+      <ReferralCard className="mt-3" />
 
       <section className="mt-12 sm:mt-16" aria-labelledby={tabButtonId(activeTab)}>
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">

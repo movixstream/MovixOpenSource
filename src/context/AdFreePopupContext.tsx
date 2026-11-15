@@ -2,8 +2,9 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { useLocation } from 'react-router-dom';
 import { checkVipStatus, isUserVip } from '../utils/vipUtils';
 import { getAdPopupMode, subscribeToAdPopupModeChanges } from '../utils/adPopupMode';
-import { SCRIPT_AD_MODE_ENABLED, loadAdScript } from '../utils/adScriptMode';
+import { hasAdToOpen, startMonetizationConfigSync } from '../services/monetizationConfig';
 import { readLocalStorage } from '../utils/browserStorage';
+import { isMovixAppWebView } from '../utils/wrappedShareFile';
 import { readHalloweenTheme } from '../hooks/useHalloweenTheme';
 import { useLightMode } from './LightModeContext';
 
@@ -99,22 +100,18 @@ export const AdFreePopupProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setIsVip(isUserVip());
   }, [pathname]);
 
-  // Précharge le script popunder quand le popup est en mode normal/bouton.
-  // Auto et click-anywhere continuent d'utiliser le lien direct.
-  useEffect(() => {
-    const sync = () => {
-      if (getAdPopupMode() === 'normal' && SCRIPT_AD_MODE_ENABLED) loadAdScript();
-    };
-    sync();
-    return subscribeToAdPopupModeChanges(sync);
-  }, []);
+  // Config publique des pubs (`/api/go-settings`) : lue au démarrage puis
+  // toutes les 5 minutes. Elle dit s'il y a une pub à ouvrir, sans attendre le
+  // réseau au moment où le lecteur demande le popup.
+  useEffect(() => startMonetizationConfigSync(), []);
 
   // Le décor animé de la popup (motifs SVG rastérisés) se prépare pendant un
   // temps mort après le chargement : il est complet dès l'animation
   // d'ouverture au lieu d'apparaître motif par motif. Seul le mode normal
   // l'affiche, et le module reste hors du bundle principal.
   const { effectivePrefs } = useLightMode();
-  const warmPopupDecor = !is_vip && effectivePrefs.bgAnimations;
+  // Pas de popup dans les applications mobiles : rien à préparer.
+  const warmPopupDecor = !is_vip && effectivePrefs.bgAnimations && !isMovixAppWebView();
   useEffect(() => {
     if (!warmPopupDecor) return;
     let cancelled = false;
@@ -159,6 +156,13 @@ export const AdFreePopupProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     if (isVipUser) {
       setIsVip(true); // Ensure state is in sync with localStorage
+      setShouldLoadIframe(true);
+      return;
+    }
+
+    // Pas de pub à ouvrir (pubs coupées, emplacement inactif, aucune pub pour
+    // l'audience du visiteur) : pas de popup, le lecteur se débloque tout de suite.
+    if (!hasAdToOpen('player')) {
       setShouldLoadIframe(true);
       return;
     }

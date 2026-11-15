@@ -118,7 +118,7 @@ Le fichier `API/proxiesembed/.env.example` couvre les besoins principaux :
 - **sécurité** : `MEDIA_SIGNING_SECRET`, `INTERNAL_API_KEY`, `MEDIA_SIGNATURE_TTL`
   — les deux secrets doivent porter **exactement la même valeur** que côté
   mainapi, sinon plus rien ne se lit
-- pool proxies : `PROXIES_SOCKS5_JSON`
+- pool proxies : `PROXY_SOURCE` (`socks5` ou `proxyscrape`), `PROXIES_SOCKS5_JSON`, `PROXYSCRAPE_API_TOKEN`, `PROXYSCRAPE_ACCOUNT_ID`
 - france.tv : `FRANCETV_EMAIL`, `FRANCETV_PASSWORD`
 - debrid : `DEEPBRID_API_KEY`
 

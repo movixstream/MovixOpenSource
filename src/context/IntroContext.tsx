@@ -12,20 +12,23 @@ interface IntroContextProps {
 
 const IntroContext = createContext<IntroContextProps | undefined>(undefined);
 
+// L'intro repose sur les unités de conteneur (cq*) et les propriétés translate/scale.
+// Sans elles (Safari 15, Chrome < 105), le logo ferait 0 × 0 sur un écran noir : on la saute.
+const introSupported = (): boolean =>
+  typeof CSS !== 'undefined' && typeof CSS.supports === 'function' &&
+  CSS.supports('width', '1cqmin') && CSS.supports('translate', '1px') && CSS.supports('scale', '1');
+
+// L'intro se joue à chaque chargement complet du site quand le réglage est actif.
+// Elle n'est montée qu'au démarrage : la navigation interne ne la rejoue pas.
+const shouldShowIntro = (): boolean =>
+  readLocalStorage('movix_intro_enabled') === 'true' && introSupported();
+
 export const IntroProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { effectivePrefs } = useLightMode();
-  const [showIntro, setShowIntro] = useState(false);
-  const [introCompleted, setIntroCompleted] = useState(true);
-
-  useEffect(() => {
-    const introEnabled = readLocalStorage('movix_intro_enabled') === 'true';
-    const hasSeenIntro = readLocalStorage('movix_intro_seen') === 'true';
-
-    if (introEnabled && !hasSeenIntro) {
-      setShowIntro(true);
-      setIntroCompleted(false);
-    }
-  }, []);
+  // Décidé dès le premier rendu, pas dans un effet : sinon la page s'affiche
+  // une image avant que l'intro ne la recouvre.
+  const [showIntro, setShowIntro] = useState(shouldShowIntro);
+  const [introCompleted, setIntroCompleted] = useState(() => !showIntro);
 
   useEffect(() => {
     if (!effectivePrefs.transitions) {
@@ -34,27 +37,12 @@ export const IntroProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [effectivePrefs.transitions]);
 
-  // Ecouter les changements de setting (toggle depuis SettingsPage)
-  useEffect(() => {
-    const handleIntroReset = () => {
-      // Quand on active l'intro dans les settings, reset le "seen" pour la prochaine visite
-      try { localStorage.removeItem('movix_intro_seen'); } catch { /* Préférence facultative. */ }
-    };
-    window.addEventListener('intro_settings_changed', handleIntroReset);
-    return () => window.removeEventListener('intro_settings_changed', handleIntroReset);
-  }, []);
-
   const completeIntro = useCallback(() => {
     setShowIntro(false);
     setIntroCompleted(true);
-    try { localStorage.setItem('movix_intro_seen', 'true'); } catch { /* Préférence facultative. */ }
   }, []);
 
-  const skipIntro = useCallback(() => {
-    setShowIntro(false);
-    setIntroCompleted(true);
-    try { localStorage.setItem('movix_intro_seen', 'true'); } catch { /* Préférence facultative. */ }
-  }, []);
+  const skipIntro = completeIntro;
 
   const value = useMemo(
     () => ({ showIntro: showIntro && effectivePrefs.transitions, setShowIntro, introCompleted: introCompleted || !effectivePrefs.transitions, completeIntro, skipIntro }),

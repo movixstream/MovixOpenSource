@@ -23,6 +23,7 @@ import HoldButton from './ui/hold-button';
 import { LiquidDropdown, LiquidSheet } from './header/liquidMenu';
 import { useSheetScrollLock } from './header/useSheetScrollLock';
 import { HeaderPanelsContext } from './header/headerPanels';
+import ReferralCodeField from './referral/ReferralCodeField';
 
 /* ─── Menu profil et menu de connexion ───────────────────────────────────────
    Même liquide que le menu Explorer : sur ordinateur, la pastille du profil
@@ -444,6 +445,8 @@ const ProfileMenu: React.FC = () => {
           <span>{t('auth.secretPhrase')}</span>
         </LiquidButton>
       </div>
+      {/* Code de parrainage, gardé jusqu'à la connexion (rien si le parrainage est coupé). */}
+      <ReferralCodeField variant="menu" className="pt-2" />
       <div data-sheet-item aria-hidden="true" className="mx-2 mb-1.5 mt-3 h-px bg-white/[0.07]" />
       <MenuList variant={variant}>
         <MenuItem variant={variant} value="/settings">

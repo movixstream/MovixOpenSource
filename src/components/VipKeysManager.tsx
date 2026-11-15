@@ -19,9 +19,11 @@ interface VipKey {
   duree_validite: string | null;
   expires_at: string | number | null;
   created_at: string;
+  /** Origine de la clé : `referral` = créée par le parrainage. */
+  source?: string | null;
 }
 
-type FilterType = 'all' | 'active' | 'inactive' | 'unused';
+type FilterType = 'all' | 'active' | 'inactive' | 'unused' | 'referral';
 const PAGE_SIZE = 30;
 
 const VipKeysManager: React.FC = () => {
@@ -109,6 +111,7 @@ const VipKeysManager: React.FC = () => {
       if (currentFilter === 'active') params.append('active', 'true');
       if (currentFilter === 'inactive') params.append('active', 'false');
       if (currentFilter === 'unused') params.append('used', 'false');
+      if (currentFilter === 'referral') params.append('source', 'referral');
       if (debouncedSearch.trim()) params.append('search', debouncedSearch.trim());
 
       const response = await axios.get(`${API_URL}/api/admin/vip-keys?${params.toString()}`, {
@@ -328,7 +331,8 @@ const VipKeysManager: React.FC = () => {
             { id: 'all', label: t('admin.allFem') },
             { id: 'active', label: t('admin.activePlural') },
             { id: 'inactive', label: t('admin.inactivePlural') },
-            { id: 'unused', label: t('admin.unused') }
+            { id: 'unused', label: t('admin.unused') },
+            { id: 'referral', label: t('referral.admin.keyTag') }
           ].map((filter) => (
             <button
               key={filter.id}
@@ -374,6 +378,11 @@ const VipKeysManager: React.FC = () => {
                       <div className="font-mono text-xl text-white mb-3 bg-gray-700 px-4 py-2 rounded-lg inline-block">
                         {key.key_value}
                       </div>
+                      {key.source === 'referral' && (
+                        <span className="mb-3 ml-3 inline-block rounded-full border border-pink-400/30 bg-pink-500/10 px-2.5 py-1 align-middle text-xs font-semibold text-pink-200">
+                          {t('referral.admin.keyTag')}
+                        </span>
+                      )}
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
                         <div>
                           <span className="text-gray-400 font-medium">{t('admin.status')}:</span>

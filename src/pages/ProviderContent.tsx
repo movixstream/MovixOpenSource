@@ -352,6 +352,7 @@ const PROVIDER_NAMES: Record<number, string> = {
   355: 'Warner Bros',
   356: 'DC Comics',
   384: 'HBO MAX',
+  1899: 'HBO Max',
   357: 'OCS'
 };
 
@@ -1191,6 +1192,7 @@ const ProviderContent: React.FC = () => {
                       backdrop_path: i.backdrop_path || '',
                       overview: i.overview || ''
                     }))}
+                  promoPage="providers"
                 />
               </div>
             )}

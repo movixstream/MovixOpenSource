@@ -10,6 +10,7 @@ const { ipKeyGenerator } = require('express-rate-limit');
 const path = require('path');
 const crypto = require('crypto');
 const fsp = require('fs').promises;
+const writeFileAtomic = require('write-file-atomic');
 const { v4: uuidv4 } = require('uuid');
 
 const router = express.Router();
@@ -30,7 +31,13 @@ const {
   pruneProgressKeys,
   touchesMarks,
 } = require('../utils/historyImport');
-const { parseMarksKey, removeTitleFromProfile } = require('../utils/historyRules');
+const {
+  isHistoryRowFresh,
+  isProgressHeartbeat,
+  parseMarksKey,
+  parseProgressKey,
+  removeTitleFromProfile,
+} = require('../utils/historyRules');
 const { createHistoryStore } = require('../utils/historyStore');
 const { createDefaultMediaStore } = require('../utils/mediaStore');
 const {
@@ -326,7 +333,7 @@ async function deleteTitleFromProfile(owner, mediaType, tmdbId) {
       }
       // Toujours au-delà de la limite : 413 (SyncPolicyError), comme un POST.
       const nextSnapshot = sanitizeProfileData(data);
-      if (!(await writeProfileSnapshot(owner.userType, owner.userId, owner.profileId, nextSnapshot))) {
+      if (!(await writeLockedProfileSnapshot(owner.userType, owner.userId, owner.profileId, nextSnapshot))) {
         throw new Error('Écriture du profil impossible');
       }
     }
@@ -430,8 +437,43 @@ function startHistoryImport(owner, profileData) {
   trackHistoryWork(owner, Promise.resolve().then(() => runHistoryImport(owner, profileData)));
 }
 
-function startHistoryMirror(owner, ops, finalValues, previousValues) {
-  trackHistoryWork(owner, mirrorSyncOps(lazyHistoryStore, owner, ops, finalValues, previousValues).catch((error) => {
+function progressIdentity({ mediaType, tmdbId, season, episode }) {
+  return `${mediaType}:${tmdbId}:${season}:${episode}`;
+}
+
+/**
+ * Clés `progress_*` de l'envoi dont la ligne `watch_history` est déjà à jour
+ * (`isHistoryRowFresh`) : pendant une lecture, seule la position change, la
+ * ligne « Reprendre » n'est alors réécrite qu'une fois par tranche de 2 min.
+ * Aucune quand l'envoi touche `continueWatching` (son miroir peut déplacer
+ * le pointeur de la ligne).
+ */
+function freshHistoryKeysOf(ops, previousValues, finalValues, profileBefore) {
+  const fresh = new Set();
+  if (ops.some((op) => op.key === 'continueWatching')) return fresh;
+  for (const [key, previous] of previousValues) {
+    if (!key.startsWith('progress_') || finalValues[key] === previous) continue;
+    if (isHistoryRowFresh(key, previous, finalValues[key], profileBefore)) fresh.add(key);
+  }
+  return fresh;
+}
+
+function startHistoryMirror(owner, ops, finalValues, previousValues, freshHistoryKeys = new Set()) {
+  let store = lazyHistoryStore;
+  if (freshHistoryKeys.size > 0) {
+    const fresh = new Set();
+    for (const key of freshHistoryKeys) {
+      const target = parseProgressKey(key);
+      if (target) fresh.add(progressIdentity(target));
+    }
+    store = {
+      ...lazyHistoryStore,
+      recordProgress: (who, progress) => lazyHistoryStore.recordProgress(who, progress, {
+        refreshHistory: !fresh.has(progressIdentity(progress)),
+      }),
+    };
+  }
+  trackHistoryWork(owner, mirrorSyncOps(store, owner, ops, finalValues, previousValues).catch((error) => {
     console.warn('[HISTORY] Miroir de la synchro impossible:', error && error.message ? error.message : error);
   }));
 }
@@ -622,6 +664,27 @@ async function readUserData(userType, userId) {
   }
 }
 
+/**
+ * Profils du compte, en lecture seule (objets partagés par le cache, à ne
+ * jamais modifier) : vérifier qu'un profil appartient au compte ne demande
+ * pas la copie complète des données du compte que fait readUserData.
+ * Mêmes erreurs que readUserData : identifiant invalide → SyncPolicyError,
+ * fichier absent ou illisible → aucun profil.
+ */
+async function readAccountProfiles(userType, userId) {
+  const filePath = getUserDataFilePath({ usersDir: USERS_DIR, guestsDir: GUESTS_DIR }, userType, userId);
+
+  try {
+    const data = await readAccountData(filePath);
+    return Array.isArray(data?.profiles) ? data.profiles : [];
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+
+    console.error(`Erreur lors de la lecture des donnees utilisateur ${userType}:${userId}:`, error.message);
+    return [];
+  }
+}
+
 async function writeUserData(userType, userId, data) {
   try {
     const filePath = getUserDataFilePath({ usersDir: USERS_DIR, guestsDir: GUESTS_DIR }, userType, userId);
@@ -678,7 +741,7 @@ function scheduleProfileCleanup(userType, userId, profileId) {
     const latest = await readProfileSnapshot(userType, userId, profileId);
     // Jamais d'écriture d'un fichier élagué en mémoire (`original`) : ses
     // progressions ne sont peut-être pas encore importées dans l'historique.
-    if (latest.changed && !latest.original) await writeProfileSnapshot(userType, userId, profileId, latest);
+    if (latest.changed && !latest.original) await writeLockedProfileSnapshot(userType, userId, profileId, latest);
   }).catch(error => {
     console.error(`Erreur lors du nettoyage du profil ${profileId}:`, error.message);
   });
@@ -703,6 +766,36 @@ async function writeProfileSnapshot(userType, userId, profileId, snapshot) {
   const success = await safeWriteFile(profilePath, snapshot.serialized);
   if (!success) console.error(`Erreur de sauvegarde atomique pour le profil ${profileId}`);
   return success;
+}
+
+// Options neuves à chaque écriture : write-file-atomic y ajoute `chown` quand
+// le processus tourne en root (conteneur Linux), un objet figé ou partagé
+// faisait échouer toutes les écritures de profil.
+const profileWriteOptions = () => ({ encoding: 'utf8', mode: 0o644, fsync: false });
+
+/**
+ * Même écriture que writeProfileSnapshot, réservée aux appelants qui
+ * tiennent déjà le verrou MySQL du profil (withProfileSyncLock) : ce verrou
+ * sérialise déjà toutes les écritures du fichier entre workers, le verrou
+ * Redis de safeWriteFile n'y ajoutait que deux commandes Redis par synchro.
+ * Écriture atomique (fichier temporaire puis rename, sans fsync comme
+ * safeWriteFile) ; le dossier n'est créé que s'il manque. Ne lève jamais.
+ */
+async function writeLockedProfileSnapshot(userType, userId, profileId, snapshot) {
+  const profilePath = getProfileFilePath(USERS_DIR, userType, userId, profileId);
+  try {
+    try {
+      await writeFileAtomic(profilePath, snapshot.serialized, profileWriteOptions());
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') throw error;
+      await fsp.mkdir(path.dirname(profilePath), { recursive: true });
+      await writeFileAtomic(profilePath, snapshot.serialized, profileWriteOptions());
+    }
+    return true;
+  } catch (error) {
+    console.error(`Erreur de sauvegarde atomique pour le profil ${profileId}:`, error && error.message ? error.message : error);
+    return false;
+  }
 }
 
 async function writeProfileData(userType, userId, profileId, data) {
@@ -781,8 +874,8 @@ router.post('/sync', syncRateLimit, rejectOversizedSync, authorizeSyncWrite, ...
     syncContext.opsCount = ops.length;
 
     const syncResult = await withProfileSyncLock(userType, finalUserId, profileId, async () => {
-      const userData = await readUserData(userType, finalUserId);
-      getOwnedProfile(userData, profileId);
+      // Profils du compte lus sans copie : la synchro ne les modifie pas.
+      getOwnedProfile({ profiles: await readAccountProfiles(userType, finalUserId) }, profileId);
 
       const snapshot = await readProfileSnapshot(userType, finalUserId, profileId);
       // Fichier déjà au-delà de la limite : on repart des données complètes,
@@ -794,6 +887,12 @@ router.post('/sync', syncRateLimit, rejectOversizedSync, authorizeSyncWrite, ...
 
       const previousValues = new Map(ops.map(op => [op.key, serverData[op.key]]));
       ops.forEach((op) => applySyncOperation(serverData, op));
+      // Progression renvoyée sans nouveauté (lecteur en pause, onglet resté
+      // ouvert : même position, horodatage neuf) : la valeur enregistrée est
+      // gardée, rien n'est écrit ni recopié pour elle.
+      for (const [key, previous] of previousValues) {
+        if (key.startsWith('progress_') && isProgressHeartbeat(previous, serverData[key])) serverData[key] = previous;
+      }
       // Valeurs finales des clés touchées, lues avant l'élagage : une
       // progression élaguée du fichier reste recopiée dans l'historique.
       const finalValues = Object.fromEntries([...previousValues.keys()].map(key => [key, serverData[key]]));
@@ -827,7 +926,7 @@ router.post('/sync', syncRateLimit, rejectOversizedSync, authorizeSyncWrite, ...
       const nextSnapshot = changed || snapshot.original ? sanitizeProfileData(serverData) : snapshot;
 
       if (changed || snapshot.changed) {
-        const writeSuccess = await writeProfileSnapshot(userType, finalUserId, profileId, nextSnapshot);
+        const writeSuccess = await writeLockedProfileSnapshot(userType, finalUserId, profileId, nextSnapshot);
         if (!writeSuccess) {
           console.error(`[SYNC] Echec de l'ecriture pour ${userType}:${finalUserId}:${profileId}`);
           await logSyncErrorToDiscord('Echec de l\'ecriture des donnees de sync', buildSyncLogContext(syncContext));
@@ -842,7 +941,8 @@ router.post('/sync', syncRateLimit, rejectOversizedSync, authorizeSyncWrite, ...
       if (touchesMarks(ops)) await applyMarkOps(lazyHistoryStore, owner, ops, serverData, previousValues);
 
       // Recopie dans l'historique sans faire attendre la réponse.
-      startHistoryMirror(owner, ops, finalValues, previousValues);
+      startHistoryMirror(owner, ops, finalValues, previousValues,
+        freshHistoryKeysOf(ops, previousValues, finalValues, importSource));
 
       return nextSnapshot.stats;
     });
@@ -993,6 +1093,7 @@ module.exports.startOperation = startOperation;
 module.exports.endOperation = endOperation;
 module.exports.waitForOperations = waitForOperations;
 module.exports.readUserData = readUserData;
+module.exports.readAccountProfiles = readAccountProfiles;
 module.exports.writeUserData = writeUserData;
 module.exports.readProfileData = readProfileData;
 module.exports.readProfileImportData = readProfileImportData;

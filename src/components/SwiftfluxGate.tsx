@@ -7,6 +7,9 @@
 // que de l'ouvrir dans le dos de l'utilisateur — un popunder silencieux sur un
 // lecteur qu'il n'a pas encore choisi se solde par un onglet fermé et une
 // impression perdue. Les VIP en sont dispensés : c'est ce qu'ils achètent.
+// L'étape ouvre `/api/go/swiftflux` : le Main API choisit la pub (onglet
+// « Publicités » de l'admin). Emplacement inactif ou aucune pub pour
+// l'audience du visiteur = étape sautée, la porte commence à Turnstile.
 //
 // Vient ensuite Turnstile, obligatoire pour tout le monde (hors dispense
 // admin) : c'est lui, et lui seul, qui débloque l'URL du fichier côté serveur.
@@ -28,24 +31,12 @@ import TurnstileWidget from './TurnstileWidget';
 import { Button } from './ui/button';
 import { getOverlayPortalRoot } from '../utils/overlayPortal';
 import { isUserVip } from '../utils/vipUtils';
+import { hasAdToOpen, openGoLinks } from '../services/monetizationConfig';
 import {
   resolveSwiftfluxPlayback,
   type ResolveSwiftfluxParams,
   type SwiftfluxPlayback,
 } from '../services/swiftfluxService';
-
-/**
- * Smartlink imposé par le partenaire pour le catalogue MP4. Distinct du
- * popunder habituel de `adAdultMode` : celui-ci est la contrepartie de cette
- * source-là, pas la régie générale du site. Lu depuis le .env
- * (VITE_SWIFTFLUX_AD_URL) : vide = étape pub sautée, la porte commence
- * directement à la vérification Turnstile.
- */
-export const SWIFTFLUX_AD_URL = (
-  typeof import.meta.env.VITE_SWIFTFLUX_AD_URL === 'string'
-    ? import.meta.env.VITE_SWIFTFLUX_AD_URL
-    : ''
-).trim();
 
 type GateStep = 'ad' | 'verify' | 'resolving' | 'error';
 
@@ -59,12 +50,11 @@ interface SwiftfluxGateProps {
 
 const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onClose }) => {
   const { t } = useTranslation();
-  // Le statut est lu une fois au montage : un changement de statut VIP en cours
-  // de porte n'a pas à faire disparaître l'étape sous le doigt de l'utilisateur.
-  const [isVip] = useState(() => isUserVip());
-  // Pas de smartlink configuré (.env) = pas d'étape pub, pour personne.
-  const skipAd = isVip || !SWIFTFLUX_AD_URL;
-  const [step, setStep] = useState<GateStep>(() => (isUserVip() || !SWIFTFLUX_AD_URL ? 'verify' : 'ad'));
+  // Lu une fois au montage : un changement de statut VIP ou de config des pubs
+  // en cours de porte n'a pas à faire disparaître l'étape sous le doigt de
+  // l'utilisateur. Pas de pub à ouvrir ici = pas d'étape pub.
+  const [skipAd] = useState(() => isUserVip() || !hasAdToOpen('swiftflux'));
+  const [step, setStep] = useState<GateStep>(() => (skipAd ? 'verify' : 'ad'));
   const [token, setToken] = useState('');
   const [error, setError] = useState('');
   const [resetSignal, setResetSignal] = useState(0);
@@ -94,9 +84,8 @@ const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onCl
   }, [close]);
 
   const openAd = useCallback(() => {
-    if (SWIFTFLUX_AD_URL && typeof window.open === 'function') {
-      try { window.open(SWIFTFLUX_AD_URL, '_blank', 'noopener'); } catch { /* Pop-up refusée par le navigateur. */ }
-    }
+    // Dans le geste du clic ; une pop-up refusée n'empêche pas d'avancer.
+    openGoLinks('swiftflux');
     setStep('verify');
   }, []);
 

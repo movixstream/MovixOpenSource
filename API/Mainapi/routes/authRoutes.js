@@ -6,7 +6,6 @@
 
 const express = require('express');
 const router = express.Router();
-const axios = require('axios');
 const crypto = require('crypto');
 const bip39 = require('bip39');
 const { v4: uuidv4 } = require('uuid');
@@ -18,6 +17,7 @@ const { getPool } = require('../mysqlPool');
 const { createRedisRateLimitStore } = require('../utils/redisRateLimitStore');
 const { verifyTurnstileFromRequest } = require('../utils/turnstile');
 const { getSessionDeviceInfo } = require('../utils/sessionDeviceInfo');
+const { verifyDiscordAccessToken, verifyGoogleAccessToken } = require('../utils/oauthProviderTokens');
 const {
   SUPPORTED_PROVIDERS,
   isSupportedProvider,
@@ -305,34 +305,6 @@ async function getOrCreateBip39Account({ mnemonic, username = null, avatar = nul
   }
 
   return { success: true, normalizedMnemonic, userId, userProfile };
-}
-
-async function verifyDiscordAccessToken(accessToken) {
-  const resp = await axios.get('https://discord.com/api/users/@me', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    timeout: 10000,
-  });
-
-  const user = resp.data;
-  if (!user || !user.id) {
-    throw new Error('Token Discord invalide');
-  }
-
-  return user;
-}
-
-async function verifyGoogleAccessToken(accessToken) {
-  const resp = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    timeout: 10000,
-  });
-
-  const user = resp.data;
-  if (!user || !user.sub) {
-    throw new Error('Token Google invalide');
-  }
-
-  return user;
 }
 
 async function finalizeResolvedSession(req, {

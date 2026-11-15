@@ -929,6 +929,7 @@ const Movies: React.FC = () => {
         {featuredMovies.length > 0 && (
           <HeroSlider
             items={featuredMovies as any}
+            promoPage="movies"
           />
         )}
       </div>

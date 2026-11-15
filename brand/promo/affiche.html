@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Affiche Movix</title>
+<!--
+  Source de l'affiche promo (1080 × 1350). Pour la régénérer :
+    node brand/promo/fetch-posters.mjs API/Mainapi/.env brand/promo/posters   (affiches TMDB du fond, non versionnées)
+    node brand/promo/capture-site.mjs https://<adresse du site>/ brand/promo/capture.png   (facultatif : nouvelle capture de l'accueil)
+    node brand/promo/render.mjs   (écrit affiche-movix.jpg)
+  L'adresse affichée reste movix.online : c'est celle qui ne change pas.
+-->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=League+Gothic&display=block">
+<style>
+  @font-face { font-family: "Inter"; font-weight: 500; src: url("../../node_modules/@fontsource/inter/files/inter-latin-500-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 600; src: url("../../node_modules/@fontsource/inter/files/inter-latin-600-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 700; src: url("../../node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Inter"; font-weight: 800; src: url("../../node_modules/@fontsource/inter/files/inter-latin-800-normal.woff2") format("woff2"); }
+
+  :root {
+    --noir: #000000;
+    --rouge: #DC2626;
+    --blanc: #F4F4F0;
+    --gris: #A3A39C;
+    --ecran: #0B0B0D;
+    --chassis: #19191C;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1350px; background: var(--noir); overflow: hidden; }
+  body { position: relative; font-family: "Inter", sans-serif; color: var(--blanc); }
+  img { display: block; object-fit: cover; }
+
+  /* --- Fond : le mur d'affiches penché, sombre et flou --- */
+  .layer { position: absolute; inset: 0; overflow: hidden; }
+  .wall {
+    position: absolute; left: 540px; top: 450px;
+    display: flex; gap: 12px;
+    transform: translate(-50%, -50%) rotate(-9deg);
+    filter: blur(2.5px) brightness(.36) saturate(.75);
+  }
+  .wall .col { display: flex; flex-direction: column; gap: 12px; }
+  .wall .col:nth-child(even) { margin-top: 96px; }
+  .wall img { width: 120px; height: 180px; border-radius: 7px; }
+  .shade {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 640px 330px at 540px 450px, rgba(220,38,38,.22), transparent 70%),
+      linear-gradient(to bottom, #000 0%, rgba(0,0,0,.78) 12%, rgba(0,0,0,.34) 28%, rgba(0,0,0,.42) 42%, rgba(0,0,0,.9) 50%, #000 55%);
+  }
+
+  /* --- Titre et accroche --- */
+  .title { position: absolute; left: 392px; top: 28px; width: 296px; }
+  .title svg { display: block; width: 100%; height: auto; }
+  .headline {
+    position: absolute; left: 0; top: 136px; width: 1080px; text-align: center; white-space: nowrap;
+    font-family: "League Gothic", sans-serif; font-size: 72px; line-height: 1; letter-spacing: 3px; text-transform: uppercase;
+  }
+
+  /* --- Le site, dans une fenêtre de navigateur --- */
+  .browser {
+    position: absolute; left: 140px; top: 230px; width: 800px; height: 434px; overflow: hidden;
+    border-radius: 14px; background: var(--ecran);
+    box-shadow: 0 0 0 1.5px rgba(244,244,240,.24), 0 0 140px 10px rgba(220,38,38,.22), 0 40px 80px rgba(0,0,0,.85);
+  }
+  .browser .bar { position: relative; height: 40px; background: var(--chassis); }
+  .browser .dots { position: absolute; left: 16px; top: 14px; display: flex; gap: 8px; }
+  .browser .dots i { width: 11px; height: 11px; border-radius: 50%; background: #3B3B40; }
+  .browser .url {
+    position: absolute; left: 50%; top: 7px; transform: translateX(-50%);
+    width: 330px; height: 26px; border-radius: 13px; background: var(--ecran);
+    font-weight: 600; font-size: 15px; line-height: 26px; text-align: center; color: #C9C9C3;
+  }
+  .browser .capture { width: 800px; height: 394px; object-position: top center; }
+
+  /* --- Lauriers --- */
+  .grid4 { position: absolute; left: 24px; width: 1032px; display: grid; grid-template-columns: repeat(4, 1fr); }
+  .laurels { top: 686px; }
+  .laurel { position: relative; width: 234px; height: 172px; margin: 0 auto; display: flex; align-items: center; justify-content: center; color: var(--blanc); }
+  .laurel svg { position: absolute; top: 0; left: 0; width: 60px; height: 172px; overflow: visible; }
+  .laurel svg.right { left: auto; right: 0; transform: scaleX(-1); }
+  .laurel .txt { width: 132px; text-align: center; }
+  .laurel .txt b { display: block; font-family: "League Gothic", sans-serif; font-weight: 400; font-size: 45px; line-height: .96; letter-spacing: 1.5px; text-transform: uppercase; }
+  .laurel .txt span { display: block; margin-top: 7px; font-weight: 500; font-size: 20px; line-height: 1.16; color: rgba(244,244,240,.78); }
+  .laurel--large .txt b { font-size: 50px; }
+  .laurel--rouge svg { color: var(--rouge); }
+  .laurel--rouge .txt b { font-size: 70px; }
+
+  /* --- Les applis, en plus du site --- */
+  .apps-title { position: absolute; left: 0; top: 878px; width: 1080px; text-align: center; font-weight: 600; font-size: 25px; letter-spacing: .3px; color: var(--rouge); }
+  .apps { top: 920px; align-items: start; }
+  .app { text-align: center; }
+  .app .shot { height: 112px; display: flex; align-items: flex-end; justify-content: center; }
+  .app .name { margin-top: 10px; font-family: "League Gothic", sans-serif; font-size: 44px; line-height: 1; letter-spacing: 4px; }
+  .app .role { margin-top: 3px; font-weight: 500; font-size: 20px; color: var(--gris); }
+  .mini { background: var(--ecran); box-shadow: 0 0 0 1.5px rgba(244,244,240,.3), 0 14px 30px rgba(0,0,0,.8); display: grid; gap: 4px; align-content: start; overflow: hidden; }
+  .mini img { width: 100%; height: 100%; border-radius: 3px; }
+  .mini--phone { width: 64px; height: 112px; border-radius: 11px; border: 5px solid var(--chassis); padding: 3px; grid-template-columns: repeat(2, 1fr); grid-auto-rows: 31px; }
+  .mini--tv { width: 196px; height: 106px; border-radius: 6px; border: 5px solid var(--chassis); padding: 4px; grid-template-columns: repeat(6, 1fr); grid-auto-rows: 42px; }
+  .tv-wrap { display: flex; flex-direction: column; align-items: center; }
+  .tv-wrap::after { content: ""; width: 74px; height: 4px; margin-top: 3px; border-radius: 2px; background: #3B3B40; }
+
+  /* --- Générique et sortie --- */
+  .billing {
+    position: absolute; left: 60px; top: 1142px; width: 960px; text-align: center;
+    font-family: "League Gothic", sans-serif; font-size: 34px; line-height: 37px; letter-spacing: 2.2px;
+    text-transform: uppercase; color: var(--gris);
+  }
+  .billing i { font-style: normal; font-size: 22px; letter-spacing: 1.4px; text-transform: lowercase; color: #7C7C76; }
+  .release { position: absolute; left: 70px; top: 1260px; width: 940px; display: flex; justify-content: space-between; align-items: baseline; }
+  .release .when { font-family: "League Gothic", sans-serif; font-size: 42px; line-height: 1; letter-spacing: 5px; text-transform: uppercase; }
+  .release .where { font-weight: 800; font-size: 40px; line-height: 1; letter-spacing: -.5px; }
+  .release .where em { font-style: normal; color: var(--rouge); }
+</style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute">
+    <symbol id="logo" viewBox="0 0 350.14 110">
+      <path fill="#DC2626" fill-rule="evenodd" d="M40.5 23.75L13.5 23.75L13.5 96.75L40.5 96.75L40.5 89.75L20.5 89.75L20.5 30.75L40.5 30.75ZM309.64 23.75L336.64 23.75L336.64 96.75L309.64 96.75L309.64 89.75L329.64 89.75L329.64 30.75L309.64 30.75ZM16 37.42H18A0.7 0.7 0 0 1 18.7 38.12V40.52A0.7 0.7 0 0 1 18 41.22H16A0.7 0.7 0 0 1 15.3 40.52V38.12A0.7 0.7 0 0 1 16 37.42ZM16 47.88H18A0.7 0.7 0 0 1 18.7 48.58V50.98A0.7 0.7 0 0 1 18 51.68H16A0.7 0.7 0 0 1 15.3 50.98V48.58A0.7 0.7 0 0 1 16 47.88ZM16 58.35H18A0.7 0.7 0 0 1 18.7 59.05V61.45A0.7 0.7 0 0 1 18 62.15H16A0.7 0.7 0 0 1 15.3 61.45V59.05A0.7 0.7 0 0 1 16 58.35ZM16 68.82H18A0.7 0.7 0 0 1 18.7 69.52V71.92A0.7 0.7 0 0 1 18 72.62H16A0.7 0.7 0 0 1 15.3 71.92V69.52A0.7 0.7 0 0 1 16 68.82ZM16 79.28H18A0.7 0.7 0 0 1 18.7 79.98V82.38A0.7 0.7 0 0 1 18 83.08H16A0.7 0.7 0 0 1 15.3 82.38V79.98A0.7 0.7 0 0 1 16 79.28ZM332.14 37.42H334.14A0.7 0.7 0 0 1 334.84 38.12V40.52A0.7 0.7 0 0 1 334.14 41.22H332.14A0.7 0.7 0 0 1 331.44 40.52V38.12A0.7 0.7 0 0 1 332.14 37.42ZM332.14 47.88H334.14A0.7 0.7 0 0 1 334.84 48.58V50.98A0.7 0.7 0 0 1 334.14 51.68H332.14A0.7 0.7 0 0 1 331.44 50.98V48.58A0.7 0.7 0 0 1 332.14 47.88ZM332.14 58.35H334.14A0.7 0.7 0 0 1 334.84 59.05V61.45A0.7 0.7 0 0 1 334.14 62.15H332.14A0.7 0.7 0 0 1 331.44 61.45V59.05A0.7 0.7 0 0 1 332.14 58.35ZM332.14 68.82H334.14A0.7 0.7 0 0 1 334.84 69.52V71.92A0.7 0.7 0 0 1 334.14 72.62H332.14A0.7 0.7 0 0 1 331.44 71.92V69.52A0.7 0.7 0 0 1 332.14 68.82ZM332.14 79.28H334.14A0.7 0.7 0 0 1 334.84 79.98V82.38A0.7 0.7 0 0 1 334.14 83.08H332.14A0.7 0.7 0 0 1 331.44 82.38V79.98A0.7 0.7 0 0 1 332.14 79.28Z"/>
+      <path fill="#F4F4F0" d="M53.98 91.25V27.23H77.62L85.78 52.15Q86.47 54.43 87.35 58.19Q88.23 61.95 89.13 66.24Q89.91 69.94 90.59 73.42Q91.24 69.98 92.01 66.24Q92.87 61.95 93.75 58.21Q94.63 54.47 95.32 52.15L103.36 27.23H127.03V91.25H111.78V63.66Q111.78 61.52 111.86 58.14Q111.95 54.77 112.06 50.82Q112.16 46.86 112.29 42.82Q112.34 41.23 112.34 39.73Q111.95 41.45 111.52 43.25Q110.49 47.34 109.48 51.2Q108.47 55.07 107.54 58.29Q106.62 61.52 105.98 63.66L96.87 91.25H84.19L74.95 63.66Q74.31 61.56 73.36 58.34Q72.42 55.11 71.39 51.25Q70.36 47.38 69.32 43.3Q68.98 41.88 68.64 40.5Q68.64 41.62 68.68 42.74Q68.77 46.73 68.87 50.73Q68.98 54.73 69.09 58.1Q69.2 61.47 69.2 63.66V91.25ZM156.26 92.15Q148.74 92.15 143.32 89.04Q137.91 85.92 135.01 80.36Q132.11 74.79 132.11 67.4Q132.11 59.97 135.01 54.4Q137.91 48.84 143.32 45.72Q148.74 42.61 156.26 42.61Q163.78 42.61 169.19 45.72Q174.61 48.84 177.48 54.4Q180.36 59.97 180.36 67.4Q180.36 74.79 177.48 80.36Q174.61 85.92 169.19 89.04Q163.78 92.15 156.26 92.15ZM156.26 80.68Q159.14 80.68 161.11 79Q163.09 77.33 164.1 74.32Q165.11 71.31 165.11 67.32Q165.11 63.32 164.1 60.33Q163.09 57.35 161.11 55.71Q159.14 54.08 156.26 54.08Q153.38 54.08 151.4 55.71Q149.43 57.35 148.42 60.33Q147.41 63.32 147.41 67.32Q147.41 71.31 148.42 74.32Q149.43 77.33 151.4 79Q153.38 80.68 156.26 80.68ZM197.34 91.25 179.94 43.21H195.75L202.93 66.71Q204.39 71.44 205.46 76.38Q205.85 78.19 206.24 80.08Q206.67 78.19 207.05 76.38Q208.09 71.48 209.5 66.71L216.55 43.21H232.19L214.7 91.25ZM235.08 91.25V43.21H250.07V91.25ZM253.48 91.25 268.39 66.59 254.38 43.21H270.28L273.97 50.09Q275.95 53.82 277.58 57.65Q277.93 58.51 278.31 59.37Q278.66 58.55 279.04 57.69Q280.72 53.82 282.78 50.09L286.65 43.21H302.29L287.89 66.67L302.93 91.25H287.12L282.48 82.91Q280.42 79.18 278.7 75.27Q278.31 74.45 277.97 73.63Q277.62 74.45 277.28 75.27Q275.61 79.18 273.63 82.91L269.07 91.25Z"/>
+      <path fill="#DC2626" d="M233.58 13.25L251.58 13.25L251.58 31.25L233.58 31.25Z"/>
+    </symbol>
+  </svg>
+
+  <div class="layer"><div class="wall" id="wall"></div></div>
+  <div class="shade"></div>
+
+  <div class="title"><svg viewBox="0 0 350.14 110"><use href="#logo"/></svg></div>
+  <h1 class="headline">Un site de streaming révolutionnaire</h1>
+
+  <div class="browser">
+    <div class="bar">
+      <div class="dots"><i></i><i></i><i></i></div>
+      <div class="url">movix.online</div>
+    </div>
+    <img class="capture" src="capture-site.jpg" alt="">
+  </div>
+
+  <div class="grid4 laurels">
+    <div class="laurel laurel--large"><div class="txt"><b>Gratuit</b><span>films, séries, animés</span></div></div>
+    <div class="laurel"><div class="txt"><b>VF &amp; Vostfr</b><span>au choix</span></div></div>
+    <div class="laurel"><div class="txt"><b>Watch Party</b><span>entre amis</span></div></div>
+    <div class="laurel laurel--large"><div class="txt"><b>Live TV</b><span>les chaînes en direct</span></div></div>
+  </div>
+
+  <p class="apps-title">Et en plus du site, les applis</p>
+  <div class="grid4 apps">
+    <div class="app">
+      <div class="shot"><div class="mini mini--phone" data-posters="28,20,21,33,36,64"></div></div>
+      <div class="name">ANDROID</div><div class="role">téléphone et tablette</div>
+    </div>
+    <div class="app">
+      <div class="shot"><div class="tv-wrap"><div class="mini mini--tv" data-posters="40,54,55,48,49,58,56,59,60,62,65,71"></div></div></div>
+      <div class="name">ANDROID TV</div><div class="role">sur la télé du salon</div>
+    </div>
+    <div class="app">
+      <div class="shot"><div class="mini mini--phone" data-posters="8,66,70,17,26,57"></div></div>
+      <div class="name">iOS</div><div class="role">IPA à installer</div>
+    </div>
+    <div class="laurel laurel--rouge"><div class="txt"><b>0 pub</b><span>dans les applis</span></div></div>
+  </div>
+
+  <p class="billing">
+    Le groupe ix <i>présente</i> Movix <i>un site</i> open source <i>fait en</i> France<br>
+    <i>avec des</i> milliers de titres <i>des</i> profils multiples <i>et des</i> listes partagées
+  </p>
+
+  <div class="release">
+    <span class="when">Actuellement sur tous tes écrans</span>
+    <span class="where">movix<em>.</em>online</span>
+  </div>
+
+<script>
+  const src = (i) => `posters/p${String(i).padStart(2, '0')}.jpg`;
+
+  // Fond : 12 colonnes de 6 affiches, les titres les moins connus sur les bords.
+  const all = Array.from({ length: 72 }, (_, i) => i);
+  const recent = all.filter((i) => i % 4 === 3 && i < 48);
+  const doubles = [14, 38, 50, 53];
+  const known = all.filter((i) => !recent.includes(i) && !doubles.includes(i));
+  const centre = known.slice(0, 48);
+  const bord = [...recent, ...doubles, ...known.slice(48)];
+  const columns = [bord.slice(0, 6), bord.slice(6, 12)];
+  for (let c = 0; c < 8; c += 1) columns.push(centre.slice(c * 6, c * 6 + 6));
+  columns.push(bord.slice(12, 18), bord.slice(18, 24));
+  document.getElementById('wall').innerHTML = columns.map((col) => `<div class="col">${col.map((i) => `<img src="${src(i)}" alt="">`).join('')}</div>`).join('');
+
+  // Écrans : chacun a ses propres affiches, rien ne passe à travers.
+  document.querySelectorAll('[data-posters]').forEach((el) => {
+    el.innerHTML = el.dataset.posters.split(',').map((i) => `<img src="${src(Number(i))}" alt="">`).join('');
+  });
+
+  // Lauriers : une branche dessinée feuille par feuille, puis retournée pour l'autre côté.
+  function branch() {
+    const cx = 86, cy = 86, RX = 70, RY = 80;
+    const leaf = (l, w) => `M0,0C${w},${-l * 0.3} ${w * 0.85},${-l * 0.78} 0,${-l}C${-w * 0.85},${-l * 0.78} ${-w},${-l * 0.3} 0,0Z`;
+    let out = '';
+    const N = 10;
+    for (let n = 0; n < N; n += 1) {
+      const t = n / (N - 1);
+      const a = 250 - t * 116;
+      const rad = (a * Math.PI) / 180;
+      const x = cx + RX * Math.cos(rad);
+      const y = cy - RY * Math.sin(rad);
+      const theta = (Math.atan2(RX * Math.sin(rad), -RY * Math.cos(rad)) * 180) / Math.PI;
+      const l = 27 - t * 9;
+      const w = 7.6 - t * 2;
+      out += `<path transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${(theta - 46).toFixed(1)})" d="${leaf(l, w)}"/>`;
+      out += `<path transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${(theta + 34).toFixed(1)})" d="${leaf(l * 0.8, w * 0.9)}"/>`;
+      if (n === N - 1) out += `<path transform="translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${theta.toFixed(1)})" d="${leaf(l, w)}"/>`;
+    }
+    return out;
+  }
+  const leaves = branch();
+  document.querySelectorAll('.laurel').forEach((el) => {
+    const svg = (cls) => `<svg class="${cls}" viewBox="0 0 60 172" fill="currentColor">${leaves}</svg>`;
+    el.insertAdjacentHTML('afterbegin', svg('left'));
+    el.insertAdjacentHTML('beforeend', svg('right'));
+  });
+</script>
+</body>
+</html>

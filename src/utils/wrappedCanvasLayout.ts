@@ -4,7 +4,19 @@ export const DISPLAY_FONT = '"Archivo Black", Inter, system-ui, sans-serif';
 export function drawRoundedRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
     const r = Math.max(0, Math.min(radius, width / 2, height / 2));
     ctx.beginPath();
-    ctx.roundRect(x, y, width, height, r);
+    // roundRect manque avant Safari 16, Chrome 99 et Firefox 112. Sans repli,
+    // l'appel lève une erreur et l'image de partage ne se génère jamais.
+    if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(x, y, width, height, r);
+        return;
+    }
+    const right = x + width, bottom = y + height;
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(right, y, right, bottom, r);
+    ctx.arcTo(right, bottom, x, bottom, r);
+    ctx.arcTo(x, bottom, x, y, r);
+    ctx.arcTo(x, y, right, y, r);
+    ctx.closePath();
 }
 
 export function wrapCanvasText(ctx: Pick<CanvasRenderingContext2D, 'measureText'>, text: string, maxWidth: number): string[] {

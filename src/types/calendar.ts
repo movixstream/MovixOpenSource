@@ -22,6 +22,7 @@
 export type CalendarSource =
   | 'newReleases'
   | 'airingEpisodes'
+  | 'animeReleases'
   | 'watchlistEpisodes'
   | 'watchlistMovies'
   | 'alerts'

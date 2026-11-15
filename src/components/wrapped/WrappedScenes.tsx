@@ -4,7 +4,7 @@ import { ArrowUpRight, ArrowRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { WrappedData } from '@/services/wrappedService';
 import type { WrappedScene } from '@/types/wrapped';
-import { formatWrappedDuration, wrappedDate, wrappedMediaKey, wrappedPeriod, wrappedPersona, wrappedTraits, wrappedTypeLabel } from '@/utils/wrappedPresentation';
+import { formatWrappedDuration, wrappedDate, wrappedMediaKey, wrappedPeriod, wrappedPersona, wrappedQuizOptions, wrappedTopPercent, wrappedTraits, wrappedTypeLabel } from '@/utils/wrappedPresentation';
 import { wrappedStoryMode } from '@/utils/wrappedStory';
 import WrappedPosterGallery from './WrappedPosterGallery';
 import WrappedTimeline from './charts/WrappedTimeline';
@@ -67,14 +67,19 @@ export default function WrappedScenes({ scene, data, onStart, onNext, onExplore,
         const total = Number.isFinite(data.stats.totalMinutes) ? Math.max(0, Math.round(data.stats.totalMinutes)) : 0;
         const hours = Math.floor(total / 60);
         const minutes = total % 60;
+        const topPercent = wrappedTopPercent(data.stats.percentile);
         return <div className="mx-auto w-full max-w-[1020px] space-y-3 lg:space-y-6">
             <header className="flex flex-wrap items-end justify-between gap-x-7 gap-y-4">
                 <div className="max-w-sm space-y-4"><p className={kicker}>{t('wrappedCinema.timeKicker')}</p><h2 className="font-['Archivo_Black'] text-3xl leading-tight tracking-tight lg:text-4xl">{t('wrappedCinema.timeTitle')}</h2></div>
-                <p className="flex flex-wrap items-baseline gap-x-4 text-[var(--wrapped-accent)]">
-                    <span className="sr-only">{duration(data.stats.totalMinutes)}</span>
-                    <span aria-hidden="true" className="whitespace-nowrap font-['Archivo_Black'] text-6xl leading-none tracking-tight lg:text-8xl"><WrappedCountUp value={hours || minutes} format={number} /><span className="ml-2 text-3xl lg:text-5xl">{hours ? 'h' : 'min'}</span></span>
-                    {hours > 0 && minutes > 0 && <span aria-hidden="true" className="whitespace-nowrap text-2xl font-semibold lg:text-3xl"><WrappedCountUp value={minutes} format={number} delay={0.45} duration={1.2} /> min</span>}
-                </p>
+                <div className="space-y-2">
+                    <p className="flex flex-wrap items-baseline gap-x-4 text-[var(--wrapped-accent)]">
+                        <span className="sr-only">{duration(data.stats.totalMinutes)}</span>
+                        <span aria-hidden="true" className="whitespace-nowrap font-['Archivo_Black'] text-6xl leading-none tracking-tight lg:text-8xl"><WrappedCountUp value={hours || minutes} format={number} /><span className="ml-2 text-3xl lg:text-5xl">{hours ? 'h' : 'min'}</span></span>
+                        {hours > 0 && minutes > 0 && <span aria-hidden="true" className="whitespace-nowrap text-2xl font-semibold lg:text-3xl"><WrappedCountUp value={minutes} format={number} delay={0.45} duration={1.2} /> min</span>}
+                    </p>
+                    {/* Sous le total qu'il qualifie, donc visible sans défiler sur téléphone. */}
+                    {topPercent !== null && <p className="text-pretty text-sm font-semibold text-white/85 lg:text-base">{t('wrappedCinema.topPercent', { percent: number(topPercent) })}</p>}
+                </div>
             </header>
             <WrappedFormats data={data} onExplore={onExplore} wide />
             <p className="text-center text-sm text-white/55">{t('wrappedCinema.timeCaption', { count: data.stats.uniqueTitles })}</p>
@@ -102,7 +107,7 @@ export default function WrappedScenes({ scene, data, onStart, onNext, onExplore,
     }
 
     if (scene === 'quiz') {
-        const options = [0, 1, 2].map((_, index) => data.topContent[(index + data.year) % 3]);
+        const options = wrappedQuizOptions(data.topContent);
         return <SceneLayout visual={<div className="space-y-4" data-wrapped-interactive>
             <div className="wrapped-quiz-options grid grid-cols-3 items-start gap-3 sm:gap-5">
                 {options.map((item, index) => {

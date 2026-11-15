@@ -11,6 +11,7 @@ import { findDarkiWorldTitleId } from '@/utils/darkiWorldResultMatch';
 import { useAgeRestrictedContent } from '../hooks/useAgeRestrictedContent';
 import TurnstileWidget from '@/components/TurnstileWidget';
 import { decodeDownloadLink } from '@/services/downloadLinksService';
+import { hasAdToOpen } from '@/services/monetizationConfig';
 import { TURNSTILE_SITE_KEY } from '@/utils/turnstileKeys';
 import { copyText } from '@/utils/clipboard';
 
@@ -578,7 +579,8 @@ const LinkSelector: React.FC<{
   };
 
   const openInNewTab = (url: string) => {
-    if (!url) return;
+    // http(s) seulement : un lien `javascript:` s'exécuterait sur le site.
+    if (!url || !/^https?:\/\//i.test(url.trim())) return;
     const a = document.createElement('a');
     a.href = url;
     a.target = '_blank';
@@ -1397,8 +1399,10 @@ const DownloadPage: React.FC = () => {
   const handleLinkSelect = async (link: DownloadLink) => {
     // Vérifier si l'utilisateur est VIP
     const isVipUser = localStorage.getItem('is_vip') === 'true';
-    
-    if (adUnlocked || isVipUser) {
+
+    // Pas de pub à ouvrir (pubs coupées, emplacement inactif, aucune pub pour
+    // l'audience du visiteur) : pas de popup, le lien se décode directement.
+    if (adUnlocked || isVipUser || !hasAdToOpen('download')) {
       await proceedDecode(link);
       return;
     }

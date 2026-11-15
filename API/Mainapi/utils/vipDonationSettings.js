@@ -114,7 +114,7 @@ const DEFAULT_VIP_DONATION_SETTINGS = deepFreeze({
     email: 'movixstreaming@gmail.com',
     discordUsername: 'mysticsaba_alt',
     discordUrl: 'https://discord.com/users/1516102413835305021',
-    telegramUsername: 'MysticSaba',
+    telegramUsername: 'MysticSaba2',
     matrixUserId: '@mysticsaba:matrix.org',
     matrixRoomUrl: 'https://matrix.to/#/%23groupe-ix:matrix.org'
   }

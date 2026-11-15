@@ -101,7 +101,7 @@ export default function MemberCard({
         className="relative flex h-full min-h-[280px] flex-col overflow-hidden rounded-2xl bg-red-600 text-white"
       >
         {/* Bande de pellicule : la seule décoration de la carte */}
-        <div aria-hidden="true" className="flex h-9 shrink-0 items-center justify-between gap-1.5 overflow-hidden bg-red-800 px-3">
+        <div aria-hidden="true" className="flex h-9 min-w-0 shrink-0 items-center justify-between gap-1.5 overflow-hidden bg-red-800 px-3">
           {SPROCKETS.map((_, index) => (
             <span key={index} className="h-3.5 w-5 shrink-0 rounded-[3px] bg-black" />
           ))}

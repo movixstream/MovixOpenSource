@@ -13,7 +13,8 @@ const start = source.indexOf('const normalizeString =');
 const end = source.indexOf('// === Data Fetching ===', start);
 assert.ok(start > 0 && end > start);
 const searchSource = source.slice(start, end)
-  + '\nglobalThis.search = searchWiflixMovie;\nglobalThis.extract = extractWiflixPlayers;';
+  + '\nglobalThis.search = searchWiflixMovie;\nglobalThis.extract = extractWiflixPlayers;'
+  + '\nglobalThis.fragment = wiflixResultsFragment;';
 const base = 'https://source.test';
 
 function card(title, href, season = null) {
@@ -139,6 +140,67 @@ test('un film ne remplace pas une série, et inversement', async () => {
 test('les recommandations populaires ne sont pas des résultats de recherche', async () => {
   const html = `<div id="no-results-rec">${card('From (2022)', '/recommendation.html', 1)}</div>`;
   assert.equal((await search('From saison 1', html)).url, null);
+});
+
+// Page de résultats sur le modèle du site : en-tête avec un gabarit de bloc
+// dans un script, résultats, bloc « Populaires », fin du contenu, barre latérale.
+function resultsPage({ results = '', recommendations = '', head = '', sidebar = '', end = '<!-- end content -->' } = {}) {
+  return `<!DOCTYPE html><html lang="fr"><head><title>Flemmix</title>
+<script>const tpl = '<div class="mov"><a class="mov-t" href="/piege.html">From (2022)</a></div>';</script>
+<style>.mov-m:empty{display:none}</style>${head}</head><body>
+<header><ul class="menu"><li><a href="/serie-en-streaming/" class="full-link">Séries</a></li></ul></header>
+<div class="content"><div class="block-main">
+${results}
+<div id="no-results-rec" style="display:none"><div class="block-title">Populaires</div>${recommendations}</div>
+</div>${end}
+<aside class="sidebar"><a class="mov-side" href="/side.html"><div class="mov-side-title">From (2022)</div></a>${sidebar}</aside>
+</div><footer>Flemmix</footer></body></html>`;
+}
+
+test('les résultats ne sont analysés que dans le contenu, avec les mêmes blocs retenus', async () => {
+  const html = resultsPage({
+    results: card('From (2022)', '/saison-complete/23591-from-2022.html', 1) + card('Tales from the Void', '/tales.html', 1),
+    recommendations: card('From (2022)', '/recommendation.html', 1),
+  });
+  const { fragment } = load({});
+  const part = fragment(html);
+  assert.ok(part.startsWith('<div class="mov">'));
+  assert.ok(part.length < html.length / 2);
+  assert.ok(!part.includes('mov-side') && !part.includes('piege'));
+  assert.ok(part.includes('id="no-results-rec"'));
+  const result = await search('From saison 1', html);
+  assert.equal(result.url, `${base}/saison-complete/23591-from-2022.html`);
+  assert.deepEqual(Array.from(result.candidates, c => c.url), [`${base}/saison-complete/23591-from-2022.html`]);
+  // Sans résultat : seul le bloc « Populaires », toujours exclu.
+  const empty = resultsPage({ recommendations: card('From (2022)', '/recommendation.html', 1) });
+  assert.ok(fragment(empty).startsWith('<div id="no-results-rec"'));
+  assert.equal((await search('From saison 1', empty)).url, null);
+});
+
+test('un bloc en commentaire ou en texte brut n’ouvre pas le fragment, et au moindre doute on garde la suite', async () => {
+  const { fragment } = load({});
+  const results = card('From (2022)', '/from.html', 1);
+  // Les blocs d'un commentaire ou d'un <noscript> ne sont pas des éléments.
+  for (const head of ['<!-- <div class="mov"><a class="mov-t" href="/c.html">From</a></div> -->',
+    '<noscript><div class="mov"><a class="mov-t" href="/n.html">From</a></div></noscript>']) {
+    const html = resultsPage({ results, head });
+    assert.ok(fragment(html).startsWith('<div class="mov"><a class="mov-t" href="/from.html">'), head);
+    assert.deepEqual(Array.from((await search('From saison 1', html)).candidates, c => c.url), [`${base}/from.html`], head);
+  }
+  // Commentaire jamais fermé : aucun élément après lui, page entière.
+  const unclosed = resultsPage({ results, head: '<!-- ' });
+  assert.equal(fragment(unclosed), unclosed);
+  // Bloc de résultat après la fin du contenu : rien n'est coupé après elle.
+  const late = resultsPage({ results, sidebar: card('From (2022)', '/late.html', 1) });
+  assert.ok(fragment(late).endsWith('</html>'));
+  assert.deepEqual(Array.from((await search('From saison 1', late)).candidates, c => c.url).sort(),
+    [`${base}/from.html`, `${base}/late.html`]);
+  // Sans repère de fin de contenu : jusqu'au bout de la page.
+  const noEnd = resultsPage({ results, end: '' });
+  assert.ok(fragment(noEnd).endsWith('</html>'));
+  // Sans aucun bloc : page entière.
+  const none = '<html><body><p>Aucun résultat</p></body></html>';
+  assert.equal(fragment(none), none);
 });
 
 test('le coupe-circuit Flemmix reste une indisponibilité, sans journal à chaque appel', async () => {

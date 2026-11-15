@@ -1,6 +1,6 @@
 /**
  * FrenchStream helper module.
- * Extracted from server.js -- retrieves Omega sources directly from FrenchCloud.
+ * Extracted from server.js -- retrieves Omega sources from FrVideoSRC (ex-FrenchCloud).
  * This is NOT an Express router; it exports plain functions used by tmdb.js.
  */
 
@@ -8,7 +8,14 @@ const cheerio = require('cheerio');
 const axios = require('axios');
 
 const FRENCHSTREAM_BASE_URL = 'https://frenchstream.food';
-const FRENCHCLOUD_BASE_URL = 'https://frenchcloud.cam';
+// FrenchCloud est devenu FrVideoSRC. La page /film/<imdb> ou /serial/<imdb>
+// porte un jeton signé que /api/embed-links échange contre les lecteurs.
+const FRVIDEOSRC_BASE_URL = 'https://frvideosrc.co';
+const FRVIDEOSRC_HOSTS = ['frvideosrc.co', 'frenchcloud.cam'];
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36';
+// tmdb.js reconnaît ces messages comme « contenu absent », pas comme une panne.
+const MOVIE_NOT_FOUND = 'Movie not found on FrenchCloud';
+const SERIES_NOT_FOUND = 'Series not found on FrenchCloud (404)';
 
 // ---------------------------------------------------------------------------
 // Dependencies injected via configure()
@@ -24,34 +31,76 @@ function configure(deps) {
   if (deps.findTvSeriesOnTMDB) findTvSeriesOnTMDB = deps.findTvSeriesOnTMDB;
 }
 
-function getFrenchCloudUrl(type, imdbId) {
+function getFrVideoSrcUrl(type, imdbId) {
   // Conserver les zéros initiaux de l'identifiant IMDb.
   const id = String(imdbId).replace(/^tt/i, '');
   if (!/^\d+$/.test(id)) throw new Error('Identifiant IMDb invalide');
-  return `${FRENCHCLOUD_BASE_URL}/${type}/${id}`;
+  return `${FRVIDEOSRC_BASE_URL}/${type}/${id}`;
 }
 
-function requestFrenchCloud(url) {
-  return axios.get(url, {
+// Le script de la page appelle l'API avec
+// JSON.stringify({ type: 'movie', id: "tt…", token: "…" }).
+function readEmbedRequest(html) {
+  const match = String(html ?? '').match(
+    /type:\s*['"](movie|tv)['"]\s*,\s*id:\s*['"](tt\d+)['"]\s*,\s*token:\s*['"]([\w.-]+)['"]/);
+  return match ? { type: match[1], id: match[2], token: match[3] } : null;
+}
+
+// Renvoie null quand FrVideoSRC n'a pas le titre : la page du lecteur
+// s'affiche alors sans jeton.
+async function fetchFrVideoSrcLinks(pageUrl) {
+  const page = await axios.get(pageUrl, {
+    headers: { 'User-Agent': USER_AGENT, 'Referer': `${FRVIDEOSRC_BASE_URL}/` },
+    timeout: 15000,
+    decompress: true,
+  });
+  const payload = readEmbedRequest(page.data);
+  if (!payload) {
+    if (/class="embed-body"/.test(String(page.data ?? ''))) return null;
+    throw new Error('Page FrVideoSRC invalide');
+  }
+  const response = await axios.post(`${FRVIDEOSRC_BASE_URL}/api/embed-links`, payload, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-      'Referer': `${FRENCHCLOUD_BASE_URL}/`,
+      'User-Agent': USER_AGENT,
+      'Content-Type': 'application/json',
+      'Origin': FRVIDEOSRC_BASE_URL,
+      'Referer': pageUrl,
     },
     timeout: 15000,
     decompress: true,
   });
+  if (!response.data?.ok) {
+    const code = response.data?.error ? ` (${response.data.error})` : '';
+    throw new Error(`Réponse FrVideoSRC invalide${code}`);
+  }
+  return response.data;
 }
 
-function normalizeFrenchCloudPlayerLink(value) {
-  if (!value?.trim()) return null;
+function normalizeFrVideoSrcPlayerLink(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
   try {
-    const url = new URL(value, FRENCHCLOUD_BASE_URL);
+    const url = new URL(value, FRVIDEOSRC_BASE_URL);
     if (!['http:', 'https:'].includes(url.protocol) ||
-        url.hostname === 'frenchcloud.cam' || url.hostname.endsWith('.frenchcloud.cam')) return null;
+        FRVIDEOSRC_HOSTS.some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))) return null;
     return url.href;
   } catch {
     return null;
   }
+}
+
+// Lecteurs dans l'ordre de FrVideoSRC (rank), sans doublon ni lien interne.
+function toPlayers(sources) {
+  const ranked = (Array.isArray(sources) ? sources : [])
+    .filter(source => source && typeof source === 'object')
+    .sort((a, b) => (Number(a.rank) || Infinity) - (Number(b.rank) || Infinity));
+  const players = [];
+  for (const source of ranked) {
+    const link = normalizeFrVideoSrcPlayerLink(source.url);
+    if (!link || players.some(player => player.link === link)) continue;
+    const name = String(source.name || new URL(link).hostname).replace(/\.[a-z]{2,4}$/i, '');
+    players.push({ name: name.charAt(0).toUpperCase() + name.slice(1), link });
+  }
+  return players;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,35 +108,17 @@ function normalizeFrenchCloudPlayerLink(value) {
 // ---------------------------------------------------------------------------
 async function getFrenchStreamMovie(imdbId) {
   try {
-    const iframeSrc = getFrenchCloudUrl('film', imdbId);
-    const iframeResponse = await requestFrenchCloud(iframeSrc);
-
-    const $iframe = cheerio.load(iframeResponse.data);
-    if (!$iframe('._player').length) throw new Error('Page FrenchCloud invalide');
-    const playerLinks = [];
-
-    $iframe('._source_list li[data-link], ._player-mirrors li[data-link]').each((index, element) => {
-      const $element = $iframe(element);
-      const link = normalizeFrenchCloudPlayerLink($element.attr('data-link'));
-      const playerName = $element.text().trim();
-      const isHD = $element.hasClass('fullhd');
-
-      if (!link || playerLinks.some(player => player.link === link)) return;
-
-      playerLinks.push({
-        player: playerName,
-        link,
-        is_hd: isHD
-      });
-    });
+    const iframeSrc = getFrVideoSrcUrl('film', imdbId);
+    const data = await fetchFrVideoSrcLinks(iframeSrc);
+    if (!data) return { error: MOVIE_NOT_FOUND };
 
     return {
       iframe_src: iframeSrc,
-      player_links: playerLinks
+      player_links: toPlayers(data.sources).map(player => ({ player: player.name, link: player.link, is_hd: false })),
     };
 
   } catch (error) {
-    if (error.response?.status === 404) return { error: 'Movie not found on FrenchCloud' };
+    if (error.response?.status === 404) return { error: MOVIE_NOT_FOUND };
     return { error: `Failed to fetch movie data: ${error.message}` };
   }
 }
@@ -97,7 +128,7 @@ async function getFrenchStreamMovie(imdbId) {
 // ---------------------------------------------------------------------------
 async function getFrenchStreamSeries(id) {
   try {
-    const link = getFrenchCloudUrl('serial', id);
+    const link = getFrVideoSrcUrl('serial', id);
     const details = await getFrenchStreamSeriesDetails(link, id);
     if (details.error) return details;
     const episodeCount = details.seasons.reduce((count, season) => count + season.episodes.length, 0);
@@ -122,55 +153,42 @@ async function getFrenchStreamSeries(id) {
 // ---------------------------------------------------------------------------
 async function getFrenchStreamSeriesDetails(seriesUrl, originalTitle) {
   try {
-    const response = await requestFrenchCloud(seriesUrl);
-    const $ = cheerio.load(response.data);
-    if (!$('._root').length) throw new Error('Page FrenchCloud invalide');
+    // Les anciens liens en cache pointent encore sur frenchcloud.cam : seul le
+    // chemin /serial/<imdb> est repris, toujours sur FrVideoSRC.
+    const pageUrl = new URL(new URL(seriesUrl, FRVIDEOSRC_BASE_URL).pathname, FRVIDEOSRC_BASE_URL).href;
+    const data = await fetchFrVideoSrcLinks(pageUrl);
+    if (!data) return { error: SERIES_NOT_FOUND };
+    if (!data.tv || !Array.isArray(data.tv.seasons)) throw new Error('Réponse FrVideoSRC invalide');
 
-    const title = $('title').text().trim() || originalTitle;
-    const seasonNumbers = new Map();
-    $('._stab[data-season]').each((_, element) => {
-      const tab = $(element);
-      const match = tab.text().match(/\d+/);
-      if (match) seasonNumbers.set(tab.attr('data-season'), Number(match[0]));
-    });
-
+    const title = String(data.tv.title || '').trim() || originalTitle;
     const seasons = [];
-    $('._grp[data-season]').each((_, element) => {
-      const group = $(element);
-      // data-season est un ID interne ; le numéro réel est dans l'onglet S1, S2…
-      const label = group.find('._ep[data-label]').first().attr('data-label') || '';
-      const seasonMatch = label.match(/\bS(\d+)\b/i);
-      const seasonNumber = seasonNumbers.get(group.attr('data-season')) ??
-        (seasonMatch ? Number(seasonMatch[1]) : null);
-      if (seasonNumber === null) return;
+    for (const season of data.tv.seasons) {
+      const seasonNumber = Number(season?.season_number);
+      if (!Number.isInteger(seasonNumber)) continue;
 
-      const episodes = new Map();
-      group.find('._ep[data-link]').each((_, episodeElement) => {
-        const episode = $(episodeElement);
-        const link = normalizeFrenchCloudPlayerLink(episode.attr('data-link'));
-        if (!link) return;
-
-        const episodeLabel = episode.attr('data-label') || '';
-        const numberMatch = episodeLabel.match(/\bE(\d+)\b/i) ||
-          episode.find('._epn').text().match(/\d+/);
-        if (!numberMatch) return;
-        const number = String(Number(numberMatch[1] || numberMatch[0]));
-        const episodeTitle = episode.find('._ept').text().trim() || episodeLabel || `Épisode ${number}`;
-        const language = /vostfr/i.test(episodeLabel + ' ' + episodeTitle) ? 'vostfr' : 'vf';
-        if (!episodes.has(number)) episodes.set(number, { number, versions: {} });
-        const versions = episodes.get(number).versions;
-        if (!versions[language]) versions[language] = { title: episodeTitle, players: [] };
-        if (!versions[language].players.some(player => player.link === link)) {
-          versions[language].players.push({ name: new URL(link).hostname, link });
-        }
-      });
+      const episodes = [];
+      for (const episode of Array.isArray(season.episodes) ? season.episodes : []) {
+        const episodeNumber = Number(episode?.episode_number);
+        const players = toPlayers(episode?.sources);
+        if (!Number.isInteger(episodeNumber) || !players.length) continue;
+        const number = String(episodeNumber);
+        const episodeTitle = String(episode.title || '').trim() || `Épisode ${number}`;
+        // L'API ne donne pas la langue : VF sauf mention VOSTFR, comme avant.
+        const language = /vostfr/i.test(`${episode.title || ''} ${episode.description || ''}`) ? 'vostfr' : 'vf';
+        episodes.push({
+          number,
+          versions: {
+            [language]: { title: episodeTitle, players: players.map(player => ({ name: new URL(player.link).hostname, link: player.link })) },
+          },
+        });
+      }
 
       seasons.push({
         number: seasonNumber,
         title: `Saison ${seasonNumber}`,
-        episodes: [...episodes.values()].sort((a, b) => Number(a.number) - Number(b.number)),
+        episodes: episodes.sort((a, b) => Number(a.number) - Number(b.number)),
       });
-    });
+    }
     seasons.sort((a, b) => a.number - b.number);
 
     // L'embed ne fournit plus la date de sortie ni le synopsis de FrenchStream.
@@ -185,7 +203,7 @@ async function getFrenchStreamSeriesDetails(seriesUrl, originalTitle) {
       seasons,
     };
   } catch (error) {
-    if (error.response?.status === 404) return { error: 'Series not found on FrenchCloud (404)' };
+    if (error.response?.status === 404) return { error: SERIES_NOT_FOUND };
     return { error: `Failed to fetch series details: ${error.message}` };
   }
 }

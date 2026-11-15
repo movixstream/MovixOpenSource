@@ -350,7 +350,10 @@ function createWishboardRouter(mysqlPool, redis) {
                     [r.id]
                 );
 
-                return { ...r, has_voted: hasVoted, notes, statusHistory };
+                // Route publique : ni l'identifiant du compte (ID Discord ou
+                // Google brut) ni celui du profil du demandeur ne sortent.
+                const { user_id: _userId, profile_id: _profileId, ...publicRequest } = r;
+                return { ...publicRequest, has_voted: hasVoted, notes, statusHistory };
             }));
 
             // Get total count

@@ -1950,9 +1950,17 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentI
         >
           <div className="flex gap-4">
             <div className="flex-shrink-0 hidden sm:block">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white font-bold text-lg shadow-lg">
-                {getProfileData()?.name?.charAt(0).toUpperCase() || 'U'}
-              </div>
+              {getProfileData()?.avatar ? (
+                <img
+                  src={getProfileData().avatar}
+                  alt={getProfileData()?.name || ''}
+                  className="w-10 h-10 rounded-full object-cover shadow-lg"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                  {getProfileData()?.name?.charAt(0).toUpperCase() || 'U'}
+                </div>
+              )}
             </div>
             <div className="flex-1">
               <div className="relative">

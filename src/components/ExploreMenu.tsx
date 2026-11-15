@@ -61,7 +61,8 @@ interface ExploreRowProps {
   hoverClassName?: string;
 }
 
-const ExploreRow: React.FC<ExploreRowProps> = ({ item, active, onNavigate, hoverClassName = '' }) => {
+/** Ligne du menu : icône, nom et description. Reprise par le menu des canaux. */
+export const ExploreRow: React.FC<ExploreRowProps> = ({ item, active, onNavigate, hoverClassName = '' }) => {
   const className = `group flex items-center gap-3 rounded-xl px-3 py-2.5 outline-none transition-colors duration-150 active:bg-white/[0.07] focus-visible:ring-1 focus-visible:ring-white/25 ${hoverClassName} ${
     active ? 'bg-white/[0.04]' : ''
   }`;

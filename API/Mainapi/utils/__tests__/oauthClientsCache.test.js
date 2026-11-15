@@ -55,6 +55,34 @@ test('la révocation ou modification de la liste et les overrides invalident imm
   assert.equal(f.api.isOAuthCorsOriginAllowed('https://override.example'), false);
 });
 
+test('vip.grant est refusé à un client public et accordé à un client confidentiel', () => {
+  const f = fixture();
+  const scopes = ['profile.read', 'vip.grant'];
+  f.update([
+    { ...client('public'), allowedScopes: scopes },
+    { ...client('confidentiel'), allowedScopes: scopes, publicClient: false, clientSecret: 's'.repeat(64) },
+  ]);
+  const publicClient = f.api.getOAuthClient('public');
+  const confidentialClient = f.api.getOAuthClient('confidentiel');
+  assert.equal(publicClient.publicClient, true);
+  assert.equal(confidentialClient.publicClient, false);
+
+  // Un client public s'approuverait lui-même : la permission lui est refusée.
+  assert.throws(
+    () => f.api.normalizeRequestedScopes('vip.grant', publicClient),
+    (error) => error.oauthError === 'invalid_scope',
+  );
+  assert.deepEqual(Array.from(f.api.normalizeRequestedScopes('profile.read', publicClient)), ['profile.read']);
+  assert.deepEqual(
+    Array.from(f.api.normalizeRequestedScopes('profile.read vip.grant', confidentialClient)).sort(),
+    scopes,
+  );
+
+  assert.equal(f.api.requiresClientAuthentication(['profile.read', 'vip.manage']), false);
+  assert.equal(f.api.requiresClientAuthentication(['profile.read', 'vip.grant']), true);
+  assert.equal(f.api.requiresClientAuthentication(null), false);
+});
+
 test('les mutations des retours ne modifient ni clients ni scopes ni origines internes', () => {
   const f = fixture();
   f.update([client()]);

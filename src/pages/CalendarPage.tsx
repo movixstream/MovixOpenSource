@@ -34,9 +34,9 @@ import type {
  */
 const PREFS_KEY = 'calendarPreferences.v4';
 
-/** Les deux sources publiques en tête : ce sont elles qui remplissent la page par défaut. */
+/** Les sources publiques en tête : ce sont elles qui remplissent la page par défaut. */
 const ALL_SOURCES: CalendarSource[] = [
-  'newReleases', 'airingEpisodes', 'watchlistEpisodes', 'watchlistMovies',
+  'newReleases', 'airingEpisodes', 'animeReleases', 'watchlistEpisodes', 'watchlistMovies',
   'alerts', 'continueWatching', 'custom',
 ];
 

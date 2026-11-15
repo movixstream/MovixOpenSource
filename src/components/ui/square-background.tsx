@@ -19,7 +19,8 @@ interface SquareBackgroundProps extends React.HTMLAttributes<HTMLDivElement> {
 interface Neighbor {
     row: number;
     col: number;
-    opacity: number;
+    /** Instant d'allumage (performance.now()) : l'opacité en découle. */
+    born: number;
 }
 
 function parseRGB(color: string): { r: number; g: number; b: number } {
@@ -30,7 +31,17 @@ function parseRGB(color: string): { r: number; g: number; b: number } {
 
 const DEFAULT_SQUARE_SIZE = 48;
 const STARTING_ALPHA = 100;
-const FADE_PER_FRAME = 8;
+// Durée du fondu d'une case allumée. Elle se comptait en images (−8 par
+// image) : 530 ms à 60 Hz, mais 90 ms sur un écran 360 Hz. On compte
+// désormais en millisecondes.
+const FADE_DURATION_MS = 530;
+// Alpha de la grille de base. L'ancien trait de 1 px à 0,08 posé sur une
+// coordonnée entière tombait à cheval sur deux pixels : Chrome le dessinait
+// comme deux pixels à 0,04, Firefox plus franc, d'où une grille bien plus
+// visible. On dessine ces deux pixels nous-mêmes avec des rectangles pleins
+// alignés sur la grille de pixels, rendus pareil partout.
+const GRID_LINE_ALPHA = 0.04;
+const HALO_ALPHA = 0.15;
 const NEIGHBOR_PROB = 0.5;
 const EXPLOSION_RADIUS = 4;
 const EXPLOSION_PARTICLES = 20;
@@ -46,6 +57,58 @@ const HALO_HIDDEN_TRANSLATE = -1200;
 // taille de cellule ne laisse aucune couture visible.
 const CANVAS_HEIGHT_VIEWPORT_MULTIPLIER = 2;
 const RESIZE_REDRAW_DEBOUNCE_MS = 150;
+
+type Rgb = { r: number; g: number; b: number };
+
+// Contour d'une case, équivalent exact de strokeRect(x, y, size, size) avec
+// un trait de 1 px : une bande de 2 px à moitié de l'alpha de part et
+// d'autre du bord. Rectangles pleins sur des pixels entiers : aucun
+// anticrénelage, donc le même rendu dans Chrome, Firefox et Safari.
+const fillCellOutline = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    size: number,
+    alpha: number,
+    { r, g, b }: Rgb,
+) => {
+    ctx.fillStyle = `rgba(${r},${g},${b},${(alpha / 2).toFixed(3)})`;
+    ctx.fillRect(x - 1, y - 1, size + 2, 2);
+    ctx.fillRect(x - 1, y + size - 1, size + 2, 2);
+    ctx.fillRect(x - 1, y + 1, 2, size - 2);
+    ctx.fillRect(x + size - 1, y + 1, 2, size - 2);
+};
+
+// Halo dessiné une fois en pixels plutôt qu'en radial-gradient CSS : un
+// dégradé rouge très sombre n'a qu'une trentaine de niveaux, que Chrome
+// lisse et que Firefox affiche en anneaux. Ici, chute douce (smoothstep,
+// sans bord visible) et léger bruit pour casser les paliers. Même portée
+// que l'ancien dégradé : 70 % de la distance au coin.
+const drawHaloBitmap = (canvas: HTMLCanvasElement, { r, g, b }: Rgb) => {
+    canvas.width = HALO_SIZE;
+    canvas.height = HALO_SIZE;
+    const haloCtx = canvas.getContext('2d');
+    if (!haloCtx) return;
+    const image = haloCtx.createImageData(HALO_SIZE, HALO_SIZE);
+    const data = image.data;
+    const radius = HALO_HALF_SIZE * Math.SQRT2 * 0.7;
+    for (let y = 0; y < HALO_SIZE; y++) {
+        const dy = y + 0.5 - HALO_HALF_SIZE;
+        for (let x = 0; x < HALO_SIZE; x++) {
+            const dx = x + 0.5 - HALO_HALF_SIZE;
+            const d = Math.sqrt(dx * dx + dy * dy) / radius;
+            if (d >= 1) continue;
+            const f = 1 - d;
+            const alpha = HALO_ALPHA * 255 * f * f * (3 - 2 * f) + Math.random() - 0.5;
+            const i = (y * HALO_SIZE + x) * 4;
+            data[i] = r;
+            data[i + 1] = g;
+            data[i + 2] = b;
+            data[i + 3] = Math.max(0, Math.min(255, Math.round(alpha)));
+        }
+    }
+    haloCtx.putImageData(image, 0, 0);
+};
 
 const normalizeSquareSize = (value: number) => (
     Number.isFinite(value) && value > 0
@@ -81,7 +144,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
 
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const haloRef = useRef<HTMLDivElement>(null);
+    const haloRef = useRef<HTMLCanvasElement>(null);
     // squareSize stocké dans un ref pour être lu dans les callbacks/RAF sans
     // re-register les handlers à chaque changement de prop.
     const squareSizeRef = useRef(squareSize);
@@ -114,6 +177,11 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
     // avec une souris : un swipe tactile ne doit pas animer le fond pendant le scroll.
     const showHalo = supportsPointerHalo && effectivePrefs.bgAnimations && effectivePrefs.blurEffects && (mode === 'static' || mode === 'combined') && prefs.haloEnabled;
     const showCanvas = effectivePrefs.bgAnimations && (mode === 'animated' || mode === 'combined');
+
+    useEffect(() => {
+        if (!showHalo || !haloRef.current) return;
+        drawHaloBitmap(haloRef.current, parseRGB(borderColor));
+    }, [showHalo, borderColor]);
 
     useEffect(() => {
         if (!showHalo) return;
@@ -397,15 +465,13 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
             if (!gridCtx) return null;
 
             gridCtx.clearRect(0, 0, cell, cell);
-            gridCtx.lineWidth = 1;
-            gridCtx.strokeStyle = `rgba(${r},${g},${b},0.08)`;
-            gridCtx.beginPath();
-
-            // Include both edges to preserve the half-pixel antialiasing at
-            // every seam when the cell is repeated.
-            gridCtx.rect(0, 0, cell, cell);
-
-            gridCtx.stroke();
+            // Une colonne/ligne de pixels sur chaque bord du motif : une fois
+            // répété, chaque trait de la grille fait 2 px (cf. GRID_LINE_ALPHA).
+            gridCtx.fillStyle = `rgba(${r},${g},${b},${GRID_LINE_ALPHA})`;
+            gridCtx.fillRect(0, 0, cell, 1);
+            gridCtx.fillRect(0, cell - 1, cell, 1);
+            gridCtx.fillRect(0, 1, 1, cell - 2);
+            gridCtx.fillRect(cell - 1, 1, 1, cell - 2);
             try {
                 gridCache.pattern = ctx.createPattern(gridCanvas, 'repeat');
             } catch (error) {
@@ -419,6 +485,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
 
         const getRandomNeighbors = (row: number, col: number, numRows: number, numCols: number): Neighbor[] => {
             const neighbors: Neighbor[] = [];
+            const born = performance.now();
 
             for (let dr = -1; dr <= 1; dr++) {
                 for (let dc = -1; dc <= 1; dc++) {
@@ -433,7 +500,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
                         nextCol < numCols &&
                         Math.random() < NEIGHBOR_PROB
                     ) {
-                        neighbors.push({ row: nextRow, col: nextCol, opacity: 255 });
+                        neighbors.push({ row: nextRow, col: nextCol, born });
                     }
                 }
             }
@@ -466,7 +533,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
             }
             state.dirtyCells = [];
 
-            const { r, g, b } = colorRef.current;
+            const color = colorRef.current;
             const { mouseX, mouseY } = state;
 
             if (mouseX >= 0 && mouseX <= width && mouseY >= 0 && mouseY <= height) {
@@ -479,21 +546,18 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
                     state.neighbors.push(...getRandomNeighbors(row, col, numRows, numCols));
                 }
 
-                ctx.strokeStyle = `rgba(${r},${g},${b},${(STARTING_ALPHA / 255).toFixed(3)})`;
-                ctx.strokeRect(col * cell, row * cell, cell, cell);
+                fillCellOutline(ctx, col * cell, row * cell, cell, STARTING_ALPHA / 255, color);
                 state.dirtyCells.push({ col, row });
             }
 
-            for (const neighbor of state.neighbors) {
-                neighbor.opacity = Math.max(0, neighbor.opacity - FADE_PER_FRAME);
-                if (neighbor.opacity > 0) {
-                    ctx.strokeStyle = `rgba(${r},${g},${b},${(neighbor.opacity / 255).toFixed(3)})`;
-                    ctx.strokeRect(neighbor.col * cell, neighbor.row * cell, cell, cell);
-                    state.dirtyCells.push({ col: neighbor.col, row: neighbor.row });
-                }
-            }
-
-            state.neighbors = state.neighbors.filter((neighbor) => neighbor.opacity > 0);
+            const now = performance.now();
+            state.neighbors = state.neighbors.filter((neighbor) => {
+                const remaining = 1 - (now - neighbor.born) / FADE_DURATION_MS;
+                if (remaining <= 0) return false;
+                fillCellOutline(ctx, neighbor.col * cell, neighbor.row * cell, cell, Math.min(1, remaining), color);
+                state.dirtyCells.push({ col: neighbor.col, row: neighbor.row });
+                return true;
+            });
 
             if (state.neighbors.length > 0) {
                 state.animId = requestAnimationFrame(renderFrame);
@@ -556,6 +620,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
             const col = Math.max(0, Math.min(numCols - 1, Math.floor(mouseX / cell)));
             const row = Math.max(0, Math.min(numRows - 1, Math.floor(mouseY / cell)));
 
+            const born = performance.now();
             for (let i = 0; i < EXPLOSION_PARTICLES; i++) {
                 const angle = Math.random() * Math.PI * 2;
                 const distance = Math.random() * (EXPLOSION_RADIUS - 1) + 1;
@@ -563,7 +628,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
                 const nextCol = Math.round(col + distance * Math.cos(angle));
 
                 if (nextRow >= 0 && nextRow < numRows && nextCol >= 0 && nextCol < numCols) {
-                    state.neighbors.push({ row: nextRow, col: nextCol, opacity: 255 });
+                    state.neighbors.push({ row: nextRow, col: nextCol, born });
                 }
             }
 
@@ -737,8 +802,11 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
             )}
 
             {showHalo && (
-                <div
+                <canvas
                     ref={haloRef}
+                    width={HALO_SIZE}
+                    height={HALO_SIZE}
+                    aria-hidden="true"
                     className="square-bg-halo absolute z-[1] pointer-events-none"
                     style={{
                         top: 0,
@@ -746,7 +814,6 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
                         width: HALO_SIZE,
                         height: HALO_SIZE,
                         transform: `translate(${HALO_HIDDEN_TRANSLATE}px, ${HALO_HIDDEN_TRANSLATE}px)`,
-                        background: `radial-gradient(circle at center, ${borderColor.replace(/[\d.]+\)$/, '0.15)')} 0%, transparent 70%)`,
                         willChange: 'transform',
                     }}
                 />

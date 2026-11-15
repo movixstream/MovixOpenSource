@@ -10,9 +10,14 @@
 //   circuit, un échec le rouvre pour `openMs`.
 // Une réponse définitive de la source (200, 404, 400…) compte comme un succès :
 // la source est joignable, c'est seulement le contenu qui manque.
+// `maxConcurrent` (facultatif) plafonne les appels en vol : le verdict d'une
+// source muette n'arrive qu'à la fin de ses délais, et sans plafond tous les
+// appels lancés entre-temps partent aussi. Au-delà, l'appel attend une place
+// (au plus `maxQueued` en attente) et repart sans réseau si la pause tombe.
 
 const DEFAULT_FAILURE_THRESHOLD = 3;
 const DEFAULT_OPEN_MS = 5 * 60 * 1000;
+const DEFAULT_MAX_QUEUED = 64;
 
 const SOURCE_DOWN_STATUSES = new Set([0, 403, 408, 425, 429]);
 
@@ -37,6 +42,9 @@ function createSourceCircuitBreaker({
   openMs = DEFAULT_OPEN_MS,
   // Codes d'erreur qui ne disent rien de la source (pool de proxys vide…).
   neutralCodes = [],
+  // Appels simultanés au plus (Infinity : aucun plafond, comportement d'origine).
+  maxConcurrent = Infinity,
+  maxQueued = DEFAULT_MAX_QUEUED,
   now = Date.now,
   logger = console,
 } = {}) {
@@ -44,12 +52,16 @@ function createSourceCircuitBreaker({
   const threshold = Math.max(1, Math.floor(Number(failureThreshold) || DEFAULT_FAILURE_THRESHOLD));
   const pauseMs = Math.max(1000, Math.floor(Number(openMs) || DEFAULT_OPEN_MS));
   const neutral = new Set(neutralCodes);
+  const concurrency = Number(maxConcurrent) >= 1 ? Math.floor(Number(maxConcurrent)) : Infinity;
+  const queueLimit = Math.max(0, Math.floor(Number(maxQueued) || 0));
 
   let state = 'closed';
   let failures = 0;
   let openUntil = 0;
   let probeInFlight = false;
   let lastFailure = null;
+  let inFlight = 0;
+  const waiters = [];
 
   function openError() {
     const retryAfterMs = Math.max(0, openUntil - now());
@@ -57,6 +69,23 @@ function createSourceCircuitBreaker({
       new Error(`Source ${name} en pause après des échecs répétés (reprise dans ${Math.ceil(retryAfterMs / 1000)} s)`),
       { code: 'SOURCE_CIRCUIT_OPEN', isSourceCircuitOpen: true, source: name, retryAfterMs, httpStatus: 503 },
     );
+  }
+
+  // File d'attente pleine : pour l'appelant, c'est une pause (rien à journaliser
+  // par titre, rien à mettre en cache), sans compter comme une panne de la source.
+  function saturatedError() {
+    return Object.assign(
+      new Error(`Source ${name} saturée : ${concurrency} appels en cours et ${queueLimit} en attente`),
+      { code: 'SOURCE_CIRCUIT_OPEN', isSourceCircuitOpen: true, source: name, retryAfterMs: 0, httpStatus: 503, saturated: true },
+    );
+  }
+
+  function wakeNext() {
+    waiters.shift()?.();
+  }
+
+  function wakeAll() {
+    for (const resolve of waiters.splice(0)) resolve();
   }
 
   function describe(error) {
@@ -73,6 +102,8 @@ function createSourceCircuitBreaker({
     logger?.warn?.(
       `[CIRCUIT] ${name} ${reopening ? 'toujours en échec' : `en échec ${threshold} fois d'affilée`} (${reason}) : pause de ${Math.round(pauseMs / 60000)} min`,
     );
+    // Les appels en attente d'une place repartent tout de suite en pause.
+    wakeAll();
   }
 
   // Réserve un passage, ou lève SOURCE_CIRCUIT_OPEN si la source est en pause.
@@ -123,13 +154,24 @@ function createSourceCircuitBreaker({
   // `classifyResult(résultat)` sert aux helpers qui renvoient un statut d'erreur
   // au lieu de lever (CycleTLS) : 'failure' | 'success' | 'neutral'.
   async function run(task, { classifyResult } = {}) {
+    // Attend une place libre, sauf si la source passe en pause : enter() lève
+    // alors SOURCE_CIRCUIT_OPEN, sans appel réseau. Revérifié au réveil, dans le
+    // même tour que la prise de place, pour que le plafond reste strict.
+    while (inFlight >= concurrency && !isOpen()) {
+      if (waiters.length >= queueLimit) throw saturatedError();
+      await new Promise(resolve => { waiters.push(resolve); });
+    }
     const ticket = enter();
+    inFlight += 1;
     let result;
     try {
       result = await task();
     } catch (error) {
       settle(ticket, classifyError(error), describe(error));
       throw error;
+    } finally {
+      inFlight -= 1;
+      wakeNext();
     }
     const verdict = classifyResult ? classifyResult(result) : 'success';
     settle(ticket, verdict, describe(result?.status !== undefined ? { httpStatus: result.status } : null));
@@ -147,6 +189,8 @@ function createSourceCircuitBreaker({
       failures,
       retryAfterMs: state === 'open' ? Math.max(0, openUntil - now()) : 0,
       lastFailure,
+      inFlight,
+      queued: waiters.length,
     };
   }
 
