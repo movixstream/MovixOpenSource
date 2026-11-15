@@ -4,27 +4,26 @@
 
 ## Pages principales
 
-- [Accueil](https://movix.llc/) : page d'accueil avec sélections et contenus mis en avant
-- [Films](https://movix.llc/movies) : catalogue complet de films
-- [Séries TV](https://movix.llc/tv-shows) : catalogue des séries et épisodes
-- [Recherche](https://movix.llc/search) : recherche multimédia
-- [TV en direct](https://movix.llc/live-tv) : chaînes en direct
-- [Collections](https://movix.llc/collections) : collections thématiques
-- [Roulette](https://movix.llc/roulette) : découverte aléatoire
-- [Watch Parties](https://movix.llc/watchparty/list) : visionnage synchronisé entre amis
+- [Accueil](__MOVIX_SITE_URL__/) : page d'accueil avec sélections et contenus mis en avant
+- [Films](__MOVIX_SITE_URL__/movies) : catalogue complet de films
+- [Séries TV](__MOVIX_SITE_URL__/tv-shows) : catalogue des séries et épisodes
+- [Recherche](__MOVIX_SITE_URL__/search) : recherche multimédia
+- [TV en direct](__MOVIX_SITE_URL__/live-tv) : chaînes en direct
+- [Collections](__MOVIX_SITE_URL__/collections) : collections thématiques
+- [Roulette](__MOVIX_SITE_URL__/roulette) : découverte aléatoire
+- [Watch Parties](__MOVIX_SITE_URL__/watchparty/list) : visionnage synchronisé entre amis
 
 ## Informations
 
-- [À propos](https://movix.llc/about) : présentation et mission
-- [VIP](https://movix.llc/vip) : programme premium
-- [Extension](https://movix.llc/extension) : extensions Chrome, Firefox et userscript
-- [Débrid](https://movix.llc/debrid) : intégration des services de débridage
+- [À propos](__MOVIX_SITE_URL__/about) : présentation et mission
+- [VIP](__MOVIX_SITE_URL__/vip) : programme premium
+- [Extension](__MOVIX_SITE_URL__/extension) : extensions Chrome, Firefox et userscript
+- [Débrid](__MOVIX_SITE_URL__/debrid) : intégration des services de débridage
 
 ## Légal
 
-- [Conditions d'utilisation](https://movix.llc/terms-of-service)
-- [Politique de confidentialité](https://movix.llc/privacy)
-- [DMCA](https://movix.llc/dmca) : procédure de retrait de contenu
+- [Conditions d'utilisation](__MOVIX_SITE_URL__/terms-of-service)
+- [Politique de confidentialité](__MOVIX_SITE_URL__/privacy)
 - Licence du projet : CC BY-NC 4.0 (usage non-commercial)
 
 ## Contact

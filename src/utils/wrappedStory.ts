@@ -1,8 +1,24 @@
 import type { WrappedData } from '../services/wrappedService';
-import type { WrappedScene } from '../types/wrapped';
+import type { WrappedScene, WrappedSignatureKind } from '../types/wrapped';
 
 export type WrappedStoryMode = 'community' | 'explorer' | 'regular' | 'devoted' | 'balanced';
 const positive = (value: number | undefined) => Number.isFinite(value) ? Math.max(0, value || 0) : 0;
+
+const GENRES: Record<string, string> = {
+    action: 'action', aventure: 'adventure', adventure: 'adventure', animation: 'animation',
+    comedie: 'comedy', comedy: 'comedy', crime: 'crime', documentaire: 'documentary', documentary: 'documentary',
+    drame: 'drama', drama: 'drama', familial: 'family', family: 'family', fantastique: 'fantasy', fantasy: 'fantasy',
+    histoire: 'history', history: 'history', horreur: 'horror', horror: 'horror', musique: 'music', music: 'music',
+    mystere: 'mystery', mystery: 'mystery', romance: 'romance', sciencefiction: 'scifi',
+    telefilm: 'tvmovie', tvmovie: 'tvmovie', thriller: 'thriller', guerre: 'war', war: 'war', western: 'western',
+    actionadventure: 'actionAdventure', scififantasy: 'scifiFantasy', sciencefictionfantastique: 'scifiFantasy', kids: 'kids', news: 'news',
+    reality: 'reality', soap: 'soap', talk: 'talk', warpolitics: 'warPolitics',
+};
+
+/** Clé stable d'un genre reçu en français ou en anglais (« Science-fiction » → scifi). */
+export function wrappedGenreKey(name: string): string | null {
+    return GENRES[name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]/g, '')] || null;
+}
 
 export function hasWrappedCommunity(data: WrappedData): boolean {
     return Boolean(data.community && positive(data.community.commentsPosted) + positive(data.community.repliesPosted) > 0);
@@ -89,4 +105,28 @@ export function wrappedTraitFacts(data: WrappedData): WrappedTrait[] {
     if (hasWrappedCommunity(data)) traits.push({ id: 'community', count: data.community!.commentsPosted + data.community!.repliesPosted });
     if (data.stats.uniqueTitles >= 25) traits.push({ id: 'explorer', count: data.stats.uniqueTitles });
     return traits.slice(0, 2);
+}
+
+const FORMAT_PERSONAS = ['anime-fan', 'weeb-supreme', 'otaku', 'binger', 'series-addict', 'tv-enthusiast', 'movie-lover', 'live-watcher'];
+
+/**
+ * Le plan « signature » du film : un seul fait d'habitude, choisi d'après le profil,
+ * jamais une scène vide. Ordre : horaires marqués, régularité, voix, format, genres.
+ */
+export function wrappedSignatureKind(data: WrappedData): WrappedSignatureKind | null {
+    const persona = data.persona?.id || '';
+    const traits = wrappedTraitFacts(data);
+    const clock = (data.listeningClock?.filter(hour => positive(hour.minutes) > 0).length || 0) >= 2 && data.peakHour != null;
+    const streak = positive(data.stats.longestStreak) >= 3;
+    const genres = (data.topGenres?.filter(genre => positive(genre.minutes) > 0).length || 0) >= 2;
+    const formats = data.byType.filter(item => positive(item.minutes) > 0).length >= 2;
+    if (clock && (persona === 'night-owl' || persona === 'early-bird' || traits.some(trait => trait.id === 'night' || trait.id === 'early'))) return 'clock';
+    if (streak && (persona === 'streak-machine' || positive(data.stats.longestStreak) >= 14)) return 'streak';
+    if (hasWrappedCommunity(data) && wrappedStoryMode(data) === 'community') return 'community';
+    // Un partage à peu près égal n'est pas une préférence : le plan format demande 60 %.
+    if (formats && (FORMAT_PERSONAS.includes(persona) || traits.some(trait => trait.id === 'format' && (trait.percent || 0) >= 60))) return 'formats';
+    if (genres) return 'genres';
+    if (clock) return 'clock';
+    if (streak) return 'streak';
+    return formats ? 'formats' : null;
 }

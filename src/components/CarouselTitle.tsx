@@ -1,14 +1,23 @@
 import React from 'react';
+import type { LucideIcon } from 'lucide-react';
 
 interface CarouselTitleProps {
-  icon?: string;
+  icon?: LucideIcon;
   iconClass?: string;
   label: string;
 }
 
-const CarouselTitle: React.FC<CarouselTitleProps> = ({ icon, iconClass, label }) => (
+// Icône Lucide plutôt qu'un emoji : le trait suit la couleur de `iconClass`
+// (currentColor) et garde la même allure sur tous les systèmes.
+const CarouselTitle: React.FC<CarouselTitleProps> = ({ icon: Icon, iconClass, label }) => (
   <span>
-    {icon && <span className={`mr-2 ${iconClass ?? ''}`}>{icon}</span>}
+    {Icon && (
+      <Icon
+        aria-hidden="true"
+        strokeWidth={2.25}
+        className={`mr-2 inline-block h-[1em] w-[1em] -translate-y-[0.1em] align-middle ${iconClass ?? ''}`}
+      />
+    )}
     <span>{label}</span>
   </span>
 );

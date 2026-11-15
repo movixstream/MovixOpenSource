@@ -1,6 +1,7 @@
 // src/utils/sourceAutoSelect.ts
 import { getSourcePriorityPrefs } from './sourcePriorityPrefs';
-import { getRememberLastPlayer, getLastPlayer } from './lastPlayerPref';
+import { getRememberLastPlayer, getLastPlayer, getLastHoster } from './lastPlayerPref';
+import { detectHoster } from './hosterRegistry';
 import type {
   TopLevelSourceId, HosterId, LanguageId, PriorityCategory,
 } from '../types/sourcePriority';
@@ -35,6 +36,42 @@ export function pickAutoSelectedSource(
     if (availMap.get(id)) return id;
   }
   return null;
+}
+
+/**
+ * Clé stable d'un lecteur dans une source, pour « se souvenir du dernier
+ * lecteur ». L'URL change d'un film à l'autre : on garde le hoster détecté
+ * (`lulustream`, `vidara`…). Un hoster inconnu du registre retombe sur le
+ * premier mot de son label (« Bysebuho 1080p » → `label:bysebuho`).
+ */
+export function hosterKeyOf(item: {
+  type?: string | null;
+  url?: string | null;
+  label?: string | null;
+  seekKind?: string | null;
+}): string | null {
+  if (item.seekKind) return 'seekstreaming';
+  if (item.type && item.type !== 'unknown') return item.type;
+  const prefs = getSourcePriorityPrefs();
+  const opts = { patternOverrides: prefs.patternOverrides, customHosters: prefs.customHosters };
+  const detected = detectHoster(item.url ?? '', opts) ?? detectHoster(item.label ?? '', opts);
+  if (detected) return detected;
+  const word = String(item.label ?? '').trim().toLowerCase().split(/[\s()[\]|:·-]+/)[0];
+  return word ? `label:${word}` : null;
+}
+
+/**
+ * Lecteur à remonter en tête pour cette source, ou null. Il ne vaut que pour
+ * la source où il a été choisi : Lulu choisi dans « Lecteur Movix » ne doit
+ * pas réordonner FStream.
+ */
+function rememberedHosterFor(
+  category: PriorityCategory,
+  topLevel: TopLevelSourceId | LanguageId | undefined,
+): string | null {
+  if (category !== 'moviesTv' || !topLevel || !getRememberLastPlayer()) return null;
+  if (getLastPlayer() !== topLevel) return null;
+  return getLastHoster();
 }
 
 /**
@@ -111,9 +148,22 @@ export function sortHostersByPriority<
     return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
   };
 
-  return [...items].sort((a, b) => {
-    const langDiff = langRank(a) - langRank(b);
-    if (langDiff !== 0) return langDiff;
-    return hosterRank(a.type) - hosterRank(b.type);
-  });
+  // « Se souvenir du dernier lecteur » : le lecteur choisi passe devant
+  // l'ordre des hosters (la langue reste le tri principal).
+  const remembered = rememberedHosterFor(context.category, tl);
+  const keyed = remembered
+    ? items.map((item) => ({
+        item,
+        isRemembered: hosterKeyOf(item as Parameters<typeof hosterKeyOf>[0]) === remembered,
+      }))
+    : items.map((item) => ({ item, isRemembered: false }));
+
+  return keyed
+    .sort((a, b) => {
+      const langDiff = langRank(a.item) - langRank(b.item);
+      if (langDiff !== 0) return langDiff;
+      if (a.isRemembered !== b.isRemembered) return a.isRemembered ? -1 : 1;
+      return hosterRank(a.item.type) - hosterRank(b.item.type);
+    })
+    .map(({ item }) => item);
 }

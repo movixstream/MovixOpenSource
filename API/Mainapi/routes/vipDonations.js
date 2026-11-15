@@ -25,8 +25,19 @@ const {
   ensureVipDonationsTables,
   getClientIp
 } = require('../utils/vipDonations');
+const {
+  VIP_DONATION_ERROR_CODES,
+  getDefaultVipDonationSettings,
+  getVipDonationAvailability,
+  loadVipDonationSettings,
+  saveVipDonationSettings,
+  validateSettingsInput
+} = require('../utils/vipDonationSettings');
 
 const router = express.Router();
+
+// Codes renvoyés au client pour qu'il distingue pause, moyen coupé et montant refusé.
+const PUBLIC_DONATION_ERROR_CODES = new Set(Object.values(VIP_DONATION_ERROR_CODES));
 
 const setNoStore = (req, res, next) => {
   res.set('Cache-Control', 'no-store');
@@ -124,6 +135,28 @@ const giftUnsealRateLimit = rateLimit({
   }
 });
 
+router.get('/vip/donation-settings', setNoStore, async (req, res) => {
+  const availability = getVipDonationAvailability();
+  try {
+    const { settings, updatedAt } = await loadVipDonationSettings(getPool());
+    return res.json({
+      success: true,
+      settings,
+      availability,
+      updatedAt
+    });
+  } catch (error) {
+    // La page doit rester utilisable (don par carte cadeau) même sans base.
+    console.error('VIP donation settings read error:', error?.message || error);
+    return res.json({
+      success: true,
+      settings: getDefaultVipDonationSettings(),
+      availability,
+      updatedAt: null
+    });
+  }
+});
+
 router.post('/vip/invoices', setNoStore, createInvoiceRateLimit, async (req, res) => {
   try {
     const pool = getPool();
@@ -139,7 +172,7 @@ router.post('/vip/invoices', setNoStore, createInvoiceRateLimit, async (req, res
     const invoice = await createVipInvoice(
       pool,
       {
-        packEur: req.body?.pack_eur,
+        amountEur: req.body?.amount_eur ?? req.body?.pack_eur,
         paymentMethod: req.body?.payment_method,
         coin: req.body?.coin,
         recipientMode: req.body?.recipient_mode,
@@ -160,7 +193,8 @@ router.post('/vip/invoices', setNoStore, createInvoiceRateLimit, async (req, res
     console.error('VIP invoice create error:', error);
     return res.status(error.statusCode || 400).json({
       success: false,
-      error: error.message || 'Impossible de créer l\'invoice VIP'
+      error: error.message || 'Impossible de créer l\'invoice VIP',
+      ...(PUBLIC_DONATION_ERROR_CODES.has(error?.code) ? { code: error.code } : {})
     });
   }
 });
@@ -467,6 +501,53 @@ router.post('/admin/vip-invoices/:id/cancel', isAdmin, async (req, res) => {
     return res.status(409).json({
       success: false,
       error: error.message || 'Impossible d\'annuler cette invoice'
+    });
+  }
+});
+
+router.get('/admin/vip-donation-settings', setNoStore, isAdmin, async (req, res) => {
+  try {
+    const { settings, updatedAt, updatedBy } = await loadVipDonationSettings(getPool(), { fresh: true });
+    return res.json({
+      success: true,
+      settings,
+      availability: getVipDonationAvailability(),
+      updatedAt,
+      updatedBy
+    });
+  } catch (error) {
+    console.error('VIP admin donation settings read error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Impossible de récupérer les réglages des dons'
+    });
+  }
+});
+
+router.put('/admin/vip-donation-settings', setNoStore, isAdmin, async (req, res) => {
+  try {
+    const pool = getPool();
+    const current = await loadVipDonationSettings(pool, { fresh: true });
+    const settings = validateSettingsInput(req.body?.settings, current.settings);
+    const saved = await saveVipDonationSettings(pool, settings, req.admin?.userId || null);
+    return res.json({
+      success: true,
+      settings: saved.settings,
+      availability: getVipDonationAvailability(),
+      updatedAt: saved.updatedAt,
+      updatedBy: saved.updatedBy
+    });
+  } catch (error) {
+    if (error?.code === VIP_DONATION_ERROR_CODES.settingsInvalid) {
+      return res.status(400).json({
+        success: false,
+        error: error.message
+      });
+    }
+    console.error('VIP admin donation settings update error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Impossible d\'enregistrer les réglages des dons'
     });
   }
 });

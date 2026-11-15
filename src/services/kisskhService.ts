@@ -313,6 +313,9 @@ async function readBoundedResponse(response: Response, maxBytes: number): Promis
   if (!response.body) return new ArrayBuffer(0);
 
   const reader = response.body.getReader();
+  // releaseLock rejette reader.closed même lorsque toutes les lectures sont
+  // terminées. Certains Firefox remontent ce rejet si personne ne l'observe.
+  void reader.closed.catch(() => undefined);
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {

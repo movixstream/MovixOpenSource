@@ -1,3 +1,4 @@
+import { IX_MATRIX_URL } from '@/config/community';
 import {
   Ban,
   Crown,
@@ -13,7 +14,7 @@ import { useTranslation } from 'react-i18next';
 import LegalDocumentPage, { LegalSection } from '../components/legal/LegalDocumentPage';
 
 const CONTACT_EMAIL = 'movixstreaming@gmail.com';
-const TELEGRAM_URL = 'https://t.me/movix_site';
+const TELEGRAM_URL = IX_MATRIX_URL;
 
 const TermsOfService = () => {
   const { t } = useTranslation();
@@ -117,7 +118,6 @@ const TermsOfService = () => {
         paragraphs: getStringArray('termsOfServicePage.supportCard.paragraphs'),
         actions: [
           { label: t('termsOfServicePage.supportCard.actions.privacy'), to: '/privacy', variant: 'primary' },
-          { label: t('termsOfServicePage.supportCard.actions.dmca'), to: '/dmca', variant: 'secondary' },
           { label: t('termsOfServicePage.supportCard.actions.contact'), href: `mailto:${CONTACT_EMAIL}`, variant: 'ghost' },
           { label: t('termsOfServicePage.supportCard.actions.telegram'), href: TELEGRAM_URL, external: true, variant: 'ghost' },
         ],

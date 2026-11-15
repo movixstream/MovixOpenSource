@@ -87,9 +87,16 @@ const SIMILARITY_THRESHOLD = parseFloat(process.env.J1F_SIMILARITY || '0.7');
 // Interrupteur global du scraping (J1F_SCRAPE=false pour couper, true par
 // défaut). À false, on sert UNIQUEMENT le cache existant : aucun rafraîchissement
 // en arrière-plan, aucun scrape de titres nouveaux, aucune requête réseau vers
-// 1J1F (ni /go/, ni nonce). Utile quand tous les egress sont morts (relais 1020,
-// proxies challengés) : évite de brûler du quota relais pour rien.
+// 1J1F (ni /go/, ni nonce). Utile quand tous les egress sont morts (proxies
+// challengés, direct bloqué) : évite de les solliciter pour rien.
 const SCRAPE_ENABLED = (process.env.J1F_SCRAPE || 'true').trim().toLowerCase() !== 'false';
+// Interrupteur de la source entière (J1F_ENABLED=false pour couper, true par
+// défaut). À false, les routes ne renvoient plus rien — ni cache ni scrape —
+// et le frontend n'affiche plus les lecteurs 1jour1film.
+const SOURCE_ENABLED = !['false', '0', 'off'].includes(
+  (process.env.J1F_ENABLED || 'true').trim().toLowerCase(),
+);
+const disabledResponse = (id) => ({ success: false, error: 'Source 1jour1film désactivée', tmdb_id: id });
 // Dooplay search nonce. Empty override = dynamic (scraped from the site pages);
 // setting J1F_SEARCH_NONCE pins it and disables the scrape entirely.
 const NONCE_OVERRIDE = (process.env.J1F_SEARCH_NONCE || '').trim();
@@ -161,8 +168,8 @@ async function resolveBase() {
 //
 // Deux garde-fous, tous deux appris d'une panne réelle : les échecs sont aussi
 // mis en cache (cooldown court) — sinon, 1J1F injoignable = CHAQUE recherche
-// repaye un fetch de page d'accueil à travers toute la chaîne relais/proxies/
-// direct avant même de tenter sa recherche — et les résolutions concurrentes
+// repaye un fetch de page d'accueil à travers toute la chaîne proxies/direct
+// avant même de tenter sa recherche — et les résolutions concurrentes
 // partagent un seul fetch en vol au lieu d'en empiler une par recherche.
 let cachedNonce = null;
 let cachedNonceAt = 0;
@@ -207,8 +214,8 @@ async function resolveNonce(base, force = false) {
 const inFlight = new Map();
 
 // Cap on scrapes running at once (per worker). A page of posters cold-loads a
-// dozen titles at a time; without this cap they all walk the relais/proxies/
-// direct chain in parallel, Cloudflare rate-limite l'egress, et tout finit en
+// dozen titles at a time; without this cap they all walk the proxies/direct
+// chain in parallel, Cloudflare rate-limite l'egress, et tout finit en
 // timeout — y compris les requêtes qui seraient passées seules. Les jobs sont
 // déjà en tâche de fond : les mettre en file ne bloque personne, ça retarde
 // juste le remplissage du cache.
@@ -396,8 +403,8 @@ async function searchJ1F(base, query, retried = false) {
     // Not JSON = a challenge page / WAF error, i.e. we never reached 1J1F.
     // THROWING is what separates that from a genuine empty result (`no_posts`),
     // which is a definitive "not here" and must stay cacheable. The message
-    // carries the egress (`via`) and the head of the body — a relay 1020 vs a
-    // proxy challenge vs a direct block.
+    // carries the egress (`via`) and the head of the body — a proxy challenge
+    // vs a direct block.
     throw new Error(
       `reponse non-JSON status=${res.status} via=${res.via || '?'} len=${body.length} body="${body
         .slice(0, 200)
@@ -637,6 +644,7 @@ const respondWithMovieSources = (req, res, payload) =>
 
 router.get('/movie/:id', async (req, res) => {
   const { id } = req.params;
+  if (!SOURCE_ENABLED) return res.status(200).json(disabledResponse(id));
   try {
     const base = SCRAPE_ENABLED ? await resolveBase() : ''; // off : zéro réseau, cache only
     const data = await withCache(generateCacheKey({ src: 'j1f', t: 'movie', id }), () =>
@@ -652,6 +660,7 @@ router.get('/movie/:id', async (req, res) => {
 router.get('/tv/:id/season/:season', async (req, res) => {
   const { id, season } = req.params;
   const { episode } = req.query;
+  if (!SOURCE_ENABLED) return res.status(200).json(disabledResponse(id));
   try {
     const base = SCRAPE_ENABLED ? await resolveBase() : ''; // off : zéro réseau, cache only
     const key = generateCacheKey({ src: 'j1f', t: 'tv', id, season, episode: episode || '' });

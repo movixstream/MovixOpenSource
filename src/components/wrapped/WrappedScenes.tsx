@@ -19,6 +19,7 @@ import WrappedPodium from './WrappedPodium';
 import WrappedRace from './WrappedRace';
 import WrappedEras from './WrappedEras';
 import WrappedReveal from './WrappedReveal';
+import WrappedCountUp from './WrappedCountUp';
 import { WRAPPED_EASE_MORPH, WRAPPED_FRAME_ANIMATION } from '@/utils/wrappedMotion';
 
 function SceneLayout({ children, visual, wide = false }: { children: ReactNode; visual: ReactNode; wide?: boolean }) {
@@ -28,7 +29,7 @@ function SceneLayout({ children, visual, wide = false }: { children: ReactNode; 
     </div>;
 }
 
-export default function WrappedScenes({ scene, data, onStart, onNext, onExplore, picked, onPick, playing = false, assembleQuiz = false }: {
+export default function WrappedScenes({ scene, data, onStart, onNext, onExplore, picked, onPick, assembleQuiz = false }: {
     scene: WrappedScene;
     data: WrappedData;
     onStart: () => void;
@@ -36,7 +37,6 @@ export default function WrappedScenes({ scene, data, onStart, onNext, onExplore,
     onExplore: (active: boolean) => void;
     picked: string | null;
     onPick: (key: string) => void;
-    playing?: boolean;
     assembleQuiz?: boolean;
 }) {
     const { t, i18n } = useTranslation();
@@ -59,7 +59,7 @@ export default function WrappedScenes({ scene, data, onStart, onNext, onExplore,
         </SceneLayout>
     );
 
-    if (scene === 'race') return <WrappedRace data={data} playing={playing} onExplore={onExplore} />;
+    if (scene === 'race') return <WrappedRace data={data} onExplore={onExplore} />;
     if (scene === 'eras') return <WrappedEras data={data} />;
     if (scene === 'awards') return <WrappedPodium data={data} onExplore={onExplore} />;
 
@@ -70,9 +70,10 @@ export default function WrappedScenes({ scene, data, onStart, onNext, onExplore,
         return <div className="mx-auto w-full max-w-[1020px] space-y-3 lg:space-y-6">
             <header className="flex flex-wrap items-end justify-between gap-x-7 gap-y-4">
                 <div className="max-w-sm space-y-4"><p className={kicker}>{t('wrappedCinema.timeKicker')}</p><h2 className="font-['Archivo_Black'] text-3xl leading-tight tracking-tight lg:text-4xl">{t('wrappedCinema.timeTitle')}</h2></div>
-                <p aria-label={duration(data.stats.totalMinutes)} className="flex flex-wrap items-baseline gap-x-4 text-[var(--wrapped-accent)]">
-                    <span className="whitespace-nowrap font-['Archivo_Black'] text-6xl leading-none tracking-tight lg:text-8xl">{number(hours || minutes)}<span className="ml-2 text-3xl lg:text-5xl">{hours ? 'h' : 'min'}</span></span>
-                    {hours > 0 && minutes > 0 && <span className="whitespace-nowrap text-2xl font-semibold lg:text-3xl">{minutes} min</span>}
+                <p className="flex flex-wrap items-baseline gap-x-4 text-[var(--wrapped-accent)]">
+                    <span className="sr-only">{duration(data.stats.totalMinutes)}</span>
+                    <span aria-hidden="true" className="whitespace-nowrap font-['Archivo_Black'] text-6xl leading-none tracking-tight lg:text-8xl"><WrappedCountUp value={hours || minutes} format={number} /><span className="ml-2 text-3xl lg:text-5xl">{hours ? 'h' : 'min'}</span></span>
+                    {hours > 0 && minutes > 0 && <span aria-hidden="true" className="whitespace-nowrap text-2xl font-semibold lg:text-3xl"><WrappedCountUp value={minutes} format={number} delay={0.45} duration={1.2} /> min</span>}
                 </p>
             </header>
             <WrappedFormats data={data} onExplore={onExplore} wide />
@@ -85,7 +86,7 @@ export default function WrappedScenes({ scene, data, onStart, onNext, onExplore,
             <p className={kicker}>{t('wrappedCinema.timelineKicker')}</p>
             <h2 className={heading}>{t('wrappedCinema.timelineTitle')}</h2>
             <p className={caption}>{t('wrappedCinema.timelineCaption')}</p>
-            <div className="hidden items-center gap-2 text-xs text-white/60 lg:flex"><ArrowUpRight className="h-4 w-4" />{t('wrappedCinema.chartHint')}</div>
+            <div className="hidden items-center gap-2 text-xs text-white/60 lg:flex"><ArrowUpRight className="h-4 w-4 text-white opacity-60" />{t('wrappedCinema.chartHint')}</div>
         </SceneLayout>
     );
 
@@ -112,7 +113,7 @@ export default function WrappedScenes({ scene, data, onStart, onNext, onExplore,
                         animate={{ opacity: 1, transform: 'translateY(0px) rotate(0deg)' }}
                         transition={{ duration: reduced ? 0 : 0.58, delay: reduced || !assembleQuiz ? 0 : 0.1 + Math.abs(index - 1) * 0.06, ease: [0.23, 1, 0.32, 1] }}
                         className="min-w-0 space-y-3 rounded-xl text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
-                        <div className={`wrapped-quiz-poster rounded-xl transition-opacity ${picked && winner ? 'ring-4 ring-[var(--wrapped-accent)]' : picked ? 'opacity-50' : ''}`}><WrappedPoster item={item} className="w-full" /></div>
+                        <div className={`wrapped-quiz-poster transition-opacity ${picked && !winner ? 'opacity-50' : ''}`}><WrappedPoster item={item} className={`w-full ${picked && winner ? 'ring-4 ring-[var(--wrapped-accent)]' : ''}`} /></div>
                         <span className="block break-words text-xs font-semibold leading-relaxed sm:text-sm">{item.title}</span>
                     </motion.button>;
                 })}

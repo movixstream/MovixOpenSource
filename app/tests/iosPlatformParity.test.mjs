@@ -81,7 +81,7 @@ async function loadUpdateHelpersWithReactNativeURL() {
 test('iOS update URLs work with the partial React Native URL global', async () => {
   const { isValidHttpsUpdateUrl, releasePageUrl } =
     await loadUpdateHelpersWithReactNativeURL();
-  const repository = 'https://github.com/Movix-STMG/MovixOpenSource';
+  const repository = 'https://github.com/movixstream/MovixOpenSource';
 
   assert.equal(isValidHttpsUpdateUrl(repository), true);
   assert.equal(
@@ -90,12 +90,12 @@ test('iOS update URLs work with the partial React Native URL global', async () =
   );
 
   for (const unsafe of [
-    'http://github.com/Movix-STMG/MovixOpenSource',
-    'https://user:password@github.com/Movix-STMG/MovixOpenSource',
-    'https://github.com/Movix-STMG/\u0000MovixOpenSource',
-    'https://github.com/Movix-STMG/%00MovixOpenSource',
-    'https://github.com/Movix-STMG/MovixOpenSource\\redirect',
-    'https://github.com:99999/Movix-STMG/MovixOpenSource',
+    'http://github.com/movixstream/MovixOpenSource',
+    'https://user:password@github.com/movixstream/MovixOpenSource',
+    'https://github.com/movixstream/\u0000MovixOpenSource',
+    'https://github.com/movixstream/%00MovixOpenSource',
+    'https://github.com/movixstream/MovixOpenSource\\redirect',
+    'https://github.com:99999/movixstream/MovixOpenSource',
   ]) {
     assert.equal(isValidHttpsUpdateUrl(unsafe), false, unsafe);
   }

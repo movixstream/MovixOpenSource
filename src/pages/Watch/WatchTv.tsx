@@ -10,10 +10,11 @@ import { useAdFreePopup } from '../../context/AdFreePopupContext';
 import AdFreePlayerAds from '../../components/AdFreePlayerAds';
 import AdWaitingScreen from '@/components/AdWaitingScreen';
 import { getAdPopupMode } from '../../utils/adPopupMode';
+import { openInNewTab } from '../../utils/openInNewTab';
 import { extractM3u8FromEmbed, extractUqloadFile, extractVidzyM3u8, extractFsvidM3u8, registerServerResolvedSources, type M3u8Result } from '../../utils/extractM3u8';
 import type { SeekStreamingHlsSource } from '../../utils/seekStreamingCandidates';
-import { runExtractionPass } from '../../utils/runExtractionPass';
-import { pickAutoSelectedSource, sortHostersByPriority, type SourceAvailability } from '../../utils/sourceAutoSelect';
+import { runExtractionPass, type ExtractionPassResult } from '../../utils/runExtractionPass';
+import { pickAutoSelectedSource, sortHostersByPriority, hosterKeyOf, type SourceAvailability } from '../../utils/sourceAutoSelect';
 import { getSourcePriorityPrefs, buildDefaults, subscribeToPriorityChanges } from '../../utils/sourcePriorityPrefs';
 import { detectHoster } from '../../utils/hosterRegistry';
 import { setLastPlayer } from '../../utils/lastPlayerPref';
@@ -42,8 +43,11 @@ import {
   type SwiftfluxEntry,
   type SwiftfluxPlayback,
 } from '../../services/swiftfluxService';
+import { isHevcPlayable } from '../../utils/videoCodecSupport';
 import type { KisskhSource, KisskhSubtitleTrack } from '../../types/kisskh';
 import { markEpisodeHandoff } from '../../utils/playerFullscreenPersistence';
+import { readLocalStorage, writeLocalStorage } from '../../utils/browserStorage';
+import { getEpisodeListOverride, getTvmazeSeasonsOverride } from '../../services/tvmazeEpisodeList';
 const MAIN_API = import.meta.env.VITE_MAIN_API;
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
 
@@ -893,21 +897,37 @@ const WatchTv: React.FC = () => {
     try {
       if (!id) return;
 
+      // La saison peut manquer sur TMDB avec le découpage Netflix (ex. partie 4).
       const seasonResponse = await axios.get(`https://api.themoviedb.org/3/tv/${id}/season/${seasonNumber}`, {
         params: { api_key: TMDB_API_KEY, language: getTmdbLanguage() }
-      });
+      }).catch(() => null);
 
       // Fetch all seasons for the show
       const allSeasonsResponse = await axios.get(`https://api.themoviedb.org/3/tv/${id}`, {
         params: { api_key: TMDB_API_KEY, language: getTmdbLanguage() }
       });
 
-      if (allSeasonsResponse.data && allSeasonsResponse.data.seasons) {
-        setSeasons(allSeasonsResponse.data.seasons.filter((s: Season) => s.season_number > 0));
+      const override = await getEpisodeListOverride(id);
+      const tmdbSeasons: Season[] = (allSeasonsResponse.data?.seasons ?? []).filter((s: Season) => s.season_number > 0);
+      if (override?.kind === 'netflix') {
+        // Les saisons TMDB ne correspondent pas aux parties Netflix : seuls
+        // les numéros et le nombre d'épisodes comptent.
+        setSeasons(Object.entries(override.seasons).map(([season, list]) => ({
+          id: Number(season),
+          name: `${t('details.season')} ${season}`,
+          season_number: Number(season),
+          episode_count: list.length,
+          poster_path: tmdbSeasons.find((s) => s.season_number === Number(season))?.poster_path ?? null,
+        })));
+      } else if (tmdbSeasons.length) {
+        setSeasons(tmdbSeasons);
       }
 
       // Set episodes for the current season
-      if (seasonResponse.data && seasonResponse.data.episodes) {
+      const tvmazeSeasons = override?.seasons;
+      if (tvmazeSeasons?.[seasonNumber]) {
+        setEpisodes(tvmazeSeasons[seasonNumber]);
+      } else if (seasonResponse?.data?.episodes) {
         setEpisodes(seasonResponse.data.episodes);
       }
     } catch (error) {
@@ -978,6 +998,11 @@ const WatchTv: React.FC = () => {
 
   // Helper function to check if next episode exists
   const isNextEpisodeAvailable = async (showId: string, season: number, episode: number) => {
+    // Liste TVmaze active : elle seule sait si l'épisode existe (ex. 11 à 21).
+    const tvmazeSeasons = await getTvmazeSeasonsOverride(showId);
+    if (tvmazeSeasons) {
+      return tvmazeSeasons[season]?.find((item) => item.episode_number === episode) ?? null;
+    }
     try {
       const response = await axios.get(
         `https://api.themoviedb.org/3/tv/${showId}/season/${season}/episode/${episode}`,
@@ -992,6 +1017,8 @@ const WatchTv: React.FC = () => {
 
   // Helper function to check if next season exists
   const isNextSeasonAvailable = async (showId: string, season: number) => {
+    const tvmazeSeasons = await getTvmazeSeasonsOverride(showId);
+    if (tvmazeSeasons) return tvmazeSeasons[season] ? { season_number: season } : null;
     try {
       const response = await axios.get(
         `https://api.themoviedb.org/3/tv/${showId}/season/${season}`,
@@ -1112,6 +1139,11 @@ const WatchTv: React.FC = () => {
       console.log(`[WatchTv] Fetching episodes for selected season: ${selectedSeasonNumber}`);
       // Consider adding an setIsLoadingEpisodes state here
       try {
+        const tvmazeSeasons = await getTvmazeSeasonsOverride(id);
+        if (tvmazeSeasons?.[selectedSeasonNumber]) {
+          setEpisodes(tvmazeSeasons[selectedSeasonNumber]);
+          return;
+        }
         const response = await axios.get(`https://api.themoviedb.org/3/tv/${id}/season/${selectedSeasonNumber}`, {
           params: { api_key: TMDB_API_KEY, language: getTmdbLanguage() }
         });
@@ -1165,14 +1197,19 @@ const WatchTv: React.FC = () => {
 
       try {
         // Fetch show information and episode details
-        const [showResponse, episodeResponse] = await Promise.all([
+        // Avec la liste TVmaze, l'épisode peut ne pas exister sur TMDB (ex. S1E15
+        // d'une saison TMDB de 10) : ses infos viennent alors de TVmaze.
+        const [showResponse, tmdbEpisode, tvmazeSeasons] = await Promise.all([
           axios.get(`https://api.themoviedb.org/3/tv/${id}`, {
             params: { api_key: TMDB_API_KEY, language: getTmdbLanguage() }
           }),
           axios.get(`https://api.themoviedb.org/3/tv/${id}/season/${seasonNumber}/episode/${episodeNumber}`, {
             params: { api_key: TMDB_API_KEY, language: getTmdbLanguage() }
-          })
+          }).then((response) => response.data).catch(() => null),
+          getTvmazeSeasonsOverride(id),
         ]);
+        const tvmazeEpisode = tvmazeSeasons?.[seasonNumber]?.find((item) => item.episode_number === episodeNumber);
+        if (!tvmazeEpisode && !tmdbEpisode) throw new Error(`Episode S${seasonNumber}E${episodeNumber} not found`);
 
         // Set show info
         const show = showResponse.data;
@@ -1182,7 +1219,7 @@ const WatchTv: React.FC = () => {
         setShowPosterPath(show.poster_path);
 
         // Set episode info
-        const episode = episodeResponse.data;
+        const episode = tvmazeEpisode ?? tmdbEpisode;
         setEpisodeTitle(episode.name);
         setEpisodeStillPath(episode.still_path);
         setCurrentEpisodeInfo({
@@ -1196,43 +1233,53 @@ const WatchTv: React.FC = () => {
         });
 
         // Add TV show episode to continueWatching (if history is enabled)
-        if (localStorage.getItem('settings_disable_history') !== 'true') {
-          const continueWatching = JSON.parse(localStorage.getItem('continueWatching') || '{"movies": [], "tv": []}');
+        try {
+          const storage = window.localStorage;
+          if (storage.getItem('settings_disable_history') !== 'true') {
+            const continueWatching = JSON.parse(storage.getItem('continueWatching') ?? '{"movies": [], "tv": []}');
+            if (!continueWatching || typeof continueWatching !== 'object' || Array.isArray(continueWatching)) {
+              throw new Error('Invalid continueWatching data');
+            }
 
-          // Ensure structure exists
-          if (!continueWatching.movies) continueWatching.movies = [];
-          if (!continueWatching.tv) continueWatching.tv = [];
+            // Ensure structure exists
+            if (continueWatching.movies === undefined) continueWatching.movies = [];
+            else if (!Array.isArray(continueWatching.movies)) throw new Error('Invalid continueWatching movies');
+            if (continueWatching.tv === undefined) continueWatching.tv = [];
+            else if (!Array.isArray(continueWatching.tv)) throw new Error('Invalid continueWatching tv');
 
-          // Find existing TV show entry or create new one
-          const showIdInt = parseInt(id!);
-          const existingShow = continueWatching.tv.find((tvShow: any) => tvShow.id === showIdInt);
+            // Find existing TV show entry or create new one
+            const showIdInt = parseInt(id!);
+            const existingShow = continueWatching.tv.find((tvShow: any) => tvShow?.id === showIdInt);
 
-          if (existingShow) {
-            // Update existing show with current episode and timestamp
-            existingShow.currentEpisode = {
-              season: seasonNumber,
-              episode: episodeNumber
-            };
-            existingShow.lastAccessed = new Date().toISOString();
-            // Move to front of array
-            continueWatching.tv = continueWatching.tv.filter((tvShow: any) => tvShow.id !== showIdInt);
-            continueWatching.tv.unshift(existingShow);
-          } else {
-            // Create new TV show entry
-            const newTvEntry = {
-              id: showIdInt,
-              currentEpisode: {
+            if (existingShow) {
+              // Update existing show with current episode and timestamp
+              existingShow.currentEpisode = {
                 season: seasonNumber,
                 episode: episodeNumber
-              },
-              lastAccessed: new Date().toISOString()
-            };
-            continueWatching.tv.unshift(newTvEntry);
-          }
+              };
+              existingShow.lastAccessed = new Date().toISOString();
+              // Move to front of array
+              continueWatching.tv = continueWatching.tv.filter((tvShow: any) => tvShow?.id !== showIdInt);
+              continueWatching.tv.unshift(existingShow);
+            } else {
+              // Create new TV show entry
+              const newTvEntry = {
+                id: showIdInt,
+                currentEpisode: {
+                  season: seasonNumber,
+                  episode: episodeNumber
+                },
+                lastAccessed: new Date().toISOString()
+              };
+              continueWatching.tv.unshift(newTvEntry);
+            }
 
-          // Keep only last 20 TV shows
-          // continueWatching.tv = continueWatching.tv.slice(0, 20); // Removed limit
-          localStorage.setItem('continueWatching', JSON.stringify(continueWatching));
+            // Keep only last 20 TV shows
+            // continueWatching.tv = continueWatching.tv.slice(0, 20); // Removed limit
+            writeLocalStorage('continueWatching', JSON.stringify(continueWatching));
+          }
+        } catch {
+          // Un historique invalide ou indisponible ne doit pas bloquer la lecture.
         }
 
         // Get seasons information for episode navigation
@@ -1701,9 +1748,16 @@ const WatchTv: React.FC = () => {
           }
         }
 
+        // Les passes d'extraction partent toutes maintenant, en même temps, et
+        // ne sont attendues qu'une fois, juste avant la fusion. Avec
+        // l'extension, chaque passe peut prendre jusqu'au délai max d'un
+        // hébergeur (10 à 15 s) : les enchaîner retenait l'écran de chargement
+        // une trentaine de secondes. L'ordre de fusion, lui, ne change pas.
+        const emptyPass: Promise<ExtractionPassResult> = Promise.resolve({ hls: [], file: [] });
+
         // Process Firebase custom links — passe d'extraction générique
-        if (customLinksResult.customLinks && customLinksResult.customLinks.length > 0) {
-          const customPass = await runExtractionPass(
+        const customPassPromise = (customLinksResult.customLinks && customLinksResult.customLinks.length > 0)
+          ? runExtractionPass(
             customLinksResult.customLinks
               .filter((url: unknown): url is string => typeof url === 'string' && !!url)
               .map((url: string) => ({ url })),
@@ -1712,18 +1766,17 @@ const WatchTv: React.FC = () => {
               origin: 'custom',
               context: { category: 'moviesTv', topLevel: 'custom' },
             },
-          );
-          finalHlsSources = [...finalHlsSources, ...customPass.hls];
-          finalFileSources = [...finalFileSources, ...customPass.file];
-        }
+          )
+          : emptyPass;
 
         // Process Coflix MULTI links — passe d'extraction générique (ignore Omega)
+        let coflixPassPromise = emptyPass;
         if (coflixResult) {
           const multiLinks = (coflixResult.current_episode && coflixResult.current_episode.player_links)
             ? coflixResult.current_episode.player_links
             : (coflixResult.player_links || []);
 
-          const coflixPass = await runExtractionPass(
+          coflixPassPromise = runExtractionPass(
             multiLinks
               .map((p: any) => ({
                 url: getCoflixPreferredUrl(p),
@@ -1737,20 +1790,15 @@ const WatchTv: React.FC = () => {
               context: { category: 'moviesTv', topLevel: 'coflix' },
             },
           );
-          finalHlsSources = [...finalHlsSources, ...coflixPass.hls];
-          finalFileSources = [...finalFileSources, ...coflixPass.file];
         }
-
-
-        console.log('?? Final HLS sources after supervideo/dropload processing:', finalHlsSources);
 
         // ========== TRAITEMENT DES RÉSULTATS FSTREAM ==========
         let fstreamProcessedSources: { url: string; label: string; category: string }[] = [];
-        const fstreamHlsSources: { url: string; label: string; category: string }[] = [];
+        let fstreamHlsPromise: Promise<{ url: string; label: string; category: string }[]> = Promise.resolve([]);
         const fsvidSources: { url: string; label: string; category: string }[] = [];
 
         // Check if user is VIP (déclaré au niveau de la fonction pour être accessible partout)
-        const isVip = localStorage.getItem('is_vip') === 'true';
+        const isVip = readLocalStorage('is_vip') === 'true';
 
         if (fstreamResult && fstreamResult.success && fstreamResult.episodes) {
 
@@ -1886,8 +1934,7 @@ const WatchTv: React.FC = () => {
           }
 
           if (fstreamExtractionPromises.length > 0) {
-            const fstreamExtractionResults = await Promise.all(fstreamExtractionPromises);
-
+            fstreamHlsPromise = Promise.all(fstreamExtractionPromises).then((fstreamExtractionResults) => {
             // Séparer les sources fsvid, vidzy et uqload pour les ordonner correctement
             const fsvidHlsSources: { url: string; label: string; category: string }[] = [];
             const vidzyHlsSources: { url: string; label: string; category: string }[] = [];
@@ -1925,10 +1972,9 @@ const WatchTv: React.FC = () => {
             });
 
             // Ajouter fsvid en premier, puis vidzy, puis uqload
-            fstreamHlsSources.push(...fsvidHlsSources, ...vidzyHlsSources, ...uqloadHlsSources);
+            return [...fsvidHlsSources, ...vidzyHlsSources, ...uqloadHlsSources];
+            });
           }
-
-          console.log(`?? FStream TV HLS sources extracted: ${fstreamHlsSources.length}`);
         } else {
           setFstreamData(null);
           console.log('? No FStream TV sources available');
@@ -2013,14 +2059,12 @@ const WatchTv: React.FC = () => {
         setJ1fSources(j1fProcessedSources);
 
         // --- Passe d'extraction m3u8 générique (tous hosters supportés) ---
-        if (j1fProcessedSources.length > 0) {
-          const j1fPass = await runExtractionPass(j1fProcessedSources, MAIN_API, {
+        const j1fPassPromise = j1fProcessedSources.length > 0
+          ? runExtractionPass(j1fProcessedSources, MAIN_API, {
             origin: 'j1f',
             context: { category: 'moviesTv', topLevel: 'j1f' },
-          });
-          finalHlsSources = [...finalHlsSources, ...j1fPass.hls];
-          finalFileSources = [...finalFileSources, ...j1fPass.file];
-        }
+          })
+          : emptyPass;
         console.log('?? [WatchTv] 1jour1film TV sources set:', j1fProcessedSources.length);
 
         // =========== TRAITEMENT DES RÉSULTATS SWIFTFLOW ===========
@@ -2054,40 +2098,28 @@ const WatchTv: React.FC = () => {
         setSwiftflowSources(swiftflowProcessedSources);
 
         // --- Passe d'extraction m3u8 générique (tous hosters supportés) ---
-        if (swiftflowProcessedSources.length > 0) {
-          const swiftflowPass = await runExtractionPass(swiftflowProcessedSources, MAIN_API, {
+        const swiftflowPassPromise = swiftflowProcessedSources.length > 0
+          ? runExtractionPass(swiftflowProcessedSources, MAIN_API, {
             origin: 'swiftflow',
             context: { category: 'moviesTv', topLevel: 'swiftflow' },
-          });
-          finalHlsSources = [...finalHlsSources, ...swiftflowPass.hls];
-          finalFileSources = [...finalFileSources, ...swiftflowPass.file];
-        }
+          })
+          : emptyPass;
         console.log('[WatchTv] SwiftFlow TV sources set:', swiftflowProcessedSources.length);
 
         // =========== EXTRACTION M3U8 DEPUIS WIFLIX TV (passe générique) ===========
         // Remplace les anciens blocs voe / uqload / doodstream / seekstreaming
         // écrits à la main : `runExtractionPass` route chaque lien vers
         // l'extracteur correspondant, donc tout hoster supporté est couvert.
-        if (wiflixProcessedSources.length > 0) {
-          const wiflixPass = await runExtractionPass(wiflixProcessedSources, MAIN_API, {
+        const wiflixPassPromise = wiflixProcessedSources.length > 0
+          ? runExtractionPass(wiflixProcessedSources, MAIN_API, {
             origin: 'wiflix',
             context: { category: 'moviesTv', topLevel: 'wiflix' },
-          });
-          // VF devant, VOSTFR derrière — l'ordre historique de ce bloc.
-          finalHlsSources = [
-            ...wiflixPass.hls.filter(s => !s.isVostfr),
-            ...finalHlsSources,
-            ...wiflixPass.hls.filter(s => s.isVostfr),
-          ];
-          finalFileSources = [
-            ...wiflixPass.file.filter(s => !s.isVostfr),
-            ...finalFileSources,
-            ...wiflixPass.file.filter(s => s.isVostfr),
-          ];
-        }
+          })
+          : emptyPass;
 
         // =========== TRAITEMENT DES RÉSULTATS VIPER ===========
         const viperProcessedSources: { url: string; label: string; quality: string; language: string }[] = [];
+        let viperPassPromise = emptyPass;
         if (viperResult && viperResult.links) {
           console.log('?? Processing Viper TV result:', viperResult);
           setViperData(viperResult);
@@ -2118,21 +2150,10 @@ const WatchTv: React.FC = () => {
 
           // =========== EXTRACTION M3U8 DEPUIS VIPER (passe générique) ===========
           if (viperProcessedSources.length > 0) {
-            const viperPass = await runExtractionPass(viperProcessedSources, MAIN_API, {
+            viperPassPromise = runExtractionPass(viperProcessedSources, MAIN_API, {
               origin: 'viper',
               context: { category: 'moviesTv', topLevel: 'viper' },
             });
-            // VF devant, VOSTFR derrière — l'ordre historique de ce bloc.
-            finalHlsSources = [
-              ...viperPass.hls.filter(s => !s.isVostfr),
-              ...finalHlsSources,
-              ...viperPass.hls.filter(s => s.isVostfr),
-            ];
-            finalFileSources = [
-              ...viperPass.file.filter(s => !s.isVostfr),
-              ...finalFileSources,
-              ...viperPass.file.filter(s => s.isVostfr),
-            ];
           }
         } else {
           setViperData(null);
@@ -2141,6 +2162,7 @@ const WatchTv: React.FC = () => {
 
         // =========== TRAITEMENT DES RÉSULTATS VOX ===========
         let voxProcessedSources: { name: string; link: string }[] = [];
+        let voxPassPromise = emptyPass;
         if (voxResult && voxResult.success && voxResult.data && voxResult.data.length > 0) {
           console.log('Vox sources found:', voxResult.data.length);
           setVoxData(voxResult);
@@ -2150,7 +2172,7 @@ const WatchTv: React.FC = () => {
           // =========== EXTRACTION M3U8 DEPUIS VOX (passe générique) ===========
           // Vox n'extrayait que voe et vidmoly ; la passe couvre tous les hosters.
           if (voxProcessedSources.length > 0) {
-            const voxPass = await runExtractionPass(
+            voxPassPromise = runExtractionPass(
               voxProcessedSources.map(source => ({ url: source.link, label: source.name })),
               MAIN_API,
               {
@@ -2158,14 +2180,46 @@ const WatchTv: React.FC = () => {
                 context: { category: 'moviesTv', topLevel: 'vox' },
               },
             );
-            finalHlsSources = [...finalHlsSources, ...voxPass.hls];
-            finalFileSources = [...finalFileSources, ...voxPass.file];
           }
         } else {
           console.log('Vox source not available from API');
           setVoxData(null);
           setVoxSources([]);
         }
+
+        // =========== FUSION DES PASSES, DANS L'ORDRE HISTORIQUE ===========
+        const [
+          customPass, coflixPass, fstreamHlsSources, j1fPass,
+          swiftflowPass, wiflixPass, viperPass, voxPass,
+        ] = await Promise.all([
+          customPassPromise, coflixPassPromise, fstreamHlsPromise, j1fPassPromise,
+          swiftflowPassPromise, wiflixPassPromise, viperPassPromise, voxPassPromise,
+        ]);
+        console.log(`?? FStream TV HLS sources extracted: ${fstreamHlsSources.length}`);
+
+        finalHlsSources = [
+          ...finalHlsSources, ...customPass.hls, ...coflixPass.hls,
+          ...j1fPass.hls, ...swiftflowPass.hls,
+        ];
+        finalFileSources = [
+          ...finalFileSources, ...customPass.file, ...coflixPass.file,
+          ...j1fPass.file, ...swiftflowPass.file,
+        ];
+        // Wiflix puis Viper : VF devant, VOSTFR derrière — l'ordre historique.
+        for (const pass of [wiflixPass, viperPass]) {
+          finalHlsSources = [
+            ...pass.hls.filter(s => !s.isVostfr),
+            ...finalHlsSources,
+            ...pass.hls.filter(s => s.isVostfr),
+          ];
+          finalFileSources = [
+            ...pass.file.filter(s => !s.isVostfr),
+            ...finalFileSources,
+            ...pass.file.filter(s => s.isVostfr),
+          ];
+        }
+        finalHlsSources = [...finalHlsSources, ...voxPass.hls];
+        finalFileSources = [...finalFileSources, ...voxPass.file];
 
         // Ajouter les sources HLS FStream aux sources finales
         if (fstreamHlsSources.length > 0) {
@@ -2208,7 +2262,7 @@ const WatchTv: React.FC = () => {
         // Par défaut (prefs vides) → ordre hardcodé historique, 100% rétrocompat.
         //
         // Legacy priority pour référence :
-        // nexus_hls > [embedseek custom promu] > nexus_file > bravo > mp4 > darkino >
+        // nexus_hls > [uqload custom promu] > nexus_file > bravo > mp4 > darkino >
         // omega (supervideo) > wiflix > viper > adFree (m3u8) > mp4 (dup) > fstream >
         // omega (deep fallback) > wiflix/viper (deep) > coflix (multi) > fstream (deep) >
         // custom > frembed > vox > vostfr
@@ -2224,12 +2278,10 @@ const WatchTv: React.FC = () => {
         console.log('AdFree M3U8 URL:', adFreeM3u8Url);
         console.log('Custom sources available:', customLinksResult.customLinks?.length || 0);
 
-        // Vérifier si un lien embedseek existe dans les custom sources.
-        // Legacy : embedseek custom était promu EN TÊTE (juste après nexus_hls).
-        // Nouveau : on le garde comme pré-check de la priorité pour préserver le comportement
-        // tel-quel tant que la priorité user n'a pas été configurée (rétrocompat 100%).
-        const embedseekLink = customLinksResult.customLinks?.find((link: string) =>
-          link.toLowerCase().includes('embedseek.com')
+        // Lien Uqload uploadé en custom : il est promu en tête (juste après
+        // nexus_hls) tant que la priorité user n'a pas été configurée.
+        const uqloadLink = customLinksResult.customLinks?.find((link: string) =>
+          link.toLowerCase().includes('uqload.')
         );
 
         // Helper : applique la config d'embed pour l'id choisi. Close sur toutes les
@@ -2461,7 +2513,8 @@ const WatchTv: React.FC = () => {
               return true;
             }
             case 'swiftflux': {
-              if (!swiftfluxResult.available) return false;
+              // HEVC illisible ici (PC sans décodeur) : son sans image, on saute.
+              if (!swiftfluxResult.available || !isHevcPlayable()) return false;
               // Aucune URL à poser : la porte d'entrée la demandera au serveur
               // une fois la pub vue et le Turnstile validé.
               setSelectedSource('swiftflux');
@@ -2527,10 +2580,10 @@ const WatchTv: React.FC = () => {
             }
             case 'custom': {
               if (!customLinksResult.customLinks || !customLinksResult.customLinks.length) return false;
-              // Legacy : embedseek est promu vers le haut ; sinon 1er custom link
-              const url = embedseekLink ?? customLinksResult.customLinks[0];
-              console.log(embedseekLink
-                ? `✅ Selecting EMBEDSEEK (Custom) — URL: ${url}`
+              // Uqload passe devant les autres liens custom ; sinon 1er custom link
+              const url = uqloadLink ?? customLinksResult.customLinks[0];
+              console.log(uqloadLink
+                ? `✅ Selecting UQLOAD (Custom) — URL: ${url}`
                 : '✅ Selecting CUSTOM as source');
               setSelectedSource('custom');
               setEmbedUrl(url);
@@ -2577,16 +2630,15 @@ const WatchTv: React.FC = () => {
           }
         };
 
-        // Legacy embedseek promotion : si embedseek existe ET nexus_hls n'est pas dispo,
-        // il était promu #2 dans l'ancien code (juste après nexus_hls). On applique cette
-        // règle avant le picker pour préserver la rétrocompat exacte.
+        // Promotion Uqload : si un lien Uqload custom existe ET nexus_hls n'est pas
+        // dispo, il est promu #2 (juste après nexus_hls), avant le picker.
         // Exceptions :
         //  - un lecteur Viblix (source `mp4`) passe devant : la promotion
         //    court-circuitait le picker et sélectionnait `custom` alors que `mp4`
         //    est classé bien avant `custom` dans l'ordre par défaut ;
         //  - si l'user a customisé l'ordre (pin ou drag), on laisse le picker.
-        let embedseekPromoted = false;
-        if (embedseekLink && finalHlsSources.length === 0 && fetchedMp4Sources.length === 0) {
+        let uqloadPromoted = false;
+        if (uqloadLink && finalHlsSources.length === 0 && fetchedMp4Sources.length === 0) {
           const prefs = getSourcePriorityPrefs();
           const userOrderIds = prefs.categories.moviesTv.sourceOrder.map((s) => s.id);
           const defaultOrderIds = buildDefaults().categories.moviesTv.sourceOrder.map((s) => s.id);
@@ -2595,11 +2647,11 @@ const WatchTv: React.FC = () => {
             || userOrderIds.some((id, i) => id !== defaultOrderIds[i]);
           if (!hasUserCustomized) {
             applyEmbedConfig('custom');
-            embedseekPromoted = true;
+            uqloadPromoted = true;
           }
         }
 
-        if (!embedseekPromoted) {
+        if (!uqloadPromoted) {
           // Priority-driven auto-select. Availability construite à partir des sources locales.
           const availability: SourceAvailability[] = [
             { id: 'nexus_hls', hasData: finalHlsSources.length > 0 },
@@ -2804,7 +2856,24 @@ const WatchTv: React.FC = () => {
         !isAutomaticFallback
         && typeof type === 'string'
       ) {
-        setLastPlayer(type === 'kisskh_main' ? 'kisskh' : type);
+        // Retrouve la ligne cliquée pour mémoriser le lecteur précis (Lulu,
+        // Vidara…) et pas seulement la source qui le contient.
+        const pickedItem = type === 'nexus_hls'
+          ? nexusHlsSources.find(source => source.url === acceptedPlaybackUrl)
+          : type === 'nexus_file'
+            ? nexusFileSources.find(source => source.url === acceptedPlaybackUrl)
+            : type === 'bravo'
+              ? purstreamSources.find(source => source.url === acceptedPlaybackUrl)
+              : type === 'darkino'
+                ? (() => {
+                    const dk = darkinoSources.find(source => source.m3u8 === acceptedPlaybackUrl);
+                    return dk ? { url: dk.m3u8, label: dk.label || dk.quality } : undefined;
+                  })()
+                : undefined;
+        setLastPlayer(
+          type === 'kisskh_main' ? 'kisskh' : type,
+          hosterKeyOf(pickedItem ?? { url: acceptedPlaybackUrl }),
+        );
       }
 
       // When a source is picked from the menu, hide the "no content" message and the menu itself.
@@ -3245,6 +3314,13 @@ const WatchTv: React.FC = () => {
     // soit franchie : l'erreur est attendue et ne doit pas déclencher de repli,
     // qui arracherait la source sous la porte encore ouverte.
     if (selectedSource === 'swiftflux' && !swiftfluxPlayback) return;
+    // Image non décodable (HEVC sans décodeur) : on laisse choisir une autre
+    // source plutôt que de rester sur un écran noir avec le son.
+    if (selectedSource === 'swiftflux' && !isHevcPlayable()) {
+      setSwiftfluxPlayback(null);
+      setShowEmbedQuality(true);
+      return;
+    }
 
     console.error(`Error playing HLS source: ${selectedSource}`);
 
@@ -3524,7 +3600,8 @@ const WatchTv: React.FC = () => {
 
   useEffect(() => {
     // On ne fait rien si VIP activé
-    if (import.meta.env.is_vip === 'true' || import.meta.env.is_vip === true || localStorage.getItem('is_vip') === 'true') {
+    const hasStoredVip = readLocalStorage('is_vip') === 'true';
+    if (import.meta.env.is_vip === 'true' || import.meta.env.is_vip === true || hasStoredVip) {
       console.log('?? VIP activé, popup désactivée');
       return;
     }
@@ -3932,7 +4009,7 @@ const WatchTv: React.FC = () => {
                 className="fixed inset-0 z-[10001] bg-black/60 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10002]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -4284,7 +4361,7 @@ const WatchTv: React.FC = () => {
                 className="fixed inset-0 z-[10001] bg-black/60 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10002]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -4426,7 +4503,7 @@ const WatchTv: React.FC = () => {
                 className="fixed inset-0 z-[10001] bg-black/60 flex justify-end pointer-events-auto"
               >
                 <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10002]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -4533,7 +4610,7 @@ const WatchTv: React.FC = () => {
               const targetUrl = embedType === 'vostfr'
                 ? `https://vidlink.pro/tv/${id}/${seasonNumber}/${episodeNumber}`
                 : embedUrl || '';
-              window.open(targetUrl, '_blank', 'noopener');
+              openInNewTab(targetUrl);
             }}
             className="flex items-center gap-1 sm:gap-2 px-3 py-2 rounded-lg bg-gray-800/90 border border-gray-600 hover:bg-gray-700/90 text-white font-medium text-sm transition-all duration-200"
             title={t('watch.openInNewPage')}

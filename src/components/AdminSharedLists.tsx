@@ -189,25 +189,25 @@ const AdminSharedLists: React.FC = () => {
             <div className="flex items-center gap-4 bg-white/5 p-1 rounded-lg w-fit border border-white/10">
                 <button
                     onClick={() => setActiveTab('public')}
-                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'public'
+                    className={`group/icon px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'public'
                         ? 'bg-green-600 text-white shadow-lg'
                         : 'text-white/60 hover:text-white hover:bg-white/5'
                         }`}
                 >
                     <div className="flex items-center gap-2">
-                        <Globe className="h-4 w-4" />
+                        <Globe className={`h-4 w-4 transition-[color,opacity] ${(activeTab === 'public' ? "text-white opacity-100" : "text-white opacity-60 group-hover/icon:opacity-100")}`} />
                         {t('admin.publicLists')}
                     </div>
                 </button>
                 <button
                     onClick={() => setActiveTab('moderated')}
-                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'moderated'
+                    className={`group/icon px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'moderated'
                         ? 'bg-amber-600 text-white shadow-lg'
                         : 'text-white/60 hover:text-white hover:bg-white/5'
                         }`}
                 >
                     <div className="flex items-center gap-2">
-                        <Sparkles className="h-4 w-4" />
+                        <Sparkles className={`h-4 w-4 transition-[color,opacity] ${(activeTab === 'moderated' ? "text-white opacity-100" : "text-white opacity-60 group-hover/icon:opacity-100")}`} />
                         {t('admin.geminiModeration')}
                         {stats.moderatedCount > 0 && (
                             <span className="bg-white/20 text-white px-1.5 py-0.5 rounded-full text-[10px]">
@@ -434,7 +434,7 @@ const AdminSharedLists: React.FC = () => {
 
                 {hasMore && (
                     <div className="p-4 flex justify-center border-t border-white/10">
-                        <Button
+                        <Button className="group/icon"
                             variant="ghost"
                             onClick={() => {
                                 setPage(prev => prev + 1);
@@ -442,7 +442,7 @@ const AdminSharedLists: React.FC = () => {
                             }}
                             disabled={loading}
                         >
-                            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                            {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" /> : null}
                             {t('admin.loadMoreLists')}
                         </Button>
                     </div>

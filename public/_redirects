@@ -4,6 +4,7 @@
 /live/*                /live/:splat                200
 /WatchpartyTutorial/*  /WatchpartyTutorial/:splat  200
 /movix.png             /movix.png                  200
+/movix.svg             /movix.svg                  200
 /robots.txt            /robots.txt                 200
 /sitemap.xml           /sitemap.xml                200
 /llms.txt              /llms.txt                   200

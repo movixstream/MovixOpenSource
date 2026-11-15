@@ -124,6 +124,7 @@ final class MediaProxyUpstream: @unchecked Sendable {
       }
       headers = MediaProxyPolicy.sanitizeRequestHeaders(headers)
       headers["Accept-Encoding"] = MediaProxyPolicy.playbackAcceptEncoding(for: currentURL)
+      headers["Cookie"] = MediaProxyPolicy.providerSessionCookie(for: currentURL)
       let response = try await transport.execute(MediaProxyUpstreamTransportRequest(
         url: currentURL,
         method: method,

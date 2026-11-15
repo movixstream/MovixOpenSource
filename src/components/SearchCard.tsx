@@ -7,6 +7,13 @@ import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip';
 import { encodeId } from '../utils/idEncoder';
 import { useAgeRestrictedContent } from '../hooks/useAgeRestrictedContent';
+import { useNearViewport } from '@/hooks/useNearViewport';
+import { useMediaColor } from '@/hooks/useMediaColor';
+import { useMediaImageSource } from '@/hooks/useMediaImageSource';
+import { useMediaColorSettings } from '@/hooks/useMediaColorSettings';
+import { useImageQuality } from '@/hooks/useImageQuality';
+import { useImageSlot } from '@/hooks/useImageSlot';
+import { getTmdbImageProps } from '@/utils/tmdbImages';
 
 interface SearchResult {
     id: number;
@@ -52,20 +59,48 @@ const getWatchlistIds = (mediaType: 'movie' | 'tv'): Set<number> => {
     const cached = watchlistCache[mediaType];
     if (cached) return cached;
     try {
-        const raw = localStorage.getItem(`watchlist_${mediaType}`) || '[]';
-        const list = JSON.parse(raw) as Array<{ id: number }>;
-        const set = new Set(list.map((m) => m.id));
+        const raw = localStorage.getItem(`watchlist_${mediaType}`) ?? '[]';
+        const list = JSON.parse(raw);
+        if (!Array.isArray(list)) return new Set<number>();
+        const set = new Set<number>();
+        for (const entry of list) {
+            if (entry && typeof entry.id === 'number') set.add(entry.id);
+        }
         watchlistCache[mediaType] = set;
         return set;
     } catch {
-        const empty = new Set<number>();
-        watchlistCache[mediaType] = empty;
-        return empty;
+        // Ne pas mémoriser une liste vide après un refus temporaire de lecture.
+        return new Set<number>();
     }
 };
 
 const invalidateWatchlistCache = (mediaType: 'movie' | 'tv') => {
     delete watchlistCache[mediaType];
+};
+
+const toggleStoredWatchlist = (item: SearchResult, title: string): boolean | null => {
+    try {
+        const storage = window.localStorage;
+        const key = `watchlist_${item.media_type}`;
+        const list = JSON.parse(storage.getItem(key) ?? '[]');
+        // Une lecture refusée ou invalide ne doit jamais écraser la liste.
+        if (!Array.isArray(list)) return null;
+        const exists = list.some((entry) => entry?.id === item.id);
+        const updatedList = exists
+            ? list.filter((entry) => entry?.id !== item.id)
+            : [...list, {
+                id: item.id,
+                type: item.media_type,
+                title,
+                poster_path: item.poster_path,
+                addedAt: new Date().toISOString(),
+            }];
+        storage.setItem(key, JSON.stringify(updatedList));
+        invalidateWatchlistCache(item.media_type);
+        return !exists;
+    } catch {
+        return null;
+    }
 };
 
 // Listen for cross-tab storage updates so the cache doesn't go stale.
@@ -88,47 +123,53 @@ interface GridCardProps {
     index: number;
     movieLabel: string;
     serieLabel: string;
+    animateEntrance?: boolean;
 }
 
-export const SearchGridCard: React.FC<GridCardProps> = React.memo(({ item, index, movieLabel, serieLabel }) => {
+export const SearchGridCard: React.FC<GridCardProps> = React.memo(({ item, index, movieLabel, serieLabel, animateEntrance = true }) => {
     const { t } = useTranslation();
     const { items: allowedItems } = useAgeRestrictedContent([item]);
     const [starred, setStarred] = useState(() => getWatchlistIds(item.media_type).has(item.id));
+    const { ref: cardRef, isNearViewport, isInViewport } = useNearViewport<HTMLDivElement>(false, allowedItems.length > 0);
+    const posterSrc = item.poster_path ? `https://image.tmdb.org/t/p/w342${item.poster_path}` : POSTER_FALLBACK;
+    const { loadedSource, imageRef, onLoad } = useMediaImageSource(posterSrc);
+    const palette = useMediaColor('cards', posterSrc, isNearViewport && allowedItems.length > 0, isInViewport, loadedSource);
+    const { cardsBaseGradient } = useMediaColorSettings();
+    const { effectiveImageQuality } = useImageQuality();
+    const imageSlot = useImageSlot(cardRef, allowedItems.length > 0);
+    const posterImage = getTmdbImageProps(posterSrc, {
+        kind: 'poster', quality: effectiveImageQuality,
+        sizes: `auto, ${imageSlot.width || 240}px`,
+    });
 
     const title = item.title || item.name || '';
 
     const toggle = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        const key = `watchlist_${item.media_type}`;
-        const list = JSON.parse(localStorage.getItem(key) || '[]');
-        const exists = list.some((m: { id: number }) => m.id === item.id);
-        if (exists) {
-            localStorage.setItem(key, JSON.stringify(list.filter((m: { id: number }) => m.id !== item.id)));
-            setStarred(false);
-            toast.success(`${title} ${t('lists.removedFromList')}`, { duration: 2000 });
-        } else {
-            list.push({ id: item.id, type: item.media_type, title, poster_path: item.poster_path, addedAt: new Date().toISOString() });
-            localStorage.setItem(key, JSON.stringify(list));
-            setStarred(true);
-            toast.success(`${title} ${t('lists.addedToList')}`, { duration: 2000 });
+        const nextStarred = toggleStoredWatchlist(item, title);
+        if (nextStarred === null) {
+            toast.error(t('lists.saveFailed'));
+            return;
         }
-        // Bust the module cache so other cards (and remounts) read fresh.
-        invalidateWatchlistCache(item.media_type);
+        setStarred(nextStarred);
+        toast.success(`${title} ${t(nextStarred ? 'lists.addedToList' : 'lists.removedFromList')}`, { duration: 2000 });
     }, [item, title, t]);
 
     if (allowedItems.length === 0) return null;
 
     return (
         <motion.div
+            ref={cardRef}
             // Seules les premières cartes s'animent à l'apparition. Au-delà, on
             // faisait démarrer des dizaines d'animations simultanées pour des
             // vignettes hors écran — coût réel, effet invisible.
-            initial={index < ANIMATED_CARD_COUNT ? { opacity: 0, y: 20 } : false}
+            initial={animateEntrance && index < ANIMATED_CARD_COUNT ? { opacity: 0, y: 20 } : false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: Math.min(index * 0.03, 0.5) }}
             whileHover={{ scale: 1.05 }}
-            className="relative group rounded-xl overflow-hidden bg-white/5 border border-white/10 hover:border-white/20 transition-colors"
+            className={`${palette ? 'media-color-card' : ''} relative group rounded-xl overflow-hidden bg-white/5 border border-white/10 hover:border-white/20 transition-colors`}
+            style={palette?.style}
         >
             {/* Badge */}
             <span className="absolute top-2 left-2 z-10 px-2 py-1 rounded-lg bg-black/75 text-[10px] font-semibold uppercase tracking-wider text-white/80">
@@ -141,7 +182,7 @@ export const SearchGridCard: React.FC<GridCardProps> = React.memo(({ item, index
                     <motion.button
                         onClick={toggle}
                         whileTap={{ scale: 0.7 }}
-                        className={`absolute top-2 right-2 z-20 p-2 rounded-full transition-all duration-200 md:opacity-0 md:group-hover:opacity-100 ${starred ? 'bg-yellow-500/25 border border-yellow-400/30' : 'bg-black/55 hover:bg-black/70'}`}
+                        className={`absolute top-2 right-2 z-20 p-2 rounded-full transition-all duration-200 md:opacity-0 md:group-hover:opacity-100 md:group-has-[:focus-visible]:opacity-100 ${starred ? 'bg-yellow-500/25 border border-yellow-400/30' : 'bg-black/55 hover:bg-black/70'}`}
                     >
                         <motion.div
                             key={starred ? 'on' : 'off'}
@@ -161,26 +202,32 @@ export const SearchGridCard: React.FC<GridCardProps> = React.memo(({ item, index
                 </TooltipContent>
             </Tooltip>
 
-            {/* Poster
-                w342 et non w500 : une carte de grille fait ~200 px de large,
-                le w500 pesait le double pour rien — et ces pages en affichent
-                vingt à la fois. `lazy` + `async` évitent de décoder d'un bloc
-                tous les posters sous la ligne de flottaison, ce qui bloquait le
-                thread principal pendant le rendu. */}
+            {/* La largeur mesurée suit aussi les densités de grille choisies
+                par l'utilisateur ; les cartes hors écran restent différées. */}
             <img
-                src={`https://image.tmdb.org/t/p/w342${item.poster_path}`}
+                {...posterImage}
+                ref={imageRef}
+                onLoad={onLoad}
                 alt={item.title || item.name}
                 loading="lazy"
                 decoding="async"
                 className="w-full aspect-[2/3] object-cover"
-                onError={(e) => { (e.target as HTMLImageElement).onerror = null; (e.target as HTMLImageElement).src = POSTER_FALLBACK; }}
+                onError={(e) => { e.currentTarget.removeAttribute('srcset'); e.currentTarget.onerror = null; e.currentTarget.src = POSTER_FALLBACK; }}
             />
 
-            {/* Hover overlay */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-transparent md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+            {/* Voile sombre de survol (lisibilité) */}
+            {cardsBaseGradient && (
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-transparent md:opacity-0 md:group-hover:opacity-100 md:group-has-[:focus-visible]:opacity-100 transition-opacity duration-300 pointer-events-none" />
+            )}
 
-            {/* Hover content */}
-            <div className="absolute bottom-0 left-0 right-0 p-3 md:opacity-0 md:group-hover:opacity-100 md:translate-y-2 md:group-hover:translate-y-0 transition-all duration-300 pointer-events-none">
+            {/* Garder les calques montés pour fondre la couleur même pendant le survol. */}
+            <div aria-hidden="true" className="media-card-color-layers absolute inset-0 pointer-events-none">
+                <div className="media-color-wash absolute inset-0" />
+                <div className="media-card-color-overlay absolute inset-0 md:opacity-0 md:group-hover:opacity-100 md:group-has-[:focus-visible]:opacity-100 transition-opacity duration-300" />
+            </div>
+
+            {/* Survol ou focus clavier : un clic ne doit pas garder les détails ouverts. */}
+            <div className="absolute bottom-0 left-0 right-0 p-3 md:opacity-0 md:group-hover:opacity-100 md:group-has-[:focus-visible]:opacity-100 md:translate-y-2 md:group-hover:translate-y-0 md:group-has-[:focus-visible]:translate-y-0 transition-all duration-300 pointer-events-none">
                 <h3 className="text-sm font-bold text-white line-clamp-1 mb-1">
                     {item.title || item.name}
                 </h3>
@@ -191,11 +238,11 @@ export const SearchGridCard: React.FC<GridCardProps> = React.memo(({ item, index
                             {item.vote_average ? item.vote_average.toFixed(1) : 'N/A'}
                         </span>
                     </div>
-                    <span className="text-xs text-white/60">
+                    <span className="media-card-muted text-xs text-white/60">
                         {new Date(item.release_date || item.first_air_date || '').getFullYear()}
                     </span>
                 </div>
-                <p className="text-xs text-white/50 line-clamp-3">
+                <p className="media-card-muted text-xs text-white/50 line-clamp-3">
                     {item.overview}
                 </p>
             </div>
@@ -220,46 +267,50 @@ interface ListCardProps {
     watchlistLabel: string;
     removeLabel: string;
     noDescLabel: string;
+    animateEntrance?: boolean;
 }
 
-export const SearchListCard: React.FC<ListCardProps> = React.memo(({ item, index, movieLabel, serieLabel, watchlistLabel, removeLabel, noDescLabel }) => {
+export const SearchListCard: React.FC<ListCardProps> = React.memo(({ item, index, movieLabel, serieLabel, watchlistLabel, removeLabel, noDescLabel, animateEntrance = true }) => {
     const { t } = useTranslation();
     const { items: allowedItems } = useAgeRestrictedContent([item]);
     const [starred, setStarred] = useState(() => getWatchlistIds(item.media_type).has(item.id));
+    const { ref: cardRef, isNearViewport, isInViewport } = useNearViewport<HTMLDivElement>(false, allowedItems.length > 0);
+    const posterSrc = item.poster_path ? `https://image.tmdb.org/t/p/w185${item.poster_path}` : POSTER_FALLBACK;
+    const { loadedSource, imageRef, onLoad } = useMediaImageSource(posterSrc);
+    const palette = useMediaColor('cards', posterSrc, isNearViewport && allowedItems.length > 0, isInViewport, loadedSource);
+    const { effectiveImageQuality } = useImageQuality();
+    const posterImage = getTmdbImageProps(posterSrc, {
+        kind: 'poster', quality: effectiveImageQuality,
+        sizes: '(min-width: 640px) 96px, 80px',
+    });
 
     const title = item.title || item.name || '';
 
     const toggle = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
-        const key = `watchlist_${item.media_type}`;
-        const list = JSON.parse(localStorage.getItem(key) || '[]');
-        const exists = list.some((m: { id: number }) => m.id === item.id);
-        if (exists) {
-            localStorage.setItem(key, JSON.stringify(list.filter((m: { id: number }) => m.id !== item.id)));
-            setStarred(false);
-            toast.success(`${title} ${t('lists.removedFromList')}`, { duration: 2000 });
-        } else {
-            list.push({ id: item.id, type: item.media_type, title, poster_path: item.poster_path, addedAt: new Date().toISOString() });
-            localStorage.setItem(key, JSON.stringify(list));
-            setStarred(true);
-            toast.success(`${title} ${t('lists.addedToList')}`, { duration: 2000 });
+        const nextStarred = toggleStoredWatchlist(item, title);
+        if (nextStarred === null) {
+            toast.error(t('lists.saveFailed'));
+            return;
         }
-        // Bust the module cache so other cards (and remounts) read fresh.
-        invalidateWatchlistCache(item.media_type);
+        setStarred(nextStarred);
+        toast.success(`${title} ${t(nextStarred ? 'lists.addedToList' : 'lists.removedFromList')}`, { duration: 2000 });
     }, [item, title, t]);
 
     if (allowedItems.length === 0) return null;
 
     return (
         <motion.div
-            initial={{ opacity: 0, x: -20 }}
+            ref={cardRef}
+            initial={animateEntrance ? { opacity: 0, x: -20 } : false}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.3, delay: Math.min(index * 0.04, 0.6) }}
         >
             <Link
                 to={`/${item.media_type}/${encodeId(item.id)}`}
-                className="flex gap-4 p-4 rounded-xl bg-white/5 border border-white/10 hover:border-white/20 hover:bg-white/[0.08] transition-all group"
+                className={`${palette ? 'media-color-card' : ''} flex gap-4 p-4 rounded-xl bg-white/5 border border-white/10 hover:border-white/20 hover:bg-white/[0.08] transition-all group`}
+                style={palette?.style}
             >
                 <div className="relative flex-shrink-0">
                     <span className="absolute top-1 left-1 z-10 px-2 py-1 rounded-lg bg-black/75 text-[10px] font-semibold uppercase tracking-wider text-white/80">
@@ -267,19 +318,21 @@ export const SearchListCard: React.FC<ListCardProps> = React.memo(({ item, index
                     </span>
                     <img
                         className="w-20 h-28 sm:w-24 sm:h-36 rounded-lg object-cover"
-                        src={item.poster_path ? `https://image.tmdb.org/t/p/w185${item.poster_path}` : POSTER_FALLBACK}
+                        {...posterImage}
+                        ref={imageRef}
+                        onLoad={onLoad}
                         alt={item.title || item.name}
                         loading="lazy"
                         decoding="async"
-                        onError={(e) => { (e.target as HTMLImageElement).onerror = null; (e.target as HTMLImageElement).src = POSTER_FALLBACK; }}
+                        onError={(e) => { e.currentTarget.removeAttribute('srcset'); e.currentTarget.onerror = null; e.currentTarget.src = POSTER_FALLBACK; }}
                     />
                 </div>
                 <div className="flex-1 min-w-0 flex flex-col justify-between">
                     <div>
-                        <h3 className="font-semibold text-white line-clamp-1 group-hover:text-red-400 transition-colors">
+                        <h3 className={`font-semibold text-white line-clamp-1 ${palette ? '' : 'group-hover:text-red-400'} transition-colors`}>
                             {item.title || item.name}
                         </h3>
-                        <div className="flex items-center gap-3 text-sm text-white/50 mt-1">
+                        <div className="media-card-muted flex items-center gap-3 text-sm text-white/50 mt-1">
                             <div className="flex items-center gap-1">
                                 <Star className="w-4 h-4 text-yellow-400" fill="currentColor" />
                                 <span>{item.vote_average?.toFixed(1) || 'N/A'}</span>
@@ -289,7 +342,7 @@ export const SearchListCard: React.FC<ListCardProps> = React.memo(({ item, index
                                 <span>{new Date(item.release_date || item.first_air_date || '').getFullYear() || 'N/A'}</span>
                             </div>
                         </div>
-                        <p className="text-sm text-white/40 line-clamp-2 mt-2">
+                        <p className="media-card-muted text-sm text-white/40 line-clamp-2 mt-2">
                             {item.overview || noDescLabel}
                         </p>
                     </div>

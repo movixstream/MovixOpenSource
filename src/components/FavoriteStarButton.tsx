@@ -74,7 +74,7 @@ export const FavoriteStarPillButton: React.FC<FavoriteStarPillButtonProps> = ({
         onClick={onToggle}
         whileTap={{ scale: 0.96 }}
         className={cn(
-          'inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all duration-200',
+          'group/icon inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-all duration-200',
           active
             ? 'border-yellow-400/30 bg-yellow-500/12 text-yellow-300'
             : 'border-white/10 bg-white/5 text-white/70 hover:border-purple-500/35 hover:bg-purple-500/10 hover:text-white',
@@ -88,7 +88,11 @@ export const FavoriteStarPillButton: React.FC<FavoriteStarPillButtonProps> = ({
           transition={{ type: 'spring', stiffness: 500, damping: 15 }}
         >
           <Star
-            className={cn('w-4 h-4 transition-colors duration-150', iconClassName)}
+            className={cn(
+              'w-4 h-4 transition-[color,opacity] duration-150',
+              active ? 'text-yellow-300' : 'text-white opacity-70 group-hover/icon:opacity-100',
+              iconClassName,
+            )}
             fill={active ? 'currentColor' : 'none'}
           />
         </motion.div>

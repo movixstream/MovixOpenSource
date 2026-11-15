@@ -27,7 +27,11 @@ function getPendingRecheckMs() {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PENDING_RECHECK_MS;
 }
 
-function getFailedRetryMs() {
+function getFailedRetryMs(lastError = '') {
+  if (/^(?:source_unavailable:|no file$)/i.test(lastError)) {
+    const delay = Number(process.env.CLONE_LINKS_MISSING_RETRY_MS);
+    return Number.isFinite(delay) && delay > 0 ? delay : 24 * 60 * 60 * 1000;
+  }
   const parsed = parseInt(process.env.CLONE_LINKS_FAILED_RETRY_MS || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FAILED_RETRY_MS;
 }
@@ -407,7 +411,7 @@ async function syncSingleUqloadClone(scope, playerLink) {
       shouldRecheck(existingRow.last_checked_at, getPendingRecheckMs());
 
     const canRetryFailed = existingRow?.status === 'failed' &&
-      shouldRecheck(existingRow.last_checked_at, getFailedRetryMs());
+      shouldRecheck(existingRow.last_checked_at, getFailedRetryMs(existingRow.last_error));
 
     if (canCheckPending || (existingRow?.status === 'ready' && existingRow.clone_file_code)) {
       try {
@@ -474,13 +478,15 @@ async function syncSingleUqloadClone(scope, playerLink) {
 
       return existingRow;
     } catch (error) {
-      console.error(`[CLONE LINKS] Upload failed for ${sourceFileCode}: ${sanitizeError(error)}`);
+      const unavailable = /^no file$/i.test(String(error.message || '').trim());
+      const lastError = unavailable ? `source_unavailable: ${sanitizeError(error)}` : sanitizeError(error);
+      console[unavailable ? 'warn' : 'error'](`[CLONE LINKS] ${unavailable ? 'Fichier source indisponible, reprise différée' : 'Échec clonage'} ${sourceFileCode}: ${sanitizeError(error)}`);
       return await persistCloneRow(scope, {
         sourceFileCode,
         cloneFileCode: existingRow?.clone_file_code || null,
         cloneEmbedUrl: existingRow?.clone_embed_url || null,
         status: 'failed',
-        lastError: sanitizeError(error),
+        lastError,
         lastCheckedAt: new Date()
       });
     }

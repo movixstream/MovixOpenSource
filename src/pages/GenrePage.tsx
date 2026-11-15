@@ -426,7 +426,7 @@ const GenrePage: React.FC = () => {
                         : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'
                         }`}
                     >
-                      <LayoutGrid className="w-4 h-4" />
+                      <LayoutGrid className={`w-4 h-4 transition-[color,opacity] ${(viewType === 'grid' ? "text-white opacity-100" : "text-white opacity-60")}`} />
                       <span className="text-sm hidden sm:inline">{t('genres.grid')}</span>
                     </motion.button>
                     <motion.button
@@ -438,7 +438,7 @@ const GenrePage: React.FC = () => {
                         : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'
                         }`}
                     >
-                      <List className="w-4 h-4" />
+                      <List className={`w-4 h-4 transition-[color,opacity] ${(viewType === 'list' ? "text-white opacity-100" : "text-white opacity-60")}`} />
                       <span className="text-sm hidden sm:inline">{t('genres.listView')}</span>
                     </motion.button>
                   </motion.div>

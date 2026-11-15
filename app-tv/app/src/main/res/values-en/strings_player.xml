@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Player: episodes, autoplay and subtitle style. Kept apart from strings.xml. -->
+<resources>
+    <string name="player_eps_title">Episodes</string>
+    <string name="player_eps_now">Now playing</string>
+    <string name="player_eps_number">%1$d. %2$s</string>
+    <string name="player_next_kicker">Next episode · S%1$d E%2$d</string>
+    <string name="player_still_title">Are you still watching?</string>
+    <string name="player_still_body">Playback is paused after several episodes played in a row without touching the remote.</string>
+    <string name="player_still_continue">Continue</string>
+    <string name="player_still_stop">Stop</string>
+    <string name="player_st_title">Subtitle style</string>
+    <string name="player_st_size">Size</string>
+    <string name="player_st_color">Color</string>
+    <string name="player_st_background">Background</string>
+    <string name="player_st_position">Position</string>
+    <string name="player_st_outline">Outline</string>
+    <string name="player_st_percent">%1$d%%</string>
+    <string name="player_st_no_background">No background</string>
+    <string name="player_st_bottom">Bottom</string>
+    <string name="player_st_raised">Raised</string>
+    <string name="player_st_outline_on">Black outline</string>
+    <string name="player_st_outline_off">No outline</string>
+    <string name="player_st_white">White</string>
+    <string name="player_st_yellow">Yellow</string>
+    <string name="player_st_cyan">Cyan</string>
+    <string name="player_st_green">Green</string>
+
+    <!-- "Check quality" (Source panel) -->
+    <string name="player_quality_check">Check quality</string>
+    <string name="player_quality_check_body">Measures the real picture quality of every source</string>
+    <string name="player_quality_checking">Checking… %1$d/%2$d</string>
+    <string name="player_quality_checking_body">Quality shows up on each source</string>
+    <string name="player_quality_best_so_far">Best so far: %1$s</string>
+    <string name="player_quality_again">Check again</string>
+    <string name="player_quality_best_is">Best quality found: %1$s</string>
+    <string name="player_quality_none">No source reported its quality</string>
+    <string name="player_quality_nothing">No source to check</string>
+    <string name="player_quality_best">Best quality</string>
+    <string name="player_quality_pending">checking…</string>
+    <string name="player_quality_down">not responding</string>
+    <string name="player_quality_unknown">quality not reported</string>
+    <string name="player_quality_unreadable">can\'t play on this TV (%1$s)</string>
+</resources>

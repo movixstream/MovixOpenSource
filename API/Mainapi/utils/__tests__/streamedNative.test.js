@@ -59,11 +59,10 @@ test('les playlists réécrivent variantes, segments et URI ; seules les envelop
   assert.deepEqual(targets, ['https://cdn.strmd.st/path/key.bin', 'https://cdn.strmd.st/stream.m3u8']);
 });
 
-test('les segments du CDN européen TikTok sont autorisés sans élargir aux domaines ressemblants', () => {
-  const url = 'https://p16-common-sign.tiktokcdn-eu.com/segment.png?signature=fixture';
-  assert.equal(mediaUrl(url), url);
-  for (const blocked of ['https://tiktokcdn-eu.com.evil.test/segment.png',
-    'https://fake-tiktokcdn-eu.com/segment.png', 'https://127.0.0.1/segment.png',
+test('tout CDN https public est accepté, sans liste de domaines', () => {
+  for (const url of ['https://p16-common-sign.tiktokcdn-eu.com/segment.png?signature=fixture',
+    'https://cdn.new-host.example/live.m3u8']) assert.equal(mediaUrl(url), url);
+  for (const blocked of ['https://127.0.0.1/segment.png', 'https://user@cdn.strmd.st/segment.png',
     'http://p16-common-sign.tiktokcdn-eu.com/segment.png']) {
     assert.throws(() => mediaUrl(blocked));
   }

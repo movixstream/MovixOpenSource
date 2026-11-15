@@ -53,9 +53,6 @@ Thumbs.db
 *.swp
 *.swo
 
-# === Images lourdes inutiles au build ===
-movix.png
-
 # === Docs ===
 *.md
 !README.md

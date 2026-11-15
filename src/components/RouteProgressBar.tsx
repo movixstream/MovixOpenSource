@@ -29,7 +29,7 @@ export const RouteProgressBar = () => {
       style={{
         height: '100%',
         width: '40%',
-        background: 'linear-gradient(90deg, transparent, #e50914, transparent)',
+        background: 'linear-gradient(90deg, transparent, rgb(var(--movix-accent, 229 9 20)), transparent)',
         animation: 'movix-route-progress 1.2s ease-in-out infinite',
         willChange: 'transform',
       }}

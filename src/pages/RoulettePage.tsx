@@ -1194,9 +1194,9 @@ const RoulettePage: React.FC = () => {
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setSkipSignal(s => s + 1)}
-                  className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-white/50 hover:text-white text-sm transition-all flex items-center gap-2"
+                  className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-white/50 hover:text-white text-sm transition-all flex items-center gap-2 group/icon"
                 >
-                  <ChevronDown className="w-4 h-4" />
+                  <ChevronDown className="w-4 h-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                   {t('roulette.skip')}
                 </motion.button>
                 {spinCount > 1 && (
@@ -1204,10 +1204,12 @@ const RoulettePage: React.FC = () => {
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={skipAll}
-                    className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-red-500/20 hover:border-red-500/30 text-white/50 hover:text-white text-sm transition-all flex items-center gap-2"
+                    className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-red-500/20 hover:border-red-500/30 text-white/50 hover:text-white text-sm transition-all flex items-center gap-2 group/icon"
                   >
-                    <ChevronDown className="w-4 h-4" />
-                    <ChevronDown className="w-4 h-4 -ml-3" />
+                    <span className="inline-flex items-center gap-2 text-white opacity-50 group-hover/icon:opacity-100 transition-opacity">
+                      <ChevronDown className="w-4 h-4" />
+                      <ChevronDown className="w-4 h-4 -ml-3" />
+                    </span>
                     {t('roulette.skipAll')}
                   </motion.button>
                 )}
@@ -1221,10 +1223,12 @@ const RoulettePage: React.FC = () => {
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={skipAll}
-                  className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-red-500/20 hover:border-red-500/30 text-white/50 hover:text-white text-sm transition-all flex items-center gap-2"
+                  className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-red-500/20 hover:border-red-500/30 text-white/50 hover:text-white text-sm transition-all flex items-center gap-2 group/icon"
                 >
-                  <ChevronDown className="w-4 h-4" />
-                  <ChevronDown className="w-4 h-4 -ml-3" />
+                  <span className="inline-flex items-center gap-2 text-white opacity-50 group-hover/icon:opacity-100 transition-opacity">
+                    <ChevronDown className="w-4 h-4" />
+                    <ChevronDown className="w-4 h-4 -ml-3" />
+                  </span>
                   {t('roulette.skipAll')}
                 </motion.button>
               </motion.div>
@@ -1293,13 +1297,13 @@ const RoulettePage: React.FC = () => {
                           ? 'bg-yellow-500/10 border border-yellow-400/20 text-yellow-400'
                           : 'bg-white/5 border border-white/10 text-white/60 hover:bg-white/10'}`}>
                         <motion.div key={starred ? 'on' : 'off'} initial={{ scale: 0.3, rotate: -45 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 500, damping: 15 }}>
-                          <Star className="w-4 h-4" fill={starred ? 'currentColor' : 'none'} />
+                          <Star className={`w-4 h-4 transition-[color,opacity] ${(starred ? "text-yellow-400 opacity-100" : "text-white opacity-60")}`} fill={starred ? 'currentColor' : 'none'} />
                         </motion.div>
                       </motion.button>
 
                       <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={respin}
                         className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:bg-white/10 transition-all">
-                        <RotateCcw className="w-4 h-4" /> {t('roulette.spinAgain')}
+                        <RotateCcw className="w-4 h-4 text-white opacity-60 transition-[color,opacity]" /> {t('roulette.spinAgain')}
                       </motion.button>
                     </div>
                   </div>

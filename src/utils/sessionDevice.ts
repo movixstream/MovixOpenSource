@@ -6,11 +6,14 @@ export interface SessionDeviceInfo {
   browserVersion: string | null;
   operatingSystem: string | null;
   deviceType: SessionDeviceType;
+  /** Nom donné par l'appareil lui-même (ex. « Android TV salon » pour l'appli télé). */
+  name: string | null;
 }
 
 const DEVICE_TYPES = new Set<SessionDeviceType>(['desktop', 'mobile', 'tablet', 'tv', 'unknown']);
+const MAX_DEVICE_NAME_LENGTH = 60;
 
-/** Normalise la rÃ©ponse de l'API pour garder les anciennes sessions affichables. */
+/** Normalise la réponse de l'API pour garder les anciennes sessions affichables. */
 export function normalizeSessionDeviceInfo(value: unknown): SessionDeviceInfo {
   if (!value || typeof value !== 'object') {
     return {
@@ -19,6 +22,7 @@ export function normalizeSessionDeviceInfo(value: unknown): SessionDeviceInfo {
       browserVersion: null,
       operatingSystem: null,
       deviceType: 'unknown',
+      name: null,
     };
   }
 
@@ -35,10 +39,19 @@ export function normalizeSessionDeviceInfo(value: unknown): SessionDeviceInfo {
     deviceType: DEVICE_TYPES.has(candidate.deviceType as SessionDeviceType)
       ? candidate.deviceType as SessionDeviceType
       : 'unknown',
+    name: typeof candidate.name === 'string' && candidate.name.trim()
+      ? candidate.name.trim().slice(0, MAX_DEVICE_NAME_LENGTH)
+      : null,
   };
 }
 
-export function getSessionBrowserLabel(device: SessionDeviceInfo, fallback: string): string {
-  if (!device.browser) return fallback;
+/**
+ * Titre d'une session : le nom de l'appareil s'il en a un, sinon le navigateur.
+ * Une télé sans nom ni navigateur prend `tvFallback` (« Télé ») plutôt que
+ * « Navigateur inconnu ».
+ */
+export function getSessionBrowserLabel(device: SessionDeviceInfo, fallback: string, tvFallback?: string): string {
+  if (device.name) return device.name;
+  if (!device.browser) return device.deviceType === 'tv' && tvFallback ? tvFallback : fallback;
   return device.browserVersion ? `${device.browser} ${device.browserVersion}` : device.browser;
 }

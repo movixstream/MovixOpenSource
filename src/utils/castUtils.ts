@@ -27,6 +27,27 @@ export interface AirPlayState {
   error?: string;
 }
 
+const isIOSBrowser = (): boolean => typeof navigator !== 'undefined' && (
+  /iPad|iPhone|iPod/i.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+);
+
+export const isWebCastSupported = (): boolean => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined' || isIOSBrowser()) return false;
+  const cast = (window as Window & { chrome?: { cast?: { isAvailable?: boolean } } }).chrome?.cast;
+  return !!cast || /Chrome\/|Chromium\/|Edg\//.test(navigator.userAgent);
+};
+
+export const getCastUnavailableReason = (sdkUnavailable: boolean): string => {
+  if (isIOSBrowser()) return 'watch.castUnavailableIOS';
+  if (!isWebCastSupported()) return 'watch.castUnavailableUnsupportedBrowser';
+  const cast = (window as Window & { chrome?: { cast?: { isAvailable?: boolean } } }).chrome?.cast;
+  if (!cast?.isAvailable) {
+    return sdkUnavailable ? 'watch.castUnavailableSdkUnavailable' : 'watch.castSdkLoading';
+  }
+  return 'watch.castUnavailableNoDevices';
+};
+
 export interface RemotePlaybackState {
   type: 'chromecast' | 'airplay' | null;
   state: 'disconnected' | 'connecting' | 'connected';

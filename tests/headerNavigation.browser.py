@@ -69,7 +69,7 @@ await require('esbuild').build({{
     (work / 'base.css').write_text('@tailwind base;\n@tailwind components;\n@tailwind utilities;', encoding='utf8')
     (work / 'index.html').write_text('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/ui.css"><link rel="stylesheet" href="/app.css"></head><body style="background:black;color:white"><div id="root"></div><script type="module" src="/app.js"></script></body></html>', encoding='utf8')
     subprocess.run(['node', str(work / 'build.mjs')], cwd=REPO, check=True)
-    subprocess.run(['node', 'node_modules/tailwindcss/lib/cli.js', '-c', 'tailwind.config.js', '-i', str(work / 'base.css'), '-o', str(work / 'ui.css'), '--content', 'src/components/Header.tsx,src/components/ui/square-background.tsx'], cwd=REPO, check=True, capture_output=True)
+    subprocess.run(['node', 'node_modules/tailwindcss/lib/cli.js', '-c', 'tailwind.config.js', '-i', str(work / 'base.css'), '-o', str(work / 'ui.css'), '--content', 'src/components/Header.tsx,src/components/ExploreMenu.tsx,src/components/header/*.tsx,src/components/ui/hover-highlight.tsx'], cwd=REPO, check=True, capture_output=True)
 
 
 async def check_navigation(browser, work, width, setting, touch=False, reduced=False):
@@ -92,7 +92,7 @@ async def check_navigation(browser, work, width, setting, touch=False, reduced=F
     await expect(page.locator('#route')).to_have_text('/')
     trigger = page.locator('[data-explore-trigger]:visible')
     mobile = width < 1024
-    menu = page.locator('#movix-overlay-root [data-lenis-prevent]') if mobile else page.locator('header > [class~="top-full"]')
+    menu = page.locator('#movix-overlay-root [data-lenis-prevent]') if mobile else page.locator('header [data-explore-menu]')
 
     async def open_menu():
         await trigger.click()
@@ -103,8 +103,9 @@ async def check_navigation(browser, work, width, setting, touch=False, reduced=F
         await open_menu()
         scope = menu if mobile or destination == '/collections' else page.locator('header nav')
         link = scope.locator(f'a[href="{destination}"]')
-        # Cliquer un enfant du lien reproduit le geste sur son icône/texte.
-        target = link.locator('svg').first
+        # Cliquer un enfant du lien reproduit le geste sur son icône/texte
+        # (les grands liens du menu mobile n'ont pas d'icône).
+        target = link.locator('svg, span').first
         if touch:
             await target.tap()
         else:
@@ -172,6 +173,7 @@ async def run():
                 await check_navigation(browser, work, 390, 'off', reduced=True)
                 await check_navigation(browser, work, 1440, 'on')
                 await check_navigation(browser, work, 1440, 'off')
+                await check_navigation(browser, work, 1440, 'off', reduced=True)
             finally:
                 await browser.close()
 

@@ -25,6 +25,7 @@ import {
   getContribUrl,
   type ContribBlockReason,
 } from '../utils/segmentContribSites';
+import { copyText } from '../utils/clipboard';
 
 /** Une séquence déjà relevée, telle que le studio la voit. */
 export interface KnownRange {
@@ -403,10 +404,9 @@ const SegmentStudio: React.FC<SegmentStudioProps> = ({
     const payload = formatContribClipboard({
       segmentType, startMs, endMs, season, episode, imdbId, malId,
     });
-    try {
-      await navigator.clipboard.writeText(payload);
+    if (await copyText(payload)) {
       setCopiedSite(siteId);
-    } catch {
+    } else {
       // Presse-papier refusé (contexte non sécurisé, permission) : ce n'est pas
       // une raison de ne pas ouvrir le site, les bornes restent lisibles ici.
       setCopiedSite(null);

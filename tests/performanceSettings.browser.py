@@ -23,7 +23,7 @@ def build_fixture(work):
 import React, {{useState}} from 'react';
 import {{createRoot}} from 'react-dom/client';
 import {{MemoryRouter}} from 'react-router-dom';
-import {{motion}} from 'framer-motion';
+import {{motion,MotionConfig}} from 'framer-motion';
 import i18next from 'i18next';
 import {{I18nextProvider}} from 'react-i18next';
 import {{LightModeProvider,useLightMode}} from {json.dumps(repo + '/src/context/LightModeContext')};
@@ -50,7 +50,11 @@ function Probe() {{
  window.showMotion=()=>setOpen(true);
  return <><output id="state">{{JSON.stringify(settings)}}</output>{{open&&<motion.div id="motion-probe" initial={{{{opacity:0,x:100}}}} animate={{{{opacity:1,x:0}}}} transition={{{{duration:3,delay:2}}}}>Ready</motion.div>}}</>;
 }}
-createRoot(document.getElementById('root')).render(<React.StrictMode><I18nextProvider i18n={{i18next}}><MemoryRouter><LightModeProvider><IntroProvider><SmoothScroll/><SquareBackground className="min-h-screen"><main className="relative mx-auto max-w-3xl px-4 py-8"><PerformanceSettings/><div id="integration"><div id="hero"><HeroSlider items={{items}}/></div><ShinyText text="Decorative title"/><DynamicBackground/><HexagonBackground/><EmblaCarouselPlatforms items={{[]}}/><canvas id="functional-canvas" width="100" height="50"/><div id="spoiler" className="blur-sm">Spoiler</div><div id="video-filter" style={{{{filter:'brightness(0.8) contrast(1.2)'}}}}>Video</div><div id="loading" className="animate-spin">Loading</div><Probe/></div></main></SquareBackground></IntroProvider></LightModeProvider></MemoryRouter></I18nextProvider></React.StrictMode>);
+function AnimationMotionConfig({{children}}) {{
+ const {{effectivePrefs}}=useLightMode();
+ return <MotionConfig reducedMotion={{effectivePrefs.transitions?'user':'always'}}>{{children}}</MotionConfig>;
+}}
+createRoot(document.getElementById('root')).render(<React.StrictMode><I18nextProvider i18n={{i18next}}><MemoryRouter><LightModeProvider><AnimationMotionConfig><IntroProvider><SmoothScroll/><SquareBackground className="min-h-screen"><main className="relative mx-auto max-w-3xl px-4 py-8"><PerformanceSettings/><div id="integration"><div id="hero"><HeroSlider items={{items}}/></div><ShinyText text="Decorative title"/><DynamicBackground/><HexagonBackground/><EmblaCarouselPlatforms items={{[]}}/><canvas id="functional-canvas" width="100" height="50"/><div id="spoiler" className="blur-sm">Spoiler</div><div id="video-filter" style={{{{filter:'brightness(0.8) contrast(1.2)'}}}}>Video</div><div id="loading" className="animate-spin">Loading</div><Probe/></div></main></SquareBackground></IntroProvider></AnimationMotionConfig></LightModeProvider></MemoryRouter></I18nextProvider></React.StrictMode>);
 """
     (work / 'entry.tsx').write_text(entry, encoding='utf8')
     script = f"""
@@ -60,7 +64,7 @@ const esbuild=require('esbuild');
 await esbuild.build({{
  entryPoints:[{json.dumps((work / 'entry.tsx').as_posix())}],outfile:{json.dumps((work / 'app.js').as_posix())},
  bundle:true,format:'esm',target:'es2022',jsx:'automatic',nodePaths:[{json.dumps(repo + '/node_modules')}],
- alias:{{'@':{json.dumps(repo + '/src')}}},define:{{'import.meta.env':JSON.stringify({{}})}},
+ alias:{{'@':{json.dumps(repo + '/src')}}},define:{{'import.meta.env':JSON.stringify({{'VITE_SITE_URL':'https://performance.test'}})}},
  plugins:[{{name:'fixture-data',setup(build){{
   build.onResolve({{filter:/useAgeRestrictedContent$/}},()=>({{path:'age-filter',namespace:'fixture'}}));
   build.onResolve({{filter:/PrefetchLink$/}},()=>({{path:'link',namespace:'fixture'}}));
@@ -108,6 +112,17 @@ async def run():
             await page.locator('#performance-bgAnimations-label').scroll_into_view_if_needed()
             await page.get_by_role('switch', name='Animations de fond', exact=True).click()
             await page.wait_for_function('document.querySelectorAll("canvas").length === 1')
+
+            await page.wait_for_function('Array.from(document.images).every(image=>image.complete && image.naturalWidth > 0)')
+            quality_probe = """() => ({
+                images: Array.from(document.images).map(image => ({
+                    src: image.getAttribute('src'), srcset: image.getAttribute('srcset'), sizes: image.getAttribute('sizes'),
+                    naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, filter: getComputedStyle(image).filter,
+                })),
+                spoilerFilter: getComputedStyle(document.querySelector('#spoiler')).filter,
+                videoFilter: getComputedStyle(document.querySelector('#video-filter')).filter,
+            })"""
+            quality_before = await page.evaluate(quality_probe)
             await page.locator('label:has(input[value="on"])').click()
             await page.wait_for_function('document.documentElement.hasAttribute("data-light-mode") && window.lenis === undefined')
             for key in ['bgAnimations', 'loadingAnimations', 'carouselAutoplay', 'blurEffects', 'transitions']:
@@ -118,6 +133,7 @@ async def run():
             assert await page.locator('#spoiler').evaluate("e=>getComputedStyle(e).filter") == 'blur(4px)'
             assert 'brightness' in await page.locator('#video-filter').evaluate("e=>getComputedStyle(e).filter")
             assert await page.locator('#loading').evaluate("e=>getComputedStyle(e).animationName") == 'none'
+            assert await page.evaluate(quality_probe) == quality_before
             await page.evaluate('window.showMotion()')
             await expect(page.locator('#motion-probe')).to_have_css('opacity', '1', timeout=1000)
             await expect(page.locator('#motion-probe')).to_have_css('transform', 'none', timeout=1000)

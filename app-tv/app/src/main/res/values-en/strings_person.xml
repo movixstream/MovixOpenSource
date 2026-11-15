@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Écran « personne » : un acteur ouvert depuis la distribution d'une fiche. -->
+    <string name="person_movies">Movies · %d</string>
+    <string name="person_series">TV shows · %d</string>
+    <string name="person_as">as %s</string>
+    <string name="person_born">Born in %s</string>
+    <string name="person_lifespan">%1$s – %2$s</string>
+    <string name="person_loading">Loading filmography…</string>
+    <string name="person_error">The filmography couldn\'t load. Check the TV\'s connection, then try again.</string>
+    <string name="person_empty">No movies or TV shows to show for %s.</string>
+    <string name="person_back">Back</string>
+</resources>

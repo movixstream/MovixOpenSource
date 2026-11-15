@@ -53,7 +53,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const checkStoredAuth = async () => {
-      const storedAuth = localStorage.getItem('auth');
+      let storedAuth: string | null;
+      try {
+        storedAuth = localStorage.getItem('auth');
+      } catch {
+        setLoading(false);
+        return;
+      }
       if (storedAuth) {
         try {
           const parsedAuth = JSON.parse(storedAuth);

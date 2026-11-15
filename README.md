@@ -1,11 +1,15 @@
 <p align="center">
-  <img src="./movix.png" alt="Movix" width="120" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./brand/movix-inverse.svg" />
+    <img src="./brand/movix-horizontal.svg" alt="Movix" width="320" />
+  </picture>
 </p>
 
 <h1 align="center">Movix</h1>
 
 <p align="center">
-  <strong>Le 1er site de streaming open source made in France et 100% vibecodé.</strong>
+  <strong>Le 1er site de streaming open source made in France et 100% vibecodé.</strong><br />
+  Site web, appli mobile Android/iOS et appli Android TV native.
 </p>
 
 <p align="center">
@@ -17,7 +21,8 @@
   <a href="https://redis.io">Redis</a> |
   <a href="https://socket.io">Socket.IO</a> |
   <a href="https://www.python.org">Python</a> |
-  <a href="https://www.rust-lang.org">Rust</a>
+  <a href="https://www.rust-lang.org">Rust</a> |
+  <a href="https://kotlinlang.org">Kotlin</a>
 </p>
 
 <p align="center">
@@ -58,17 +63,37 @@ Movix est un monorepo produit pour une plateforme de streaming communautaire. Le
 
 Ce n'est pas un simple duo "frontend + backend". Une feature peut très vite traverser plusieurs couches à la fois : interface React, persistance locale, sync backend, extraction vidéo, proxy Python et parfois extension navigateur.
 
+## Le groupe ix
+
+Movix fait partie d'**ix**, une petite famille de projets dont les noms finissent en « ix ». Ils partagent la même identité : une lettre entre deux crochets, et une couleur par projet.
+
+<p align="center">
+  <img src="./brand/groupe-ix.svg" alt="ix" width="72" />
+  <img src="./brand/movix.svg" alt="Movix" width="72" />
+  <img src="./brand/loadix.svg" alt="Loadix" width="72" />
+</p>
+
+| Projet | Logo | Rôle |
+| --- | --- | --- |
+| ix | `[ix]` en noir | le groupe ; il reste neutre pour laisser sa couleur à chaque projet |
+| Movix | `[M]` en rouge, crochets perforés comme une pellicule | streaming de films, séries et anime |
+| [Loadix](https://loadix.fun) | `[L]` en bleu | index communautaire francophone de releases DDL et NZB |
+
+Les annonces des projets passent par l’espace Matrix [#groupe-ix:matrix.org](<https://matrix.to/#/%23groupe-ix:matrix.org>). Les logos, leurs versions rondes pour les avatars et le script qui les génère sont dans [`brand/`](brand/).
+
 ## Ce que contient le repo
 
 | Zone | Rôle | Documentation |
 | --- | --- | --- |
 | `src/` | Frontend Vite + React + TypeScript | [Frontend](src/README.md) |
 | `Dockerfile` + `server/` | Build et hébergement du frontend avec Hono | [Déploiement Docker](docs/deployment-docker.md) |
+| `cloudflare-cache-rules.json` | Cache Cloudflare des miroirs frontend | [Règles de cache](#cache-cloudflare-du-frontend) |
 | `API/Mainapi/` | Backend principal clusterisé | [Main API](API/Mainapi/README.md) |
 | `API/watchpartyAPI/` | Service temps réel WatchParty | [WatchParty API](API/watchpartyAPI/README.md) |
 | `API/proxiesembed/` | Proxy aiohttp pour embeds, flux et DRM | [Proxies Embed](API/proxiesembed/README.md) |
 | `extension/` + `userscript/` | Outils navigateur Movix | [Movix OS](README_MOVIX_OS.md) |
 | `app/` | App mobile React Native (Android OK, iOS non testé) | [App mobile](app/README.md) |
+| `app-tv/` | Appli Android TV native (Kotlin, Compose for TV, Media3), APK publiée dans `app-tv/movix-tv.apk` | [Appli TV](app-tv/README.md) |
 | `wasm/watchparty-sync/` | Moteur Rust/WASM de la Sync Pro | [WatchParty Sync WASM](wasm/watchparty-sync/README.md) |
 | `cloudflareproxy/` | Worker Cloudflare CORS/proxy | [Cloudflare Proxy](cloudflareproxy/README.md) |
 
@@ -85,6 +110,7 @@ movix-main/
 |-- extension/                  # Extension Chrome / Firefox
 |-- userscript/                 # Variante Tampermonkey
 |-- app/                        # App mobile React Native (Android/iOS)
+|-- app-tv/                     # Appli Android TV native (Kotlin/Compose)
 |-- wasm/watchparty-sync/       # Sync Pro en Rust/WASM
 |-- cloudflareproxy/            # Worker Cloudflare
 |-- functions/                  # Handlers serverless annexes
@@ -104,6 +130,7 @@ movix-main/
 - MySQL et Redis pour `API/Mainapi`
 - Rust + `wasm-bindgen` seulement si tu touches la Sync Pro WASM
 - React Native CLI + Android Studio (et Xcode + CocoaPods sur Mac) seulement si tu touches l'app mobile `app/` — iOS n'a pas été testé, voir [`app/README.md`](app/README.md)
+- JDK 17 et SDK Android (plateforme 37) seulement si tu touches l'appli TV `app-tv/`, voir [`app-tv/README.md`](app-tv/README.md)
 
 ### Installer les dépendances utiles
 
@@ -177,6 +204,56 @@ Pour un premier lancement local, configure au minimum :
 - `API/Mainapi/.env`
 - `API/watchpartyAPI/.env`
 
+### Cache Cloudflare du frontend
+
+Le fichier [`cloudflare-cache-rules.json`](cloudflare-cache-rules.json) contient
+le modèle commun des quatre Cache Rules des neuf miroirs listés dans `domains`.
+La règle HTML a été ajoutée le 28 septembre 2026, après les trois règles
+initiales du 26 septembre. Les domaines de `html_only_domains` (`movix.help`
+et `movix.online`) ont uniquement reçu cette nouvelle règle HTML, leur
+hébergement étant distinct. Chaque règle vise uniquement le domaine
+racine et son hôte `www`, sans cibler les API ni les autres sous-domaines.
+
+Conserver cet ordre :
+
+| Ordre | Règle | Politique |
+| --- | --- | --- |
+| 1 | Frontend par défaut | Hors cache Cloudflare ; le navigateur respecte les en-têtes de l'origine |
+| 2 | Médias publics identifiés | Cache selon l'origine : actuellement 24 heures, avec `stale-while-revalidate` |
+| 3 | Bundles Vite sous `/assets/` | Cache selon l'origine : actuellement un an, avec `immutable` |
+| 4 | HTML public identifié | Éligible selon l'origine ; 60 secondes lorsque le nouveau frontend fournit son en-tête CDN |
+
+Les trois règles positives excluent les requêtes contenant `Authorization`,
+quelle que soit la casse du nom de l'en-tête. Elles ne stockent pas les
+réponses HTTP 400 à 599 dans le cache Cloudflare (`status_code_ttl: -1`).
+Sans en-tête de cache à l'origine, elles ne mettent pas la réponse en cache
+(`bypass_by_default`). Les paramètres d'URL restent dans la clé de cache.
+
+La règle HTML ne force aucun TTL : le frontend en production au moment de
+l'ajout émettait encore `no-cache, must-revalidate`. Le cache de 60 secondes
+dépend du déploiement du serveur qui émet `Cloudflare-CDN-Cache-Control`.
+Les pages privées, l'API et les autres sous-domaines ne sont pas visés par
+cette règle. `movix.online` utilise un autre projet Pages et `movix.help` un
+autre serveur : leurs en-têtes doivent être adaptés dans leur hébergement.
+
+Pour appliquer le modèle à une zone, remplacer `{{DOMAIN}}` dans les
+expressions par son domaine, puis envoyer uniquement l'objet `ruleset` à
+`PUT /zones/{zone_id}/rulesets/phases/http_request_cache_settings/entrypoint`.
+`domains`, `html_only_domains` et `phase` sont des métadonnées du fichier, pas des champs de ce
+corps de requête. Cet appel remplace toutes les Cache Rules de la zone :
+sauvegarder et comparer les règles existantes avant de l'utiliser.
+
+Pour ajouter seulement le HTML, envoyer la règle `movix_public_html_origin`
+à `POST /zones/{zone_id}/rulesets/{ruleset_id}/rules` après substitution du
+domaine. Vérifier d'abord l'absence de ce `ref` pour éviter les doublons ;
+utiliser PATCH sur son identifiant si elle existe déjà. Cette opération
+préserve les autres règles. Pour les domaines de `html_only_domains`, ne pas
+appliquer automatiquement le modèle complet des neuf miroirs.
+
+Ce fichier ne contient aucun token et n'est pas appliqué automatiquement par
+le build ou le déploiement Docker. Les en-têtes du serveur sont décrits dans
+le [guide de déploiement Docker](docs/deployment-docker.md).
+
 ## Comment s'orienter vite
 
 - Feature frontend : commence par `src/App.tsx`, puis la page cible dans `src/pages/`.
@@ -205,6 +282,7 @@ Pour un premier lancement local, configure au minimum :
 - [Extension navigateur](extension/README.md)
 - [Userscript Tampermonkey](userscript/README.md)
 - [App mobile React Native](app/README.md) — Android fonctionnel, iOS non testé (aide recherchée)
+- [Appli Android TV native](app-tv/README.md) — Fire TV, Google TV et Android TV ; installation expliquée sur la page `/app-tv` du site
 - [WatchParty Sync WASM](wasm/watchparty-sync/README.md)
 - [Cloudflare Proxy](cloudflareproxy/README.md)
 

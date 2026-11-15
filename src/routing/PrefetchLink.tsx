@@ -27,7 +27,7 @@ const compose = <T,>(...fns: (((e: T) => void) | undefined)[]) =>
  */
 export const PrefetchLink: FC<LinkProps> = ({ to, onMouseEnter, onFocus, onPointerDown, ...rest }) => {
   const { isLightMode } = useLightMode();
-  const path = typeof to === 'string' ? to : to.pathname || '';
+  const path = typeof to === 'string' ? to : to?.pathname || '';
   const prefetch = useCallback(() => {
     if (isLightMode || (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData) return;
     if (!path || prefetched.has(path)) return;

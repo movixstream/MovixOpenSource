@@ -38,7 +38,7 @@ const CalendarPoster: React.FC<CalendarPosterProps> = ({ path, className = '' })
         aria-hidden="true"
         className={`flex shrink-0 items-center justify-center rounded-md bg-white/[0.06] ${className}`}
       >
-        <CalendarDays className="h-4 w-4 text-white/25" />
+        <CalendarDays className="h-4 w-4 text-white opacity-25" />
       </span>
     );
   }

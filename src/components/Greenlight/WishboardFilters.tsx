@@ -151,9 +151,9 @@ export const WishboardFilters: React.FC<WishboardFiltersProps> = ({
                             whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
                             onClick={() => onMediaTypeChange('movie')}
-                            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
+                            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white group/icon"
                         >
-                            <Film className="h-4 w-4" />
+                            <Film className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" />
                             {t('admin.movies')}
                         </motion.button>
                     )}
@@ -185,9 +185,9 @@ export const WishboardFilters: React.FC<WishboardFiltersProps> = ({
                             whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
                             onClick={() => onMediaTypeChange('tv')}
-                            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
+                            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white group/icon"
                         >
-                            <Tv className="h-4 w-4" />
+                            <Tv className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" />
                             {t('admin.tvShows')}
                         </motion.button>
                     )}

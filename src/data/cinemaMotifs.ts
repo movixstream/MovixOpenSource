@@ -43,20 +43,32 @@ const PRIORITY_MOTIFS: readonly CinemaMotifId[] = [
   'clapperboard', 'clapperboard', 'clapperboard', 'projector',
 ];
 
-/** Une collection variée à chaque ouverture, avec les motifs cinéma dominants. */
-export const createCinemaMotifSequence = (count: number, random = Math.random): CinemaMotif[] => {
-  const sequence = [...CINEMA_MOTIFS];
-  for (const id of PRIORITY_MOTIFS) {
-    const motif = CINEMA_MOTIFS.find(item => item.id === id);
+/** Catalogue de la pluie : motifs, et ceux qui doivent dominer. */
+export interface CinemaMotifCatalog {
+  motifs: readonly CinemaMotif[];
+  priority: readonly CinemaMotif['id'][];
+}
+
+export const CINEMA_CATALOG: CinemaMotifCatalog = { motifs: CINEMA_MOTIFS, priority: PRIORITY_MOTIFS };
+
+/** Une collection variée à chaque ouverture, avec les motifs dominants du catalogue. */
+export const createCinemaMotifSequence = (
+  count: number,
+  random = Math.random,
+  { motifs, priority }: CinemaMotifCatalog = CINEMA_CATALOG,
+): CinemaMotif[] => {
+  const sequence = [...motifs];
+  for (const id of priority) {
+    const motif = motifs.find(item => item.id === id);
     if (motif) sequence.push(motif);
   }
-  const totalWeight = CINEMA_MOTIFS.reduce((total, motif) => total + motif.weight, 0);
+  const totalWeight = motifs.reduce((total, motif) => total + motif.weight, 0);
   while (sequence.length < count) {
     let choice = random() * totalWeight;
-    const motif = CINEMA_MOTIFS.find(item => {
+    const motif = motifs.find(item => {
       choice -= item.weight;
       return choice < 0;
-    }) ?? CINEMA_MOTIFS[CINEMA_MOTIFS.length - 1];
+    }) ?? motifs[motifs.length - 1];
     sequence.push(motif);
   }
   sequence.length = Math.max(0, Math.floor(count));

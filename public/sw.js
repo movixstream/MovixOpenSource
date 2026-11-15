@@ -1,8 +1,17 @@
+import {
+  MEDIA_COLOR_CACHE_NAME,
+  TMDB_IMAGE_CACHE_NAME,
+  handleTmdbImage,
+  installMediaColorServiceWorker,
+} from '../src/workers/mediaColor.serviceWorker';
+
+installMediaColorServiceWorker();
+
 // ============================================================================
 // Fallback domain — constantes injectées au build par vite.config.ts
 // ============================================================================
-// Ce fichier n'est pas transpilé : pas de `?.`, `??` ni `1_000`, sinon le SW ne
-// s'installe pas sur les TV webOS 5 (Chromium 68), comme le bundle.
+// Conserver une syntaxe compatible avec les TV webOS 5 (Chromium 68), même
+// lorsque ce fichier est servi sans transpilation : pas de `?.`, `??` ni `1_000`.
 const DEFAULT_MIRRORS = __MOVIX_DEFAULT_MIRRORS__;
 const CONFIG_URL = __MOVIX_CONFIG_URL__;
 const NAV_TIMEOUT_MS = 3000;
@@ -27,81 +36,9 @@ const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9
 //
 // Bump IMAGE_CACHE_NAME pour invalider toutes les images cachées d'un coup
 // (ex. quand on change la taille standard w500→w342 — sinon on continue à
-// servir les vieilles URLs pendant des semaines). v2 = passage à w342 posters
-// + w300 logos.
-const IMAGE_CACHE_NAME = 'movix-tmdb-images-v2';
+// servir les vieilles URLs pendant des semaines). v3 repart d'un cache propre
+// afin de remplacer les anciennes réponses opaques par des réponses CORS.
 const TMDB_IMAGE_HOST = 'image.tmdb.org';
-const MAX_CONCURRENT_IMAGE_FETCHES = 6;
-let activeImageFetches = 0;
-const imageFetchQueue = [];
-
-// Éviction FIFO : sans ça le cache grossit sans limite jusqu'à ce que le
-// quota du navigateur fasse échouer silencieusement tous les cache.put().
-// On ne vérifie qu'~1 mise en cache sur 20 (hors chemin chaud du hit, donc
-// pas de coût sur les hits) pour éviter d'ouvrir cache.keys() à chaque fetch.
-const IMAGE_CACHE_MAX_ENTRIES = 600;
-const IMAGE_CACHE_TRIM_SAMPLE_RATE = 1 / 20;
-
-async function trimImageCache(cache) {
-  const keys = await cache.keys();
-  if (keys.length <= IMAGE_CACHE_MAX_ENTRIES) return;
-  // cache.keys() respecte l'ordre d'insertion -> les plus vieilles entrées
-  // sont en tête, donc les premières de la liste sont supprimées (FIFO).
-  const staleKeys = keys.slice(0, keys.length - IMAGE_CACHE_MAX_ENTRIES);
-  await Promise.all(staleKeys.map((key) => cache.delete(key)));
-}
-
-function acquireImageFetchSlot() {
-  return new Promise((resolve) => {
-    if (activeImageFetches < MAX_CONCURRENT_IMAGE_FETCHES) {
-      activeImageFetches++;
-      resolve();
-    } else {
-      imageFetchQueue.push(resolve);
-    }
-  });
-}
-
-function releaseImageFetchSlot() {
-  const next = imageFetchQueue.shift();
-  if (next) {
-    next();
-  } else {
-    activeImageFetches = Math.max(0, activeImageFetches - 1);
-  }
-}
-
-async function handleTmdbImage(req) {
-  const cache = await caches.open(IMAGE_CACHE_NAME);
-  const cached = await cache.match(req);
-  // Une réponse opaque (obtenue pour un <img>, mode no-cors) ne peut être
-  // servie qu'à une requête no-cors. La resservir à un fetch() en mode cors
-  // (extraction de couleur des affiches dans les pages de détail) fait échouer
-  // la requête : « Response served by service worker is opaque ». Dans ce cas
-  // on repasse par le réseau, et la réponse CORS obtenue remplace l'opaque.
-  const opaqueForCors = cached && cached.type === 'opaque' && req.mode !== 'no-cors';
-  if (cached && !opaqueForCors) return cached;
-
-  await acquireImageFetchSlot();
-  try {
-    const res = await fetch(req);
-    if (res && (res.ok || res.type === 'opaque')) {
-      // .clone() avant .put() : la response ne peut être consommée qu'une fois.
-      // .catch silently : QuotaExceededError quand storage full → on sert la
-      // réponse non-cachée à l'utilisateur, qui marche quand même.
-      cache.put(req, res.clone())
-        .then(() => {
-          if (Math.random() < IMAGE_CACHE_TRIM_SAMPLE_RATE) {
-            trimImageCache(cache).catch(() => {});
-          }
-        })
-        .catch(() => {});
-    }
-    return res;
-  } finally {
-    releaseImageFetchSlot();
-  }
-}
 
 // ============================================================================
 // Asset cache — JS / CSS / polices du build
@@ -151,22 +88,37 @@ async function fetchAssetWithRetry(req) {
   }
 }
 
-async function handleAsset(req) {
-  const cache = await caches.open(ASSET_CACHE_NAME);
-  const cached = await cache.match(req);
-  if (cached) return cached;
+async function handleAsset(req, extendLifetime) {
+  let cache = null;
+  try {
+    cache = await caches.open(ASSET_CACHE_NAME);
+    const cached = await cache.match(req);
+    if (cached) return cached;
+  } catch {
+    // Le cache est facultatif : un refus du stockage ne doit pas empêcher
+    // le navigateur de charger un chunk disponible sur le réseau.
+    cache = null;
+  }
 
   const res = await fetchAssetWithRetry(req);
   // Uniquement les vraies réussites : une 404 (chunk d'un ancien build) ou une
   // réponse opaque mises en cache seraient resservies indéfiniment.
-  if (res && res.ok && res.type === 'basic') {
-    cache.put(req, res.clone())
-      .then(() => {
+  if (cache && res && res.ok && res.type === 'basic') {
+    const cacheWrite = (async () => {
+      try {
+        await cache.put(req, res.clone());
         if (Math.random() < ASSET_CACHE_TRIM_SAMPLE_RATE) {
-          trimAssetCache(cache).catch(() => {});
+          await trimAssetCache(cache);
         }
-      })
-      .catch(() => {});
+      } catch {
+        // Quota plein ou document fermé : la réponse réseau reste utilisable.
+      }
+    })();
+    try {
+      extendLifetime(cacheWrite);
+    } catch {
+      // Un événement déjà terminé ne doit pas faire perdre la réponse.
+    }
   }
   return res;
 }
@@ -324,7 +276,7 @@ function render503Page() {
     .logo { font-size: 2rem; font-weight: 900; color: #dc2626; letter-spacing: 0.1em; margin-bottom: 1rem; }
     h1 { font-size: 1.2rem; margin: 0 0 1rem; }
     p { margin: 0.5rem 0; color: #aaa; font-size: 0.9rem; line-height: 1.5; }
-    a { display: inline-block; margin-top: 1rem; background: #229ED9; color: #fff;
+    a { display: inline-block; margin-top: 1rem; background: #fff; color: #000;
       padding: 0.7rem 1.2rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600; }
   </style>
 </head>
@@ -333,8 +285,8 @@ function render503Page() {
     <div class="logo">MOVIX</div>
     <h1>Site temporairement indisponible</h1>
     <p>Tous nos domaines connus sont inaccessibles depuis votre connexion.</p>
-    <p>Rejoins notre canal Telegram pour recevoir l'adresse du nouveau domaine.</p>
-    <a href="https://t.me/movix_site">Ouvrir Telegram</a>
+    <p>Rejoins notre canal Matrix pour recevoir l'adresse du nouveau domaine.</p>
+    <a href="https://matrix.to/#/%23groupe-ix:matrix.org">Ouvrir Matrix</a>
   </div>
 </body>
 </html>`;
@@ -363,7 +315,7 @@ self.addEventListener('activate', (event) => {
       // (anciennes versions, caches légacy d'avant cette logique). Quand on
       // bumpe un nom de cache (ex. v1 → v2), l'ancienne version est supprimée
       // ici automatiquement.
-      const kept = new Set([IMAGE_CACHE_NAME, ASSET_CACHE_NAME]);
+      const kept = new Set([TMDB_IMAGE_CACHE_NAME, MEDIA_COLOR_CACHE_NAME, ASSET_CACHE_NAME]);
       await Promise.all(
         keys
           .filter((k) => !kept.has(k))
@@ -510,26 +462,44 @@ async function isOriginReachable() {
 }
 
 async function handleNavigation(req) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), NAV_TIMEOUT_MS);
+  // `fetch(req)` SANS second argument, et un délai par course plutôt que par
+  // AbortController. Deux raisons, toutes deux vues sur webOS 5 (Chromium 68) :
+  //  - passer un init (`{ signal }`) avec une requête de mode `navigate` lève
+  //    un TypeError sur les vieux Chromium — chaque navigation échouait alors
+  //    en ERR_FAILED dès que le SW contrôlait la page ;
+  //  - abandonner la requête au bout de 3s transformait une origine lente mais
+  //    joignable (TV, mobile bas de gamme) en page d'erreur. Le délai sert
+  //    seulement à déclencher la sonde ; la requête d'origine continue.
+  const network = fetch(req);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error('navigation timeout');
+      err.name = 'TimeoutError';
+      reject(err);
+    }, NAV_TIMEOUT_MS);
+  });
   try {
-    const res = await fetch(req, { signal: controller.signal });
+    const res = await Promise.race([network, timeout]);
     clearTimeout(timer);
     return res;
   } catch (err) {
     clearTimeout(timer);
     // Si l'utilisateur est offline, on laisse l'erreur réseau naturelle
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      throw err;
+      return network;
     }
     // Confirmation : l'origine est-elle vraiment injoignable ? Sinon (mobile
-    // qui se réveille, network blip, tab throttlé), on relaie l'erreur
-    // d'origine et on laisse le browser gérer (retry naturel, page d'erreur).
-    // On ne bascule au miroir QUE si même un HEAD simple échoue.
+    // qui se réveille, network blip, tab throttlé, appareil lent), on rend la
+    // main à la requête d'origine : sa réponse si elle arrive, son erreur
+    // sinon. On ne bascule au miroir QUE si même un HEAD simple échoue.
     const reachable = await isOriginReachable();
     if (reachable) {
-      throw err;
+      return network;
     }
+    // La requête d'origine peut encore rejeter plus tard : sans handler, le
+    // rejet remonterait en « unhandled rejection ».
+    network.catch(() => {});
     return await redirectToMirror({
       from: self.location.hostname,
       reason: 'unreachable',
@@ -561,14 +531,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.hostname === TMDB_IMAGE_HOST) {
-    event.respondWith(handleTmdbImage(req));
+    event.respondWith(handleTmdbImage(req, (promise) => event.waitUntil(promise)));
     return;
   }
 
   // 2. Assets du build — cache-first. Réservé à notre origine : le nom hashé
   // ne garantit l'immuabilité que pour les fichiers qu'on a produits.
   if (url.origin === self.location.origin && url.pathname.startsWith(ASSET_PATH_PREFIX)) {
-    event.respondWith(handleAsset(req));
+    event.respondWith(handleAsset(req, (promise) => event.waitUntil(promise)));
     return;
   }
 

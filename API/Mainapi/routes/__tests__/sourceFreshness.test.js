@@ -21,7 +21,8 @@ const tick = () => new Promise(setImmediate);
 async function settle() { for (let i = 0; i < 12; i++) await tick(); }
 const silentConsole = { log() {}, warn() {}, error() {}, time() {}, timeEnd() {} };
 function response() {
-  return { statusCode: 200, headersSent: false,
+  return { statusCode: 200, headersSent: false, headers: {},
+    setHeader(name, value) { this.headers[name.toLowerCase()] = value; },
     status(code) { this.statusCode = code; return this; },
     json(value) { this.body = value; this.headersSent = true; return this; }
   };
@@ -38,6 +39,9 @@ function loadRoute(relative, stubs, suffix = '', timerOverrides = {}) {
   const standard = {
     express: { Router: () => router }, path,
     '../utils/sourceRefresh': sourceRefresh,
+    '../utils/sharedSourceWork': require('../../utils/sharedSourceWork'),
+    '../utils/concurrency': require('../../utils/concurrency'),
+    'write-file-atomic': (...args) => stubs.fs.promises.writeFile(...args),
     axios: { create: () => ({}) },
     '../utils/embedExtraction': {
       buildM3u8Map: async () => ({}),
@@ -285,7 +289,7 @@ function cpasmalHarness(cached) {
   };
   return { counts, call, setScrape(fn) { scrape = fn; }, set fresh(value) { fresh = value; }, get cache() { return cache; } };
 }
-const playableCpasmal = { links: { vf: [{ server: 'voe', url: 'https://fixture.invalid/play' }], vostfr: [] } };
+const playableCpasmal = { _tvCacheVersion: 1, links: { vf: [{ server: 'voe', url: 'https://fixture.invalid/play' }], vostfr: [] } };
 
 test('Cpasmal: fresh movie and episode caches read once per request without scraping', async () => {
   const h = cpasmalHarness(playableCpasmal); h.fresh = true;
@@ -294,15 +298,36 @@ test('Cpasmal: fresh movie and episode caches read once per request without scra
   assert.equal(h.counts.scrapes, 0); assert.equal(h.counts.writes, 0);
 });
 
-test('Cpasmal: cold and stale 20-request bursts publish once and preserve freshness', async () => {
-  for (const cached of [null, playableCpasmal]) {
+test('Cpasmal: cold and stale bursts respond before retrieval finishes and publish once', async () => {
+  for (const type of ['movie', 'tv']) for (const cached of [null, playableCpasmal]) {
     const h = cpasmalHarness(cached); const gate = deferred();
     h.setScrape(async () => { await gate.promise; return playableCpasmal; });
-    const responses = Array.from({ length: 20 }, () => h.call());
+    const responses = await Promise.all(Array.from({ length: 20 }, () => h.call(type)));
+    for (const res of responses) {
+      assert.equal(res.statusCode, cached ? 200 : 202);
+      if (cached) {
+        assert.deepEqual(res.body.links, cached.links);
+      } else {
+        assert.equal(res.body.pending, true);
+        assert.equal(res.body.code, 'retrieval_in_progress');
+        assert.match(res.body.message, /Récupération Cpasmal en cours/);
+        assert.equal(res.body.tmdb_id, '42');
+        if (type === 'tv') {
+          assert.equal(res.body.season, 1);
+          assert.equal(res.body.episode, 2);
+        }
+        assert.equal(res.headers['retry-after'], '2');
+        assert.equal(res.headers['cache-control'], 'no-store');
+      }
+    }
     await settle(); assert.equal(h.counts.scrapes, 1);
-    gate.resolve(); await Promise.all(responses); await settle();
+    assert.equal(h.counts.writes, 0);
+    gate.resolve(); await settle();
     assert.equal(h.counts.writes, 1);
-    await h.call(); await settle(); assert.equal(h.counts.scrapes, 1);
+    const ready = await h.call(type);
+    assert.equal(ready.statusCode, 200);
+    assert.deepEqual(ready.body.links, playableCpasmal.links);
+    await settle(); assert.equal(h.counts.scrapes, 1);
   }
 });
 
@@ -325,25 +350,32 @@ test('Cpasmal: empty positive results keep the existing ten-minute retry interva
   assert.equal(h.counts.scrapes, 2);
 });
 
-test('Cpasmal: caller timeout leaves the operation alive for the next waiter and one publication', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  // Use the real helper with mocked timers, while the route remains fully simulated.
-  const originalWait = sourceRefresh.waitForSource;
-  sourceRefresh.waitForSource = require('../../utils/sourceRefresh').waitForSource;
-  try {
-    const h = cpasmalHarness(null); const gate = deferred();
-    h.setScrape(async () => { await gate.promise; return playableCpasmal; });
-    const first = h.call(); await settle();
-    t.mock.timers.tick(15000); assert.equal((await first).statusCode, 500);
-    const second = h.call(); await settle(); assert.equal(h.counts.scrapes, 1);
-    gate.resolve(); assert.equal((await second).statusCode, 200);
+test('Cpasmal: failed background retrieval surfaces on polling and retries after cooldown', async () => {
+  for (const type of ['movie', 'tv']) {
+    const h = cpasmalHarness(null);
+    h.setScrape(async () => { throw Object.assign(new Error('Cpasmal temporarily unavailable'), { code: 'CPASMAL_UPSTREAM_ERROR' }); });
+    assert.equal((await h.call(type)).statusCode, 202);
+    await settle();
+    const failed = await h.call(type);
+    assert.equal(failed.statusCode, 503);
+    assert.equal(failed.body.error, 'Cpasmal temporarily unavailable');
+    assert.equal((await h.call(type)).statusCode, 503);
+    assert.equal(h.counts.scrapes, 1);
+    assert.equal(h.counts.writes, 0);
+
+    now += 60001;
+    h.setScrape(async () => playableCpasmal);
+    assert.equal((await h.call(type)).statusCode, 202);
+    await settle();
+    assert.equal((await h.call(type)).statusCode, 200);
+    assert.equal(h.counts.scrapes, 2);
     assert.equal(h.counts.writes, 1);
-  } finally { sourceRefresh.waitForSource = originalWait; }
+  }
 });
 
-function animeHarness(fresh = false) {
+function animeHarness(fresh = false, cached = null, scanned = null) {
   const episodes = [{ name: 'Episode 1', index: 1, streaming_links: [{ language: 'vostfr', players: ['https://fixture.invalid/play'] }] }];
-  let raw = JSON.stringify({ timestamp: now - 7200000, seasons: { 'Saison 1': { episodes } } });
+  let raw = JSON.stringify({ timestamp: now - 7200000, seasons: { 'Saison 1': { episodes: cached || episodes } } });
   let mtime = now - (fresh ? 1000 : 7200000);
   let fail = false;
   const counts = { catalogs: 0, scans: 0, writes: 0, touches: 0 };
@@ -356,8 +388,9 @@ function animeHarness(fresh = false) {
     ANIME_SAMA_URL: 'https://anime-sama.invalid/',
     getFromCacheNoExpiration: async () => [{ name: 'Example Anime', url: 'https://anime-sama.invalid/catalogue/example/' }],
     axiosAnimeSamaRequest: async () => { counts.catalogs++; if (fail) throw new Error('timeout'); return { data: 'panneauAnime("Saison 1", "saison1/vostfr");' }; },
+    cleanupOldCacheFiles: async () => {},
   });
-  loaded.exports.audit.setScan(async () => { counts.scans++; return episodes; });
+  loaded.exports.audit.setScan(async () => { counts.scans++; return scanned || episodes; });
   const call = () => loaded.routes.get('get /search/:query')({ params: { query: 'example' }, query: {}, headers: {} }, response());
   return { counts, call, set fail(value) { fail = value; }, get data() { return JSON.parse(raw); }, get mtime() { return mtime; } };
 }
@@ -386,6 +419,36 @@ test('AnimeSama: upstream failure retains usable data and retries only after bac
   await h.call(); await settle();
   assert.equal(h.counts.catalogs, 2); assert.equal(h.counts.writes, 0);
   assert.equal(h.counts.touches, 1);
+});
+
+test('AnimeSama: removed players, languages and episodes leave the cache', async () => {
+  const ep = (index, links) => ({ name: `Episode ${index}`, serie_name: 'example', season_name: 'Saison 1', index, streaming_links: links });
+  const cached = [
+    ep(1, [{ language: 'vostfr', players: ['https://a.invalid/1', 'https://b.invalid/1'] }, { language: 'vf', players: ['https://a.invalid/vf1'] }]),
+    ep(2, [{ language: 'vostfr', players: ['https://a.invalid/2'] }]),
+  ];
+  const scanned = [ep(1, [{ language: 'vostfr', players: ['https://a.invalid/1'] }])];
+  const h = animeHarness(false, cached, scanned);
+  await h.call(); await settle();
+  assert.equal(h.counts.writes, 1);
+  assert.deepEqual(h.data.seasons['Saison 1'].episodes, scanned);
+});
+
+test('AnimeSama: older-format caches and empty languages do not force a rewrite', async () => {
+  const links = [{ language: 'vostfr', players: ['https://a.invalid/1'] }];
+  const cached = [{ name: 'Episode 1', index: 1, streaming_links: links, legacy: true }];
+  const scanned = [{ name: 'Episode 1', serie_name: 'example', season_name: 'Saison 1', index: 1, streaming_links: [...links, { language: 'vf', players: [] }] }];
+  const h = animeHarness(false, cached, scanned);
+  await h.call(); await settle();
+  assert.equal(h.counts.writes, 0);
+  assert.equal(h.counts.touches, 1);
+});
+
+test('AnimeSama: an empty season scan keeps the cached episodes', async () => {
+  const h = animeHarness(false, null, []); const original = h.data;
+  await h.call(); await settle();
+  assert.equal(h.counts.writes, 0);
+  assert.deepEqual(h.data, original);
 });
 
 test('AnimeSama: unchanged worker cannot replace episodes published after its version check', async () => {

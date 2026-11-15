@@ -117,8 +117,8 @@ const LegalDocumentPage: React.FC<LegalDocumentPageProps> = ({
       />
 
       <div className="container mx-auto px-4 sm:px-6 py-8 sm:py-12">
-        <Link to="/" className="inline-flex items-center text-white/50 hover:text-white transition-colors mb-8">
-          <ArrowLeft className="w-5 h-5 mr-2" />
+        <Link to="/" className="inline-flex items-center text-white/50 hover:text-white transition-colors mb-8 group/icon">
+          <ArrowLeft className="w-5 h-5 mr-2 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
           {t('legalDocument.backHome')}
         </Link>
 

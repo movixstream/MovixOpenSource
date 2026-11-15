@@ -3,8 +3,9 @@ import type remarkGfm from 'remark-gfm';
 
 const hasRegexLookbehindSupport = (() => {
   try {
-    new RegExp('(?<=a)b');
-    return true;
+    // Utiliser le résultat : le minifieur supprimait le constructeur inutilisé
+    // et transformait tout le try en `return true` dans le bundle de production.
+    return new RegExp('(?<=a)b').test('ab');
   } catch {
     return false;
   }

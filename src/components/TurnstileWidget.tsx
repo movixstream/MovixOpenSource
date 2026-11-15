@@ -2,8 +2,7 @@ import React, { useEffect, useRef } from 'react';
 
 import { useTurnstileBypass } from '../hooks/useTurnstileBypass';
 import { ADMIN_BYPASS_TOKEN } from '../utils/turnstileBypass';
-
-const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+import { TURNSTILE_SITE_KEY } from '../utils/turnstileKeys';
 
 declare global {
   interface Window {

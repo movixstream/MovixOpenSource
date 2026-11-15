@@ -42,7 +42,6 @@ const {
 
 const {
   CPASMAL_BASE_URL,
-  makeRequestWithCorsFallback,
 } = require("./utils/proxyManager");
 
 const axios = require("axios");
@@ -110,7 +109,7 @@ const COFLIX_BASE_URL = (
 ).replace(/\/$/, "");
 const coflixHeaders = {
   "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
   Referer: COFLIX_BASE_URL,
 };
 
@@ -131,7 +130,8 @@ const axiosAnimeSama = axios.create({
   decompress: true,
 });
 
-const FSTREAM_BASE_URL_VAL = "https://french-stream.one/";
+const { FSTREAM_BASE_URL } = require('./config/fstream');
+const FSTREAM_BASE_URL_VAL = `${FSTREAM_BASE_URL}/`;
 const axiosFStream = axios.create({
   baseURL: FSTREAM_BASE_URL_VAL,
   timeout: 6000,
@@ -155,7 +155,7 @@ const axiosFStream = axios.create({
     "sec-ch-ua": '"Not(A:Brand";v="8", "Chromium";v="144", "Brave";v="144"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Windows"',
-    Referer: "https://french-stream.one/",
+    Referer: FSTREAM_BASE_URL_VAL,
   },
   decompress: true,
 });
@@ -326,10 +326,7 @@ cpasmalRouter.configure({
   CPASMAL_BASE_URL,
   TMDB_API_URL,
   TMDB_API_KEY,
-  axiosCpasmalRequest: require("./utils/proxyManager").axiosCpasmalRequest,
-  DARKINO_PROXIES: require("./utils/proxyManager").DARKINO_PROXIES,
-  getDarkinoHttpProxyAgent: require("./utils/proxyManager")
-    .getDarkinoHttpProxyAgent,
+  makeCpasmalRequest: require("./utils/proxyManager").makeCpasmalRequest,
   getFromCacheNoExpiration,
   shouldUpdateCache,
 });
@@ -350,7 +347,6 @@ coflix.configure({
 // --- Configure frenchstream (helper, not a router) ---
 const frenchstream = require("./routes/frenchstream");
 frenchstream.configure({
-  makeRequestWithCorsFallback,
   axiosFrenchStreamRequest: axiosHelpers.axiosFrenchStreamRequest,
   // findTvSeriesOnTMDB will be injected after tmdb is configured
 });
@@ -363,7 +359,6 @@ animeSamaRouter.configure({
   axiosAnimeSamaRequest: axiosHelpers.axiosAnimeSamaRequest,
   getFromCacheNoExpiration,
   saveToCache,
-  mergeStreamingLinks: axiosHelpers.mergeStreamingLinks,
   cleanupOldCacheFiles: axiosHelpers.cleanupOldCacheFiles,
   migrateOldCacheFiles: axiosHelpers.migrateOldCacheFiles,
   limitConcurrency10,
@@ -493,6 +488,7 @@ app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/oauth', oauthRouter);
 app.use('/api/admin/oauth-apps', require('./routes/adminOauthApps'));
 app.use('/api/sessions', require('./routes/sessions'));
+app.use('/api/tv/link', require('./routes/tvLink'));
 app.use('/api', require('./routes/debrid'));
 app.use('/api', require('./routes/admin'));
 app.use('/api', vipDonationsRouter);
@@ -541,6 +537,7 @@ const {
 const { ensureAccountLinksStorage } = require('./utils/accountLinks');
 const { ensureCloneLinksStorage } = require('./utils/cloneLinks');
 const { ensureOAuthStorage } = require('./utils/oauthStorage');
+const { ensureTableGroup } = require('./db/runtimeEnsure');
 
 const appReady = (async () => {
   try {
@@ -684,6 +681,14 @@ const appReady = (async () => {
       await initWrappedTables();
       app.use("/api/wrapped", wrappedRouter);
       console.log("Wrapped routes initialized successfully");
+
+      // Historique et progression serveur + cache TMDB permanent (idempotent).
+      await ensureTableGroup(pool, 'history');
+      console.log('History tables initialized successfully');
+
+      // Routes de l'historique, montées une fois les tables créées.
+      app.use('/api', require('./routes/history'));
+      console.log('History routes initialized successfully');
     });
   } catch (error) {
     console.error("MySQL connection error:", error.message);

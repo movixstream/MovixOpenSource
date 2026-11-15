@@ -78,9 +78,9 @@ const JoinPartyModal: React.FC<JoinPartyModalProps> = ({ isOpen, onClose }) => {
                             </h3>
                             <button
                                 onClick={handleClose}
-                                className="text-white/50 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
+                                className="text-white/50 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors group/icon"
                             >
-                                <X className="w-5 h-5" />
+                                <X className="w-5 h-5 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                             </button>
                         </div>
 

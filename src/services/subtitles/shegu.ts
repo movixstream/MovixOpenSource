@@ -7,7 +7,7 @@ import type {
   SubtitleTrack,
 } from './types.ts';
 
-export const SHEGU_BASE_URL = 'https://subtitles.shegu.st';
+export const SHEGU_BASE_URL = 'https://subs.wing.st';
 
 const REQUEST_TIMEOUT_MS = 12_000;
 

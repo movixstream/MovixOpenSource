@@ -17,7 +17,11 @@ concurrency:
 jobs:
   build:
     name: Compile and package the unsigned IPA
-    runs-on: macos-26
+    # macos-26 a laissé le job en file sans machine trois fois de suite le
+    # 2026-10-23 (« not acquired by Runner … capacity constraints »). macos-15,
+    # plus fourni, embarque aussi Xcode 26, indispensable aux API Liquid Glass
+    # (glassEffect) : l'étape suivante le sélectionne.
+    runs-on: macos-15
     timeout-minutes: 90
     permissions:
       contents: read
@@ -27,6 +31,18 @@ jobs:
       min_os: ${{ steps.validate.outputs.min_os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # L'image garde Xcode 16 par défaut : prendre le Xcode 26 le plus récent
+      # installé, sans figer de numéro que l'image retirerait un jour.
+      - name: Select Xcode 26
+        run: |
+          XCODE="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$XCODE" ]; then
+            echo "Xcode 26 introuvable sur ce runner" >&2
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:

@@ -39,12 +39,12 @@
              donc dans le chunk de cette route, servie depuis notre origine avec
              un cache immuable, et seulement quand on y va. -->
 
-        <!-- Icons -->
-        <link rel="icon" href="/movix.png" />
-        <link rel="icon" type="image/png" href="/movix.png" sizes="96x96" />
-        <link rel="icon" type="image/svg+xml" href="/movix.png" />
-        <link rel="shortcut icon" href="/movix.png" />
-        <link rel="apple-touch-icon" sizes="180x180" href="/movix.png" />
+        <!-- Icônes : le SVG d'abord. Le PNG garde sa vraie taille déclarée,
+             sinon Chrome le préfère au SVG ; il ne sert plus qu'aux navigateurs
+             sans favicon SVG et à l'écran d'accueil iOS, qui n'accepte que le PNG. -->
+        <link rel="icon" type="image/svg+xml" href="/movix.svg" />
+        <link rel="icon" type="image/png" sizes="1024x1024" href="/movix.png" />
+        <link rel="apple-touch-icon" href="/movix.png" />
         <link rel="manifest" href="/manifest.json" />
 
         <title data-rh="true">
@@ -73,7 +73,7 @@
                             "width": 512,
                             "height": 512
                         },
-                        "sameAs": ["https://t.me/movix_site"],
+                        "sameAs": ["https://matrix.to/#/%23groupe-ix:matrix.org"],
                         "contactPoint": {
                             "@type": "ContactPoint",
                             "contactType": "customer support",
@@ -97,6 +97,96 @@
                     }
                 ]
             }
+        </script>
+        <script>
+            // Stockage de secours, avant tout autre script. Quand le navigateur
+            // refuse le stockage (cookies bloqués, iframe sandboxée, WebView sans
+            // DOM storage, base Firefox corrompue), le simple accès à
+            // `localStorage` jette (SecurityError « Access is denied » ou « The
+            // operation is insecure », NS_ERROR_FAILURE), vaut null ou n'existe
+            // pas. Plus de 700 accès directs du code supposent un stockage
+            // utilisable : chacun devenait un écran de crash (GlitchTip B2, ED,
+            // E6, DN, CB…). Ici, un stockage en mémoire prend la place de la
+            // propriété : le site reste utilisable pendant la visite, rien n'est
+            // conservé après. La sonde ne fait que lire : un stockage simplement
+            // plein reste le vrai, pour ne pas masquer les données existantes.
+            // ES5 uniquement : ce bloc n'est pas transpilé.
+            (function () {
+                var reserved = { getItem: 1, setItem: 1, removeItem: 1, clear: 1, key: 1, length: 1 };
+
+                function createMemoryStorage() {
+                    var data = Object.create(null);
+                    var storage = Object.create({
+                        getItem: function (key) {
+                            key = String(key);
+                            return key in data ? data[key] : null;
+                        },
+                        setItem: function (key, value) {
+                            key = String(key);
+                            data[key] = String(value);
+                            // Object.keys(localStorage) doit lister les clés,
+                            // comme pour un vrai Storage.
+                            if (!reserved[key]) {
+                                Object.defineProperty(storage, key, {
+                                    value: data[key],
+                                    configurable: true,
+                                    enumerable: true,
+                                    writable: true,
+                                });
+                            }
+                        },
+                        removeItem: function (key) {
+                            key = String(key);
+                            delete data[key];
+                            if (!reserved[key]) delete storage[key];
+                        },
+                        clear: function () {
+                            var keys = Object.keys(data);
+                            for (var i = 0; i < keys.length; i++) storage.removeItem(keys[i]);
+                        },
+                        key: function (index) {
+                            var keys = Object.keys(data);
+                            return index >= 0 && index < keys.length ? keys[index] : null;
+                        },
+                    });
+                    Object.defineProperty(storage, "length", {
+                        get: function () {
+                            return Object.keys(data).length;
+                        },
+                    });
+                    return storage;
+                }
+
+                function isUsable(name) {
+                    try {
+                        var storage = window[name];
+                        if (!storage) return false;
+                        storage.getItem("__movix_storage_probe__");
+                        return true;
+                    } catch (error) {
+                        return false;
+                    }
+                }
+
+                var names = ["localStorage", "sessionStorage"];
+                for (var i = 0; i < names.length; i++) {
+                    if (isUsable(names[i])) continue;
+                    try {
+                        Object.defineProperty(window, names[i], {
+                            value: createMemoryStorage(),
+                            configurable: true,
+                            enumerable: true,
+                            writable: false,
+                        });
+                        // Lu par la synchronisation de profil (App.tsx) : un
+                        // stockage éphémère ne doit jamais servir de base de sync.
+                        window.__MOVIX_MEMORY_STORAGE__ = window.__MOVIX_MEMORY_STORAGE__ || {};
+                        window.__MOVIX_MEMORY_STORAGE__[names[i]] = true;
+                    } catch (error) {
+                        // Propriété non remplaçable : comportement d'origine.
+                    }
+                }
+            })();
         </script>
         <script>
             // Object.hasOwn is ES2022 (Chrome 93+, Safari 15.4+, Firefox 92+). react-markdown
@@ -219,6 +309,28 @@
                         if (target.type !== "module" && target.src.indexOf("-legacy") === -1) return;
                         if (target.src.indexOf("/assets/") === -1) return;
                         if (recoveryStarted || recoveredFromUrl) return;
+
+                        // Le bundle legacy installe une vraie seconde tentative
+                        // au niveau SystemJS. Laisser passer le premier `error`
+                        // de sa balise dynamique ; si ce retry échoue aussi, le
+                        // prochain événement reprend la purge/recharge ci-dessous.
+                        // Les erreurs survenant avant l'installation du hook,
+                        // notamment dans les polyfills, gardent la récupération
+                        // directe.
+                        try {
+                            if (
+                                typeof window.__MOVIX_DEFER_LEGACY_SCRIPT_RECOVERY__ ===
+                                    "function" &&
+                                window.__MOVIX_DEFER_LEGACY_SCRIPT_RECOVERY__(
+                                    target.src
+                                )
+                            ) {
+                                return;
+                            }
+                        } catch (error) {
+                            // Une coordination défaillante ne doit pas désactiver
+                            // la récupération historique du bootstrap.
+                        }
 
                         try {
                             if (

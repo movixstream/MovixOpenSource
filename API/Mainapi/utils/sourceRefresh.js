@@ -11,7 +11,14 @@ function createSourceRefresh({ retryMs = 60000, maxEntries = 2000 } = {}) {
     map.set(key, value);
     if (map.size > maxEntries) map.delete(map.keys().next().value);
   };
+  const getFailure = (key) => {
+    const failure = failures.get(key);
+    if (failure && Date.now() < failure.retryAt) return failure.error;
+    failures.delete(key);
+    return null;
+  };
   return {
+    getFailure,
     recentlyChecked(key, intervalMs) {
       const checkedAt = checks.get(key);
       return checkedAt !== undefined && Date.now() - checkedAt < intervalMs;
@@ -20,9 +27,8 @@ function createSourceRefresh({ retryMs = 60000, maxEntries = 2000 } = {}) {
     forget(key) { checks.delete(key); failures.delete(key); },
     run(key, task) {
       return flight(key, async () => {
-        const failure = failures.get(key);
-        if (failure && Date.now() < failure.retryAt) throw failure.error;
-        failures.delete(key);
+        const failure = getFailure(key);
+        if (failure) throw failure;
         try {
           return await task();
         } catch (error) {

@@ -17,7 +17,6 @@ from yarl import URL
 from media_signing import compute_signature, is_public_http_url, verify_request
 
 ROUTE = '/streamed-proxy'
-CDN_SUFFIXES = ('strmd.st', 'tiktokcdn.com', 'tiktokcdn-us.com', 'tiktokcdn-eu.com', 'zohanayaan.com')
 REFERERS = ('https://embed.st/', 'https://exposestrat.com/')
 MAX_BODY = 32 * 1024 * 1024
 USER_AGENT = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -30,9 +29,7 @@ def media_url(value):
     host = parsed.hostname or ''
     if (parsed.scheme != 'https' or parsed.username or parsed.password or parsed.port
             or any(c.isspace() or ord(c) < 32 for c in value)
-            or not is_public_http_url(value)
-            or not (host == 'content.instructables.com'
-                    or any(host == suffix or host.endswith('.' + suffix) for suffix in CDN_SUFFIXES))):
+            or not host or not is_public_http_url(value)):
         raise ValueError('Invalid Streamed destination')
     return value
 

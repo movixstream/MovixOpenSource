@@ -1,6 +1,6 @@
 import { useLightMode } from '@/context/LightModeContext';
 import React, { useCallback, useEffect, useState } from 'react';
-import useEmblaCarousel from 'embla-carousel-react';
+import useEmblaCarousel from '@/hooks/useFlexGapEmblaCarousel';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { useTranslation } from 'react-i18next';
@@ -96,7 +96,7 @@ const EmblaCarouselPlatforms: React.FC<EmblaCarouselPlatformsProps> = ({ title, 
       )}
       <div className="relative w-full">
         <div className="overflow-visible" ref={emblaRef}>
-          <div className="flex gap-6 pr-8 md:pr-16 py-8 pl-4 md:pl-6">
+          <div className="flex gap-6 pr-8 md:pr-16 py-8 pl-4 md:pl-6 touch-pan-y touch-pinch-zoom">
             {items.map((platform) => (
               <div key={platform.id} className="flex-none">
                 <Link to={platform.route} className="platform-link block w-[250px] h-[150px] group select-none">
@@ -177,7 +177,8 @@ const EmblaCarouselPlatforms: React.FC<EmblaCarouselPlatformsProps> = ({ title, 
           aria-label={t('common.previous')}
           onClick={handlePrev}
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          className={`hidden md:flex absolute left-6 md:left-8 top-1/2 z-20
+          data-carousel-arrow="prev"
+          className={`group/icon hidden md:flex absolute left-6 md:left-8 top-1/2 z-20
                      w-12 h-32 rounded-2xl items-center justify-center text-white/90 hover:text-white
                      bg-gradient-to-b from-neutral-900/70 via-black/80 to-neutral-900/70 backdrop-blur-md
                      ring-1 ring-white/10 hover:ring-red-500/40
@@ -188,14 +189,15 @@ const EmblaCarouselPlatforms: React.FC<EmblaCarouselPlatformsProps> = ({ title, 
                      group-hover/carousel:opacity-100 group-hover/carousel:translate-x-0
                      ${!canScrollPrev ? 'pointer-events-none !opacity-0' : 'pointer-events-auto'}`}
         >
-          <ChevronLeft className="w-7 h-7" strokeWidth={2.25} />
+          <ChevronLeft className="w-7 h-7 text-white opacity-90 group-hover/icon:opacity-100 transition-opacity duration-300" strokeWidth={2.25} />
         </button>
         <button
           type="button"
           aria-label={t('common.next')}
           onClick={handleNext}
           onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          className={`hidden md:flex absolute right-6 md:right-8 top-1/2 z-20
+          data-carousel-arrow="next"
+          className={`group/icon hidden md:flex absolute right-6 md:right-8 top-1/2 z-20
                      w-12 h-32 rounded-2xl items-center justify-center text-white/90 hover:text-white
                      bg-gradient-to-b from-neutral-900/70 via-black/80 to-neutral-900/70 backdrop-blur-md
                      ring-1 ring-white/10 hover:ring-red-500/40
@@ -206,7 +208,7 @@ const EmblaCarouselPlatforms: React.FC<EmblaCarouselPlatformsProps> = ({ title, 
                      group-hover/carousel:opacity-100 group-hover/carousel:translate-x-0
                      ${!canScrollNext ? 'pointer-events-none !opacity-0' : 'pointer-events-auto'}`}
         >
-          <ChevronRight className="w-7 h-7" strokeWidth={2.25} />
+          <ChevronRight className="w-7 h-7 text-white opacity-90 group-hover/icon:opacity-100 transition-opacity duration-300" strokeWidth={2.25} />
         </button>
       </div>
     </div>

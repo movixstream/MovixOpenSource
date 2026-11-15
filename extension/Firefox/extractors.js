@@ -350,13 +350,44 @@ function extractM3u8UrlFromDecodedScript(script, embedUrl) {
                     step += sign * parseInt(numPart, 10);
                 }
             } else if (/^(?:0[xX][0-9a-fA-F]+|\d+)$/.test(t)) {
-                seed += sign * parseInt(t, 10);
+                seed += sign * Number(t);
             } else if (/^[A-Za-z_$][\w$]*$/.test(t)) {
-                seed += sign * hostnameSum;
+                seed += sign * resolveRollingIdentifier(t, hostnameSum);
             }
         }
 
         return { seed, step };
+    };
+
+    // Le lecteur ajoute à la clé la largeur d'un div caché
+    // (`width:calc(1in + 43px)` → offsetWidth = 139 px en CSS). On relit la
+    // valeur depuis la page pour suivre une éventuelle rotation (cm, mm, calc…).
+    const CSS_PX_PER_UNIT = { px: 1, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, pt: 96 / 72, pc: 16, q: 96 / 101.6 };
+    const cssLengthToPx = (value) => {
+        let total = 0;
+        let found = false;
+        for (const term of String(value).matchAll(/([-+]?)\s*(\d+(?:\.\d+)?)\s*(px|in|cm|mm|pt|pc|q)\b/gi)) {
+            total += (term[1] === '-' ? -1 : 1) * parseFloat(term[2]) * CSS_PX_PER_UNIT[term[3].toLowerCase()];
+            found = true;
+        }
+        return found ? Math.round(total) : null;
+    };
+    const resolveRollingIdentifier = (name, hostnameSum) => {
+        const token = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const source = String(script || '');
+        const measured = new RegExp(`\\b${token}\\s*=\\s*[A-Za-z_$][\\w$]*\\.(?:offset|client)(Width|Height)\\b`).exec(source);
+        if (measured) {
+            const axis = measured[1] === 'Width' ? 'width' : 'height';
+            const css = new RegExp(`(?:^|[;"'\\s])${axis}\\s*:\\s*([^;"']+)`, 'i')
+                .exec(source.substring(Math.max(0, measured.index - 600), measured.index));
+            const pixels = css ? cssLengthToPx(css[1]) : null;
+            return pixels ?? 0;
+        }
+        const literal = new RegExp(`\\b${token}\\s*=\\s*(0[xX][0-9a-fA-F]+|\\d+)\\s*[;,]`).exec(source);
+        if (literal && !new RegExp(`\\b${token}\\s*=\\s*\\(?\\s*${token}\\s*\\+`).test(source)) {
+            return Number(literal[1]);
+        }
+        return hostnameSum;
     };
 
     const unifiedRollingXorPattern =
@@ -385,18 +416,38 @@ function extractM3u8UrlFromDecodedScript(script, embedUrl) {
             const rawDecoded = atob(paddedPayload);
             const byteArray = Array.from(rawDecoded, c => c.charCodeAt(0));
             if (groups.bytes) byteArray.reverse();
-            const decodedBytes = Uint8Array.from(
-                byteArray,
-                (byteVal, index) => byteVal ^ ((parameters.seed + index * parameters.step) & mask),
-            );
             const matchIndex = match.index || 0;
             const matchTail = script.substring(matchIndex);
-            if (!groups.bytes && /\.reverse\(\s*\)\s*\.join/.test(matchTail.substring(0, 500))) {
-                decodedBytes.reverse();
-            }
-            const decoded = new TextDecoder('utf-8', { fatal: false }).decode(decodedBytes);
-            const candidate = normalizeCandidate(decoded);
+            const postReverse = !groups.bytes && /\.reverse\(\s*\)\s*\.join/.test(matchTail.substring(0, 500));
+            const decodeWith = (seed, fatal) => {
+                const decodedBytes = Uint8Array.from(
+                    byteArray,
+                    (byteVal, index) => byteVal ^ ((seed + index * parameters.step) & mask),
+                );
+                if (postReverse) decodedBytes.reverse();
+                try {
+                    return new TextDecoder('utf-8', { fatal }).decode(decodedBytes);
+                } catch {
+                    return '';
+                }
+            };
+            const candidate = normalizeCandidate(decodeWith(parameters.seed, false));
             if (candidate) return candidate;
+
+            // La graine dépend de mesures faites dans le navigateur
+            // (offsetWidth d'un div enfant à 50 % d'un parent en
+            // `calc(1in + Npx)`, somme du hostname…) que la page fait
+            // tourner. Une mesure mal relue donne une clé fausse, donc le
+            // leurre `troll`. La graine n'a que `mask + 1` valeurs
+            // possibles : on les essaie toutes et on n'accepte qu'une URL
+            // m3u8 complète, en ASCII imprimable, hors leurre.
+            for (let alternative = 0; alternative <= mask; alternative++) {
+                if (alternative === (parameters.seed & mask)) continue;
+                const decoded = decodeWith(alternative, true);
+                if (!/^https:\/\/[\x21-\x7e]+$/i.test(decoded)) continue;
+                const fallback = normalizeCandidate(decoded);
+                if (fallback) return fallback;
+            }
         } catch {}
     }
 
@@ -564,6 +615,137 @@ async function extractFsvidVidzyM3u8(html, embedUrl, provider) {
     }
 }
 
+// Sans clé `gk`, le CDN Fsvid/Vidzy ne sert que les 9 à 19 premiers segments
+// (selon le serveur), puis répond 403. Leur lecteur demande cette clé à une
+// « porte » (gate.php chez Vidzy, /gk chez Fsvid) avec une empreinte du
+// navigateur, puis l'ajoute au master ; le CDN la recopie ensuite dans les
+// URLs des variantes et des segments. La clé ne dépend ni de l'IP ni de la
+// vidéo, et les deux hébergeurs partagent la même : une seule sert partout.
+// La porte refuse (`{"ok":0}`) une empreinte sans canvas : faute de canvas
+// (service worker sans OffscreenCanvas, QuickJS), on envoie les largeurs que
+// mesure Chrome sous Windows.
+const FSVID_VIDZY_GATE_TEXT = 'Movix7Qm@Éédoà1l';
+const FSVID_VIDZY_GATE_FALLBACK_WIDTHS = { serif: 159.56, sans: 170.34 };
+const FSVID_VIDZY_GATE_URLS = {
+    vidzy: 'https://v6.vidzy.cc/gate.php',
+    fsvid: 'https://fsvid.lol/gk',
+};
+const FSVID_VIDZY_GATE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const FSVID_VIDZY_GATE_RETRY_AFTER_MS = 60 * 1000;
+let fsvidVidzyGateKey = null;
+let fsvidVidzyGateKeyPromise = null;
+
+function measureFsvidVidzyGateText() {
+    try {
+        const canvas = typeof OffscreenCanvas === 'function'
+            ? new OffscreenCanvas(16, 16)
+            : (typeof document !== 'undefined' ? document.createElement('canvas') : null);
+        const context = canvas?.getContext?.('2d');
+        if (context) {
+            const measure = (font) => {
+                context.textBaseline = 'top';
+                context.font = font;
+                return Math.round(context.measureText(FSVID_VIDZY_GATE_TEXT).width * 100) / 100;
+            };
+            const serif = measure('18px serif');
+            const sans = measure('18px sans-serif');
+            if (Number.isFinite(serif) && Number.isFinite(sans) && serif > 0 && sans > 0) {
+                return { serif, sans };
+            }
+        }
+    } catch {}
+    return FSVID_VIDZY_GATE_FALLBACK_WIDTHS;
+}
+
+function buildFsvidVidzyGateQuery() {
+    const { serif, sans } = measureFsvidVidzyGateText();
+    const nav = typeof navigator !== 'undefined' ? navigator : {};
+    const scr = typeof screen !== 'undefined' ? screen : {};
+    const dpr = typeof devicePixelRatio === 'number' && devicePixelRatio > 0 ? devicePixelRatio : 1;
+    return [
+        ['v', 'p1'], ['cw', serif], ['cw2', sans], ['wg', 1], ['dpr', dpr],
+        ['sw', scr.width || 1920], ['hw', nav.hardwareConcurrency || 8],
+        ['ft', 'TOP'], ['rf', ''],
+    ].map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&');
+}
+
+function getFsvidVidzyGateUrls(html, provider) {
+    const urls = [];
+    // Vidzy écrit l'adresse de sa porte dans la page : la suivre si elle change.
+    const inline = /fetch\(\s*['"](https:\/\/[a-z0-9.-]+\/gate\.php)\?/i.exec(String(html || ''));
+    if (inline && /(?:^|\.)(?:vidzy\.cc|vidzy\.org|fsvid\.lol)$/i.test(new URL(inline[1]).hostname)) {
+        urls.push(inline[1]);
+    }
+    urls.push(FSVID_VIDZY_GATE_URLS[provider], FSVID_VIDZY_GATE_URLS[provider === 'fsvid' ? 'vidzy' : 'fsvid']);
+    return [...new Set(urls)];
+}
+
+async function requestFsvidVidzyGateKey(gateUrls) {
+    const query = buildFsvidVidzyGateQuery();
+    for (const gateUrl of gateUrls) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        try {
+            const resp = await fetch(`${gateUrl}?${query}`, {
+                cache: 'no-store',
+                credentials: 'omit',
+                signal: controller.signal,
+            });
+            if (!resp.ok) continue;
+            const data = await resp.json();
+            if (typeof data?.gk === 'string' && /^[A-Za-z0-9_.-]{16,512}$/.test(data.gk)) {
+                return data.gk;
+            }
+        } catch {
+            // Porte suivante.
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+    return null;
+}
+
+function getFsvidVidzyGateKey(html, provider) {
+    if (fsvidVidzyGateKey && fsvidVidzyGateKey.expiresAt > Date.now()) {
+        return Promise.resolve(fsvidVidzyGateKey.value);
+    }
+    if (!fsvidVidzyGateKeyPromise) {
+        fsvidVidzyGateKeyPromise = requestFsvidVidzyGateKey(getFsvidVidzyGateUrls(html, provider))
+            .then((value) => {
+                // La clé se termine par `.<émission>.<durée en s>` : la garder la
+                // moitié de sa durée, sans dépasser six heures.
+                const ttl = Number(String(value || '').split('.')[2]);
+                const lifetime = Number.isFinite(ttl) && ttl > 0
+                    ? Math.min(FSVID_VIDZY_GATE_MAX_AGE_MS, ttl * 500)
+                    : FSVID_VIDZY_GATE_MAX_AGE_MS;
+                // Après un échec, ne pas rappeler les portes à chaque extraction.
+                fsvidVidzyGateKey = {
+                    value: value || null,
+                    expiresAt: Date.now() + (value ? lifetime : FSVID_VIDZY_GATE_RETRY_AFTER_MS),
+                };
+                return value;
+            })
+            .finally(() => {
+                fsvidVidzyGateKeyPromise = null;
+            });
+    }
+    return fsvidVidzyGateKeyPromise;
+}
+
+function hasFsvidVidzyGateKey(url) {
+    return /[?&]gk=/.test(String(url || ''));
+}
+
+async function withFsvidVidzyGateKey(m3u8Url, html, provider) {
+    if (hasFsvidVidzyGateKey(m3u8Url)) return m3u8Url;
+    const gateKey = await getFsvidVidzyGateKey(html, provider);
+    if (!gateKey) {
+        console.warn(`[EXT-${provider.toUpperCase()}] Gate key unavailable, playback will stop early`);
+        return m3u8Url;
+    }
+    return `${m3u8Url}${m3u8Url.includes('?') ? '&' : '?'}gk=${encodeURIComponent(gateKey)}`;
+}
+
 function extractUqloadMediaUrl(html) {
     const candidates = [];
     const collect = value => {
@@ -589,6 +771,102 @@ function extractUqloadMediaUrl(html) {
         candidates.find(url => /\/v\.mp4(?:[?#]|$)/i.test(url)) ||
         null
     );
+}
+
+// Code ISO 639-1 déduit du libellé jwplayer ou du suffixe du fichier
+// (`abc_fre.vtt`), pour que le lecteur Movix range la piste dans la bonne langue.
+const UQLOAD_SUBTITLE_LANGS = [
+    ['fr', /\b(?:fr|fra|fre|french|fran[cç]ais|vf|vostfr)\b/i],
+    ['en', /\b(?:en|eng|english|anglais)\b/i],
+    ['es', /\b(?:es|spa|spanish|espa[nñ]ol)\b/i],
+    ['de', /\b(?:de|ger|deu|german|deutsch)\b/i],
+    ['it', /\b(?:it|ita|italian|italiano)\b/i],
+    ['pt', /\b(?:pt|por|portuguese|portugu[eê]s)\b/i],
+    ['ar', /\b(?:ar|ara|arabic|arabe)\b/i],
+];
+
+function guessUqloadSubtitleLang(label, url) {
+    const file = String(url || '').split(/[?#]/)[0].split('/').pop() || '';
+    const haystack = `${label || ''} ${file.replace(/[_.-]/g, ' ')}`;
+    for (const [code, pattern] of UQLOAD_SUBTITLE_LANGS) {
+        if (pattern.test(haystack)) return code;
+    }
+    return 'und';
+}
+
+/**
+ * Sous-titres déclarés dans `jwplayer().setup({ tracks: [...] })`.
+ * On ignore les vignettes (`kind: "thumbnails"`) et le `empty.srt` factice
+ * qu'Uqload ajoute sous le libellé « Upload captions ».
+ */
+function extractUqloadSubtitles(html, pageUrl) {
+    const sources = [String(html || '')];
+    const decoded = deobfuscatePackedScript(html);
+    if (decoded) sources.push(decoded);
+
+    const subtitles = [];
+    const seen = new Set();
+    for (const source of sources) {
+        const normalized = source.replace(/\\\//g, '/');
+        for (const block of normalized.matchAll(/tracks\s*:\s*\[([\s\S]{0,8000}?)\]/g)) {
+            for (const entry of block[1].matchAll(/\{[^{}]*\}/g)) {
+                const field = name => {
+                    const match = new RegExp(`["']?${name}["']?\\s*:\\s*["']([^"']*)["']`, 'i').exec(entry[0]);
+                    return match ? match[1].trim() : '';
+                };
+                const file = field('file') || field('src');
+                const kind = (field('kind') || 'captions').toLowerCase();
+                if (!file || (kind !== 'captions' && kind !== 'subtitles')) continue;
+                if (/\/empty\.(?:srt|vtt)(?:[?#]|$)/i.test(file)) continue;
+                if (!/\.(?:vtt|srt)(?:[?#]|$)/i.test(file)) continue;
+
+                let url;
+                try {
+                    url = parseAllowedUqloadUrl(new URL(file, pageUrl).href).href;
+                } catch {
+                    continue;
+                }
+                if (seen.has(url)) continue;
+                seen.add(url);
+
+                const label = field('label');
+                const lang = guessUqloadSubtitleLang(label, url);
+                subtitles.push({
+                    url,
+                    label: label || (lang !== 'und' ? lang.toUpperCase() : `Piste ${subtitles.length + 1}`),
+                    lang,
+                    format: /\.srt(?:[?#]|$)/i.test(url) ? 'srt' : 'vtt',
+                    default: /["']?default["']?\s*:\s*(?:true|["']true["'])/i.test(entry[0]),
+                });
+                if (subtitles.length >= 20) return subtitles;
+            }
+        }
+    }
+    return subtitles;
+}
+
+/**
+ * Télécharge le texte des sous-titres ici, avec le Referer Uqload : le site
+ * Movix ne peut pas les lire lui-même (pas d'en-têtes CORS chez Uqload).
+ * Une piste qui échoue garde son URL seule, le lecteur tentera sa chance.
+ */
+async function fetchUqloadSubtitleContents(subtitles, headers) {
+    const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
+    return Promise.all(subtitles.slice(0, 8).map(async subtitle => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        try {
+            const resp = await fetch(subtitle.url, { headers, signal: controller.signal });
+            if (!resp.ok) return subtitle;
+            const content = await resp.text();
+            if (!content.trim() || content.length > MAX_SUBTITLE_BYTES || /^\s*</.test(content)) return subtitle;
+            return { ...subtitle, content };
+        } catch {
+            return subtitle;
+        } finally {
+            clearTimeout(timer);
+        }
+    }));
 }
 
 /**
@@ -845,7 +1123,7 @@ async function extractFsvid(fsvidUrl) {
     const cacheKey = md5Hash(embedUrl);
     const cached = caches.fsvid.get(cacheKey);
     const cachedMediaUrl = normalizeFsvidVidzyMediaUrl(cached?.m3u8Url, embedUrl, 'fsvid');
-    if (cached && cachedMediaUrl) {
+    if (cached && cachedMediaUrl && hasFsvidVidzyGateKey(cachedMediaUrl)) {
         console.log('[EXT-FSVID] Cache hit');
         return { ...cached, m3u8Url: cachedMediaUrl, fromCache: true };
     }
@@ -889,9 +1167,10 @@ async function extractFsvid(fsvidUrl) {
             return { success: false, error: 'Fsvid: M3U8 not found in page' };
         }
 
-        console.log(`[EXT-FSVID] Final M3U8 URL: ${m3u8Url}`);
-        const result = { m3u8Url, success: true, source: 'fsvid' };
-        caches.fsvid.set(cacheKey, result);
+        const playableUrl = await withFsvidVidzyGateKey(m3u8Url, html, 'fsvid');
+        console.log(`[EXT-FSVID] Final M3U8 URL: ${playableUrl}`);
+        const result = { m3u8Url: playableUrl, success: true, source: 'fsvid' };
+        if (hasFsvidVidzyGateKey(playableUrl)) caches.fsvid.set(cacheKey, result);
         return result;
 
     } catch (e) {
@@ -916,7 +1195,7 @@ async function extractVidzy(vidzyUrl) {
     const cacheKey = md5Hash(embedUrl);
     const cached = caches.vidzy.get(cacheKey);
     const cachedMediaUrl = normalizeFsvidVidzyMediaUrl(cached?.m3u8Url, embedUrl, 'vidzy');
-    if (cached && cachedMediaUrl) {
+    if (cached && cachedMediaUrl && hasFsvidVidzyGateKey(cachedMediaUrl)) {
         return { ...cached, m3u8Url: cachedMediaUrl, fromCache: true };
     }
 
@@ -942,8 +1221,9 @@ async function extractVidzy(vidzyUrl) {
 
         if (!m3u8Url) return { success: false, error: 'Vidzy: M3U8 not found in page' };
 
-        const result = { m3u8Url, success: true, source: 'vidzy' };
-        caches.vidzy.set(cacheKey, result);
+        const playableUrl = await withFsvidVidzyGateKey(m3u8Url, html, 'vidzy');
+        const result = { m3u8Url: playableUrl, success: true, source: 'vidzy' };
+        if (hasFsvidVidzyGateKey(playableUrl)) caches.vidzy.set(cacheKey, result);
         return result;
 
     } catch (e) {
@@ -1127,12 +1407,14 @@ async function extractUqload(uqloadUrl) {
         // Try embed and non-embed versions without leaving the validated host.
         const urls = [fullUrl, fullUrl.replace('/embed-', '/')];
         let html = null;
+        let pageUrl = fullUrl;
 
         for (const url of urls) {
             try {
                 const resp = await fetch(url, { headers, signal: controller.signal });
                 if (resp.ok) {
                     html = await resp.text();
+                    pageUrl = resp.url || url;
                     break;
                 }
             } catch {
@@ -1146,7 +1428,12 @@ async function extractUqload(uqloadUrl) {
         const videoUrl = extractUqloadMediaUrl(html);
         if (!videoUrl) return { success: false, error: 'Uqload: video URL not found' };
 
+        const subtitles = await fetchUqloadSubtitleContents(
+            extractUqloadSubtitles(html, pageUrl),
+            headers,
+        );
         const result = { m3u8Url: videoUrl, success: true, source: 'uqload' };
+        if (subtitles.length) result.subtitles = subtitles;
         caches.uqload.set(cacheKey, result);
         return result;
     } catch (e) {
@@ -1776,7 +2063,10 @@ const VOE_DOMAIN_PATTERN = new RegExp(
     + '|sandratableother|sandrataxeight|scatch176duplicities|sethniceletter|shannonpersonalcost'
     + '|simpulumlamerop|smoki|stevenfamilyedge|stevenimaginelittle|strawberriesporail|telyn610zoanthropy'
     + '|timberwoodanotia|timmaybealready|toddpartneranimal|toxitabellaeatrebates306|tracylocalschool'
-    + '|uptodatefinishconferenceroom|valeronevijao|walterprettytheir|wolfdyslectic|yodelswartlike)\\.',
+    + '|uptodatefinishconferenceroom|valeronevijao|walterprettytheir|wolfdyslectic|yodelswartlike'
+    // Domaines VOE des lecteurs d'anime-sama (2026-10-19)
+    + '|claireguessthousand|derricknationtop|jamesbornmain|jeremyparticipantanything|megankiddifference'
+    + '|teresapoliticallearn)\\.',
     'i'
 );
 
@@ -1915,6 +2205,24 @@ async function extractAll(sources) {
 /**
  * Set up DNR headers for a service's extracted URL so the browser player can use it
  */
+/**
+ * Cookie de session que le master Fsvid/Vidzy pose (`vz_pe`/`fsv_pe`, valeur
+ * = jeton `t=` de son URL). Depuis le 2026-10-27, Vidzy sert sa fausse
+ * playlist de 177 octets à la place des segments après quelques dizaines de
+ * requêtes sans lui. Le navigateur ne le renvoie pas : cookie tiers (bloqué
+ * par Brave), et hls.js lit sans `credentials`. N'importe quel jeton valide
+ * du même serveur suffit, d'où une seule règle par domaine.
+ */
+function fsvidVidzySessionCookie(url) {
+    try {
+        const token = new URL(url).searchParams.get('t') || '';
+        if (!/^[A-Za-z0-9_-]{16,128}$/.test(token)) return null;
+        return `vz_pe=${token}; fsv_pe=${token}`;
+    } catch {
+        return null;
+    }
+}
+
 async function setupHeadersForService(type, url, referer) {
     // Fsvid needs different referers:
     // - Embed page (fsvid.lol/embed-xxx) → fsmirror46.lol (required by fsvid to serve content)
@@ -1972,8 +2280,12 @@ async function setupHeadersForService(type, url, referer) {
         kisskh: { 'Referer': 'https://kisskh.do/', 'Origin': 'https://kisskh.do' },
     };
 
-    const hdrs = headerMap[type];
+    let hdrs = headerMap[type];
     if (!hdrs || !url) return;
+    if (type === 'fsvid' || type === 'vidzy') {
+        const cookie = fsvidVidzySessionCookie(url);
+        if (cookie) hdrs = { ...hdrs, 'Cookie': cookie };
+    }
 
     try {
         const parsedUrl = new URL(url);

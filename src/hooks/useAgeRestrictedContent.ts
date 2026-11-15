@@ -65,18 +65,21 @@ export const useAgeRestrictedContent = <T extends AgeClassifiableContent>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ageRestriction, requestKey]);
 
-  if (!ageRestriction || ageRestriction <= 0) {
-    return { items: [...items], isFiltering: false };
-  }
+  // Preserve identity on unrelated renders (carousel arrow state, for example)
+  // so consumers do not rebuild every card's progress/watchlist data.
+  return useMemo(() => {
+    if (!ageRestriction || ageRestriction <= 0) {
+      return { items: [...items], isFiltering: false };
+    }
 
-  // A changed profile or a newly loaded list must never render stale cards
-  // from the prior profile while the effect above is scheduled.
-  if (state.requestKey !== requestKey) {
-    return { items: [], isFiltering: true };
-  }
+    // Never expose the previous profile's cards while its replacement loads.
+    if (state.requestKey !== requestKey) {
+      return { items: [], isFiltering: true };
+    }
 
-  return {
-    items: items.filter((item) => state.allowedKeys.has(getContentAgeKey(item))),
-    isFiltering: state.isFiltering,
-  };
+    return {
+      items: items.filter((item) => state.allowedKeys.has(getContentAgeKey(item))),
+      isFiltering: state.isFiltering,
+    };
+  }, [items, ageRestriction, state, requestKey]);
 };

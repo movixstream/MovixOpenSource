@@ -10,11 +10,19 @@ const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
 const CACHE_KEY = 'movix_tmdb_images_cache_v7';
 const CACHE_TIMESTAMP_KEY = 'movix_tmdb_images_cache_v7_timestamp';
 const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+const MAX_CACHE_ENTRIES = 500;
 
 type ImageEntry = {
   logoUrl: string | null;
   posterUrl: string | null;
 };
+
+type HookEntry = {
+  key: string | null;
+  value: ImageEntry;
+};
+
+const EMPTY_IMAGE_ENTRY: ImageEntry = Object.freeze({ logoUrl: null, posterUrl: null });
 
 // Normalise une entrée cache (potentiellement persistée par une version
 // antérieure du schéma) → toujours retourner une ImageEntry complète. Évite
@@ -37,14 +45,22 @@ function normalizeEntry(raw: unknown): ImageEntry {
 // fetchAndCache) — sans ça, chaque appel refaisait un sessionStorage.getItem
 // + JSON.parse du blob COMPLET. Hydratée depuis sessionStorage seulement au
 // premier appel ou après expiration TTL ; setCache met à jour la copie
-// mémoire ET sessionStorage. Best-effort multi-onglets : une divergence
+// mémoire et diffère la persistance. Best-effort multi-onglets : une divergence
 // temporaire entre onglets (un autre onglet écrit pendant que le TTL courant
 // est encore valide ici) est acceptable.
-let memoryCache: Record<string, ImageEntry> | null = null;
+let memoryCache: Map<string, ImageEntry> | null = null;
 let memoryCacheTimestamp = 0;
 
 // Helper functions for sessionStorage cache
-function getCache(): Record<string, ImageEntry> {
+function trimCache(cache: Map<string, ImageEntry>): void {
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (oldestKey === undefined) return;
+    cache.delete(oldestKey);
+  }
+}
+
+function getCache(): Map<string, ImageEntry> {
   const now = Date.now();
   if (memoryCache && (now - memoryCacheTimestamp) < CACHE_DURATION_MS) {
     return memoryCache;
@@ -59,10 +75,11 @@ function getCache(): Record<string, ImageEntry> {
       const isValid = (now - parsedTimestamp) < CACHE_DURATION_MS;
       if (isValid) {
         const parsed = JSON.parse(cached) as Record<string, unknown>;
-        const normalized: Record<string, ImageEntry> = {};
+        const normalized = new Map<string, ImageEntry>();
         for (const k of Object.keys(parsed)) {
-          normalized[k] = normalizeEntry(parsed[k]);
+          normalized.set(k, normalizeEntry(parsed[k]));
         }
+        trimCache(normalized);
         memoryCache = normalized;
         memoryCacheTimestamp = parsedTimestamp;
         return memoryCache;
@@ -72,20 +89,83 @@ function getCache(): Record<string, ImageEntry> {
     // Ignore parse errors
   }
 
-  memoryCache = {};
+  memoryCache = new Map();
   memoryCacheTimestamp = now;
   return memoryCache;
 }
 
-function setCache(cache: Record<string, ImageEntry>) {
-  memoryCache = cache;
-  memoryCacheTimestamp = Date.now();
+function readCacheEntry(key: string): ImageEntry | undefined {
+  const cache = getCache();
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+
+  // Map conserve l'ordre d'insertion : replacer une entrée lue en fin donne
+  // un LRU simple sans compteur ni timestamp par carte.
+  cache.delete(key);
+  cache.set(key, entry);
+  return entry;
+}
+
+let cacheWriteTimer: ReturnType<typeof setTimeout> | undefined;
+let cacheWriteIdle: number | undefined;
+
+function persistCache() {
+  if (cacheWriteTimer !== undefined) clearTimeout(cacheWriteTimer);
+  if (cacheWriteIdle !== undefined) window.cancelIdleCallback?.(cacheWriteIdle);
+  cacheWriteTimer = cacheWriteIdle = undefined;
+  if (!memoryCache) return;
   try {
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify(Object.fromEntries(memoryCache)));
     sessionStorage.setItem(CACHE_TIMESTAMP_KEY, memoryCacheTimestamp.toString());
   } catch {
-    // Ignore storage errors (quota exceeded, etc.)
+    // Cache best-effort: private browsing and full storage must still work.
   }
+}
+
+function setCacheEntry(key: string, entry: ImageEntry) {
+  const cache = getCache();
+  cache.delete(key);
+  cache.set(key, entry);
+  trimCache(cache);
+  memoryCache = cache;
+  memoryCacheTimestamp = Date.now();
+  // Updating React consumers only needs the memory cache. Coalesce the full
+  // JSON serialization/storage write instead of doing it for every poster.
+  if (cacheWriteTimer !== undefined || cacheWriteIdle !== undefined) return;
+  cacheWriteTimer = setTimeout(() => {
+    cacheWriteTimer = undefined;
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+      cacheWriteIdle = window.requestIdleCallback(persistCache, { timeout: 2000 });
+    } else {
+      persistCache();
+    }
+  }, 1000);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    if (cacheWriteTimer !== undefined || cacheWriteIdle !== undefined) persistCache();
+  });
+}
+
+// Shared across every carousel and hook, also before the service worker has
+// taken control. A per-row limit still multiplies the work by the row count.
+const MAX_IMAGE_REQUESTS = 3;
+let activeImageRequests = 0;
+const pendingImageRequests: Array<() => void> = [];
+
+function withImageRequestSlot<T>(request: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      activeImageRequests++;
+      void Promise.resolve().then(request).then(resolve, reject).finally(() => {
+        activeImageRequests--;
+        pendingImageRequests.shift()?.();
+      });
+    };
+    if (activeImageRequests < MAX_IMAGE_REQUESTS) run();
+    else pendingImageRequests.push(run);
+  });
 }
 
 // Pick the best image asset by language priority: interface lang > EN > untagged > any.
@@ -124,22 +204,38 @@ function pickBestImage(images: TmdbImage[], preferredLanguage: string): TmdbImag
 // Promesses en vol partagées au scope module. Si plusieurs cards (même
 // carousel ou carousels différents) demandent la même paire (mediaType, id)
 // au même moment, elles JOIGNENT la même Promise au lieu de fire 30 requêtes
-// redondantes pour le même item. Le prefetch idle au mount d'EmblaCarousel
-// utilise aussi ce map → 0 fetch dupliqué entre prefetch et hook subscribe.
-const inflight = new Map<string, Promise<ImageEntry>>();
+// redondantes pour le même item. Les requêtes en attente partagent aussi
+// cette Promise, y compris entre prefetch et hooks.
+type ImageRequest = {
+  promise: Promise<ImageEntry>;
+  consumers: Set<() => boolean>;
+};
+const inflight = new Map<string, ImageRequest>();
 
 async function fetchAndCache(
   mediaType: 'movie' | 'tv',
   id: number,
   language: string,
+  isNeeded: () => boolean = () => true,
 ): Promise<ImageEntry> {
   const key = getCacheEntryKey(mediaType, id, language);
-  const cache = getCache();
-  if (key in cache) return cache[key];
-  if (inflight.has(key)) return inflight.get(key)!;
+  const cached = readCacheEntry(key);
+  if (cached) return cached;
+  const pending = inflight.get(key);
+  if (pending) {
+    pending.consumers.add(isNeeded);
+    return pending.promise;
+  }
 
-  const promise = (async () => {
+  const consumers = new Set([isNeeded]);
+
+  const promise = withImageRequestSlot(async () => {
     try {
+      // A fast scroll can hide a card before it gets a network slot. Skip its
+      // queued work unless another card (or an explicit prefetch) still needs
+      // the same metadata. Do not cache a skipped request as a missing image.
+      if (![...consumers].some((needed) => needed())) return EMPTY_IMAGE_ENTRY;
+
       // include_image_language=<lang>,en,null = langue d'interface + EN +
       // untagged (sinon TMDB n'expose que en+null par défaut, on perd toutes
       // les versions localisées).
@@ -151,6 +247,7 @@ async function fetchAndCache(
           api_key: TMDB_API_KEY,
           include_image_language: includeImageLanguage,
         },
+        timeout: 10000,
       });
 
       const logo = pickBestImage(res.data.logos || [], language);
@@ -161,31 +258,26 @@ async function fetchAndCache(
         posterUrl: poster ? `https://image.tmdb.org/t/p/w342${poster.file_path}` : null,
       };
 
-      const updated = getCache();
-      updated[key] = result;
-      setCache(updated);
+      setCacheEntry(key, result);
       return result;
     } catch {
       // Cache empty result to avoid repeated failed requests
       const result: ImageEntry = { logoUrl: null, posterUrl: null };
-      const updated = getCache();
-      updated[key] = result;
-      setCache(updated);
+      setCacheEntry(key, result);
       return result;
     } finally {
       inflight.delete(key);
     }
-  })();
+  });
 
-  inflight.set(key, promise);
+  inflight.set(key, { promise, consumers });
   return promise;
 }
 
 /**
  * Prefetch & cache (logo + poster) sans souscrire à un état React.
  *
- * Usage : EmblaCarousel idle prewarm pour remplir la cache avant que les
- * cards ne soient hover/visibles. Joint l'inflight map si une requête est
+ * Joint l'inflight map si une requête est
  * déjà en vol pour la même paire (mediaType, id) → 0 doublon avec les
  * hooks `useTmdbImages` mountés sur les cards qui partagent le même item.
  */
@@ -205,49 +297,56 @@ export async function prefetchTmdbImages(mediaType: 'movie' | 'tv', id: number):
  * @param mediaType 'movie' | 'tv'
  * @param id TMDB ID
  * @param refreshKey Optional refresh key
+ * @param enabled Fetch missing metadata only when the card is near the viewport
  * @returns { logoUrl, posterUrl } — null si non disponible
  */
 export function useTmdbImages(
   mediaType: 'movie' | 'tv' | undefined,
   id: number | undefined,
   refreshKey?: number,
+  enabled = true,
 ): ImageEntry {
   const imageLanguage = getImageLanguage();
+  const currentKey = mediaType && id
+    ? getCacheEntryKey(mediaType, id, imageLanguage)
+    : null;
 
   // Init synchronously from cache : si l'entrée a déjà été fetchée par le
   // prefetch idle d'EmblaCarousel ou par un autre hook au mount précédent,
   // on retourne la valeur dès le premier render — 0 flicker.
-  const [, setEntry] = useState<ImageEntry>(() => {
-    if (!mediaType || !id) return { logoUrl: null, posterUrl: null };
-    const cache = getCache();
-    return cache[getCacheEntryKey(mediaType, id, imageLanguage)] ?? { logoUrl: null, posterUrl: null };
+  const [entry, setEntry] = useState<HookEntry>(() => {
+    if (!currentKey) return { key: null, value: EMPTY_IMAGE_ENTRY };
+    return {
+      key: currentKey,
+      value: readCacheEntry(currentKey) ?? EMPTY_IMAGE_ENTRY,
+    };
   });
 
   useEffect(() => {
-    if (!mediaType || !id) {
-      setEntry({ logoUrl: null, posterUrl: null });
+    if (!mediaType || !id || !currentKey) return;
+
+    const cached = readCacheEntry(currentKey);
+
+    if (cached) {
+      setEntry(previous => previous.key === currentKey && previous.value === cached
+        ? previous
+        : { key: currentKey, value: cached });
       return;
     }
 
-    const key = getCacheEntryKey(mediaType, id, imageLanguage);
-    const cache = getCache();
-
-    if (key in cache) {
-      setEntry(cache[key]);
-      return;
-    }
-
+    // Ne pas vider une valeur déjà affichée pour cette même clé si son entrée
+    // vient d'être évincée du LRU. Si la clé a changé, la garde du return plus
+    // bas masque immédiatement l'ancienne valeur pendant ce render.
+    if (!enabled) return;
     let cancelled = false;
-    fetchAndCache(mediaType, id, imageLanguage).then((result) => {
-      if (!cancelled) setEntry(result);
+    fetchAndCache(mediaType, id, imageLanguage, () => !cancelled).then((result) => {
+      if (!cancelled) setEntry({ key: currentKey, value: result });
     });
     return () => { cancelled = true; };
-  }, [mediaType, id, refreshKey, imageLanguage]);
+  }, [mediaType, id, refreshKey, imageLanguage, currentKey, enabled]);
 
-  if (!mediaType || !id) return { logoUrl: null, posterUrl: null };
-
-  const cache = getCache();
-  return cache[getCacheEntryKey(mediaType, id, imageLanguage)] ?? { logoUrl: null, posterUrl: null };
+  if (!currentKey || entry.key !== currentKey) return EMPTY_IMAGE_ENTRY;
+  return entry.value;
 }
 
 /**

@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Movix TV maquette</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600;700&display=block" rel="stylesheet">
+<style>
+:root{
+  --ink:#0A0A0A; --panel:#151515; --line:#2A2A2A;
+  --text:#F4F4F0; --muted:#A1A1A1; --dim:#6B6B6B;
+  --red:#DC2626; --red-hi:#F04444;
+  --img:"https://image.tmdb.org/t/p/";
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:960px;height:540px;background:var(--ink);overflow:hidden}
+body{font-family:"Instrument Sans",sans-serif;color:var(--text);-webkit-font-smoothing:antialiased}
+.screen{position:relative;width:960px;height:540px;overflow:hidden;display:none}
+.screen.on{display:block}
+.display{font-family:"Bricolage Grotesque",sans-serif;letter-spacing:-.02em}
+svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- Focus: les crochets du logo ---------- */
+.brk{position:relative}
+.brk::before,.brk::after{content:"";position:absolute;top:-7px;bottom:-7px;width:9px;border:2.5px solid var(--red);
+  background:radial-gradient(circle,var(--red) 1.1px,transparent 1.4px) 1px 5px/5px 9px repeat-y}
+.brk::before{left:-9px;border-right:0}
+.brk::after{right:-9px;border-left:0;background-position:2px 5px}
+
+/* ---------- Rail ---------- */
+.rail{position:absolute;left:0;top:0;bottom:0;width:60px;display:flex;flex-direction:column;align-items:center;padding-top:26px;gap:20px;
+  background:linear-gradient(90deg,rgba(10,10,10,.92),rgba(10,10,10,0));z-index:5}
+.rail .mk{width:30px;margin-bottom:12px}
+.rail a{color:var(--dim);display:grid;place-items:center;width:34px;height:34px;border-radius:10px;position:relative}
+.rail a.cur{color:var(--text)}
+.rail a.cur::before{content:"";position:absolute;left:-13px;top:9px;bottom:9px;width:3px;border-radius:2px;background:var(--red)}
+
+/* ---------- Accueil ---------- */
+.hero-bg{position:absolute;inset:0 0 auto 0;height:390px;background-size:cover;background-position:center 20%}
+.hero-bg::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(90deg,var(--ink) 4%,rgba(10,10,10,.85) 30%,rgba(10,10,10,.1) 66%),
+             linear-gradient(0deg,var(--ink) 0%,rgba(10,10,10,0) 45%)}
+.hero{position:absolute;left:84px;top:56px;width:560px;z-index:2}
+.hero p{-webkit-line-clamp:2 !important}
+.hero h1{font-size:42px !important}
+.kicker{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--muted);font-weight:600}
+.kicker .badge{color:var(--text);background:rgba(255,255,255,.12);padding:3px 7px;border-radius:5px}
+.hero h1{font-size:46px;font-weight:800;line-height:1;margin:12px 0 10px}
+.hero p{font-size:13.5px;line-height:1.55;color:#D2D2CE;max-width:380px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.meta{display:flex;gap:14px;font-size:12.5px;color:var(--muted);margin-bottom:10px;font-weight:500}
+.meta b{color:var(--text);font-weight:600}
+.btns{display:flex;gap:10px;margin-top:16px}
+.btn{white-space:nowrap;flex:none;display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 16px;border-radius:999px;font-size:13.5px;font-weight:600;background:rgba(255,255,255,.12);color:var(--text)}
+.btn.f{background:var(--text);color:var(--ink)}
+.btn svg.i{width:16px;height:16px}
+.btn.f svg.i.fill{fill:var(--ink)}
+
+.rows{position:absolute;left:84px;right:0;top:252px;z-index:3}
+.row h2{font-size:15px;font-weight:700;margin-bottom:10px;font-family:"Bricolage Grotesque",sans-serif;letter-spacing:-.01em}
+.strip{display:flex;gap:14px;align-items:flex-start}
+.land{flex:none;width:178px}
+.land .im{height:100px;border-radius:8px;background-size:cover;background-position:center;position:relative;overflow:hidden}
+.land .bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.25)}
+.land .bar i{display:block;height:100%;background:var(--red)}
+.land .t{font-size:12px;font-weight:600;margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.land .s{font-size:11px;color:var(--muted);margin-top:2px}
+.land.foc .fw{transform:scale(1.06);transform-origin:center}
+.land.foc .im{box-shadow:0 10px 30px rgba(0,0,0,.6)}
+.land.foc{margin:0 14px 0 12px}
+.land.foc .t{margin-top:12px}
+.row+.row{margin-top:22px}
+.post{flex:none;width:92px;height:138px;border-radius:7px;background-size:cover;background-position:center}
+
+/* ---------- Fiche ---------- */
+.det-bg{position:absolute;right:0;top:0;width:640px;height:400px;background-size:cover;background-position:center}
+.det-bg::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,var(--ink) 0%,rgba(10,10,10,.6) 35%,rgba(10,10,10,0) 70%),linear-gradient(0deg,var(--ink) 2%,rgba(10,10,10,0) 50%)}
+.det{position:absolute;left:84px;top:52px;width:430px;z-index:2}
+.det h1{font-size:40px;font-weight:800;line-height:1;margin-bottom:12px}
+.det p{font-size:13.5px;line-height:1.55;color:#D2D2CE;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.seasons{position:absolute;left:84px;top:288px;display:flex;gap:6px;z-index:2}
+.seasons span{font-size:13px;font-weight:600;color:var(--muted);padding:6px 12px;border-radius:999px}
+.seasons span.cur{color:var(--text);background:rgba(255,255,255,.12)}
+.eps{position:absolute;left:84px;top:330px;display:flex;gap:14px;z-index:2}
+.ep{width:196px;flex:none}
+.ep .im{height:110px;border-radius:8px;background-size:cover;background-position:center;position:relative;overflow:hidden}
+.ep .n{position:absolute;left:8px;top:7px;font-size:11px;font-weight:700;background:rgba(10,10,10,.7);padding:2px 6px;border-radius:4px}
+.ep .t{font-size:12.5px;font-weight:600;margin-top:8px}
+.ep .s{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ep .bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.25)}
+.ep .bar i{display:block;height:100%;background:var(--red)}
+.ep .seen{position:absolute;right:7px;top:7px;width:18px;height:18px;border-radius:50%;background:rgba(10,10,10,.7);display:grid;place-items:center}
+.ep .seen svg{width:11px;height:11px}
+
+/* ---------- Lecteur ---------- */
+.vid{position:absolute;inset:0;background-size:cover;background-position:center}
+.ptop{position:absolute;inset:0 0 auto 0;height:120px;background:linear-gradient(180deg,rgba(0,0,0,.75),rgba(0,0,0,0));padding:24px 48px}
+.ptop .a{font-size:12px;color:var(--muted);font-weight:600}
+.ptop .b{font-size:20px;font-weight:700;margin-top:4px}
+.pbot{position:absolute;inset:auto 0 0 0;height:190px;background:linear-gradient(0deg,rgba(0,0,0,.88),rgba(0,0,0,0));padding:0 48px}
+.sub{position:absolute;left:0;right:0;bottom:150px;text-align:center;font-size:21px;font-weight:600;text-shadow:0 2px 6px #000}
+.sub span{background:rgba(0,0,0,.45);padding:2px 10px;border-radius:4px}
+.prog{position:absolute;left:48px;right:48px;bottom:84px}
+.track{height:4px;border-radius:2px;background:rgba(255,255,255,.22);position:relative}
+.track .buf{position:absolute;left:0;top:0;bottom:0;width:52%;background:rgba(255,255,255,.35);border-radius:2px}
+.track .pl{position:absolute;left:0;top:0;bottom:0;width:36%;background:var(--red);border-radius:2px}
+.track .knob{position:absolute;left:36%;top:50%;width:13px;height:13px;margin:-6.5px 0 0 -6.5px;border-radius:50%;background:var(--text)}
+.times{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:8px;font-variant-numeric:tabular-nums}
+.ctrl{position:absolute;left:48px;right:48px;bottom:22px;display:flex;align-items:center}
+.ctrl .mid{position:absolute;left:50%;transform:translateX(-50%);display:flex;gap:16px;align-items:center}
+.cb{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:var(--text);position:relative}
+.cb.big{width:48px;height:48px}
+.cb.f{background:var(--text);color:var(--ink)}
+.cb svg.i{width:20px;height:20px}
+.cb small{position:absolute;font-size:8px;font-weight:700;top:15px}
+.ctrl .rt{margin-left:auto;display:flex;gap:6px}
+.chip{font-size:11px;font-weight:700;padding:3px 7px;border-radius:5px;background:rgba(255,255,255,.14);margin-right:6px}
+.next{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;height:36px;padding:0 14px;border-radius:999px;background:rgba(255,255,255,.12)}
+
+/* Panneau réglages */
+.dim{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+.side{position:absolute;top:0;bottom:0;right:0;width:300px;background:rgba(18,18,18,.97);padding:28px 22px;border-left:1px solid var(--line)}
+.side.l2{right:300px;width:260px;background:rgba(14,14,14,.97)}
+.side h3{font-size:17px;font-weight:700;margin-bottom:16px;font-family:"Bricolage Grotesque",sans-serif}
+.opt{display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 12px;border-radius:10px;font-size:13.5px;font-weight:600}
+.opt .v{color:var(--muted);font-weight:500;display:flex;align-items:center;gap:6px}
+.opt.f{background:var(--text);color:var(--ink)}
+.opt.f .v{color:#444}
+.opt.sel{background:rgba(255,255,255,.1)}
+.grp{font-size:11.5px;color:var(--dim);font-weight:600;margin:14px 12px 6px}
+.src{padding:9px 12px;border-radius:10px;margin-bottom:4px}
+.src .a{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:8px}
+.src .b{font-size:11.5px;color:var(--muted);margin-top:3px}
+.src.f{background:var(--text);color:var(--ink)} .src.f .b{color:#555}
+.src .tag{font-size:10px;font-weight:700;color:var(--ink);background:#E8C468;padding:1px 6px;border-radius:4px}
+.src.f .tag{background:var(--ink);color:#E8C468}
+.chk{margin-left:auto;color:var(--red)}
+
+/* ---------- Embed + souris ---------- */
+.web{position:absolute;inset:0;background:#101318}
+.web .hbar{height:46px;background:#181c23;display:flex;align-items:center;justify-content:center;padding:0 22px;gap:14px;color:#8a93a3;font-size:12px}
+.web .hbar b{color:#d5dbe5;font-size:15px}
+.web .player{position:absolute;left:140px;right:140px;top:82px;height:382px;background:#000 center/cover;border-radius:4px}
+.web .player::after{content:"";position:absolute;inset:0;background:rgba(0,0,0,.35)}
+.web .play{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;background:rgba(255,255,255,.92);display:grid;place-items:center;z-index:2}
+.web .play svg{width:30px;height:30px;fill:#111;stroke:none;margin-left:5px}
+.web .gone{position:absolute;right:22px;top:82px;width:110px;height:240px;border:1px dashed #2b313c;border-radius:4px;display:grid;place-items:center;color:#3c4452;font-size:10.5px;text-align:center;padding:10px}
+.web .gone.l{left:22px;right:auto}
+.cursor{position:absolute;left:503px;top:286px;z-index:9;filter:drop-shadow(0 2px 4px rgba(0,0,0,.7))}
+.cursor .ring{position:absolute;left:-14px;top:-14px;width:30px;height:30px;border-radius:50%;border:2px solid rgba(255,255,255,.5)}
+.ov-top{position:absolute;left:16px;right:16px;top:12px;display:flex;justify-content:space-between;z-index:8}
+.pill{display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:999px;background:rgba(10,10,10,.82);font-size:12px;font-weight:600;backdrop-filter:blur(6px)}
+.pill .dotg{width:7px;height:7px;border-radius:50%;background:#22C55E}
+.pill .n{color:var(--red-hi)}
+.ov-bot{position:absolute;left:0;right:0;bottom:14px;display:flex;justify-content:center;gap:8px;z-index:8}
+.key{display:flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 6px;border-radius:999px;background:rgba(10,10,10,.82);font-size:12px;font-weight:500;color:#ddd}
+.key kbd{font-family:inherit;font-size:10.5px;font-weight:700;color:var(--ink);background:var(--text);border-radius:999px;padding:2px 7px}
+
+/* ---------- Connexion ---------- */
+.login{position:absolute;inset:0;background:radial-gradient(ellipse 70% 90% at 85% 50%,rgba(220,38,38,.16),transparent 60%),var(--ink)}
+.login .lg{position:absolute;left:84px;top:52px;width:150px}
+.login h1{position:absolute;left:84px;top:132px;font-size:40px;font-weight:800;line-height:1.02;width:440px}
+.steps{position:absolute;left:84px;top:242px;width:420px;display:flex;flex-direction:column;gap:14px}
+.step{display:flex;gap:14px;align-items:flex-start;font-size:14.5px;line-height:1.45;color:#D2D2CE}
+.step .n{flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--text)}
+.step b{color:var(--text)}
+.code{position:absolute;left:84px;top:356px;display:flex;gap:10px}
+.code span{width:62px;height:76px;border-radius:12px;background:var(--panel);border:1.5px solid var(--line);display:grid;place-items:center;font-family:"Bricolage Grotesque",sans-serif;font-size:40px;font-weight:700}
+.exp{position:absolute;left:84px;top:450px;font-size:12.5px;color:var(--muted)}
+.qr{position:absolute;right:120px;top:120px;width:250px;height:250px;background:#F4F4F0;border-radius:18px;padding:18px}
+.qr canvas{width:214px;height:214px;image-rendering:pixelated}
+.qrcap{position:absolute;right:120px;top:384px;width:250px;text-align:center;font-size:12.5px;color:var(--muted)}
+.alt{position:absolute;right:120px;top:430px;width:250px;display:flex;justify-content:center}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z"/></symbol>
+  <symbol id="film" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></symbol>
+  <symbol id="tv" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="m8 2 4 4 4-4"/></symbol>
+  <symbol id="spark" viewBox="0 0 24 24"><path d="M12 3l2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4z"/></symbol>
+  <symbol id="list" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="play" viewBox="0 0 24 24"><path d="M7 4.5v15l12.5-7.5z"/></symbol>
+  <symbol id="pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+  <symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></symbol>
+  <symbol id="back" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="fwd" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="next" viewBox="0 0 24 24"><path d="M5 5v14l10-7zM19 5v14"/></symbol>
+  <symbol id="cc" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 10.5a2 2 0 1 0 0 3M17 10.5a2 2 0 1 0 0 3"/></symbol>
+  <symbol id="audio" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></symbol>
+  <symbol id="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="check" viewBox="0 0 24 24"><path d="M5 12.5 10 17l9-10"/></symbol>
+  <symbol id="shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></symbol>
+  <symbol id="mouse" viewBox="0 0 24 24"><path d="M5 3l14 7-6 2-2 6z"/></symbol>
+</svg>
+
+<!-- ============ 1. ACCUEIL ============ -->
+<section class="screen" id="accueil">
+  <div class="hero-bg" style="background-image:url(https://image.tmdb.org/t/p/w1280/577eXC8wFQT0eUrJcgznSiFPRmk.jpg)"></div>
+  <nav class="rail">
+    <img class="mk" src="mark.svg" style="width:34px;height:34px">
+    <a><svg class="i"><use href="#search"/></svg></a>
+    <a class="cur"><svg class="i"><use href="#home"/></svg></a>
+    <a><svg class="i"><use href="#film"/></svg></a>
+    <a><svg class="i"><use href="#tv"/></svg></a>
+    <a><svg class="i"><use href="#spark"/></svg></a>
+    <a><svg class="i"><use href="#list"/></svg></a>
+    <a style="margin-top:auto;margin-bottom:24px"><svg class="i"><use href="#gear"/></svg></a>
+  </nav>
+  <div class="hero">
+    <div class="kicker"><span class="badge">Série</span><span>Reprendre saison 2, épisode 3</span></div>
+    <h1 class="display">House of the Dragon</h1>
+    <div class="meta"><b>★ 8,4</b><span>2022</span><span>3 saisons</span><span>Fantastique, drame</span></div>
+    <p>Près de 200 ans avant Game of Thrones, la maison Targaryen se déchire. Une guerre civile se prépare : la Danse des Dragons.</p>
+  </div>
+  <div class="rows">
+    <div class="row">
+      <h2>Reprendre</h2>
+      <div class="strip">
+        <div class="land foc"><div class="brk fw"><div class="im" style="background-image:url(https://image.tmdb.org/t/p/w500/p0qHRRhD8QOONaxJBzUewTRWADO.jpg)"><div class="bar"><i style="width:36%"></i></div></div></div><div class="t">House of the Dragon</div><div class="s">S2 É3, il reste 42 min</div></div>
+        <div class="land"><div class="im" style="background-image:url(https://image.tmdb.org/t/p/w500/hzznrBI07C2chXivlLYvEmQESP7.jpg)"><div class="bar"><i style="width:70%"></i></div></div><div class="t">La diplomate</div><div class="s">S3 É2, il reste 14 min</div></div>
+        <div class="land"><div class="im" style="background-image:url(https://image.tmdb.org/t/p/w500/shW2jHkQLZVv4Fko2rJDqTGU0gx.jpg)"><div class="bar"><i style="width:22%"></i></div></div><div class="t">Englouti</div><div class="s">Il reste 1 h 12</div></div>
+        <div class="land"><div class="im" style="background-image:url(https://image.tmdb.org/t/p/w500/w3agwUSMpJ4X9t1jGrDtqqRPjDQ.jpg)"><div class="bar"><i style="width:55%"></i></div></div><div class="t">Link Click</div><div class="s">S1 É8, il reste 11 min</div></div>
+      </div>
+    </div>
+    <div class="row">
+      <h2>Tendances cette semaine</h2>
+      <div class="strip">
+        <div class="post" style="background-image:url(https://image.tmdb.org/t/p/w342/6OEtkkzoyusZDm2uMJojlWZSLR9.jpg)"></div>
+        <div class="post" style="background-image:url(https://image.tmdb.org/t/p/w342/bWPktguPGslrdM79SNQt4OWYyJS.jpg)"></div>
+        <div class="post" style="background-image:url(https://image.tmdb.org/t/p/w342/tGdFDoA9qyt0t6Qr9MFnOl8Z2Jz.jpg)"></div>
+        <div class="post" style="background-image:url(https://image.tmdb.org/t/p/w342/dkDeQSeJGSfEBFavomS3LUci2VO.jpg)"></div>
+        <div class="post" style="background-image:url(https://image.tmdb.org/t/p/w342/vSgnJDw404JUokiy5NDZgXOi01E.jpg)"></div>
+        <div class="post" style="background-image:url(https://image.tmdb.org/t/p/w342/k53HHxQ4rQG0dME6nsofii3QNS7.jpg)"></div>
+        <div class="post" style="background-image:url(https://image.tmdb.org/t/p/w342/pimX9PWeZS55yfmbO6H3nmnzFCX.jpg)"></div>
+        <div class="post" style="background-image:url(https://image.tmdb.org/t/p/w342/sGuCmIy8kEmx3FWZyMj654rF6g8.jpg)"></div>
+        <div class="post" style="background-image:url(https://image.tmdb.org/t/p/w342/fG6ODXfXVJbIrFxzQv9BhnTomPc.jpg)"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2. FICHE ============ -->
+<section class="screen" id="details">
+  <div class="det-bg" style="background-image:url(https://image.tmdb.org/t/p/w1280/577eXC8wFQT0eUrJcgznSiFPRmk.jpg)"></div>
+  <div class="det">
+    <div class="kicker" style="margin-bottom:12px"><span class="badge">Série</span><span>HBO</span></div>
+    <h1 class="display">House of the Dragon</h1>
+    <div class="meta"><b>★ 8,4</b><span>2022</span><span>3 saisons</span><span>16+</span><span>VF, VOSTFR</span></div>
+    <p>Près de 200 ans avant les évènements de Game of Thrones, Westeros est en proie à de nombreux dangers. La maison Targaryen se disloque peu à peu et une guerre civile se prépare : la Danse des Dragons.</p>
+    <div class="btns">
+      <span class="btn f"><svg class="i fill"><use href="#play"/></svg>Reprendre S2 É3</span>
+      <span class="btn"><svg class="i"><use href="#list"/></svg>Ma liste</span>
+      <span class="btn"><svg class="i"><use href="#film"/></svg>Bande-annonce</span>
+    </div>
+  </div>
+  <div class="seasons"><span>Saison 1</span><span class="cur">Saison 2</span><span>Saison 3</span></div>
+  <div class="eps">
+    <div class="ep"><div class="im" style="background-image:url(https://image.tmdb.org/t/p/w500/s0OUOQKhFdshcwWEMkNKogOOWd4.jpg)"><span class="n">É1</span><span class="seen"><svg class="i"><use href="#check"/></svg></span></div><div class="t">Un fils pour un fils</div><div class="s">58 min. Alicent s'inquiète du Petit Conseil d'Aegon.</div></div>
+    <div class="ep"><div class="im" style="background-image:url(https://image.tmdb.org/t/p/w500/plVChbDtiWCZowdqiKThSXZaWYa.jpg)"><span class="n">É2</span><span class="seen"><svg class="i"><use href="#check"/></svg></span></div><div class="t">Rhaenyra la cruelle</div><div class="s">69 min. Otto complote pour retourner le peuple contre elle.</div></div>
+    <div class="ep"><div class="im" style="background-image:url(https://image.tmdb.org/t/p/w500/p0qHRRhD8QOONaxJBzUewTRWADO.jpg)"><span class="n">É3</span><div class="bar"><i style="width:36%"></i></div></div><div class="t">Le moulin brûlé</div><div class="s">66 min. Daemon arrive à Harrenhal pour lever une armée.</div></div>
+    <div class="ep"><div class="im" style="background-image:url(https://image.tmdb.org/t/p/w500/qaTbcOomj6HjQ0Drp1nOOMYB5Sa.jpg)"><span class="n">É4</span></div><div class="t">Le Dragon rouge et le Dragon d'or</div><div class="s">55 min. Rhaenys tente de maintenir la paix.</div></div>
+  </div>
+</section>
+
+<!-- ============ 3. LECTEUR ============ -->
+<section class="screen" id="player">
+  <div class="vid" style="background-image:url(https://image.tmdb.org/t/p/original/p0qHRRhD8QOONaxJBzUewTRWADO.jpg)"></div>
+  <div class="ptop"><div class="a">House of the Dragon</div><div class="b">S2 É3, Le moulin brûlé</div></div>
+  <div class="sub"><span>Les anciennes rancunes ne meurent jamais.</span></div>
+  <div class="pbot"></div>
+  <div class="prog"><div class="track"><div class="buf"></div><div class="pl"></div><div class="knob"></div></div>
+    <div class="times"><span>23:41</span><span>−42:19</span></div></div>
+  <div class="ctrl">
+    <span class="chip">VF</span><span class="chip">1080p</span>
+    <div class="mid">
+      <span class="cb"><svg class="i"><use href="#back"/></svg><small>10</small></span>
+      <span class="cb big f"><svg class="i"><use href="#pause"/></svg></span>
+      <span class="cb"><svg class="i"><use href="#fwd"/></svg><small>10</small></span>
+    </div>
+    <div class="rt">
+      <span class="next"><svg class="i" style="width:16px;height:16px"><use href="#next"/></svg>Épisode suivant</span>
+      <span class="cb"><svg class="i"><use href="#cc"/></svg></span>
+      <span class="cb"><svg class="i"><use href="#audio"/></svg></span>
+      <span class="cb"><svg class="i"><use href="#gear"/></svg></span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4. LECTEUR + RÉGLAGES / SOURCES ============ -->
+<section class="screen" id="settings">
+  <div class="vid" style="background-image:url(https://image.tmdb.org/t/p/original/p0qHRRhD8QOONaxJBzUewTRWADO.jpg)"></div>
+  <div class="dim"></div>
+  <div class="side l2">
+    <h3>Source</h3>
+    <div class="grp">Serveur Movix</div>
+    <div class="src sel" style="background:rgba(255,255,255,.08)"><div class="a">Movix direct <span class="tag">VIP</span><svg class="i chk"><use href="#check"/></svg></div><div class="b">1080p, VF, lecture native</div></div>
+    <div class="src"><div class="a">Movix secours <span class="tag">VIP</span></div><div class="b">720p, VF</div></div>
+    <div class="grp">Extraction sur la télé</div>
+    <div class="src f"><div class="a">Lecteur A</div><div class="b">1080p, VF, lien extrait</div></div>
+    <div class="src"><div class="a">Lecteur B</div><div class="b">720p, VOSTFR, lien extrait</div></div>
+    <div class="src"><div class="a"><svg class="i" style="width:14px;height:14px"><use href="#mouse"/></svg>Lecteur C</div><div class="b">Page web, avec la souris</div></div>
+  </div>
+  <div class="side">
+    <h3>Réglages</h3>
+    <div class="opt sel">Source<span class="v">Movix direct<svg class="i" style="width:14px;height:14px"><use href="#chev"/></svg></span></div>
+    <div class="opt">Qualité<span class="v">1080p<svg class="i" style="width:14px;height:14px"><use href="#chev"/></svg></span></div>
+    <div class="opt">Audio<span class="v">Français<svg class="i" style="width:14px;height:14px"><use href="#chev"/></svg></span></div>
+    <div class="opt">Sous-titres<span class="v">Français<svg class="i" style="width:14px;height:14px"><use href="#chev"/></svg></span></div>
+    <div class="opt">Décalage<span class="v">0,0 s<svg class="i" style="width:14px;height:14px"><use href="#chev"/></svg></span></div>
+    <div class="opt">Vitesse<span class="v">Normale<svg class="i" style="width:14px;height:14px"><use href="#chev"/></svg></span></div>
+    <div class="opt">Format<span class="v">Ajusté<svg class="i" style="width:14px;height:14px"><use href="#chev"/></svg></span></div>
+  </div>
+</section>
+
+<!-- ============ 5. EMBED + SOURIS ============ -->
+<section class="screen" id="embed">
+  <div class="web">
+    <div class="hbar"><b>videohost</b><span>Le moulin brûlé.mp4</span></div>
+    <div class="gone l">Pub bloquée</div>
+    <div class="player" style="background-image:url(https://image.tmdb.org/t/p/w1280/p0qHRRhD8QOONaxJBzUewTRWADO.jpg)"><div class="play"><svg><use href="#play"/></svg></div></div>
+    <div class="gone">Pub bloquée</div>
+  </div>
+  <div class="ov-top">
+    <span class="pill"><span class="dotg"></span>Lecteur C, page web</span>
+    <span class="pill"><svg class="i" style="width:14px;height:14px;color:var(--red-hi)"><use href="#shield"/></svg><span class="n">23</span> pubs et pop-up bloquées</span>
+  </div>
+  <div class="cursor"><div class="ring"></div>
+    <svg width="26" height="30" viewBox="0 0 26 30"><path d="M2 2 L2 24 L8 18.5 L12.5 28 L16.5 26.2 L12 17 L20 17 Z" fill="#F4F4F0" stroke="#0A0A0A" stroke-width="2" stroke-linejoin="round"/></svg>
+  </div>
+  <div class="ov-bot">
+    <span class="key"><kbd>Flèches</kbd>Bouger la souris</span>
+    <span class="key"><kbd>OK</kbd>Cliquer</span>
+    <span class="key"><kbd>OK long</kbd>Faire défiler</span>
+    <span class="key"><kbd>Retour</kbd>Quitter</span>
+  </div>
+</section>
+
+<!-- ============ 6. CONNEXION ============ -->
+<section class="screen" id="login">
+  <div class="login">
+    <img class="lg" src="logo.svg">
+    <h1 class="display">Connecte ta télé à ton compte Movix</h1>
+    <div class="steps">
+      <div class="step"><span class="n">1</span><span>Sur ton téléphone, ouvre <b>movix.luxe/tv</b> ou scanne le code à droite.</span></div>
+      <div class="step"><span class="n">2</span><span>Entre ce code. La télé se connecte toute seule.</span></div>
+    </div>
+    <div class="code"><span>K</span><span>7</span><span>P</span><span>2</span><span>Q</span></div>
+    <div class="exp">Nouveau code dans 4 min 32</div>
+    <div class="qr"><canvas id="qr" width="29" height="29"></canvas></div>
+    <div class="qrcap">Scanne avec l'appareil photo</div>
+    <div class="alt"><span class="btn f">Utiliser une clé VIP</span></div>
+  </div>
+</section>
+
+<script>
+const s=new URLSearchParams(location.search).get('s')||'accueil';
+document.getElementById(s).classList.add('on');
+// Faux QR (illustration, non scannable)
+const c=document.getElementById('qr').getContext('2d');c.fillStyle='#0A0A0A';
+let x=7;const r=()=>{x=(x*16807)%2147483647;return x/2147483647};
+for(let i=0;i<29;i++)for(let j=0;j<29;j++){if(r()>.52)c.fillRect(i,j,1,1)}
+const finder=(a,b)=>{c.fillStyle='#F4F4F0';c.fillRect(a-1,b-1,9,9);c.fillStyle='#0A0A0A';c.fillRect(a,b,7,7);c.fillStyle='#F4F4F0';c.fillRect(a+1,b+1,5,5);c.fillStyle='#0A0A0A';c.fillRect(a+2,b+2,3,3)};
+finder(0,0);finder(22,0);finder(0,22);
+</script>
+</body>
+</html>

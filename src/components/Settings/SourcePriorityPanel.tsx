@@ -313,7 +313,7 @@ export const SourcePriorityPanel: React.FC = () => {
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-xs text-white/60 hover:text-white"
+                className="text-xs text-white/60 hover:text-white group/icon"
                 onClick={() => doResetWithUndo(
                   t('settings.sourcePriority.resetSourcesLabel'),
                   t('settings.sourcePriority.undoToastAction'),
@@ -324,7 +324,7 @@ export const SourcePriorityPanel: React.FC = () => {
                 )}
                 title={t('settings.sourcePriority.resetSourcesTitle')}
               >
-                <RotateCcw size={12} className="mr-1" /> {t('settings.sourcePriority.resetSectionShort')}
+                <RotateCcw size={12} className="mr-1 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" /> {t('settings.sourcePriority.resetSectionShort')}
               </Button>
             </div>
             <SortableList
@@ -437,7 +437,7 @@ export const SourcePriorityPanel: React.FC = () => {
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-xs text-white/60 hover:text-white"
+                className="text-xs text-white/60 hover:text-white group/icon"
                 onClick={() => doResetWithUndo(
                   t('settings.sourcePriority.resetMoviesTvHostersLabel'),
                   t('settings.sourcePriority.undoToastAction'),
@@ -448,7 +448,7 @@ export const SourcePriorityPanel: React.FC = () => {
                 )}
                 title={t('settings.sourcePriority.resetHostersTitle')}
               >
-                <RotateCcw size={12} className="mr-1" /> {t('settings.sourcePriority.resetSectionShort')}
+                <RotateCcw size={12} className="mr-1 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" /> {t('settings.sourcePriority.resetSectionShort')}
               </Button>
             </div>
             <p className="text-xs text-gray-500 mb-2">
@@ -501,7 +501,7 @@ export const SourcePriorityPanel: React.FC = () => {
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-xs text-white/60 hover:text-white"
+                className="text-xs text-white/60 hover:text-white group/icon"
                 onClick={() => doResetWithUndo(
                   t('settings.sourcePriority.resetAnimeLanguagesLabel'),
                   t('settings.sourcePriority.undoToastAction'),
@@ -512,7 +512,7 @@ export const SourcePriorityPanel: React.FC = () => {
                 )}
                 title={t('settings.sourcePriority.resetLanguagesTitle')}
               >
-                <RotateCcw size={12} className="mr-1" /> {t('settings.sourcePriority.resetSectionShort')}
+                <RotateCcw size={12} className="mr-1 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" /> {t('settings.sourcePriority.resetSectionShort')}
               </Button>
             </div>
             <SortableList
@@ -564,7 +564,7 @@ export const SourcePriorityPanel: React.FC = () => {
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-xs text-white/60 hover:text-white"
+                className="text-xs text-white/60 hover:text-white group/icon"
                 onClick={() => doResetWithUndo(
                   t('settings.sourcePriority.resetAnimeHostersLabel'),
                   t('settings.sourcePriority.undoToastAction'),
@@ -575,7 +575,7 @@ export const SourcePriorityPanel: React.FC = () => {
                 )}
                 title={t('settings.sourcePriority.resetHostersTitle')}
               >
-                <RotateCcw size={12} className="mr-1" /> {t('settings.sourcePriority.resetSectionShort')}
+                <RotateCcw size={12} className="mr-1 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" /> {t('settings.sourcePriority.resetSectionShort')}
               </Button>
             </div>
             <p className="text-xs text-gray-500 mb-2">

@@ -1,12 +1,212 @@
+import SwiftUI
 import UIKit
 
+final class MovixBrowserChromeModel: ObservableObject {
+  @Published var canGoBack = false
+  @Published var canGoForward = false
+  @Published var loading = false
+  @Published var domain = MovixBrowserChromeModel.unavailableDomain
+  @Published var dnsEnabled = false
+  @Published var showURLBar = true
+  @Published var showNavBar = true
+
+  var onGoBack: (() -> Void)?
+  var onGoForward: (() -> Void)?
+  var onReload: (() -> Void)?
+  var onHome: (() -> Void)?
+  var onSettings: (() -> Void)?
+
+  static let unavailableDomain = "Adresse indisponible"
+
+  static func domain(from currentURL: String) -> String {
+    guard currentURL.utf8.count <= 4_096,
+      let components = URLComponents(string: currentURL),
+      let host = components.host,
+      !host.isEmpty
+    else {
+      return unavailableDomain
+    }
+    return host.lowercased()
+  }
+}
+
+private enum MovixLiquidGlass {
+  static var isAvailable: Bool {
+    if #available(iOS 26.0, *) { return true }
+    return false
+  }
+}
+
+/// Regroupe les éléments en verre pour qu'ils se fondent et se transforment
+/// ensemble sur iOS 26 ; simple passe-plat sur les versions antérieures.
+private struct MovixGlassGroup<Content: View>: View {
+  let spacing: CGFloat
+  let content: Content
+
+  init(spacing: CGFloat, @ViewBuilder content: () -> Content) {
+    self.spacing = spacing
+    self.content = content()
+  }
+
+  var body: some View {
+    if #available(iOS 26.0, *) {
+      GlassEffectContainer(spacing: spacing) { content }
+    } else {
+      content
+    }
+  }
+}
+
+/// Capsule Liquid Glass sur iOS 26, matériau translucide système avant.
+private struct MovixGlassCapsule: ViewModifier {
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(iOS 26.0, *) {
+      content.glassEffect(.regular, in: .capsule)
+    } else {
+      content.background(.ultraThinMaterial, in: Capsule())
+    }
+  }
+}
+
+/// Fond translucide pour la rangée de boutons, uniquement avant iOS 26 : à
+/// partir d'iOS 26 chaque bouton porte déjà son propre verre.
+private struct MovixLegacyMaterialCapsule: ViewModifier {
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(iOS 26.0, *) {
+      content
+    } else {
+      content.background(.ultraThinMaterial, in: Capsule())
+    }
+  }
+}
+
+private struct MovixChromeIconButtonStyle: ViewModifier {
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(iOS 26.0, *) {
+      content
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .controlSize(.large)
+    } else {
+      content
+        .buttonStyle(.borderless)
+        .tint(.primary)
+    }
+  }
+}
+
+struct MovixBrowserChromeContent: View {
+  @ObservedObject var model: MovixBrowserChromeModel
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+  var body: some View {
+    MovixGlassGroup(spacing: 8) {
+      if oneRow {
+        HStack(spacing: 8) {
+          addressBar.frame(minWidth: 220)
+          navigationBar
+        }
+      } else {
+        VStack(spacing: 8) {
+          if model.showURLBar { addressBar }
+          if model.showNavBar { navigationBar }
+        }
+      }
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .frame(maxWidth: 720)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  private var oneRow: Bool {
+    horizontalSizeClass == .regular && model.showURLBar && model.showNavBar
+  }
+
+  private var addressBar: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "lock.fill")
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(model.dnsEnabled ? Color(uiColor: .systemGreen) : Color.secondary)
+      if model.loading {
+        ProgressView().controlSize(.small)
+      }
+      Text(model.domain)
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.middle)
+    }
+    .padding(.horizontal, 16)
+    .frame(maxWidth: .infinity, minHeight: 44)
+    .modifier(MovixGlassCapsule())
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(Text("Adresse"))
+    .accessibilityValue(Text(model.dnsEnabled ? "\(model.domain), DNS sécurisé activé" : model.domain))
+  }
+
+  private var navigationBar: some View {
+    HStack(spacing: 6) {
+      iconButton("chevron.backward", label: "Page précédente", enabled: model.canGoBack) {
+        model.onGoBack?()
+      }
+      Spacer(minLength: 0)
+      iconButton("chevron.forward", label: "Page suivante", enabled: model.canGoForward) {
+        model.onGoForward?()
+      }
+      Spacer(minLength: 0)
+      iconButton(
+        model.loading ? "xmark" : "arrow.clockwise",
+        label: model.loading ? "Arrêter le chargement" : "Recharger"
+      ) {
+        model.onReload?()
+      }
+      Spacer(minLength: 0)
+      iconButton("house", label: "Accueil") {
+        model.onHome?()
+      }
+      Spacer(minLength: 0)
+      iconButton("gearshape", label: "Réglages") {
+        model.onSettings?()
+      }
+    }
+    .padding(.horizontal, MovixLiquidGlass.isAvailable ? 0 : 6)
+    .modifier(MovixLegacyMaterialCapsule())
+  }
+
+  private func iconButton(
+    _ symbol: String,
+    label: String,
+    enabled: Bool = true,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: symbol)
+        .font(.system(size: 17, weight: .semibold))
+        .frame(width: 24, height: 24)
+        .padding(MovixLiquidGlass.isAvailable ? 0 : 10)
+        .contentShape(Rectangle())
+    }
+    .disabled(!enabled)
+    .modifier(MovixChromeIconButtonStyle())
+    .accessibilityLabel(Text(label))
+  }
+}
+
 @objc(MovixBrowserChromeView)
-final class MovixBrowserChromeView: UIView {
-  @objc dynamic var canGoBack = false { didSet { updateButtons() } }
-  @objc dynamic var canGoForward = false { didSet { updateButtons() } }
-  @objc dynamic var loading = false { didSet { updateButtons() } }
-  @objc dynamic var currentURL = "" { didSet { updateDomain() } }
-  @objc dynamic var dnsEnabled = false { didSet { updateDNSState() } }
+final class MovixBrowserChromeView: MovixSwiftUIHostView {
+  private let model = MovixBrowserChromeModel()
+
+  @objc dynamic var canGoBack = false { didSet { model.canGoBack = canGoBack } }
+  @objc dynamic var canGoForward = false { didSet { model.canGoForward = canGoForward } }
+  @objc dynamic var loading = false { didSet { model.loading = loading } }
+  @objc dynamic var currentURL = "" {
+    didSet { model.domain = MovixBrowserChromeModel.domain(from: currentURL) }
+  }
+  @objc dynamic var dnsEnabled = false { didSet { model.dnsEnabled = dnsEnabled } }
   @objc dynamic var showURLBar = true { didSet { updateVisibility() } }
   @objc dynamic var showNavBar = true { didSet { updateVisibility() } }
 
@@ -15,44 +215,6 @@ final class MovixBrowserChromeView: UIView {
   @objc dynamic var onReload: RCTBubblingEventBlock?
   @objc dynamic var onHome: RCTBubblingEventBlock?
   @objc dynamic var onSettings: RCTBubblingEventBlock?
-
-  private let glassView = MovixGlassEffectView(frame: .zero)
-  private let contentStack = UIStackView()
-  private let addressCapsule = UIView()
-  private let addressStack = UIStackView()
-  private let lockView = UIImageView()
-  private let loadingIndicator = UIActivityIndicatorView(style: .medium)
-  private let domainLabel = UILabel()
-  private let navigationStack = UIStackView()
-  private lazy var regularAddressWidthConstraint = addressCapsule.widthAnchor.constraint(
-    greaterThanOrEqualToConstant: 220
-  )
-
-  private lazy var backButton = makeButton(
-    symbol: "chevron.backward",
-    accessibilityLabel: "Page précédente",
-    action: #selector(goBack)
-  )
-  private lazy var forwardButton = makeButton(
-    symbol: "chevron.forward",
-    accessibilityLabel: "Page suivante",
-    action: #selector(goForward)
-  )
-  private lazy var reloadButton = makeButton(
-    symbol: "arrow.clockwise",
-    accessibilityLabel: "Recharger",
-    action: #selector(reload)
-  )
-  private lazy var homeButton = makeButton(
-    symbol: "house",
-    accessibilityLabel: "Accueil",
-    action: #selector(goHome)
-  )
-  private lazy var settingsButton = makeButton(
-    symbol: "gearshape",
-    accessibilityLabel: "Réglages",
-    action: #selector(openSettings)
-  )
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -64,193 +226,19 @@ final class MovixBrowserChromeView: UIView {
     configureView()
   }
 
-  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-    super.traitCollectionDidChange(previousTraitCollection)
-    updateAdaptiveAxis()
-    updateButtons()
-  }
-
   private func configureView() {
-    directionalLayoutMargins = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
-
-    glassView.interactive = true
-    glassView.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(glassView)
-
-    contentStack.spacing = 8
-    contentStack.alignment = .fill
-    contentStack.translatesAutoresizingMaskIntoConstraints = false
-    addSubview(contentStack)
-
-    let compactFillWidth = contentStack.widthAnchor.constraint(equalTo: layoutMarginsGuide.widthAnchor)
-    compactFillWidth.priority = .defaultHigh
-
-    NSLayoutConstraint.activate([
-      glassView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      glassView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      glassView.topAnchor.constraint(equalTo: topAnchor),
-      glassView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      contentStack.topAnchor.constraint(equalTo: layoutMarginsGuide.topAnchor),
-      contentStack.bottomAnchor.constraint(equalTo: layoutMarginsGuide.bottomAnchor),
-      contentStack.centerXAnchor.constraint(equalTo: centerXAnchor),
-      contentStack.leadingAnchor.constraint(greaterThanOrEqualTo: layoutMarginsGuide.leadingAnchor),
-      contentStack.trailingAnchor.constraint(lessThanOrEqualTo: layoutMarginsGuide.trailingAnchor),
-      contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: 720),
-      compactFillWidth,
-    ])
-
-    configureAddressCapsule()
-    configureNavigationStack()
-    contentStack.addArrangedSubview(addressCapsule)
-    contentStack.addArrangedSubview(navigationStack)
-
-    updateDomain()
-    updateDNSState()
-    updateButtons()
+    model.onGoBack = { [weak self] in self?.onGoBack?([:]) }
+    model.onGoForward = { [weak self] in self?.onGoForward?([:]) }
+    model.onReload = { [weak self] in self?.onReload?([:]) }
+    model.onHome = { [weak self] in self?.onHome?([:]) }
+    model.onSettings = { [weak self] in self?.onSettings?([:]) }
+    installRootView(MovixBrowserChromeContent(model: model))
     updateVisibility()
   }
 
-  private func configureAddressCapsule() {
-    addressCapsule.backgroundColor = .secondarySystemFill
-    addressCapsule.layer.cornerRadius = 12
-    addressCapsule.isAccessibilityElement = true
-    addressCapsule.accessibilityLabel = "Adresse"
-    addressCapsule.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-    addressCapsule.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-    addressStack.axis = .horizontal
-    addressStack.alignment = .center
-    addressStack.spacing = 8
-    addressStack.translatesAutoresizingMaskIntoConstraints = false
-    addressCapsule.addSubview(addressStack)
-    NSLayoutConstraint.activate([
-      addressStack.leadingAnchor.constraint(equalTo: addressCapsule.leadingAnchor, constant: 12),
-      addressStack.trailingAnchor.constraint(equalTo: addressCapsule.trailingAnchor, constant: -12),
-      addressStack.topAnchor.constraint(equalTo: addressCapsule.topAnchor),
-      addressStack.bottomAnchor.constraint(equalTo: addressCapsule.bottomAnchor),
-    ])
-
-    lockView.image = UIImage(systemName: "lock.fill")
-    lockView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-    lockView.contentMode = .scaleAspectFit
-    lockView.isAccessibilityElement = false
-    lockView.setContentHuggingPriority(.required, for: .horizontal)
-
-    loadingIndicator.hidesWhenStopped = true
-    loadingIndicator.color = .secondaryLabel
-    loadingIndicator.isAccessibilityElement = false
-    loadingIndicator.setContentHuggingPriority(.required, for: .horizontal)
-
-    domainLabel.font = .preferredFont(forTextStyle: .subheadline)
-    domainLabel.adjustsFontForContentSizeCategory = true
-    domainLabel.textColor = .secondaryLabel
-    domainLabel.lineBreakMode = .byTruncatingMiddle
-    domainLabel.numberOfLines = 1
-    domainLabel.isAccessibilityElement = false
-
-    addressStack.addArrangedSubview(lockView)
-    addressStack.addArrangedSubview(loadingIndicator)
-    addressStack.addArrangedSubview(domainLabel)
-  }
-
-  private func configureNavigationStack() {
-    navigationStack.axis = .horizontal
-    navigationStack.alignment = .center
-    navigationStack.distribution = .equalSpacing
-    navigationStack.spacing = 6
-    for button in [backButton, forwardButton, reloadButton, homeButton, settingsButton] {
-      navigationStack.addArrangedSubview(button)
-    }
-  }
-
-  private func makeButton(
-    symbol: String,
-    accessibilityLabel: String,
-    action: Selector
-  ) -> UIButton {
-    var configuration = UIButton.Configuration.plain()
-    configuration.image = UIImage(systemName: symbol)
-    configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
-      pointSize: 17,
-      weight: .semibold
-    )
-    configuration.baseForegroundColor = .label
-    configuration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
-
-    let button = UIButton(configuration: configuration)
-    button.accessibilityLabel = accessibilityLabel
-    button.addTarget(self, action: action, for: .touchUpInside)
-    button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-    button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-    button.configurationUpdateHandler = { updatedButton in
-      var updatedConfiguration = updatedButton.configuration
-      updatedConfiguration?.baseForegroundColor = updatedButton.isEnabled ? UIColor.label : UIColor.secondaryLabel
-      updatedButton.configuration = updatedConfiguration
-    }
-    return button
-  }
-
-  private func updateAdaptiveAxis() {
-    let useHorizontalLayout = traitCollection.horizontalSizeClass == .regular
-      && showURLBar
-      && showNavBar
-    contentStack.axis = useHorizontalLayout ? .horizontal : .vertical
-    regularAddressWidthConstraint.isActive = useHorizontalLayout
-  }
-
   private func updateVisibility() {
-    addressCapsule.isHidden = !showURLBar
-    navigationStack.isHidden = !showNavBar
+    model.showURLBar = showURLBar
+    model.showNavBar = showNavBar
     isHidden = !showURLBar && !showNavBar
-    updateAdaptiveAxis()
   }
-
-  private func updateButtons() {
-    backButton.isEnabled = canGoBack
-    forwardButton.isEnabled = canGoForward
-    let reloadSymbol = loading ? "xmark" : "arrow.clockwise"
-    var configuration = reloadButton.configuration
-    configuration?.image = UIImage(systemName: reloadSymbol)
-    reloadButton.configuration = configuration
-    reloadButton.accessibilityLabel = loading ? "Arrêter le chargement" : "Recharger"
-
-    if loading {
-      loadingIndicator.startAnimating()
-    } else {
-      loadingIndicator.stopAnimating()
-    }
-  }
-
-  private func updateDomain() {
-    let value: String
-    if currentURL.utf8.count <= 4_096,
-      let components = URLComponents(string: currentURL),
-      let host = components.host,
-      !host.isEmpty
-    {
-      value = host.lowercased()
-    } else {
-      value = "Adresse indisponible"
-    }
-    domainLabel.text = value
-    updateAddressAccessibilityValue()
-  }
-
-  private func updateDNSState() {
-    lockView.tintColor = dnsEnabled ? .systemGreen : .secondaryLabel
-    updateAddressAccessibilityValue()
-  }
-
-  private func updateAddressAccessibilityValue() {
-    let domain = domainLabel.text ?? "Adresse indisponible"
-    addressCapsule.accessibilityValue = dnsEnabled
-      ? "\(domain), DNS sécurisé activé"
-      : domain
-  }
-
-  @objc private func goBack() { onGoBack?([:]) }
-  @objc private func goForward() { onGoForward?([:]) }
-  @objc private func reload() { onReload?([:]) }
-  @objc private func goHome() { onHome?([:]) }
-  @objc private func openSettings() { onSettings?([:]) }
 }

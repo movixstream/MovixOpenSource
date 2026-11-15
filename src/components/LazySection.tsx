@@ -1,6 +1,6 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { startTransition, useRef, useState, useEffect } from 'react';
 import ContentRowSkeleton from './skeletons/ContentRowSkeleton';
-import { useLightMode } from '@/context/LightModeContext';
+import { scheduleSectionLoad } from '@/utils/sectionLoadScheduler';
 
 /**
  * Props pour le composant LazySection
@@ -28,7 +28,7 @@ interface LazySectionProps {
     placeholder?: React.ReactNode;
 
     /**
-     * Marge avant l'intersection (défaut: '400px')
+     * Marge avant l'intersection (défaut: '800px')
      * Plus grand = préchargement plus tôt
      */
     rootMargin?: string;
@@ -79,106 +79,79 @@ const LazySection: React.FC<LazySectionProps> = ({
     index,
     immediateLoadCount = 2,
     children,
-    placeholder = <ContentRowSkeleton />,
-    rootMargin = '400px',
+    placeholder,
+    rootMargin = '800px',
     minHeight = '200px',
     onVisible,
     onLoad,
     showLoadingDuringFetch = false,
     className = ''
 }) => {
-    const { isLightMode } = useLightMode();
-    // En mode léger, les rangées supplémentaires attendent le défilement.
-    const isImmediate = index < (isLightMode ? Math.min(immediateLoadCount, 1) : immediateLoadCount);
-    const effectiveRootMargin = isLightMode ? '100px' : rootMargin;
-
+    // Performance mode reduces effects, not the time available to prepare a
+    // row. A 100px margin made TV/mobile mount each carousel during the swipe.
+    const isImmediate = index < immediateLoadCount;
     const [isVisible, setIsVisible] = useState(isImmediate);
-    const [hasLoaded, setHasLoaded] = useState(isImmediate);
     const [isFetching, setIsFetching] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
-    const observerRef = useRef<IntersectionObserver | null>(null);
     const loadStartedRef = useRef(false);
+    const mountedRef = useRef(false);
+    const callbacksRef = useRef({ onVisible, onLoad });
+    callbacksRef.current = { onVisible, onLoad };
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => { mountedRef.current = false; };
+    }, []);
 
     useEffect(() => {
         if (loadStartedRef.current) return;
-        // Si c'est une section immédiate, pas besoin d'observer
-        if (isImmediate) {
+        const triggerLoad = () => {
+            if (loadStartedRef.current || !mountedRef.current) return;
             loadStartedRef.current = true;
-            setIsVisible(true);
-            setHasLoaded(true);
-            // Déclencher le callback onLoad si fourni
-            if (onLoad) {
-                setIsFetching(true);
-                onLoad().finally(() => setIsFetching(false));
-            }
-            if (onVisible) {
-                onVisible();
-            }
-            return;
-        }
-
-        const element = containerRef.current;
-        if (!element || hasLoaded) return;
-
-        let queued = false;
-        let cancelled = false;
-        let idleId: number | undefined;
-        let timer: ReturnType<typeof setTimeout> | undefined;
-
-        observerRef.current = new IntersectionObserver(
-            (entries) => {
-                entries.forEach((entry) => {
-                    if (entry.isIntersecting && !queued) {
-                        queued = true;
-                        observerRef.current?.disconnect();
-                        // Utiliser requestIdleCallback pour éviter de bloquer le thread principal
-                        const triggerLoad = () => {
-                            if (cancelled) return;
-                            loadStartedRef.current = true;
-                            setIsVisible(true);
-                            setHasLoaded(true);
-
-                            if (onVisible) {
-                                onVisible();
-                            }
-
-                            if (onLoad) {
-                                setIsFetching(true);
-                                onLoad().finally(() => setIsFetching(false));
-                            }
-                        };
-
-                        if (isLightMode) {
-                            triggerLoad();
-                        } else if ('requestIdleCallback' in window) {
-                            idleId = window.requestIdleCallback(triggerLoad, { timeout: 100 + index * 50 });
-                        } else {
-                            // Fallback pour les navigateurs ne supportant pas requestIdleCallback
-                            timer = setTimeout(triggerLoad, index * 30);
-                        }
-                    }
-                });
-            },
-            {
-                rootMargin: effectiveRootMargin,
-                threshold: 0.01
-            }
-        );
-
-        observerRef.current.observe(element);
-
-        return () => {
-            cancelled = true;
-            if (idleId !== undefined) window.cancelIdleCallback?.(idleId);
-            clearTimeout(timer);
-            if (observerRef.current) {
-                observerRef.current.disconnect();
+            const callbacks = callbacksRef.current;
+            startTransition(() => {
+                setIsVisible(true);
+                setIsFetching(Boolean(callbacks.onLoad));
+                callbacks.onVisible?.();
+            });
+            if (callbacks.onLoad) {
+                void Promise.resolve().then(callbacks.onLoad)
+                    .catch(error => console.error('Error loading section:', error))
+                    .finally(() => {
+                        if (mountedRef.current) setIsFetching(false);
+                    });
             }
         };
-    }, [hasLoaded, isImmediate, index, effectiveRootMargin, isLightMode, onVisible, onLoad]);
+
+        if (isImmediate) {
+            triggerLoad();
+            return;
+        }
+        const element = containerRef.current;
+        if (!element) return;
+        let cancelLoad: (() => void) | undefined;
+        if (typeof IntersectionObserver === 'undefined') {
+            return scheduleSectionLoad(triggerLoad);
+        }
+        const observer = new IntersectionObserver(entries => {
+            if (cancelLoad || !entries.some(entry => entry.isIntersecting)) return;
+            observer.disconnect();
+            cancelLoad = scheduleSectionLoad(triggerLoad);
+        }, { rootMargin, threshold: 0 });
+        observer.observe(element);
+        return () => {
+            observer.disconnect();
+            cancelLoad?.();
+        };
+    }, [isImmediate, rootMargin]);
 
     // Déterminer ce qu'il faut afficher
     const shouldShowPlaceholder = !isVisible || (showLoadingDuringFetch && isFetching);
+    // Ne pas monter les skeletons de tout le catalogue avant l'intersection.
+    // Le gabarit conserve la hauteur ; le skeleton détaillé sert à l'attente réseau.
+    const loadingPlaceholder = placeholder === undefined
+        ? <ContentRowSkeleton reserveSpaceOnly={!isVisible} />
+        : placeholder;
 
     return (
         <div
@@ -189,7 +162,7 @@ const LazySection: React.FC<LazySectionProps> = ({
                 contain: 'layout style',
             }}
         >
-            {shouldShowPlaceholder ? placeholder : children}
+            {shouldShowPlaceholder ? loadingPlaceholder : children}
         </div>
     );
 };

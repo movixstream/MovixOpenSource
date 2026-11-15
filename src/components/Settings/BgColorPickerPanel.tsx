@@ -6,6 +6,8 @@ interface BgColorPickerPanelProps {
   committedHex: string;
   /** Hint i18n pour le texte sous le picker. */
   hint: string;
+  /** Nom accessible du champ hexadécimal quand plusieurs pickers coexistent. */
+  label?: string;
   /**
    * Appelé uniquement après que l'utilisateur arrête de bouger la pipette
    * (debounce ~100ms). Le parent reçoit donc max ~10 updates/sec au lieu
@@ -25,6 +27,7 @@ interface BgColorPickerPanelProps {
 export const BgColorPickerPanel = memo(function BgColorPickerPanel({
   committedHex,
   hint,
+  label,
   onCommit,
   layout = 'auto',
 }: BgColorPickerPanelProps) {
@@ -38,6 +41,8 @@ export const BgColorPickerPanel = memo(function BgColorPickerPanel({
   // pour éviter que le picker saute pendant que l'user drag.
   useEffect(() => {
     if (committedHex !== lastCommittedRef.current) {
+      if (commitTimerRef.current) window.clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
       lastCommittedRef.current = committedHex;
       setDraft(committedHex);
     }
@@ -69,13 +74,28 @@ export const BgColorPickerPanel = memo(function BgColorPickerPanel({
   }, [scheduleCommit]);
 
   const handleHexInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (commitTimerRef.current) window.clearTimeout(commitTimerRef.current);
+    commitTimerRef.current = null;
     const v = e.target.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 6);
     const next = '#' + v.toLowerCase();
     setDraft(next);
-    if (v.length === 3 || v.length === 6) {
+    // Expanding a three-digit colour while typing would prevent entering six
+    // digits once the parent normalises it. Accept short hex on blur instead.
+    if (v.length === 6) {
       scheduleCommit(next);
     }
   }, [scheduleCommit]);
+
+  const commitHexInput = () => {
+    if (commitTimerRef.current) window.clearTimeout(commitTimerRef.current);
+    commitTimerRef.current = null;
+    if (/^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(draft)) {
+      lastCommittedRef.current = draft;
+      if (draft !== committedHex) onCommit(draft);
+    } else {
+      setDraft(committedHex);
+    }
+  };
 
   return (
     <div className={`mt-4 flex gap-4 items-start w-full ${layout === 'column' ? 'flex-col' : 'flex-col sm:flex-row'}`}>
@@ -92,8 +112,11 @@ export const BgColorPickerPanel = memo(function BgColorPickerPanel({
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm select-none pointer-events-none">#</span>
             <input
               type="text"
+              aria-label={label ?? hint}
               value={draft.replace('#', '').toUpperCase()}
               onChange={handleHexInput}
+              onBlur={commitHexInput}
+              onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
               placeholder="EF4444"
               maxLength={6}
               className="w-full bg-gray-800/60 border border-gray-700/40 rounded-lg px-6 py-2 text-sm text-white font-mono tracking-wider focus:outline-none focus:border-indigo-500/60"

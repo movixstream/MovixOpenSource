@@ -3,10 +3,11 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import AppButton from './AppButton';
 
 interface Props {
   telegramUrl: string;
@@ -26,18 +27,28 @@ export default function MirrorErrorScreen({ telegramUrl, onRetry }: Props) {
         <Text style={styles.title}>Movix injoignable</Text>
         <Text style={styles.body}>
           Tous les domaines Movix semblent bloqués ou hors ligne. Rejoins le
-          canal Telegram pour récupérer le nouveau lien officiel.
+          canal Matrix pour récupérer le nouveau lien officiel.
         </Text>
 
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={() => Linking.openURL(telegramUrl)}>
-          <Text style={styles.primaryText}>Ouvrir Telegram</Text>
-        </TouchableOpacity>
+        <AppButton
+          title="Ouvrir Matrix"
+          variant="primary"
+          systemImage="bubble.left.and.bubble.right.fill"
+          accessibilityRole="link"
+          onPress={() => Linking.openURL(telegramUrl)}
+          style={[styles.buttonLayout, { marginBottom: 12 }]}
+          fallbackStyle={styles.primaryButton}
+          fallbackTextStyle={styles.primaryText}
+        />
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={onRetry}>
-          <Text style={styles.secondaryText}>Réessayer</Text>
-        </TouchableOpacity>
+        <AppButton
+          title="Réessayer"
+          systemImage="arrow.clockwise"
+          onPress={onRetry}
+          style={styles.buttonLayout}
+          fallbackStyle={styles.secondaryButton}
+          fallbackTextStyle={styles.secondaryText}
+        />
       </View>
     </View>
   );
@@ -68,14 +79,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 32,
   },
+  buttonLayout: {
+    minWidth: 200,
+  },
   primaryButton: {
     backgroundColor: '#8b5cf6',
     paddingVertical: 14,
     paddingHorizontal: 32,
     borderRadius: 10,
-    minWidth: 200,
     alignItems: 'center',
-    marginBottom: 12,
   },
   primaryText: {
     color: '#ffffff',
@@ -86,7 +98,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 32,
     borderRadius: 10,
-    minWidth: 200,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#27272a',

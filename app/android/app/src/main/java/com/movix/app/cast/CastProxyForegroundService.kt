@@ -19,6 +19,7 @@ import android.os.IBinder
 import com.movix.app.R
 import com.movix.app.proxy.CastMediaPreparer
 import com.movix.app.proxy.CronetMediaProxyUpstream
+import com.movix.app.proxy.ImpersonateMediaProxyUpstream
 import com.movix.app.proxy.MediaProxyPolicy
 import com.movix.app.proxy.MediaProxyServer
 import com.movix.app.proxy.MediaProxyServerConfig
@@ -35,6 +36,7 @@ class CastProxyForegroundService : Service() {
     private var sessionStore: MediaProxySessionStore? = null
     private var server: MediaProxyServer? = null
     private var preparer: CastMediaPreparer? = null
+    private var impersonatedUpstream: ImpersonateMediaProxyUpstream? = null
     private var powerLease: CastPowerLease? = null
     private var activeSessionId: String? = null
 
@@ -99,14 +101,23 @@ class CastProxyForegroundService : Service() {
                 selected.receiverAddress,
             )
             val store = MediaProxySessionStore()
-            // Fetch upstream via Cronet lie au reseau du Chromecast (signature TLS
-            // Chrome) pour passer les CDN fsvid/vidzy qui bloquent okhttp. Repli
-            // sur l'upstream okhttp network-bound si Cronet est indisponible.
+            // Fetch upstream via Cronet lie au reseau du Chromecast ; Fsvid/Vidzy
+            // via libcurl-impersonate (profil Chrome complet) sur ce meme reseau.
+            // Repli sur l'upstream okhttp network-bound si l'un manque.
+            val networkFallback = NetworkBoundMediaProxyUpstream(selected.network)
+            val impersonated = ImpersonateMediaProxyUpstream(
+                context = applicationContext,
+                fallback = networkFallback,
+                validateUrl = MediaProxyPolicy::validateHttpsUrlSyntax,
+                boundNetwork = selected.network,
+            )
+            impersonatedUpstream = impersonated
             val networkUpstream = CronetMediaProxyUpstream(
                 context = applicationContext,
                 validateUrl = MediaProxyPolicy::validateHttpsUrlSyntax,
-                fallback = NetworkBoundMediaProxyUpstream(selected.network),
+                fallback = networkFallback,
                 boundNetwork = selected.network,
+                impersonated = impersonated,
             )
             val relayServer = MediaProxyServer(
                 upstream = networkUpstream,
@@ -237,11 +248,13 @@ class CastProxyForegroundService : Service() {
         runCatching { sessionStore?.invalidateAll(com.movix.app.proxy.MediaProxyMode.CAST_LAN) }
         runCatching { preparer?.close() }
         runCatching { server?.close() }
+        runCatching { impersonatedUpstream?.close() }
         runCatching { powerLease?.release() }
         selectedNetwork = null
         sessionStore = null
         server = null
         preparer = null
+        impersonatedUpstream = null
         powerLease = null
         activeSessionId = null
         CastRelayRequestRegistry.shared.clear()

@@ -18,6 +18,7 @@ class InMemoryRedis {
     const chain = {
       zadd: (...args) => { operations.push(['zadd', args]); return chain; },
       zremrangebyscore: (...args) => { operations.push(['zremrangebyscore', args]); return chain; },
+      zremrangebyrank: (...args) => { operations.push(['zremrangebyrank', args]); return chain; },
       expire: (...args) => { operations.push(['expire', args]); return chain; },
       exec: async () => {
         const results = [];
@@ -50,6 +51,14 @@ class InMemoryRedis {
     const values = this.sortedSets.get(key) || [];
     this.sortedSets.set(key, values.filter(({ score }) => score > max));
     return values.length - (this.sortedSets.get(key)?.length || 0);
+  }
+
+  async zremrangebyrank(key, start, stop) {
+    const values = this.sortedSets.get(key) || [];
+    const end = stop < 0 ? values.length + stop : stop;
+    const kept = values.filter((_, index) => index < start || index > end);
+    this.sortedSets.set(key, kept);
+    return values.length - kept.length;
   }
 
   async expire() {
@@ -228,6 +237,32 @@ test('trackRequest persists an attempt before a rejected upstream request', asyn
   await telemetry.reportFailure(proxyUrl, blocked, { requestKind: 'page' });
 
   assert.equal(fieldsByName(sent[0])['Requêtes avant blocage'], '1');
+});
+
+test('sans webhook Discord, aucun essai n’est écrit dans Redis', async () => {
+  const redis = new InMemoryRedis();
+  const telemetry = createWiflixProxyTelemetry({ redis, webhookUrl: '', sendWebhook: async () => {} });
+  assert.equal(await telemetry.recordAttempt('http://198.51.100.50:8080'), false);
+  assert.equal(redis.sortedSets.size, 0);
+});
+
+test('la liste des essais d’un proxy reste bornée aux plus récents', async () => {
+  const redis = new InMemoryRedis();
+  let now = 1_000;
+  const telemetry = createWiflixProxyTelemetry({
+    redis,
+    webhookUrl: 'https://discord.com/api/webhooks/123/token',
+    now: () => now,
+    createId: () => `id-${now}`,
+    sendWebhook: async () => {},
+    maxAttempts: 3,
+  });
+  for (let index = 0; index < 5; index++) {
+    now += 1_000;
+    await telemetry.recordAttempt('http://198.51.100.60:8080');
+  }
+  const [values] = [...redis.sortedSets.values()];
+  assert.deepEqual(values.map(({ score }) => score), [4_000, 5_000, 6_000]);
 });
 
 test('reportFailure ignores non-blocking HTTP failures', async () => {

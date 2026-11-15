@@ -158,7 +158,7 @@ router.delete('/:profileId', async (req, res) => {
     }
 
     const profileId = ensureSafeProfileId(req.params.profileId);
-    const { readUserData, writeUserData, USERS_DIR } = getSyncModule();
+    const { readUserData, writeUserData, deleteProfileHistory, USERS_DIR } = getSyncModule();
     const userData = await readUserData(auth.userType, auth.userId);
     const profiles = userData.profiles || [];
 
@@ -204,6 +204,9 @@ router.delete('/:profileId', async (req, res) => {
     // Delete profile data file
     const profilePath = getProfileFilePath(USERS_DIR, auth.userType, auth.userId, profileId);
     try { await fsp.unlink(profilePath); } catch (e) { /* Ignore if file doesn't exist */ }
+
+    // Historique et progression du profil (au mieux, ne lève jamais).
+    await deleteProfileHistory(auth.userType, auth.userId, profileId);
 
     // Delete associated votes (likes/dislikes) for this profile
     try {

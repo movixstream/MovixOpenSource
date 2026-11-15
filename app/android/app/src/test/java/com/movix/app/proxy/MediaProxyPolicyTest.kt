@@ -161,6 +161,15 @@ class MediaProxyPolicyTest {
         assertTrue(MediaProxyPolicy.isProviderDecoyUrl("https://s1.fsvid.lol/troll/master.m3u8"))
         assertTrue(MediaProxyPolicy.isProviderDecoyUrl("https://s1.fsvid.lol/troll/seg0.ts"))
         assertTrue(MediaProxyPolicy.isProviderDecoyUrl("https://u14.vidzy.cc/troll/master.m3u8"))
+        // Leurre servi en 200 a l'URL reelle du master (releve le 2026-10-15).
+        assertTrue(MediaProxyPolicy.isProviderDecoyUrl("https://s1.fsvid.lol/e/seg0.ts"))
+        assertTrue(MediaProxyPolicy.isProviderDecoyUrl("https://u14.vidzy.cc/e/seg8.ts"))
+        assertFalse(
+            MediaProxyPolicy.isProviderDecoyUrl(
+                "https://s1.fsvid.lol/hls2/01/00031/id_n/seg-1-v1-a1.ts?t=x",
+            ),
+        )
+        assertFalse(MediaProxyPolicy.isProviderDecoyUrl("https://cdn.example.com/e/seg0.ts"))
 
         // Un vrai flux, et un hote tiers qui contient "troll", restent acceptes.
         assertFalse(
@@ -214,7 +223,7 @@ class MediaProxyPolicyTest {
         // qu'annonce PLAYBACK_SEC_CH_UA, sans quoi Fsvid sert son flux leurre.
         val signedUserAgent =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+                "(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
 
         for (url in listOf(
             "https://r1.fsvid.lol/video/master.m3u8",
@@ -230,10 +239,15 @@ class MediaProxyPolicyTest {
 
     @Test
     fun limitsExplicitEncodingToTheProviderDomains() {
-        for (host in listOf(
-            "r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org",
-            "strm4.uqload.vc", "strm1.uqload.bz", "STRM4.UQLOAD.VC.",
-        )) {
+        // Fsvid/Vidzy servent un faux master a tout Accept-Encoding qui n'est
+        // pas exactement celui de Chrome.
+        for (host in listOf("r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org")) {
+            assertEquals(
+                "gzip, deflate, br, zstd",
+                MediaProxyPolicy.playbackAcceptEncoding("https://$host/master.m3u8"),
+            )
+        }
+        for (host in listOf("strm4.uqload.vc", "strm1.uqload.bz", "STRM4.UQLOAD.VC.")) {
             assertEquals(
                 "identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0",
                 MediaProxyPolicy.playbackAcceptEncoding("https://$host/master.m3u8"),
@@ -247,6 +261,29 @@ class MediaProxyPolicyTest {
         )) {
             assertEquals(null, MediaProxyPolicy.playbackAcceptEncoding(url))
         }
+    }
+
+    @Test
+    fun routesFsvidVidzyToTheBrowserImpersonation() {
+        // Leur CDN exige le TLS d'un navigateur ET l'Accept-Encoding exact de
+        // Chrome : ni Cronet ni OkHttp, seul libcurl-impersonate.
+        for (host in listOf("r1.fsvid.lol", "fsvid.lol", "u14.vidzy.cc", "vidzy.org", "V6.VIDZY.CC.")) {
+            assertTrue(MediaProxyPolicy.requiresBrowserImpersonation("https://$host/master.m3u8"))
+            assertFalse(MediaProxyPolicy.requiresOkHttpUpstream("https://$host/master.m3u8"))
+        }
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("https://vidzy.cc.attacker.example/m.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("https://notfsvid.lol/m.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("https://strm4.uqload.vc/m.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresBrowserImpersonation("not-a-url"))
+    }
+
+    @Test
+    fun keepsOnlyUqloadOnOkHttp() {
+        for (host in listOf("strm4.uqload.vc", "STRM4.UQLOAD.VC.")) {
+            assertTrue(MediaProxyPolicy.requiresOkHttpUpstream("https://$host/master.m3u8"))
+        }
+        assertFalse(MediaProxyPolicy.requiresOkHttpUpstream("https://notuqload.vc/master.m3u8"))
+        assertFalse(MediaProxyPolicy.requiresOkHttpUpstream("not-a-url"))
     }
 
     @Test

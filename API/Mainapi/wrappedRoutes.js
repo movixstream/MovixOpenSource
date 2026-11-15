@@ -563,6 +563,62 @@ router.post('/track', verifyToken, trackRateLimit, async (req, res) => {
     }
 });
 
+// /progress : lu une fois par ouverture de l'onglet « En cours » du profil.
+const progressRateLimit = rateLimitPerProfile('progress', 20, 60, (req) => {
+    return req.headers['x-profile-id'] || req.user?.sub;
+});
+
+const PROGRESS_MAX_IDS = 50;
+
+/**
+ * Temps cumulé (secondes) passé sur la page de lecture de chaque titre, pour
+ * estimer l'avancement des films lus dans un lecteur qui n'enregistre pas sa
+ * position (embeds). Ce n'est qu'une estimation : le compteur tourne tant que
+ * la page est visible, même en pause.
+ * GET /api/wrapped/progress?type=movie&ids=1,2,3   Header 'x-profile-id' optionnel.
+ * Ne lit que les lignes de l'utilisateur du jeton.
+ */
+router.get('/progress', verifyToken, progressRateLimit, async (req, res) => {
+    if (!pool) {
+        return res.status(503).json({ success: false, error: 'Database not available' });
+    }
+
+    const contentType = req.query.type;
+    if (!['movie', 'tv', 'anime'].includes(contentType)) {
+        return res.status(400).json({ success: false, error: 'Invalid type' });
+    }
+
+    const ids = [...new Set(String(req.query.ids || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter((value) => /^\d{1,10}$/.test(value)))]
+        .slice(0, PROGRESS_MAX_IDS);
+    if (ids.length === 0) {
+        return res.json({ success: true, seconds: {} });
+    }
+
+    const profileId = req.headers['x-profile-id'] || null;
+    try {
+        const placeholders = ids.map(() => '?').join(',');
+        const [rows] = await pool.execute(
+            `SELECT content_id, SUM(watch_duration) AS seconds
+               FROM wrapped_viewing_data
+              WHERE user_id = ? AND profile_id <=> ? AND content_type = ?
+                AND content_id IN (${placeholders})
+              GROUP BY content_id`,
+            [req.user.sub, profileId, contentType, ...ids]
+        );
+        const seconds = {};
+        for (const row of rows) {
+            seconds[String(row.content_id)] = Number(row.seconds) || 0;
+        }
+        res.json({ success: true, seconds });
+    } catch (error) {
+        console.error('[Wrapped] Error reading progress:', error);
+        res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+});
+
 /**
  * Generate Wrapped summary using templates (like Spotify - no AI)
  * Header 'x-profile-id': Optional profile ID to filter stats

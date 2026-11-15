@@ -16,14 +16,18 @@ du dépôt d'origine, reproduite dans [LICENSE.md](LICENSE.md). Ils ne sont pas
 relicenciés sous la licence générale de Movix.
 
 Adaptations Movix : preset cinéma fixé, chemins d'images importés par Vite,
-canvas centré à 200 % de la largeur (géométrie mobile du Lightbar : 500 % × 40 %)
-et rogné par la popup. La densité reste de 265 particules : 34 images et 231 points.
+champ de particules à 200 % de la largeur (géométrie mobile du Lightbar : 500 % × 40 %)
+dont seule la moitié centrale, visible dans la popup, est allouée dans le canvas.
+La densité reste de 265 particules : 34 images et 231 points.
 Les directions, distributions de départ, durées de vie, orientation et fondu
 parabolique proviennent du moteur amont.
 
 La finition ajoute trois plans qui modulent la taille, la vitesse, l'opacité et
 la netteté. Les sources SVG restent intactes ; les plans doux sont précalculés
 dans des sprites en mémoire et le premier plan conserve les détails nets.
+Ces sprites sont préparés pendant un temps mort, avant la première popup
+(`src/utils/cinemaRainSprites.ts`) : le décor est complet dès l'ouverture. Si la
+popup s'ouvre avant, le reste est préparé d'un bloc et les motifs entrent ensemble.
 Le plan moyen gagne 20 % d'opacité et le premier plan 25 %, uniquement hors des
 zones de lecture ; les points sont atténués de 20 % sans changer leur nombre.
 Le placement initial et le renouvellement des icônes limitent leurs chevauchements

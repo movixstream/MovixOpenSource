@@ -2,6 +2,11 @@ import React, { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { useBgPrefs, getBgAccentRgb } from '@/utils/bgPreferences';
 import { useLightMode } from '@/context/LightModeContext';
+import { useHalloweenTheme } from '@/hooks/useHalloweenTheme';
+import { fitCanvasBitmapSize, isCanvasInvalidStateError } from '@/utils/canvasSizing';
+
+// Grille gris brume du thème Halloween, au-dessus du réglage « Forcer la couleur ».
+const HALLOWEEN_GRID_RGB = '130, 120, 150';
 
 type BgMode = 'combined' | 'static' | 'animated';
 
@@ -39,8 +44,14 @@ const HALO_HIDDEN_TRANSLATE = -1200;
 // translation CSS pendant le scroll (cf. updateCanvasWindow) ; la grille étant
 // un motif périodique, un repositionnement aligné sur un multiple de la
 // taille de cellule ne laisse aucune couture visible.
-const CANVAS_HEIGHT_VIEWPORT_MULTIPLIER = 3;
+const CANVAS_HEIGHT_VIEWPORT_MULTIPLIER = 2;
 const RESIZE_REDRAW_DEBOUNCE_MS = 150;
+
+const normalizeSquareSize = (value: number) => (
+    Number.isFinite(value) && value > 0
+        ? Math.max(2, Math.min(512, Math.round(value)))
+        : DEFAULT_SQUARE_SIZE
+);
 
 export const SquareBackground: React.FC<SquareBackgroundProps> = ({
     children,
@@ -54,16 +65,17 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
     // l'utilisateur active les flags, on ignore les valeurs hardcodées passées
     // par les pages (Search, Collections, etc.) et on applique le réglage user.
     const prefs = useBgPrefs();
+    const halloween = useHalloweenTheme();
     const { isLightMode, effectivePrefs } = useLightMode();
-    const squareSize = prefs.forceSquareSize ? prefs.squareSize : propSquareSize;
+    const squareSize = normalizeSquareSize(prefs.forceSquareSize ? prefs.squareSize : propSquareSize);
+    const overrideRgb = halloween ? HALLOWEEN_GRID_RGB : prefs.forceColor ? getBgAccentRgb(prefs) : null;
     // Préserve l'alpha de la couleur originale (les pages utilisent 0.10/0.15…)
     // en ne remplaçant que la composante RGB.
-    const borderColor = prefs.forceColor
+    const borderColor = overrideRgb
         ? (() => {
-            const rgb = getBgAccentRgb(prefs);
             const alphaMatch = propBorderColor.match(/rgba?\([^)]*?,\s*([\d.]+)\s*\)$/);
             const alpha = alphaMatch ? alphaMatch[1] : '0.15';
-            return `rgba(${rgb}, ${alpha})`;
+            return `rgba(${overrideRgb}, ${alpha})`;
         })()
         : propBorderColor;
 
@@ -72,8 +84,8 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
     const haloRef = useRef<HTMLDivElement>(null);
     // squareSize stocké dans un ref pour être lu dans les callbacks/RAF sans
     // re-register les handlers à chaque changement de prop.
-    const squareSizeRef = useRef(squareSize || DEFAULT_SQUARE_SIZE);
-    squareSizeRef.current = squareSize || DEFAULT_SQUARE_SIZE;
+    const squareSizeRef = useRef(squareSize);
+    squareSizeRef.current = squareSize;
     const stateRef = useRef({
         neighbors: [] as Neighbor[],
         currentRow: -2,
@@ -85,17 +97,22 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
         isDocumentVisible: typeof document === 'undefined' ? true : !document.hidden,
         dirtyCells: [] as Array<{ col: number; row: number }>,
     });
-    const gridCacheRef = useRef<{ canvas: HTMLCanvasElement | null; signature: string }>({
+    const gridCacheRef = useRef<{ canvas: HTMLCanvasElement | null; pattern: CanvasPattern | null; signature: string }>({
         canvas: null,
+        pattern: null,
         signature: '',
     });
     const colorRef = useRef(parseRGB(borderColor));
     colorRef.current = parseRGB(borderColor);
 
     const showCssGrid = !isLightMode && (mode === 'static' || !effectivePrefs.bgAnimations);
+    const supportsPointerHalo = typeof window === 'undefined'
+        || typeof window.matchMedia !== 'function'
+        || window.matchMedia('(hover: hover) and (pointer: fine)').matches;
     // Halo : seulement quand le mode l'inclut ET que l'utilisateur ne l'a pas
-    // explicitement désactivé dans Apparence → "Halo lumineux".
-    const showHalo = effectivePrefs.bgAnimations && effectivePrefs.blurEffects && (mode === 'static' || mode === 'combined') && prefs.haloEnabled;
+    // explicitement désactivé dans Apparence → "Halo lumineux", et seulement
+    // avec une souris : un swipe tactile ne doit pas animer le fond pendant le scroll.
+    const showHalo = supportsPointerHalo && effectivePrefs.bgAnimations && effectivePrefs.blurEffects && (mode === 'static' || mode === 'combined') && prefs.haloEnabled;
     const showCanvas = effectivePrefs.bgAnimations && (mode === 'animated' || mode === 'combined');
 
     useEffect(() => {
@@ -131,6 +148,13 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
         };
 
         const handlePointerMove = (e: PointerEvent) => {
+            if (e.pointerType !== 'mouse') {
+                if (isActive) {
+                    isActive = false;
+                    scheduleHaloUpdate();
+                }
+                return;
+            }
             lastClientX = e.clientX;
             lastClientY = e.clientY;
             isActive = true;
@@ -150,6 +174,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
 
         container.addEventListener('pointermove', handlePointerMove, { passive: true });
         container.addEventListener('pointerleave', handlePointerLeave);
+        container.addEventListener('pointercancel', handlePointerLeave);
         window.addEventListener('scroll', handleViewportShift, { passive: true });
         window.addEventListener('resize', handleViewportShift);
 
@@ -159,6 +184,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
             }
             container.removeEventListener('pointermove', handlePointerMove);
             container.removeEventListener('pointerleave', handlePointerLeave);
+            container.removeEventListener('pointercancel', handlePointerLeave);
             window.removeEventListener('scroll', handleViewportShift);
             window.removeEventListener('resize', handleViewportShift);
         };
@@ -177,8 +203,13 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
 
         const state = stateRef.current;
         const gridCache = gridCacheRef.current;
+        let canvasAvailable = true;
+        let logicalWidth = 0;
+        let logicalHeight = 0;
+        let bitmapScaleX = 1;
+        let bitmapScaleY = 1;
 
-        const canRender = () => state.isInViewport && state.isDocumentVisible;
+        const canRender = () => canvasAvailable && state.isInViewport && state.isDocumentVisible;
 
         const cancelScheduledFrame = () => {
             if (state.animId) {
@@ -204,6 +235,13 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
         let windowTop = 0;
         let windowHeight = 0;
 
+        const disableCanvas = () => {
+            canvasAvailable = false;
+            cancelScheduledFrame();
+            canvas.width = 0;
+            canvas.height = 0;
+        };
+
         const computeWindowHeight = (containerHeight: number) => {
             const maxHeight = Math.max(1, Math.round(window.innerHeight * CANVAS_HEIGHT_VIEWPORT_MULTIPLIER));
             return Math.max(1, Math.min(Math.round(containerHeight), maxHeight));
@@ -219,19 +257,41 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
             const nextWidth = Math.max(1, Math.round(containerRect.width));
             windowHeight = computeWindowHeight(containerRect.height);
             const nextHeight = windowHeight;
+            const bitmapSize = fitCanvasBitmapSize(nextWidth, nextHeight);
+            if (!bitmapSize) {
+                disableCanvas();
+                return;
+            }
 
-            if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
-                canvas.width = nextWidth;
-                canvas.height = nextHeight;
-                gridCache.signature = '';
+            if (
+                canvas.width !== bitmapSize.width
+                || canvas.height !== bitmapSize.height
+                || logicalWidth !== nextWidth
+                || logicalHeight !== nextHeight
+            ) {
+                logicalWidth = nextWidth;
+                logicalHeight = nextHeight;
+                bitmapScaleX = bitmapSize.scaleX;
+                bitmapScaleY = bitmapSize.scaleY;
+                canvas.style.width = `${nextWidth}px`;
+                canvas.style.height = `${nextHeight}px`;
+                try {
+                    canvas.width = bitmapSize.width;
+                    canvas.height = bitmapSize.height;
+                    ctx.setTransform(bitmapScaleX, 0, 0, bitmapScaleY, 0, 0);
+                } catch (error) {
+                    if (!isCanvasInvalidStateError(error)) throw error;
+                    disableCanvas();
+                    return;
+                }
+                canvasAvailable = true;
                 state.dirtyCells = [];
                 // Paint grid once on resize so dirty-rect rendering has a clean base
                 const cell = squareSizeRef.current;
-                const numCols = Math.ceil(nextWidth / cell);
-                const numRows = Math.ceil(nextHeight / cell);
-                const gridCanvas = drawBaseGrid(nextWidth, nextHeight, cell, numCols, numRows);
-                if (gridCanvas) {
-                    ctx.drawImage(gridCanvas, 0, 0);
+                const pattern = drawBaseGrid(cell);
+                if (pattern) {
+                    ctx.fillStyle = pattern;
+                    ctx.fillRect(0, 0, nextWidth, nextHeight);
                 }
             }
         };
@@ -240,16 +300,15 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
         // régénération : dimensions/couleur inchangées, seule la position
         // affichée bouge) — utilisé après un repositionnement de fenêtre.
         const paintGridFromCache = () => {
-            const width = canvas.width;
-            const height = canvas.height;
+            const width = logicalWidth;
+            const height = logicalHeight;
             if (width <= 0 || height <= 0) return;
             const cell = squareSizeRef.current;
-            const numCols = Math.ceil(width / cell);
-            const numRows = Math.ceil(height / cell);
-            const gridCanvas = drawBaseGrid(width, height, cell, numCols, numRows);
-            if (gridCanvas) {
+            const pattern = drawBaseGrid(cell);
+            if (pattern) {
                 ctx.clearRect(0, 0, width, height);
-                ctx.drawImage(gridCanvas, 0, 0);
+                ctx.fillStyle = pattern;
+                ctx.fillRect(0, 0, width, height);
             }
             state.dirtyCells = [];
         };
@@ -303,8 +362,8 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
         };
 
         const getGridMetrics = () => {
-            const width = canvas.width;
-            const height = canvas.height;
+            const width = logicalWidth;
+            const height = logicalHeight;
             const cell = squareSizeRef.current;
             const numCols = Math.ceil(width / cell);
             const numRows = Math.ceil(height / cell);
@@ -318,12 +377,12 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
             };
         };
 
-        const drawBaseGrid = (width: number, height: number, cell: number, numCols: number, numRows: number) => {
+        const drawBaseGrid = (cell: number) => {
             const { r, g, b } = colorRef.current;
-            // Signature inclut `cell` pour invalider le cache quand squareSize change.
-            const signature = `${width}:${height}:${cell}:${r}:${g}:${b}`;
-            if (gridCache.signature === signature && gridCache.canvas) {
-                return gridCache.canvas;
+            // Cache one repeating cell, not a second viewport-sized bitmap.
+            const signature = `${cell}:${r}:${g}:${b}`;
+            if (gridCache.signature === signature && gridCache.pattern) {
+                return gridCache.pattern;
             }
 
             if (!gridCache.canvas) {
@@ -331,32 +390,31 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
             }
 
             const gridCanvas = gridCache.canvas;
-            gridCanvas.width = width;
-            gridCanvas.height = height;
+            gridCanvas.width = cell;
+            gridCanvas.height = cell;
 
             const gridCtx = gridCanvas.getContext('2d');
             if (!gridCtx) return null;
 
-            gridCtx.clearRect(0, 0, width, height);
+            gridCtx.clearRect(0, 0, cell, cell);
             gridCtx.lineWidth = 1;
             gridCtx.strokeStyle = `rgba(${r},${g},${b},0.08)`;
             gridCtx.beginPath();
 
-            for (let col = 0; col <= numCols; col++) {
-                const x = col * cell;
-                gridCtx.moveTo(x, 0);
-                gridCtx.lineTo(x, numRows * cell);
-            }
-
-            for (let row = 0; row <= numRows; row++) {
-                const y = row * cell;
-                gridCtx.moveTo(0, y);
-                gridCtx.lineTo(numCols * cell, y);
-            }
+            // Include both edges to preserve the half-pixel antialiasing at
+            // every seam when the cell is repeated.
+            gridCtx.rect(0, 0, cell, cell);
 
             gridCtx.stroke();
+            try {
+                gridCache.pattern = ctx.createPattern(gridCanvas, 'repeat');
+            } catch (error) {
+                if (!isCanvasInvalidStateError(error)) throw error;
+                disableCanvas();
+                gridCache.pattern = null;
+            }
             gridCache.signature = signature;
-            return gridCanvas;
+            return gridCache.pattern;
         };
 
         const getRandomNeighbors = (row: number, col: number, numRows: number, numCols: number): Neighbor[] => {
@@ -392,8 +450,9 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
 
             const { width, height, cell, numCols, numRows } = getGridMetrics();
 
-            const gridCanvas = drawBaseGrid(width, height, cell, numCols, numRows);
-            if (!gridCanvas) return;
+            const pattern = drawBaseGrid(cell);
+            if (!pattern) return;
+            ctx.fillStyle = pattern;
 
             // Dirty-rect restore: paint grid only under previously drawn cells
             // instead of clearing + drawImage the full canvas each frame.
@@ -403,7 +462,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
                 const w = cell + 2;
                 const h = cell + 2;
                 ctx.clearRect(x, y, w, h);
-                ctx.drawImage(gridCanvas, x, y, w, h, x, y, w, h);
+                ctx.fillRect(x, y, w, h);
             }
             state.dirtyCells = [];
 
@@ -489,11 +548,11 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
             // handlePointerMove) plutôt qu'un getBoundingClientRect() direct.
             const mouseX = e.clientX - containerRect.left;
             const mouseY = (e.clientY - containerRect.top) - windowTop;
-            if (mouseX < 0 || mouseX > canvas.width || mouseY < 0 || mouseY > canvas.height) return;
+            if (mouseX < 0 || mouseX > logicalWidth || mouseY < 0 || mouseY > logicalHeight) return;
 
             const cell = squareSizeRef.current;
-            const numCols = Math.ceil(canvas.width / cell);
-            const numRows = Math.ceil(canvas.height / cell);
+            const numCols = Math.ceil(logicalWidth / cell);
+            const numRows = Math.ceil(logicalHeight / cell);
             const col = Math.max(0, Math.min(numCols - 1, Math.floor(mouseX / cell)));
             const row = Math.max(0, Math.min(numRows - 1, Math.floor(mouseY / cell)));
 
@@ -559,7 +618,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
         // relance un resize + repaint complet de la grille pendant le scroll —
         // exactement le moment où on veut le moins de travail main-thread.
         let resizeDebounceId: number | undefined;
-        const resizeObserver = new ResizeObserver(() => {
+        const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
             if (resizeDebounceId !== undefined) {
                 window.clearTimeout(resizeDebounceId);
             }
@@ -578,18 +637,17 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
         // que les cellules survolées. Sans ce paint forcé, un changement de
         // couleur ou de taille en live laisse l'ancienne grille à l'écran.
         const forceFullPaint = () => {
-            const width = canvas.width;
-            const height = canvas.height;
+            const width = logicalWidth;
+            const height = logicalHeight;
             if (width <= 0 || height <= 0) return;
             const cell = squareSizeRef.current;
-            const numCols = Math.ceil(width / cell);
-            const numRows = Math.ceil(height / cell);
             // Invalide le cache pour que drawBaseGrid utilise la nouvelle couleur.
             gridCache.signature = '';
-            const gridCanvas = drawBaseGrid(width, height, cell, numCols, numRows);
-            if (gridCanvas) {
+            const pattern = drawBaseGrid(cell);
+            if (pattern) {
                 ctx.clearRect(0, 0, width, height);
-                ctx.drawImage(gridCanvas, 0, 0);
+                ctx.fillStyle = pattern;
+                ctx.fillRect(0, 0, width, height);
             }
             state.dirtyCells = [];
         };
@@ -600,7 +658,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
         forceFullPaint();
         renderOnce();
 
-        resizeObserver.observe(container);
+        resizeObserver?.observe(container);
         viewportObserver?.observe(container);
         container.addEventListener('pointermove', handlePointerMove, { passive: true });
         container.addEventListener('pointerleave', handlePointerLeave);
@@ -621,7 +679,7 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
             if (resizeDebounceId !== undefined) {
                 window.clearTimeout(resizeDebounceId);
             }
-            resizeObserver.disconnect();
+            resizeObserver?.disconnect();
             viewportObserver?.disconnect();
             container.removeEventListener('pointermove', handlePointerMove);
             container.removeEventListener('pointerleave', handlePointerLeave);
@@ -632,11 +690,14 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
             // Le mode léger doit aussi libérer les buffers conservés hors DOM.
             canvas.width = 0;
             canvas.height = 0;
+            canvas.style.width = '';
+            canvas.style.height = '';
             if (gridCache.canvas) {
                 gridCache.canvas.width = 0;
                 gridCache.canvas.height = 0;
             }
             gridCache.canvas = null;
+            gridCache.pattern = null;
             gridCache.signature = '';
             state.neighbors = [];
             state.dirtyCells = [];
@@ -649,6 +710,9 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
         <div
             ref={containerRef}
             className={cn('relative overflow-hidden bg-black', className)}
+            // Thème Halloween : fond rendu transparent (halloween-ui.css)
+            // pour laisser voir le décor peint derrière le site.
+            data-square-bg=""
             {...props}
         >
             {showCssGrid && (

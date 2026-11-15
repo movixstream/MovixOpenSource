@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Crown, Gift } from 'lucide-react';
+import { Crown, Gift, Ticket } from 'lucide-react';
 import TutoLayout, { TutoSection } from '../../components/TutoLayout';
 import TutoLink from '../../components/TutoLink';
 
@@ -57,11 +57,20 @@ const VipHelpPage: React.FC = () => {
     },
     {
       kind: 'text',
+      titleKey: 'help.vip.giftCardTitle',
+      bodyKey: 'help.vip.giftCardBody',
+      titleIcon: <Ticket className="w-5 h-5 text-amber-300" />,
+      components: {
+        1: <TutoLink to="/vip" />,
+      },
+    },
+    {
+      kind: 'text',
       titleKey: 'help.vip.giftTitle',
       bodyKey: 'help.vip.giftBody',
       titleIcon: <Gift className="w-5 h-5 text-pink-400" />,
       components: {
-        1: <TutoLink to="/vip/don" />,
+        1: <TutoLink to="/vip" />,
       },
     },
     {

@@ -13,9 +13,10 @@ import {
 } from '../utils/accountAuth';
 import { getSessionCreationHeaders } from '../utils/sessionClientId';
 import { useTurnstileBypass } from '../hooks/useTurnstileBypass';
+import { TURNSTILE_SITE_KEY } from '../utils/turnstileKeys';
+import { copyText } from '../utils/clipboard';
 
 const API_URL = import.meta.env.VITE_MAIN_API;
-const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
 declare global {
   interface Window {
@@ -169,12 +170,11 @@ const CreateAccount: React.FC<CreateAccountProps> = ({ mode = 'create' }) => {
   };
 
   const copyToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(mnemonic);
+    if (await copyText(mnemonic)) {
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2000);
-    } catch (error) {
-      console.error('Erreur lors de la copie:', error);
+    } else {
+      console.error('Erreur lors de la copie');
     }
   };
 

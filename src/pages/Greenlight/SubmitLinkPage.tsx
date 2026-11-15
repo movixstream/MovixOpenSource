@@ -357,6 +357,9 @@ const SubmitLinkPage: React.FC = () => {
                 return;
             }
 
+            // Lien Uqload sans nom de source saisi : on nomme la source « Uqload »
+            const finalSourceName = sourceName.trim() || (isUqload ? 'Uqload' : '');
+
             if (isTvBulk) {
                 // Bulk submit for TV episodes with per-episode URLs
                 const epUrlsClean: Record<number, string> = {};
@@ -377,7 +380,7 @@ const SubmitLinkPage: React.FC = () => {
                     season_number: selectedSeason,
                     episode_urls: epUrlsClean,
                 };
-                if (sourceName.trim()) body.source_name = sourceName.trim();
+                if (finalSourceName) body.source_name = finalSourceName;
 
                 const response = await fetch(`${API_URL}/api/link-submissions/bulk`, {
                     method: 'POST',
@@ -400,7 +403,7 @@ const SubmitLinkPage: React.FC = () => {
                     media_type: contentType,
                     url: linkUrl.trim(),
                 };
-                if (sourceName.trim()) body.source_name = sourceName.trim();
+                if (finalSourceName) body.source_name = finalSourceName;
 
                 const response = await fetch(`${API_URL}/api/link-submissions`, {
                     method: 'POST',
@@ -456,11 +459,9 @@ const SubmitLinkPage: React.FC = () => {
         setWishboardPage(1);
     };
 
-    // Check if SeekStreaming
+    // Lien Uqload (tous TLD : .vc, .is, .cx…)
     const allUrls = contentType === 'tv' ? Object.values(episodeUrls).join(' ') : linkUrl;
-    const isSeekStreaming = allUrls.toLowerCase().includes('seekstreaming.com') ||
-        allUrls.toLowerCase().includes('embedseek.com') ||
-        allUrls.toLowerCase().includes('embed4me.com');
+    const isUqload = allUrls.toLowerCase().includes('uqload.');
 
     const contentTitle = selectedContent?.title || selectedContent?.name || '';
     const contentYear = (selectedContent?.release_date || selectedContent?.first_air_date || '').split('-')[0];
@@ -492,8 +493,8 @@ const SubmitLinkPage: React.FC = () => {
                 <div className="mb-8">
                     <div className="flex items-center gap-3 mb-4">
                         <Link to="/wishboard">
-                            <Button variant="ghost" size="sm" className="text-white/60 hover:text-white">
-                                <ArrowLeft className="w-4 h-4 mr-1" /> Greenlight
+                            <Button variant="ghost" size="sm" className="text-white/60 hover:text-white group/icon">
+                                <ArrowLeft className="w-4 h-4 mr-1 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" /> Greenlight
                             </Button>
                         </Link>
                     </div>
@@ -509,10 +510,10 @@ const SubmitLinkPage: React.FC = () => {
                         {t('greenlight.submitLinkIntro')}
                     </p>
 
-                    {/* SeekStreaming recommendation */}
+                    {/* Uqload recommendation */}
                     <div className="mt-4 mx-auto max-w-md">
                         <a
-                            href="https://seekstreaming.com/"
+                            href="https://uqload.vc/"
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex items-center gap-3 p-3 rounded-xl bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 hover:border-emerald-500/40 transition-all group"
@@ -522,10 +523,10 @@ const SubmitLinkPage: React.FC = () => {
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="text-sm font-semibold text-emerald-400">
-                                    <ShinyText text={t('greenlight.seekStreamingTip')} speed={3} color="#34d399" shineColor="#6ee7b7" className="inline-block" />
+                                    <ShinyText text={t('greenlight.uqloadTip')} speed={3} color="#34d399" shineColor="#6ee7b7" className="inline-block" />
                                 </p>
                                 <p className="text-xs text-white/40 mt-0.5">
-                                    {t('greenlight.seekStreamingDesc')}
+                                    {t('greenlight.uqloadDesc')}
                                 </p>
                             </div>
                             <ExternalLink className="w-4 h-4 text-white opacity-30 group-hover:text-emerald-400 group-hover:opacity-100 transition-all flex-shrink-0" />
@@ -577,7 +578,7 @@ const SubmitLinkPage: React.FC = () => {
                         >
                             <div className="bg-white/5 rounded-xl border border-white/10 p-4">
                                 <h3 className="text-sm font-semibold text-white/80 mb-3 flex items-center gap-2">
-                                    <Clock className="w-4 h-4" /> {t('greenlight.recentSubmissions')}
+                                    <Clock className="w-4 h-4 text-white opacity-80" /> {t('greenlight.recentSubmissions')}
                                 </h3>
                                 {loadingSubmissions ? (
                                     <div className="flex justify-center py-4">
@@ -613,9 +614,9 @@ const SubmitLinkPage: React.FC = () => {
                                                 {sub.status === 'pending' && (
                                                     <button
                                                         onClick={() => handleDeleteSubmission(sub.id)}
-                                                        className="text-white/30 hover:text-red-400 transition-colors"
+                                                        className="text-white/30 hover:text-red-400 transition-colors group/icon"
                                                     >
-                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                        <Trash2 className="w-3.5 h-3.5 text-white opacity-30 group-hover/icon:text-red-400 group-hover/icon:opacity-100 transition-[color,opacity]" />
                                                     </button>
                                                 )}
                                             </div>
@@ -640,9 +641,6 @@ const SubmitLinkPage: React.FC = () => {
                         <h2 className="text-2xl font-bold mb-2">{t('greenlight.linkSubmitted')}</h2>
                         <p className="text-white/50 mb-6 max-w-md mx-auto">
                             {t('greenlight.linkSubmittedDesc')}
-                            {isSeekStreaming && (
-                                <span className="block mt-2 text-emerald-400 text-sm">{t('greenlight.seekStreamingDetectedPriority')}</span>
-                            )}
                         </p>
                         <div className="flex gap-3 justify-center">
                             <Button onClick={handleReset} className="bg-white/10 hover:bg-white/20">
@@ -761,8 +759,8 @@ const SubmitLinkPage: React.FC = () => {
                                             )}
 
                                             <div className="flex justify-between mt-6">
-                                                <Button variant="ghost" onClick={() => { setSelectedContent(null); setSelectedSeason(null); setSelectedEpisodes(new Set()); setEpisodes([]); setStep(1); }} className="text-white/50 hover:text-white">
-                                                    <ArrowLeft className="w-4 h-4 mr-1" /> {t('common.back')}
+                                                <Button variant="ghost" onClick={() => { setSelectedContent(null); setSelectedSeason(null); setSelectedEpisodes(new Set()); setEpisodes([]); setStep(1); }} className="text-white/50 hover:text-white group/icon">
+                                                    <ArrowLeft className="w-4 h-4 mr-1 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" /> {t('common.back')}
                                                 </Button>
                                                 <Button
                                                     disabled={selectedSeason === null || selectedEpisodes.size === 0}
@@ -785,7 +783,7 @@ const SubmitLinkPage: React.FC = () => {
                                             setLinkUrl={setLinkUrl}
                                             sourceName={sourceName}
                                             setSourceName={setSourceName}
-                                            isSeekStreaming={isSeekStreaming}
+                                            isUqload={isUqload}
                                             error={error}
                                             submitting={submitting}
                                             onSubmit={handleSubmit}
@@ -838,13 +836,13 @@ const SubmitLinkPage: React.FC = () => {
                                                         setEpisodeUrls(filled);
                                                     }
                                                 }}
-                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                                                className={`group/icon flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
                                                     linkInputMode === 'individual'
                                                         ? 'bg-green-500/20 text-green-400'
                                                         : 'text-white/40 hover:text-white/60'
                                                 }`}
                                             >
-                                                <List className="w-3.5 h-3.5" />
+                                                <List className={`w-3.5 h-3.5 transition-[color,opacity] ${(linkInputMode === 'individual' ? "text-green-400 opacity-100" : "text-white opacity-40 group-hover/icon:opacity-60")}`} />
                                                 {t('greenlight.detailedMode')}
                                             </button>
                                             <button
@@ -855,13 +853,13 @@ const SubmitLinkPage: React.FC = () => {
                                                     const lines = sortedEps.map(ep => episodeUrls[ep] || '').join('\n');
                                                     setBulkTextarea(lines);
                                                 }}
-                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                                                className={`group/icon flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
                                                     linkInputMode === 'textarea'
                                                         ? 'bg-green-500/20 text-green-400'
                                                         : 'text-white/40 hover:text-white/60'
                                                 }`}
                                             >
-                                                <AlignLeft className="w-3.5 h-3.5" />
+                                                <AlignLeft className={`w-3.5 h-3.5 transition-[color,opacity] ${(linkInputMode === 'textarea' ? "text-green-400 opacity-100" : "text-white opacity-40 group-hover/icon:opacity-60")}`} />
                                                 {t('greenlight.textMode')}
                                             </button>
                                         </div>
@@ -884,7 +882,7 @@ const SubmitLinkPage: React.FC = () => {
                                                                     placeholder={epName ? t('greenlight.linkForEpisode', { name: epName }) : t('greenlight.linkEpisodeNum', { num: epNum })}
                                                                     className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-white/20 focus:outline-none focus:ring-1 focus:ring-green-500/50 focus:border-green-500/50"
                                                                 />
-                                                                {(episodeUrls[epNum] || '').toLowerCase().includes('seekstreaming.com') && (
+                                                                {(episodeUrls[epNum] || '').toLowerCase().includes('uqload.') && (
                                                                     <Sparkles className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-emerald-400" />
                                                                 )}
                                                             </div>
@@ -988,21 +986,20 @@ const SubmitLinkPage: React.FC = () => {
                                         />
                                     </div>
 
-                                    {/* SeekStreaming reminder */}
+                                    {/* Uqload reminder */}
                                     <div className="mb-4 p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white/40">
                                         <p className="font-medium text-white/60 mb-1">{t('greenlight.tipTitle')}</p>
-                                        <p>
-                                            {t('greenlight.tipUploadSeekStreaming')}
-                                        </p>
+                                        <p>{t('greenlight.tipUploadUqload')}</p>
+                                        <p className="mt-1">{t('greenlight.tipPremiumAccount')}</p>
                                     </div>
 
-                                    {isSeekStreaming && (
+                                    {isUqload && (
                                         <motion.p
                                             initial={{ opacity: 0, y: -5 }}
                                             animate={{ opacity: 1, y: 0 }}
                                             className="text-xs text-emerald-400 mb-4 flex items-center gap-1"
                                         >
-                                            <Sparkles className="w-3 h-3" /> {t('greenlight.seekStreamingDetected')}
+                                            <Sparkles className="w-3 h-3" /> {t('greenlight.uqloadDetected')}
                                         </motion.p>
                                     )}
 
@@ -1020,8 +1017,8 @@ const SubmitLinkPage: React.FC = () => {
 
                                     {/* Actions */}
                                     <div className="flex justify-between">
-                                        <Button variant="ghost" onClick={() => navigateStep(3)} className="text-white/50 hover:text-white">
-                                            <ArrowLeft className="w-4 h-4 mr-1" /> {t('common.back')}
+                                        <Button variant="ghost" onClick={() => navigateStep(3)} className="text-white/50 hover:text-white group/icon">
+                                            <ArrowLeft className="w-4 h-4 mr-1 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" /> {t('common.back')}
                                         </Button>
                                         <Button
                                             disabled={Object.keys(episodeUrls).length < selectedEpisodes.size || Object.values(episodeUrls).some(u => !u.trim()) || submitting}
@@ -1056,8 +1053,8 @@ const SubmitLinkPage: React.FC = () => {
                                         </AnimatedBorderCard>
                                     </motion.div>
                                 ) : (
-                                    <motion.button layout whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setContentType('movie'); setSearchQuery(''); setSearchResults([]); setWishboardRequests([]); setWishboardSearch(''); }} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white">
-                                        <Film className="h-4 w-4" /> {t('greenlight.films')}
+                                    <motion.button layout whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setContentType('movie'); setSearchQuery(''); setSearchResults([]); setWishboardRequests([]); setWishboardSearch(''); }} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white group/icon">
+                                        <Film className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" /> {t('greenlight.films')}
                                     </motion.button>
                                 )}
                                 {/* Séries */}
@@ -1068,8 +1065,8 @@ const SubmitLinkPage: React.FC = () => {
                                         </AnimatedBorderCard>
                                     </motion.div>
                                 ) : (
-                                    <motion.button layout whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setContentType('tv'); setSearchQuery(''); setSearchResults([]); setWishboardRequests([]); setWishboardSearch(''); }} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white">
-                                        <Tv className="h-4 w-4" /> {t('greenlight.tvSeries')}
+                                    <motion.button layout whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setContentType('tv'); setSearchQuery(''); setSearchResults([]); setWishboardRequests([]); setWishboardSearch(''); }} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white group/icon">
+                                        <Tv className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" /> {t('greenlight.tvSeries')}
                                     </motion.button>
                                 )}
 
@@ -1084,8 +1081,8 @@ const SubmitLinkPage: React.FC = () => {
                                         </AnimatedBorderCard>
                                     </motion.div>
                                 ) : (
-                                    <motion.button layout whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setSourceMode('tmdb'); setWishboardRequests([]); setWishboardSearch(''); }} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white">
-                                        <Search className="h-4 w-4" /> TMDB
+                                    <motion.button layout whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setSourceMode('tmdb'); setWishboardRequests([]); setWishboardSearch(''); }} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white group/icon">
+                                        <Search className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" /> TMDB
                                     </motion.button>
                                 )}
                                 {sourceMode === 'wishboard' ? (
@@ -1095,8 +1092,8 @@ const SubmitLinkPage: React.FC = () => {
                                         </AnimatedBorderCard>
                                     </motion.div>
                                 ) : (
-                                    <motion.button layout whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setSourceMode('wishboard'); setSearchQuery(''); setSearchResults([]); fetchWishboardRequests('', 1); }} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white">
-                                        <Vote className="h-4 w-4" /> {t('greenlight.requests')}
+                                    <motion.button layout whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setSourceMode('wishboard'); setSearchQuery(''); setSearchResults([]); fetchWishboardRequests('', 1); }} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white group/icon">
+                                        <Vote className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" /> {t('greenlight.requests')}
                                     </motion.button>
                                 )}
                             </div>
@@ -1239,10 +1236,10 @@ const SubmitLinkPage: React.FC = () => {
                                                         setWishboardPage(nextPage);
                                                         fetchWishboardRequests(wishboardSearch, nextPage, true);
                                                     }}
-                                                    className="text-white/50 hover:text-white text-xs"
+                                                    className="text-white/50 hover:text-white text-xs group/icon"
                                                     disabled={loadingWishboard}
                                                 >
-                                                    {loadingWishboard ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}
+                                                    {loadingWishboard ? <Loader2 className="w-4 h-4 animate-spin mr-1 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" /> : null}
                                                     {t('greenlight.seeMoreRequests')}
                                                 </Button>
                                             </div>
@@ -1271,7 +1268,7 @@ interface LinkInputFormProps {
     setLinkUrl: (val: string) => void;
     sourceName: string;
     setSourceName: (val: string) => void;
-    isSeekStreaming: boolean;
+    isUqload: boolean;
     error: string | null;
     submitting: boolean;
     onSubmit: () => void;
@@ -1280,7 +1277,7 @@ interface LinkInputFormProps {
 
 const LinkInputForm: React.FC<LinkInputFormProps> = ({
     contentTitle, contentYear, posterUrl, seasonLabel,
-    linkUrl, setLinkUrl, sourceName, setSourceName, isSeekStreaming,
+    linkUrl, setLinkUrl, sourceName, setSourceName, isUqload,
     error, submitting, onSubmit, onBack
 }) => {
     const { t } = useTranslation();
@@ -1316,13 +1313,13 @@ const LinkInputForm: React.FC<LinkInputFormProps> = ({
                     className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:border-green-500/50"
                     autoFocus
                 />
-                {isSeekStreaming && (
+                {isUqload && (
                     <motion.p
                         initial={{ opacity: 0, y: -5 }}
                         animate={{ opacity: 1, y: 0 }}
                         className="text-xs text-emerald-400 mt-1.5 flex items-center gap-1"
                     >
-                        <Sparkles className="w-3 h-3" /> {t('greenlight.seekStreamingLinkDetected')}
+                        <Sparkles className="w-3 h-3" /> {t('greenlight.uqloadDetected')}
                     </motion.p>
                 )}
             </div>
@@ -1339,12 +1336,11 @@ const LinkInputForm: React.FC<LinkInputFormProps> = ({
                 />
             </div>
 
-            {/* SeekStreaming reminder */}
+            {/* Uqload reminder */}
             <div className="mb-6 p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-white/40">
                 <p className="font-medium text-white/60 mb-1">{t('greenlight.tipTitle')}</p>
-                <p>
-                    {t('greenlight.tipUploadSeekStreamingFull')}
-                </p>
+                <p>{t('greenlight.tipUploadUqloadFull')}</p>
+                <p className="mt-1">{t('greenlight.tipPremiumAccount')}</p>
             </div>
 
             {/* Error */}
@@ -1361,8 +1357,8 @@ const LinkInputForm: React.FC<LinkInputFormProps> = ({
 
             {/* Actions */}
             <div className="flex justify-between">
-                <Button variant="ghost" onClick={onBack} className="text-white/50 hover:text-white">
-                    <ArrowLeft className="w-4 h-4 mr-1" /> {t('common.back')}
+                <Button variant="ghost" onClick={onBack} className="text-white/50 hover:text-white group/icon">
+                    <ArrowLeft className="w-4 h-4 mr-1 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" /> {t('common.back')}
                 </Button>
                 <Button
                     disabled={!linkUrl.trim() || submitting}

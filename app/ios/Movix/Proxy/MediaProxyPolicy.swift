@@ -120,14 +120,16 @@ enum MediaProxyPolicy {
   // requêtes aussi sûrement qu'une absence d'en-tête. On émet donc la chaîne
   // complète, alignée sur playbackSecChUa et sur le relais Python
   // (API/proxiesembed/server.py, FSVID_VIDZY_CLIENT_HINTS).
+  // Chrome 142 et non 140 : depuis le 2026-10-26, Fsvid/Vidzy servent un faux
+  // master qui boucle sur lui-même à la chaîne exacte « Windows Chrome 140 ».
   static let playbackUserAgent =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    + "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+    + "(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
   // Fsvid/Vidzy exigent un Referer sur un de leurs domaines ET la présence de
   // Sec-Ch-Ua. Sans cet en-tête leur CDN répond 302 vers .../troll/master.m3u8
   // (fsvid) ou 403 (vidzy). Seule la présence compte, pas la valeur.
   static let playbackSecChUa =
-    "\"Chromium\";v=\"140\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"140\""
+    "\"Chromium\";v=\"142\", \"Not=A?Brand\";v=\"24\", \"Google Chrome\";v=\"142\""
   // Un vrai Chrome ne dissocie jamais les trois indices client : poser Sec-Ch-Ua
   // seul revenait à annoncer un navigateur tout en le contredisant.
   static let playbackSecChUaMobile = "?0"
@@ -135,25 +137,52 @@ enum MediaProxyPolicy {
 
   private static let providerDecoyHostSuffixes = ["fsvid.lol", "vidzy.cc", "vidzy.org"]
 
-  // Vidzy exige le token zstd. q=0 conserve des corps identity : le transport
-  // HTTP natif ne décompresse pas les réponses et doit préserver les Range.
+  // Uqload : q=0 conserve des corps identity, le transport HTTP natif ne
+  // décompresse pas les réponses et doit préserver les Range.
   private static let providerMediaAcceptEncoding =
     "identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0"
+  // Fsvid/Vidzy servent un faux master (sa variante renvoie le master
+  // lui-même) à tout Accept-Encoding autre que celui de Chrome, `identity`
+  // compris (mesuré le 2026-10-26). Leur CDN répond alors en gzip pour les
+  // playlists, que MediaProxyServer décompresse ; les segments arrivent bruts.
+  private static let fsvidVidzyMediaAcceptEncoding = "gzip, deflate, br, zstd"
+
+  /// Cookie de session que le master Fsvid/Vidzy pose (`vz_pe`/`fsv_pe`, valeur
+  /// = jeton `t=` de son URL) et sans lequel Vidzy sert sa fausse variante de
+  /// 177 octets (mesuré le 2026-10-27). Le transport épinglé n'a pas de
+  /// stockage de cookies : on le reconstruit depuis le jeton de chaque requête.
+  static func providerSessionCookie(for url: URL) -> String? {
+    guard let host = url.host?.lowercased() else { return nil }
+    let normalizedHost = host.hasSuffix(".") ? String(host.dropLast()) : host
+    guard providerDecoyHostSuffixes.contains(where: {
+      normalizedHost == $0 || normalizedHost.hasSuffix(".\($0)")
+    }),
+      let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+        .queryItems?.first(where: { $0.name == "t" })?.value,
+      (16...128).contains(token.count),
+      token.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") })
+    else { return nil }
+    return "vz_pe=\(token); fsv_pe=\(token)"
+  }
 
   static func playbackAcceptEncoding(for url: URL) -> String {
     guard let host = url.host?.lowercased() else { return "identity" }
     let normalizedHost = host.hasSuffix(".") ? String(host.dropLast()) : host
-    let isProviderHost = providerDecoyHostSuffixes.contains {
+    if providerDecoyHostSuffixes.contains(where: {
       normalizedHost == $0 || normalizedHost.hasSuffix(".\($0)")
-    } || normalizedHost.range(
+    }) {
+      return fsvidVidzyMediaAcceptEncoding
+    }
+    let isUqloadHost = normalizedHost.range(
       of: #"(?:^|\.)uqload\.[a-z]{2,24}$"#,
       options: .regularExpression
     ) != nil
-    return isProviderHost ? providerMediaAcceptEncoding : "identity"
+    return isUqloadHost ? providerMediaAcceptEncoding : "identity"
   }
 
   /// Vrai si l'URL est le flux leurre servi par Fsvid/Vidzy quand ils jugent la
-  /// requête illégitime (302 vers .../troll/master.m3u8).
+  /// requête illégitime : 302 vers .../troll/master.m3u8, ou playlist 200 de
+  /// segments `/e/segN.ts`.
   static func isProviderDecoyURL(_ rawURL: String) -> Bool {
     guard let components = URLComponents(string: rawURL),
           let host = components.host?.lowercased() else {
@@ -164,7 +193,9 @@ enum MediaProxyPolicy {
       normalizedHost == $0 || normalizedHost.hasSuffix(".\($0)")
     }
     guard isProviderHost else { return false }
-    return components.percentEncodedPath.lowercased().split(separator: "/").contains("troll")
+    let path = components.percentEncodedPath.lowercased()
+    return path.split(separator: "/").contains("troll")
+      || path.range(of: #"^/e/seg[0-9]+\.ts$"#, options: .regularExpression) != nil
   }
 
   static let allowedRequestHeaders: [String: String] = [

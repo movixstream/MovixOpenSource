@@ -47,9 +47,27 @@ import i18n from '../i18n';
 import { useProfile } from '../context/ProfileContext';
 import { getClassificationLabel as getClassificationLabelUtil, isContentAllowed } from '../utils/certificationUtils';
 import { useTvAiringSchedule } from '@/hooks/useTvAiringSchedule';
+import {
+  EPISODE_LIST_SOURCE_EVENT,
+  episodeListChoice,
+  getDefaultEpisodeListSource,
+  getShowEpisodeList,
+  resolveEpisodeList,
+  groupTvmazeSeasons,
+  isTvmazeListDifferent,
+  setEpisodeListSource,
+  type EpisodeListKind,
+  type ShowEpisodeLists,
+} from '@/utils/tvmazeEpisodes';
 import { formatAiringDate, getAiringLabel, getEpisodeTimeline, resolveEpisodeAiring, resolveShowAiring } from '@/utils/tvAiring';
 import type { TvEpisodeDate, TvExternalIds } from '@/types/tvAiring';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { useImageQuality, useImageViewport } from '../hooks/useImageQuality';
+import { useImageSlot } from '../hooks/useImageSlot';
+import { getCoverImageWidth, getTmdbImageProps, getTmdbImageUrl } from '../utils/tmdbImages';
+import { readLocalStorage, writeLocalStorage } from '../utils/browserStorage';
+import { useTitleHistory } from '../hooks/useTitleHistory';
+import { mergeEpisode, seedProgress, serverEpisodeMap, seriesFullyMarked, seriesResume } from '../utils/titleHistoryMerge';
 
 const MAIN_API = import.meta.env.VITE_MAIN_API;
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
@@ -146,6 +164,7 @@ interface Episode {
 }
 
 const DEFAULT_IMAGE = 'https://www.shutterstock.com/image-vector/default-image-icon-vector-missing-600nw-2079504220.jpg';
+const PENDING_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
 
 // Constante pour activer/désactiver la vérification VIP pour le bouton download
 const ENABLE_VIP_DOWNLOAD_CHECK = false;
@@ -172,28 +191,71 @@ const getClassificationLabel = getClassificationLabelUtil;
 const getAnimeLanguageLabel = (language: string, t: TFunction): string =>
   t(`details.languages.${language.toLowerCase()}`, { defaultValue: language.toUpperCase() });
 
-// Fonction utilitaire pour renommer les saisons de séries spécifiques (ex: 71446)
 const getSeasonDisplayName = (
   seasonNumber: number,
-  showId: string | null | undefined,
   t: TFunction,
   originalName?: string
-) => {
-  if (String(showId) === '71446') {
-    if (seasonNumber === 0) return t('details.part1And2');
-    if (seasonNumber === 2) return t('details.part3And4');
-    if (seasonNumber === 3) return t('details.part5');
-  }
-  return originalName || `${t('details.season')} ${seasonNumber}`;
-};
+) => originalName || `${t('details.season')} ${seasonNumber}`;
 
 // 1. Update DEFAULT_IMAGE to a custom SVG string for fallback
 const getSeasonFallbackSvg = (label: string) =>
   `data:image/svg+xml;utf8,<svg width="500" height="750" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 750" preserveAspectRatio="xMidYMid meet"><rect width="100%" height="100%" fill="%23222"/><g><rect x="80" y="180" width="340" height="260" rx="32" fill="%23333" stroke="%23555" stroke-width="8"/><rect x="120" y="220" width="260" height="180" rx="16" fill="%23444"/><rect x="180" y="420" width="140" height="20" rx="8" fill="%23555"/></g><text x="50%" y="70%" fill="%23777" font-size="48" font-family="Arial, sans-serif" text-anchor="middle" dy=".3em">${encodeURIComponent(label)}</text></svg>`;
 
+// Résumé d'épisode replié sur deux lignes. « Voir plus » n'apparaît que si
+// le texte dépasse vraiment ces deux lignes (mesuré, pas deviné).
+const EpisodeOverview = ({ text, expanded, onToggle, t }: {
+  text: string;
+  expanded: boolean;
+  onToggle: (e: React.MouseEvent) => void;
+  t: TFunction;
+}) => {
+  const textRef = useRef<HTMLParagraphElement>(null);
+  const [overflows, setOverflows] = useState(false);
+
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    const check = () => {
+      const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20;
+      setOverflows(el.offsetHeight > lineHeight * 2 + 1);
+    };
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text]);
+
+  return (
+    <div className="mt-2 relative">
+      <motion.div
+        initial={false}
+        animate={{ height: expanded || !overflows ? 'auto' : '2.5rem' }}
+        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+        className="overflow-hidden"
+      >
+        <p ref={textRef} className="text-sm leading-5 text-white/70">{text}</p>
+      </motion.div>
+      {overflows && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="text-xs text-red-400 hover:text-red-300 mt-1 flex items-center"
+        >
+          {expanded ? t('details.seeLess') : t('details.seeMore')}
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ml-1 h-3 w-3">
+            <polyline points={expanded ? '18 15 12 9 6 15' : '6 9 12 15 18 9'}></polyline>
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+};
+
 // Composant pour une image avec lazy loading
-const LazyTVImage = ({ src, alt, className, onLoad }: {
+const LazyTVImage =({ src, srcSet, sizes, alt, className, onLoad }: {
   src: string;
+  srcSet?: string;
+  sizes?: string;
   alt: string;
   className: string;
   onLoad?: () => void;
@@ -240,6 +302,8 @@ const LazyTVImage = ({ src, alt, className, onLoad }: {
           )}
           <img
             src={src}
+            srcSet={srcSet}
+            sizes={sizes}
             alt={alt}
             className={`w-full h-auto object-cover transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'
               }`}
@@ -255,6 +319,9 @@ const LazyTVImage = ({ src, alt, className, onLoad }: {
 // Composant pour la section Images des séries TV
 const TVImagesSection = ({ tvId }: { tvId: string }) => {
   const { t } = useTranslation();
+  const { effectiveImageQuality } = useImageQuality();
+  const { width: viewportWidth, dpr } = useImageViewport();
+  const imageDpr = Math.min(dpr, effectiveImageQuality === 'high' ? 3 : 2);
   const [images, setImages] = useState<TVImages | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<'backdrops' | 'posters' | 'logos'>('backdrops');
@@ -262,12 +329,46 @@ const TVImagesSection = ({ tvId }: { tvId: string }) => {
   const [, setLoadedImagesCount] = useState(0);
   const [selectedLanguage, setSelectedLanguage] = useState<string>('all');
   const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
+  const mobileLogoGridRef = useRef<HTMLDivElement | null>(null);
+  const desktopLogoGridRef = useRef<HTMLDivElement | null>(null);
+  const logoSlotEnabled = !loading && Boolean(images) && showImages && selectedCategory === 'logos';
+  const mobileLogoGridSlot = useImageSlot(mobileLogoGridRef, logoSlotEnabled && viewportWidth < 768);
+  const desktopLogoGridSlot = useImageSlot(desktopLogoGridRef, logoSlotEnabled && viewportWidth >= 768);
 
   // États pour le téléchargement ZIP
   const [isDownloadingZip, setIsDownloadingZip] = useState(false);
   const [zipProgress, setZipProgress] = useState(0);
   const [zipStatus, setZipStatus] = useState<'idle' | 'downloading' | 'zipping' | 'complete' | 'error'>('idle');
   const [downloadedCount, setDownloadedCount] = useState(0);
+
+  const getGalleryImageProps = (image: TMDBImage) => {
+    if (selectedCategory === 'logos') {
+      const gridSlot = viewportWidth < 768 ? mobileLogoGridSlot : desktopLogoGridSlot;
+      if (gridSlot.width <= 0) return { src: PENDING_IMAGE };
+      const columns = viewportWidth < 768 ? 1 : viewportWidth < 1024 ? 3 : 4;
+      const cardWidth = viewportWidth < 768
+        ? (viewportWidth < 640 ? 256 : 288)
+        : (gridSlot.width - 16 * (columns - 1)) / columns;
+      const horizontalPadding = viewportWidth < 768 ? 48 : 64;
+      const imageWidth = Math.max(1, cardWidth - horizontalPadding);
+      return {
+        src: getTmdbImageUrl(image.file_path, {
+          kind: 'logo',
+          quality: effectiveImageQuality,
+          width: Math.ceil(imageWidth * imageDpr),
+          role: 'card',
+        }),
+      };
+    }
+
+    return getTmdbImageProps(image.file_path, {
+      kind: selectedCategory === 'posters' ? 'poster' : 'backdrop',
+      quality: effectiveImageQuality,
+      sizes: '(max-width: 639px) 16rem, (max-width: 767px) 18rem, (max-width: 1023px) calc(22.222vw - 1.778rem), calc(16.667vw - 2.25rem)',
+      role: 'card',
+      originalWidth: image.width,
+    });
+  };
 
   const fetchImages = async () => {
     if (images) return; // Ne pas refetch si déjà chargé
@@ -726,6 +827,7 @@ const TVImagesSection = ({ tvId }: { tvId: string }) => {
 
                 {/* Mobile: Ligne défilante d'images (horizontal scroll) */}
                 <motion.div
+                  ref={mobileLogoGridRef}
                   key={selectedCategory + '-mobile'}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -743,7 +845,7 @@ const TVImagesSection = ({ tvId }: { tvId: string }) => {
                     >
                       <div className={`w-full h-auto ${selectedCategory === 'logos' ? 'p-6 bg-white/5 flex items-center justify-center' : ''}`}>
                         <LazyTVImage
-                          src={`https://image.tmdb.org/t/p/w500${image.file_path}`}
+                          {...getGalleryImageProps(image)}
                           alt={`${selectedCategory} ${index + 1}`}
                           className="w-full h-auto object-contain"
                           onLoad={handleImageLoad}
@@ -772,6 +874,7 @@ const TVImagesSection = ({ tvId }: { tvId: string }) => {
 
                 {/* Desktop: grille d'images (grid) */}
                 <motion.div
+                  ref={desktopLogoGridRef}
                   key={selectedCategory + '-desktop'}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -789,7 +892,7 @@ const TVImagesSection = ({ tvId }: { tvId: string }) => {
                     >
                       <div className={`w-full h-auto ${selectedCategory === 'logos' ? 'p-8 bg-white/5' : ''}`}>
                         <LazyTVImage
-                          src={`https://image.tmdb.org/t/p/w500${image.file_path}`}
+                          {...getGalleryImageProps(image)}
                           alt={`${selectedCategory} ${index + 1}`}
                           className="w-full h-auto object-contain"
                           onLoad={handleImageLoad}
@@ -888,6 +991,9 @@ const fetchSeasonDetails = async (
 
 const TVDetails: React.FC = () => {
   const { t } = useTranslation();
+  const { effectiveImageQuality } = useImageQuality();
+  const { width: viewportWidth, height: viewportHeight, dpr } = useImageViewport();
+  const imageDpr = Math.min(dpr, effectiveImageQuality === 'high' ? 3 : 2);
   const [show, setShow] = useState<any>(null);
   const [, setIsLoading] = useState(true);
   const { id: encodedId } = useParams<{ id: string }>();
@@ -909,7 +1015,7 @@ const TVDetails: React.FC = () => {
   const [showMovixRatingInfo, setShowMovixRatingInfo] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [backdropImage, setBackdropImage] = useState<string | null>(null);
+  const [bestBackdrop, setBestBackdrop] = useState<TMDBImage | null>(null);
   const [showTrailerPopup, setShowTrailerPopup] = useState(false);
   const [trailerVideo, setTrailerVideo] = useState<any>(null);
   const [isClosingTrailer, setIsClosingTrailer] = useState(false);
@@ -1009,7 +1115,81 @@ const TVDetails: React.FC = () => {
   const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   // Ajout de l'état pour stocker les détails complets des saisons et épisodes
-  const [seasonsDetails, setSeasonsDetails] = useState<Record<number, any>>({});
+  const [tmdbSeasonsDetails, setSeasonsDetails] = useState<Record<number, any>>({});
+  // Liste TVmaze (ex. 21 chapitres au lieu de 10 épisodes) ou découpage
+  // Netflix (ex. les 5 parties de La Casa de Papel) selon le choix. Le reste
+  // de la page lit `seasonsDetails`.
+  const [episodeListChoiceVersion, setEpisodeListChoiceVersion] = useState(0);
+  useEffect(() => {
+    const sync = () => setEpisodeListChoiceVersion((version) => version + 1);
+    window.addEventListener(EPISODE_LIST_SOURCE_EVENT, sync);
+    return () => window.removeEventListener(EPISODE_LIST_SOURCE_EVENT, sync);
+  }, []);
+  const tmdbEpisodeCounts = useMemo(() => {
+    const counts: Record<number, number> = {};
+    for (const season of tvShow?.seasons ?? []) counts[season.season_number] = season.episode_count ?? 0;
+    return counts;
+  }, [tvShow]);
+  const scheduleMatches = String(tvShow?.id) === id;
+  const tvmazeEpisodeList = scheduleMatches ? airingSchedule?.episodeList : undefined;
+  const netflixEpisodeList = scheduleMatches ? airingSchedule?.netflixEpisodeList : undefined;
+  const episodeLists = useMemo<ShowEpisodeLists>(() => ({
+    tmdbCounts: tmdbEpisodeCounts,
+    tvmaze: tvmazeEpisodeList,
+    netflix: netflixEpisodeList,
+    onNetflix: scheduleMatches && !!airingSchedule?.onNetflix,
+  }), [tmdbEpisodeCounts, tvmazeEpisodeList, netflixEpisodeList, scheduleMatches, airingSchedule]);
+  // Relu à chaque rendu : `episodeListChoiceVersion` en provoque un quand le choix change.
+  void episodeListChoiceVersion;
+  const episodeListKind = getShowEpisodeList(id, episodeLists);
+  const tvmazeSeasons = useMemo(
+    () => tvmazeEpisodeList?.length ? groupTvmazeSeasons(tvmazeEpisodeList) : null,
+    [tvmazeEpisodeList],
+  );
+  const netflixSeasons = useMemo(
+    () => netflixEpisodeList?.length ? groupTvmazeSeasons(netflixEpisodeList) : null,
+    [netflixEpisodeList],
+  );
+  // Deux sélecteurs, chacun visible seulement si sa liste diffère de TMDB :
+  // au-dessus des saisons, TMDB ou Netflix ; au-dessus des épisodes (hors
+  // Netflix), TVmaze ou TMDB, même quand le filtre écarte TVmaze.
+  const hasNetflixLayout = !!netflixSeasons && isTvmazeListDifferent(tmdbEpisodeCounts, netflixEpisodeList);
+  const usesNetflixLayout = episodeListKind === 'netflix';
+  const episodeListOptions = useMemo<EpisodeListKind[]>(
+    () => !usesNetflixLayout && tvmazeSeasons && isTvmazeListDifferent(tmdbEpisodeCounts, tvmazeEpisodeList)
+      ? ['tvmaze', 'tmdb'] : [],
+    [usesNetflixLayout, tvmazeSeasons, tmdbEpisodeCounts, tvmazeEpisodeList],
+  );
+  const chooseEpisodeList = (kind: EpisodeListKind) => {
+    if (!id) return;
+    // Si le choix global donne déjà ce résultat, on retire l'exception.
+    setEpisodeListSource(id, episodeListChoice(kind, episodeLists));
+  };
+  // Quitter Netflix revient à la liste du choix global (TVmaze ou TMDB).
+  const chooseSeasonLayout = (netflix: boolean) =>
+    chooseEpisodeList(netflix ? 'netflix' : resolveEpisodeList(getDefaultEpisodeListSource(), episodeLists));
+  const activeListSeasons = episodeListKind === 'netflix' ? netflixSeasons : episodeListKind === 'tvmaze' ? tvmazeSeasons : null;
+  const seasonsDetails = useMemo<Record<number, any>>(() => {
+    if (!activeListSeasons) return tmdbSeasonsDetails;
+    // Le découpage Netflix remplace toutes les saisons TMDB (ex. la saison 0
+    // de La Casa de Papel reprend les parties 1 et 2).
+    const merged: Record<number, any> = episodeListKind === 'netflix' ? {} : { ...tmdbSeasonsDetails };
+    for (const [season, episodes] of Object.entries(activeListSeasons)) {
+      const number = Number(season);
+      const tmdbSeason = tmdbSeasonsDetails[number];
+      merged[number] = episodeListKind === 'netflix'
+        ? { season_number: number, poster_path: tmdbSeason?.poster_path ?? null, air_date: episodes[0]?.air_date, episodes }
+        : { ...(tmdbSeason ?? { season_number: number }), episodes };
+    }
+    return merged;
+  }, [tmdbSeasonsDetails, activeListSeasons, episodeListKind]);
+  // Cartes de saison : celles de TMDB, ou les parties Netflix.
+  const seasonCards = useMemo<Array<{ season_number: number } & Record<string, any>>>(
+    () => episodeListKind === 'netflix' && netflixSeasons
+      ? Object.keys(netflixSeasons).map((season) => ({ season_number: Number(season) }))
+      : tvShow?.seasons ?? [],
+    [episodeListKind, netflixSeasons, tvShow],
+  );
   const availableEpisodes = useMemo<Episode[]>(() => Object.entries(seasonsDetails).flatMap(([season, details]) =>
     (details.episodes ?? []).filter((episode: { episode_number: number; air_date?: string | null }) =>
       resolveEpisodeAiring({ ...episode, season_number: Number(season) }, airingSchedule, airingNow).kind === 'aired',
@@ -1023,6 +1203,10 @@ const TVDetails: React.FC = () => {
   const [isEpisodeWarningOpen, setEpisodeWarningOpen] = useState(false);
   // Ajoute les états pour les tabs et le scroll des tabs comme dans MovieDetails
   const [activeTab, setActiveTab] = useState<'overview' | 'details' | 'videos' | 'images' | 'cast' | 'characters' | 'crew'>('overview');
+  const detailsMediaSlot = useImageSlot(
+    seasonsSectionRef,
+    !loading && Boolean(tvShow) && activeTab === 'overview',
+  );
   const [isTabsScrollable, setIsTabsScrollable] = useState(false);
   const tabsContainerRef = useRef<HTMLDivElement>(null);
   // Dans les états, ajoute un état pour le chargement des vidéos
@@ -1239,11 +1423,6 @@ const TVDetails: React.FC = () => {
       // Fetch season details and videos
       const seasonPromises = [];
       for (let season = 0; season <= numberOfSeasons; season++) {
-        // EXCLUSION: Retirer la saison 1 pour la série 71446
-        if (String(id) === '71446' && season === 1) {
-          continue;
-        }
-
         seasonPromises.push(
           (async () => {
             try {
@@ -1427,7 +1606,7 @@ const TVDetails: React.FC = () => {
   }, [availableEpisodes]);
 
   // Saison de départ par défaut : préférer la saison 1 si elle existe (pour éviter de commencer par les spéciaux / saison 0)
-  // Si la saison 1 n'est pas disponible (ex: série 71446 où elle est exclue), on prend la première disponible
+  // Si la saison 1 n'est pas disponible, on prend la première disponible
   const defaultStartSeason = useMemo(() => {
     if (availableSeasons.length === 0) return 1;
     if (availableSeasons.includes(1)) return 1;
@@ -1497,6 +1676,7 @@ const TVDetails: React.FC = () => {
   const updateWatchStatus = (type: keyof WatchStatus, value: boolean, episodeKey?: string) => {
     setWatchStatus(prev => {
       let newStatus;
+      let persisted = true;
       const showId = id; // Assuming 'id' is the tvShowId from params
 
       if (episodeKey && showId) { // episodeKey is like "s1e1"
@@ -1551,6 +1731,7 @@ const TVDetails: React.FC = () => {
           }
           localStorage.setItem(storageKey, JSON.stringify(episodeData));
         } catch (error) {
+          persisted = false;
           console.error(`Error updating ${itemType} episodes in localStorage:`, error);
         }
 
@@ -1591,6 +1772,7 @@ const TVDetails: React.FC = () => {
               localStorage.setItem(storageKey, JSON.stringify(updatedList));
             }
           } catch (error) {
+            persisted = false;
             console.error(`Error updating ${type} in localStorage:`, error);
           }
         }
@@ -1623,7 +1805,7 @@ const TVDetails: React.FC = () => {
           };
         }
       }
-      return newStatus as WatchStatus;
+      return persisted ? newStatus as WatchStatus : prev;
     });
   };
 
@@ -1801,14 +1983,27 @@ const TVDetails: React.FC = () => {
       }
     }
   }, [id, animeMode, availableSeasons, defaultStartSeason]);
+
+  // Historique serveur de la série (autre appareil, lecteurs web, « Déjà vu ») :
+  // le stockage local gagne toujours, le serveur comble ce qui manque.
+  const titleHistory = useTitleHistory('tv', id);
+  const serverEpisodes = useMemo(() => serverEpisodeMap(titleHistory), [titleHistory]);
+  const seriesMarked = seriesFullyMarked(titleHistory);
+  const resumeData = seriesResume(continueWatchingData, titleHistory, {
+    pageAnimeMode: animeMode,
+    availableSeasons,
+    defaultStartSeason,
+  });
+
   // Fonction pour continuer le visionnage
   const handleContinueWatching = () => {
     // Use the progress data if available, otherwise start from the first episode
-    let seasonToWatch = continueWatchingData.hasProgress ? continueWatchingData.seasonNumber : defaultStartSeason;
-    let episodeToWatch = continueWatchingData.hasProgress ? continueWatchingData.episodeNumber : 1;
+    // (reprise du serveur si le stockage local n'en a pas : resumeData).
+    let seasonToWatch = resumeData.hasProgress || resumeData.fromServer ? resumeData.seasonNumber : defaultStartSeason;
+    let episodeToWatch = resumeData.hasProgress || resumeData.fromServer ? resumeData.episodeNumber : 1;
 
     // Validation: si la saison demandée n'est pas disponible, prendre la première disponible
-    // Cela gère le cas où la saison 1 est exclue (ex: série 71446).
+    // Cela gère le cas où la saison 1 n'existe pas dans la liste affichée.
     // En mode anime on valide contre animeData.seasons (numérotation anime) car
     // availableSeasons ne reflète que les saisons TMDB — ce qui renverrait à tort
     // S1E1 lorsqu'un anime a des saisons/cours additionnels non présents dans TMDB.
@@ -1828,6 +2023,15 @@ const TVDetails: React.FC = () => {
 
     setSelectedSeason(seasonToWatch);
     setSelectedEpisode(episodeToWatch);
+
+    // Reprise venue du serveur : le lecteur ne lit que progress_tv_ local, on
+    // y recopie la position exacte de cet épisode (jamais un estimé).
+    if (id && resumeData.fromServer && seasonToWatch === resumeData.seasonNumber && episodeToWatch === resumeData.episodeNumber) {
+      const progressKey = `progress_tv_${id}_s${seasonToWatch}_e${episodeToWatch}`;
+      const seed = seedProgress(resumeData, new Date().toISOString());
+      // Stockage plein ou refusé : writeLocalStorage rend false, le lecteur repartira du début.
+      if (seed && !readLocalStorage(progressKey)) writeLocalStorage(progressKey, seed);
+    }
 
     // Check if Cinema Mode is active
     if (cinemaMode && id) {
@@ -1856,24 +2060,29 @@ const TVDetails: React.FC = () => {
           >
             <Play className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" />
             <div className="text-center">
-              {continueWatchingData.hasProgress ? (
+              {resumeData.hasProgress ? (
                 <div className="flex flex-col items-center text-center w-full">
-                      <span>{t('details.resumeEpisode', { episode: continueWatchingData.episodeNumber, season: getSeasonDisplayName(continueWatchingData.seasonNumber, id, t) })}</span>
+                      {/* Estimé seul : le lecteur repartira du début de l'épisode, donc « Regarder ». */}
+                      <span>{resumeData.estimated
+                        ? t('details.watchBtn')
+                        : t('details.resumeEpisode', { episode: resumeData.episodeNumber, season: getSeasonDisplayName(resumeData.seasonNumber, t) })}</span>
                   <span className="text-xs bg-red-800/80 text-white px-1.5 py-0.5 rounded font-medium mt-1">
-                    {formatTime(continueWatchingData.position)}/{formatTime(continueWatchingData.duration)}
+                    {resumeData.estimated
+                      ? t('profilePage.progress.estimated', { percent: Math.round((resumeData.position / resumeData.duration) * 100), defaultValue: '≈ {{percent}} % · estimé' })
+                      : `${formatTime(resumeData.position)}/${formatTime(resumeData.duration)}`}
                   </span>
                 </div>
-              ) : (availableSeasons.length > 0 && continueWatchingData.seasonNumber !== defaultStartSeason) || continueWatchingData.episodeNumber !== 1 ? (
-                      <span>{t('details.continueEpisode', { episode: continueWatchingData.episodeNumber, season: getSeasonDisplayName(continueWatchingData.seasonNumber, id, t) })}</span>
+              ) : (availableSeasons.length > 0 && resumeData.seasonNumber !== defaultStartSeason) || resumeData.episodeNumber !== 1 ? (
+                      <span>{t('details.continueEpisode', { episode: resumeData.episodeNumber, season: getSeasonDisplayName(resumeData.seasonNumber, t) })}</span>
               ) : (
                 <>
-                    {t('details.startEpisode', { season: getSeasonDisplayName(defaultStartSeason, id, t) })}
+                    {t('details.startEpisode', { season: getSeasonDisplayName(defaultStartSeason, t) })}
                 </>
               )}
             </div>
           </motion.button>
 
-          {(!ENABLE_VIP_DOWNLOAD_CHECK || localStorage.getItem('is_vip') === 'true') && (
+          {(!ENABLE_VIP_DOWNLOAD_CHECK || readLocalStorage('is_vip') === 'true') && (
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -2370,8 +2579,8 @@ const TVDetails: React.FC = () => {
       // Trouver la meilleure image de fond
       const backdrops = imagesResponse.data.backdrops;
       if (backdrops && backdrops.length > 0) {
-        const bestBackdrop = backdrops.sort((a: any, b: any) => b.width - a.width)[0];
-        setBackdropImage(`https://image.tmdb.org/t/p/w1280${bestBackdrop.file_path}`);
+        const largestBackdrop = backdrops.sort((a: TMDBImage, b: TMDBImage) => b.width - a.width)[0];
+        setBestBackdrop(largestBackdrop);
       }
 
       // Récupérer la bande-annonce
@@ -2455,13 +2664,14 @@ const TVDetails: React.FC = () => {
   }, [id]);
 
   useEffect(() => {
+    setBestBackdrop(null);
     if (id) {
       fetchBackdropAndTrailer();
     }
   }, [id]);
 
   if (loading) {
-    return <DetailsSkeleton />;
+    return <DetailsSkeleton mediaType="tv" />;
   }
 
   if (error) return <div className="text-center text-red-500">{error}</div>;
@@ -2594,16 +2804,17 @@ const TVDetails: React.FC = () => {
 
     };
 
+    // Bascule immédiate menu ↔ grille : un AnimatePresence « wait » laissait
+    // un instant vide (sortie puis entrée) qui faisait clignoter la section.
     return (
-      <AnimatePresence mode="wait">
+      <>
         {showToggle && (dropdownMode !== null ? dropdownMode : defaultDropdownMode) ? (
           // Dropdown mode (si > 15 épisodes par défaut, ou si activé manuellement)
           <motion.div
             key="dropdown"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
+            transition={{ duration: 0.15 }}
           >
             <div className="flex justify-start mb-6">  {/* Alignement à gauche */}
               <div className="w-full max-w-md">
@@ -2615,7 +2826,7 @@ const TVDetails: React.FC = () => {
                   value={selectedEpisode ? selectedEpisode.toString() : ""}
                   onChange={handleDropdownChange}
                   placeholder={t('details.chooseEpisode')}
-                  searchable={true}
+                  searchable={false}
                   className="w-full"
                 />
               </div>
@@ -2627,8 +2838,7 @@ const TVDetails: React.FC = () => {
             key="grid"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
+            transition={{ duration: 0.15 }}
           >
             <div className={`grid grid-cols-1 ${isAnime ? 'md:grid-cols-3' : 'md:grid-cols-3 lg:grid-cols-4'} gap-4 mb-6`}>
               {nonEmptyEpisodes.map((ep: any, index: number) => {
@@ -2643,7 +2853,7 @@ const TVDetails: React.FC = () => {
                     <motion.div
                       key={`anime-${selectedSeason}-${ep.index}`}
                       initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1, transition: { delay: index * 0.05, duration: 0.3 } }}
+                      animate={{ opacity: 1, scale: 1, transition: { delay: Math.min(index * 0.03, 0.25), duration: 0.25 } }}
                       className={`group relative rounded-xl overflow-hidden border border-white/10 hover:border-red-500 transition-all duration-300 bg-gray-800 flex flex-col ${isSelected ? 'ring-2 ring-red-500' : ''}`}
                       whileHover={{ y: -5, transition: { duration: 0.2 } }}
                     >
@@ -2696,10 +2906,21 @@ const TVDetails: React.FC = () => {
                   } catch (err) {
                     // ignore localStorage/parsing errors
                   }
-                  // If the episode is explicitly marked as watched in state, prefer that
-                  const isEpisodeWatched = watchStatus?.episodeWatched?.[episodeKey];
+                  // Serveur (autre appareil, lecteur web, série marquée en entier) :
+                  // comble seulement ce que le stockage local n'a pas.
+                  const mergedEpisode = mergeEpisode(
+                    { percent: progressPercentage, hasProgress, watched: Boolean(watchStatus?.episodeWatched?.[episodeKey]) },
+                    serverEpisodes.get(`${selectedSeason}:${ep.episode_number}`),
+                    seriesMarked,
+                  );
+                  progressPercentage = mergedEpisode.percent;
+                  hasProgress = mergedEpisode.hasProgress;
+                  // Coche : la marque locale seule. Vu d'après le serveur seulement :
+                  // indication à part (seenOnServer), la coche n'est pas allumée.
+                  const isEpisodeWatched = mergedEpisode.watched;
+                  const seenOnServer = mergedEpisode.serverWatched;
                   // If watched, show a full green bar; otherwise show actual progress
-                  const displayProgress = isEpisodeWatched ? 100 : progressPercentage;
+                  const displayProgress = isEpisodeWatched || seenOnServer ? 100 : progressPercentage;
 
                   return (
                     <motion.div
@@ -2708,7 +2929,9 @@ const TVDetails: React.FC = () => {
                       animate={{
                         opacity: 1,
                         scale: 1,
-                        transition: { delay: index * 0.05, duration: 0.3 }
+                        // Délai plafonné : sans ça, la 21e carte d'une liste
+                        // TVmaze attendait plus d'une seconde avant d'apparaître.
+                        transition: { delay: Math.min(index * 0.03, 0.25), duration: 0.25 }
                       }}
                       className={`group relative rounded-xl overflow-hidden border border-white/10 hover:border-red-500 transition-all duration-300 bg-white/10 flex flex-col ${isSelected ? 'ring-2 ring-red-500' : ''}`}
                       whileHover={{ y: -5, transition: { duration: 0.2 } }}
@@ -2717,7 +2940,7 @@ const TVDetails: React.FC = () => {
                       <div
                         role="button"
                         tabIndex={0}
-                        className="block w-full text-left cursor-pointer"
+                        className="flex flex-col flex-1 w-full text-left cursor-pointer"
                         onClick={() => handleEpisodeChange(ep.episode_number)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
@@ -2726,12 +2949,21 @@ const TVDetails: React.FC = () => {
                         }}
                       >
                         {/* ... Grid item content for standard episodes ... */}
-                        <div className="flex flex-col">
+                        <div className="flex flex-col flex-1">
                           <div className="relative aspect-video w-full">
-                            {ep.still_path && !shouldHide('episodeImages') ? (
+                            {(ep.still_path || ep.still_url) && !shouldHide('episodeImages') ? (
                               (() => {
-                                const imageUrl = `https://image.tmdb.org/t/p/original${ep.still_path}`;
-                                const imageKey = `episode-s${selectedSeason || 'unknown'}-e${ep.episode_number}-still`;
+                                // `still_url` : image TVmaze complète, laissée telle quelle.
+                                const imageUrl = detailsMediaSlot.width > 0
+                                  ? getTmdbImageUrl(ep.still_path || ep.still_url, {
+                                    kind: 'still',
+                                    quality: effectiveImageQuality,
+                                    width: Math.ceil(episodeCardCssWidth * imageDpr),
+                                    role: 'card',
+                                  })
+                                  : getSeasonFallbackSvg(t('details.season').toUpperCase());
+                                // Source dans la clé : un échec TVmaze ne doit pas masquer l'image TMDB.
+                                const imageKey = `episode-s${selectedSeason || 'unknown'}-e${ep.episode_number}-${ep.still_path ? 'tmdb' : 'tvmaze'}-still`;
                                 const hasFailed = failedImages[imageKey];
                                 const retryUrl = hasFailed ? `${imageUrl}?retry=${Date.now()}` : imageUrl;
                                 return (
@@ -2804,10 +3036,11 @@ const TVDetails: React.FC = () => {
                             )}
 
                           </div>
-                          <div className="p-4">
+                          <div className="p-4 flex flex-col flex-1">
                             <div className="flex items-start justify-between gap-4">
-                              <div>
-                                <h4 className="text-lg font-medium group-hover:text-red-500 transition-colors">
+                              <div className="min-w-0">
+                                {/* Hauteur fixe de deux lignes : la date reste au même niveau sur toutes les cartes. */}
+                                <h4 className="text-lg leading-7 h-14 line-clamp-2 font-medium group-hover:text-red-500 transition-colors" title={shouldHide('episodeNames') ? undefined : ep.name}>
                                   {shouldHide('episodeNames') ? getMaskedContent(ep.name, 'episodeNames', undefined, ep.episode_number) : `${ep.episode_number}. ${ep.name}`}
                                 </h4>
                                 <div className="flex flex-wrap items-center gap-3 mt-1 text-sm text-white/60">
@@ -2825,51 +3058,16 @@ const TVDetails: React.FC = () => {
                                   )}
                                 </div>
                                 {ep.overview && (
-                                  <div className="mt-2 relative">
-                                    <motion.div
-                                      layout
-                                      initial={{ height: "2.5rem" }}
-                                      animate={{
-                                        height: expandedCards[`s${selectedSeason}e${ep.episode_number}`] ? "auto" : "2.5rem"
-                                      }}
-                                      transition={{
-                                        type: "spring",
-                                        stiffness: 300,
-                                        damping: 30
-                                      }}
-                                      className="overflow-hidden"
-                                    >
-                                      <p className={`text-sm text-white/70`}>
-                                        {shouldHide('episodeOverviews') ? getMaskedContent(ep.overview, 'episodeOverviews') : ep.overview}
-                                      </p>
-                                    </motion.div>
-                                    <AnimatePresence mode="wait">
-                                      <motion.button
-                                        key={expandedCards[`s${selectedSeason}e${ep.episode_number}`] ? "moins" : "plus"}
-                                        initial={{ opacity: 0.8 }}
-                                        animate={{ opacity: 1 }}
-                                        exit={{ opacity: 0 }}
-                                        onClick={toggleCardExpansion(`s${selectedSeason}e${ep.episode_number}`)}
-                                        className="text-xs text-red-400 hover:text-red-300 mt-1 flex items-center"
-                                      >
-                                        {expandedCards[`s${selectedSeason}e${ep.episode_number}`] ? (
-                                          <>
-                                            {t('details.seeLess')}
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ml-1 h-3 w-3"><polyline points="18 15 12 9 6 15"></polyline></svg>
-                                          </>
-                                        ) : (
-                                          <>
-                                            {t('details.seeMore')}
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ml-1 h-3 w-3"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                                          </>
-                                        )}
-                                      </motion.button>
-                                    </AnimatePresence>
-                                  </div>
+                                  <EpisodeOverview
+                                    text={shouldHide('episodeOverviews') ? getMaskedContent(ep.overview, 'episodeOverviews') : ep.overview}
+                                    expanded={!!expandedCards[`s${selectedSeason}e${ep.episode_number}`]}
+                                    onToggle={toggleCardExpansion(`s${selectedSeason}e${ep.episode_number}`)}
+                                    t={t}
+                                  />
                                 )}
                               </div>
                             </div>
-                            <div className="flex gap-2 mt-3 justify-end">
+                            <div className="flex gap-2 mt-auto pt-3 justify-end">
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -2889,11 +3087,23 @@ const TVDetails: React.FC = () => {
                                     updateWatchStatus('episodeWatched', !watchStatus.episodeWatched[episodeKey], episodeKey);
                                   }
                                 }}
-                                className={`p-2 rounded ${watchStatus?.episodeWatched?.[episodeKey] ? 'text-red-600' : 'text-gray-400'} hover:bg-gray-800`}
+                                className={`p-2 rounded ${isEpisodeWatched ? 'text-red-600' : 'text-gray-400'} hover:bg-gray-800`}
                                 title={t('details.markAsWatched')}
                               >
                                 <Check className="w-4 h-4" />
                               </button>
+                              {seenOnServer && (
+                                // Indication, pas un bouton : cocher reste le geste qui marque pour de vrai.
+                                <span
+                                  role="img"
+                                  aria-label={seenOnServer === 'estimated' ? t('details.watchedEstimatedBtn', 'Vu (estimé)') : t('details.watchedOtherDevice', 'Vu sur un autre appareil')}
+                                  title={seenOnServer === 'estimated' ? t('details.watchedEstimatedBtn', 'Vu (estimé)') : t('details.watchedOtherDevice', 'Vu sur un autre appareil')}
+                                  className="inline-flex h-8 items-center gap-1 self-center rounded border border-dashed border-white/25 px-1.5 text-[11px] text-white/60"
+                                >
+                                  <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                                  {seenOnServer === 'estimated' ? t('details.estimatedShort', 'estimé') : t('details.otherDeviceShort', 'autre appareil')}
+                                </span>
+                              )}
                               {(() => {
                                 const reminderAt = airing.timestamp ?? (airing.date ? Date.parse(`${airing.date}T00:00:00Z`) : NaN);
                                 // Ne pas proposer un rappel dont l'instant est déjà passé.
@@ -2922,7 +3132,7 @@ const TVDetails: React.FC = () => {
             </div>
           </motion.div>
         )}
-      </AnimatePresence>
+      </>
     );
   };
   const tvYear = tvShow.first_air_date && !isNaN(new Date(tvShow.first_air_date).getTime())
@@ -2944,6 +3154,30 @@ const TVDetails: React.FC = () => {
     ? `https://image.tmdb.org/t/p/original${tvShow.backdrop_path || tvShow.poster_path}`
     : undefined;
   const tvDescription = tvShow.overview?.trim() || `Découvrez ${tvShow.name} sur Movix.`;
+  const posterCssWidth = viewportWidth < 768
+    ? viewportWidth - 32
+    : viewportWidth < 1024
+      ? (viewportWidth - 128) / 3
+      : (viewportWidth - 192) / 3;
+  const mainPosterUrl = getTmdbImageUrl(tvShow.poster_path, {
+    kind: 'poster',
+    quality: effectiveImageQuality,
+    width: Math.ceil(Math.max(1, posterCssWidth) * imageDpr),
+    role: 'detail',
+    fallback: DEFAULT_IMAGE,
+  });
+  const backdropImage = bestBackdrop
+    ? getTmdbImageUrl(bestBackdrop.file_path, {
+      kind: 'backdrop',
+      quality: effectiveImageQuality,
+      width: getCoverImageWidth(viewportWidth, viewportHeight, bestBackdrop.aspect_ratio, imageDpr),
+      role: 'background',
+    })
+    : null;
+  const measuredDetailsWidth = Math.max(1, detailsMediaSlot.width);
+  const gridCardWidth = (columns: number) => Math.max(1, (measuredDetailsWidth - 16 * (columns - 1)) / columns);
+  const episodeCardCssWidth = gridCardWidth(viewportWidth < 768 ? 1 : viewportWidth < 1024 ? 3 : 4);
+  const seasonCardCssWidth = gridCardWidth(viewportWidth < 640 ? 2 : viewportWidth < 768 ? 3 : viewportWidth < 1024 ? 4 : 5);
 
   return (
     <MotionConfig reducedMotion="user">
@@ -3166,7 +3400,7 @@ const TVDetails: React.FC = () => {
             <motion.img
               whileHover={{ scale: 1.03 }}
               transition={{ type: "spring", stiffness: 300, damping: 10 }}
-              src={tvShow.poster_path ? `https://image.tmdb.org/t/p/original${tvShow.poster_path}` : DEFAULT_IMAGE}
+              src={mainPosterUrl}
               alt={tvShow.name}
               className="w-full rounded-lg shadow-lg"
             />
@@ -3394,7 +3628,7 @@ const TVDetails: React.FC = () => {
                     </div>
 
                     {/* TMDB Info Box */}
-                    <div className="mb-6 p-4 border border-red-500/50 bg-red-500/10 rounded-lg flex gap-3 items-start">
+                    <div data-halloween-parchment className="mb-6 p-4 border border-red-500/50 bg-red-500/10 rounded-lg flex gap-3 items-start">
                       <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
                       <div className="text-sm text-gray-300">
                         <p>
@@ -3520,7 +3754,27 @@ const TVDetails: React.FC = () => {
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.5 }}
                   >
-                    <h3 className="text-xl font-bold mb-4">{t('details.seasonsLabel')}</h3>
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                      <h3 className="text-xl font-bold">{t('details.seasonsLabel')}</h3>
+                      {hasNetflixLayout && !animeMode && id && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-400">{t('details.seasonLayout')}</span>
+                          <div className="flex rounded-lg bg-gray-800 p-1" role="group">
+                            {([false, true] as const).map((netflix) => (
+                              <button
+                                key={netflix ? 'netflix' : 'tmdb'}
+                                type="button"
+                                aria-pressed={usesNetflixLayout === netflix}
+                                onClick={() => chooseSeasonLayout(netflix)}
+                                className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${usesNetflixLayout === netflix ? 'bg-red-600 text-white' : 'text-gray-300 hover:bg-gray-700'}`}
+                              >
+                                {t(netflix ? 'details.episodeListNetflix' : 'details.episodeListTmdb')}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Grid of seasons with animations */}
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8">
@@ -3582,13 +3836,20 @@ const TVDetails: React.FC = () => {
                           })
                         ) : (
                           /* Affichage standard des saisons pour les séries non-anime */
-                          [...(tvShow.seasons ?? [])]
-                            .filter((sm) => !(String(id) === '71446' && sm.season_number === 1))
+                          [...seasonCards]
                             .sort((a, b) => a.season_number - b.season_number)
                             .map((seasonMeta) => {
                             const season = seasonMeta.season_number;
                             const details = seasonsDetails[season] || seasonMeta;
-                            const imageUrl = details?.poster_path ? `https://image.tmdb.org/t/p/original${details.poster_path}` : getSeasonFallbackSvg(t('details.season').toUpperCase());
+                            const imageUrl = detailsMediaSlot.width > 0
+                              ? getTmdbImageUrl(details?.poster_path, {
+                                kind: 'poster',
+                                quality: effectiveImageQuality,
+                                width: Math.ceil(seasonCardCssWidth * imageDpr),
+                                role: 'card',
+                                fallback: getSeasonFallbackSvg(t('details.season').toUpperCase()),
+                              })
+                              : getSeasonFallbackSvg(t('details.season').toUpperCase());
                             const imageKey = `season-${season}-poster`;
                             const hasFailed = failedImages[imageKey];
                             const retryUrl = hasFailed ? `${imageUrl}?retry=${Date.now()}` : imageUrl;
@@ -3629,7 +3890,7 @@ const TVDetails: React.FC = () => {
                                   )}
                                   <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3">
                                     <h3 className="text-base font-bold text-white line-clamp-2">
-                          {shouldHide('episodeNames') ? getMaskedContent(getSeasonDisplayName(season, id, t, details?.name), 'episodeNames') : getSeasonDisplayName(season, id, t, details?.name)}
+                          {shouldHide('episodeNames') ? getMaskedContent(getSeasonDisplayName(season, t, details?.name), 'episodeNames') : getSeasonDisplayName(season, t, details?.name)}
                                     </h3>
                                     <div className="flex items-center gap-2 mt-1">
                                       <span className="text-xs text-gray-300">{details?.air_date ? new Date(details.air_date).getFullYear() : ''}</span>
@@ -3709,7 +3970,7 @@ const TVDetails: React.FC = () => {
                               >
                                 {/* Toggle Button (toujours affiché) */}
                                 {(seasonsDetails[selectedSeason]?.episodes?.length > 0) && (
-                                  <div className="flex justify-start mb-4"> {/* Alignement à gauche */}
+                                  <div className="flex flex-wrap items-center justify-start gap-3 mb-4"> {/* Alignement à gauche */}
                                     <button
                                       ref={dropdownToggleButtonRef}
                                       className="px-4 py-2 rounded-lg font-medium bg-gray-800 hover:bg-gray-700 text-white dropdown-toggle-button"
@@ -3724,7 +3985,34 @@ const TVDetails: React.FC = () => {
                                         return currentMode ? t('details.showEpisodeGrid') : t('details.showDropdown');
                                       })()}
                                     </button>
+                                    {episodeListOptions.length > 0 && id && (
+                                      <div
+                                        className="flex items-center gap-2"
+                                        title={episodeListKind === 'tvmaze' && tvmazeSeasons ? t('details.episodeListTvmazeHint', {
+                                          count: tvmazeSeasons[selectedSeason]?.length ?? 0,
+                                          tmdb: tmdbSeasonsDetails[selectedSeason]?.episodes?.length ?? 0,
+                                        }) : undefined}
+                                      >
+                                        <span className="text-sm text-gray-400">{t('details.episodeListSource')}</span>
+                                        <div className="flex rounded-lg bg-gray-800 p-1" role="group">
+                                          {episodeListOptions.map((kind) => (
+                                            <button
+                                              key={kind}
+                                              type="button"
+                                              aria-pressed={episodeListKind === kind}
+                                              onClick={() => chooseEpisodeList(kind)}
+                                              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${episodeListKind === kind ? 'bg-red-600 text-white' : 'text-gray-300 hover:bg-gray-700'}`}
+                                            >
+                                              {t(kind === 'netflix' ? 'details.episodeListNetflix' : kind === 'tvmaze' ? 'details.episodeListTvmaze' : 'details.episodeListTmdb')}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
+                                )}
+                                {episodeListOptions.length > 0 && (
+                                  <p className="text-sm text-gray-400 mb-4">{t('details.episodeListSwitchHint')}</p>
                                 )}
                                 {/* Render Dropdown or Grid */}
                                 {renderEpisodes(seasonsDetails[selectedSeason]?.episodes || [], 'standard')}
@@ -3762,7 +4050,12 @@ const TVDetails: React.FC = () => {
                       >
                         {actor.profile_path ? (
                           <motion.img
-                            src={`https://image.tmdb.org/t/p/original${actor.profile_path}`}
+                            src={getTmdbImageUrl(actor.profile_path, {
+                              kind: 'profile',
+                              quality: effectiveImageQuality,
+                              width: Math.ceil(48 * imageDpr),
+                              role: 'card',
+                            })}
                             alt={actor.name}
                             className="w-12 h-12 rounded-full object-cover"
                             whileHover={{ scale: 1.1 }}
@@ -3820,7 +4113,12 @@ const TVDetails: React.FC = () => {
                       >
                         {member.profile_path ? (
                           <motion.img
-                            src={`https://image.tmdb.org/t/p/original${member.profile_path}`}
+                            src={getTmdbImageUrl(member.profile_path, {
+                              kind: 'profile',
+                              quality: effectiveImageQuality,
+                              width: Math.ceil(48 * imageDpr),
+                              role: 'card',
+                            })}
                             alt={member.name}
                             className="w-12 h-12 rounded-full object-cover"
                             whileHover={{ scale: 1.1 }}
@@ -3882,7 +4180,12 @@ const TVDetails: React.FC = () => {
                             >
                               {company.logo_path ? (
                                 <img
-                                  src={`https://image.tmdb.org/t/p/original${company.logo_path}`}
+                                  src={getTmdbImageUrl(company.logo_path, {
+                                    kind: 'logo',
+                                    quality: effectiveImageQuality,
+                                    width: Math.ceil(40 * imageDpr),
+                                    role: 'card',
+                                  })}
                                   alt={company.name}
                                   className="max-h-10 max-w-10"
                                 />
@@ -4433,7 +4736,7 @@ const TVDetails: React.FC = () => {
                           <div className="space-y-2 max-h-60 overflow-y-auto">
                             {Array.from({ length: tvShow.number_of_seasons || 0 }, (_, i) => i + 1).map(season => (
                               <div key={season} className="grid grid-cols-3 gap-2 text-sm">
-                                <div className="text-gray-200">{getSeasonDisplayName(season, id, t, `${t('details.season')} ${season}`)}</div>
+                                <div className="text-gray-200">{getSeasonDisplayName(season, t, `${t('details.season')} ${season}`)}</div>
                                 <div className="text-gray-200">
                                   {seasonsDetails[season]
                                     ? seasonsDetails[season].episodes.length
@@ -4600,7 +4903,12 @@ const TVDetails: React.FC = () => {
                             >
                               {network.logo_path ? (
                                 <img
-                                  src={`https://image.tmdb.org/t/p/original${network.logo_path}`}
+                                  src={getTmdbImageUrl(network.logo_path, {
+                                    kind: 'logo',
+                                    quality: effectiveImageQuality,
+                                    width: Math.ceil(40 * imageDpr),
+                                    role: 'card',
+                                  })}
                                   alt={network.name}
                                   className="max-h-10 max-w-10"
                                 />
@@ -4971,7 +5279,7 @@ const TVDetails: React.FC = () => {
                     availableSeasons.map(seasonNum => (
                       <div key={`season-videos-${seasonNum}`} className="mb-8">
                         <div className="flex items-center justify-between mb-6">
-                        <h4 className="text-lg font-semibold">{getSeasonDisplayName(seasonNum, id, t, `${t('details.season')} ${seasonNum}`)}</h4>
+                        <h4 className="text-lg font-semibold">{getSeasonDisplayName(seasonNum, t,`${t('details.season')} ${seasonNum}`)}</h4>
 
                           <motion.button
                             whileHover={{
@@ -5388,7 +5696,13 @@ const TVDetails: React.FC = () => {
                     className="block group/item relative rounded-lg overflow-hidden"
                   >
                     <img
-                      src={`https://image.tmdb.org/t/p/original${item.poster_path}`}
+                      {...getTmdbImageProps(item.poster_path, {
+                        kind: 'poster',
+                        quality: effectiveImageQuality,
+                        sizes: '(max-width: 639px) calc(50vw - 3rem), (max-width: 767px) calc(33.333vw - 2.333rem), (max-width: 927px) calc(25vw - 2rem), 12.5rem',
+                        role: 'card',
+                        fallback: DEFAULT_IMAGE,
+                      })}
                       alt={item.name}
                       className="w-full aspect-[2/3] object-cover rounded-lg transition-transform duration-300 group-hover/item:scale-105"
                     />

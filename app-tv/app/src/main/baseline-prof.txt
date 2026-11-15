@@ -1,0 +1,22 @@
+# Profil de démarrage écrit à la main (phase 7).
+#
+# En sideload, sans Play Store, c'est la seule compilation anticipée (AOT) :
+# profileinstaller l'applique au premier lancement. Les bibliothèques Compose,
+# Media3 et Coil livrent déjà leur propre profil ; il ne manque que notre code
+# et ce que nos écrans traversent au démarrage et à l'ouverture du lecteur.
+# Plus tard : profil mesuré par un module baselineprofile sur un vrai boîtier.
+
+# Appli entière (environ 1 Mo de bytecode après R8, compilé en quelques secondes à l'installation).
+HSPLcom/movix/tv/**->**(**)**
+Lcom/movix/tv/**;
+
+# Extraction sur la télé (QuickJS) : lancée dès qu'un film n'a pas de flux serveur.
+HSPLcom/movix/extract/**->**(**)**
+Lcom/movix/extract/**;
+HSPLcom/dokar/quickjs/**->**(**)**
+
+# Réseau et JSON : chaque écran en dépend dès la première image.
+HSPLokhttp3/**->**(**)**
+HSPLokio/**->**(**)**
+HSPLkotlinx/serialization/json/**->**(**)**
+HSPLkotlinx/coroutines/**->**(**)**

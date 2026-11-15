@@ -11,8 +11,8 @@ import {
 } from '../utils/accountAuth';
 import { getSessionCreationHeaders } from '../utils/sessionClientId';
 import { useTurnstileBypass } from '../hooks/useTurnstileBypass';
+import { TURNSTILE_SITE_KEY } from '../utils/turnstileKeys';
 const API_URL = import.meta.env.VITE_MAIN_API;
-const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
 declare global {
   interface Window {

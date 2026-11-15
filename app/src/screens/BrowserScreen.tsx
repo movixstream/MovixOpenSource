@@ -18,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import WebViewBrowser, { type WebViewBrowserRef } from '../components/WebViewBrowser';
 import BrowserToolbar from '../components/BrowserToolbar';
 import IOSBrowserToolbar from '../components/ios/IOSBrowserToolbar';
-import { NativeGlassSurface } from '../components/ios/NativeGlassSurface';
+import AppButton from '../components/AppButton';
 import MiniPill from '../components/MiniPill';
 import MirrorErrorScreen from '../components/MirrorErrorScreen';
 import { setLocalPlaybackAwake } from '../services/playbackAwake';
@@ -26,6 +26,10 @@ import { setPictureInPicturePlaybackActive } from '../services/pictureInPicture'
 import { useBrowserUIPrefs } from '../hooks/useBrowserUIPrefs';
 import { useAddress } from '../context/AddressContext';
 import SettingsScreen from './SettingsScreen';
+
+const MAX_NETWORK_RETRIES = 2;
+const NETWORK_RETRY_WINDOW_MS = 30_000;
+const NETWORK_RETRY_DELAY_MS = 1000;
 
 export default function BrowserScreen() {
   const insets = useSafeAreaInsets();
@@ -50,6 +54,8 @@ export default function BrowserScreen() {
   const [dnsEnabled, setDnsEnabled] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [isPictureInPictureActive, setIsPictureInPictureActive] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const networkRetriesRef = useRef({ count: 0, since: 0 });
 
   const activeUrl = urlChain[mirrorIndex] ?? '';
 
@@ -111,6 +117,22 @@ export default function BrowserScreen() {
   const onWebViewError = useCallback(
     (description: string) => {
       console.warn('[BrowserScreen] WebView error', description, 'on', activeUrl);
+      // Le réseau a changé pendant le chargement (VPN DNS qui démarre, passage
+      // Wi-Fi/4G) : le miroir n'y est pour rien, on recharge le même.
+      const now = Date.now();
+      const retries = networkRetriesRef.current;
+      if (now - retries.since > NETWORK_RETRY_WINDOW_MS) {
+        retries.count = 0;
+        retries.since = now;
+      }
+      if (
+        description.includes('ERR_NETWORK_CHANGED') &&
+        retries.count < MAX_NETWORK_RETRIES
+      ) {
+        retries.count += 1;
+        setTimeout(() => setLoadAttempt(n => n + 1), NETWORK_RETRY_DELAY_MS);
+        return;
+      }
       if (mirrorIndex + 1 < urlChain.length) {
         setMirrorIndex(i => i + 1);
       } else {
@@ -153,7 +175,7 @@ export default function BrowserScreen() {
     }]}>
       <View style={styles.webViewContainer}>
         <WebViewBrowser
-          key={activeUrl}
+          key={`${activeUrl}#${loadAttempt}`}
           ref={webViewRef}
           url={activeUrl}
           onNavigationStateChange={onNavigationStateChange}
@@ -204,17 +226,19 @@ export default function BrowserScreen() {
         onRequestClose={closeSettings}>
         <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
           {Platform.OS === 'ios' ? (
-            <NativeGlassSurface interactive style={styles.modalHeaderIOS}>
-              <TouchableOpacity
-                accessibilityRole="button"
+            // Pas de surface en verre sous le bouton : Liquid Glass ne doit
+            // pas s'empiler sur une autre couche de verre.
+            <View style={styles.modalHeaderIOS}>
+              <AppButton
+                title="Fermer"
+                compact
                 accessibilityLabel="Fermer les paramètres"
                 onPress={closeSettings}
-                style={styles.closeButton}>
-                <Text style={styles.closeText}>Fermer</Text>
-              </TouchableOpacity>
+                style={styles.closeButtonIOS}
+              />
               <Text style={styles.modalTitle}>Paramètres</Text>
-              <View style={styles.closeButton} />
-            </NativeGlassSurface>
+              <View style={styles.closeButtonIOS} />
+            </View>
           ) : (
             <View style={styles.modalHeader}>
               <TouchableOpacity onPress={closeSettings} style={styles.closeButton}>
@@ -277,6 +301,9 @@ const styles = StyleSheet.create({
     width: 60,
     minHeight: 44,
     justifyContent: 'center',
+  },
+  closeButtonIOS: {
+    width: 100,
   },
   closeText: {
     color: Platform.OS === 'ios' ? PlatformColor('systemPurpleColor') : '#8b5cf6',

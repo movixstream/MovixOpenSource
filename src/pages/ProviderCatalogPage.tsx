@@ -1,133 +1,148 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { useTranslation } from 'react-i18next';
-import axios from 'axios';
-import { ArrowLeft, SlidersHorizontal, LayoutGrid, List, Loader2, Film, Tv } from 'lucide-react';
+import { ArrowLeft, SlidersHorizontal, LayoutGrid, List, Loader2, Film, Tv, ChevronDown, X } from 'lucide-react';
 import SEO from '../components/SEO';
-import { motion, AnimatePresence } from 'framer-motion';
 import { SquareBackground } from '../components/ui/square-background';
-import ShinyText from '../components/ui/shiny-text';
-import CustomDropdown from '../components/CustomDropdown';
 import { SearchGridCard, SearchListCard } from '../components/SearchCard';
+import GridSkeleton from '../components/skeletons/GridSkeleton';
 import { getTmdbLanguage } from '../i18n';
+import { getLanguages } from '../data/languages';
+import { getCountries } from '../data/countries';
+import {
+    DEFAULT_CATALOG_FILTERS, GENRE_IDS, PROVIDER_NAMES, STUDIOS,
+    fetchProviderCatalog, getCatalogGenre, readCatalogFilters,
+    type CatalogFilters, type CatalogMediaType, type CatalogResult,
+} from '../services/providerCatalog';
 
-const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
+interface FilterOption { value: string; label: string }
 
-const PROVIDER_NAMES: Record<number, string> = {
-    8: 'Netflix', 119: 'Prime Video', 531: 'Paramount+', 337: 'Disney+',
-    338: 'Marvel Studios', 350: 'Apple TV+', 355: 'Warner Bros', 356: 'DC Comics', 384: 'HBO MAX'
-};
-
-const STUDIOS: Record<number, { name: string; tmdbId: number }> = {
-    338: { name: 'Marvel Studios', tmdbId: 420 },
-    356: { name: 'DC Comics', tmdbId: 9993 },
-    355: { name: 'Warner Bros', tmdbId: 174 }
-};
-
-interface ContentItem {
-    id: number;
-    title?: string;
-    name?: string;
-    poster_path: string;
-    backdrop_path?: string;
-    overview: string;
-    vote_average: number;
-    release_date?: string;
-    first_air_date?: string;
-    genre_ids?: number[];
-    media_type?: 'movie' | 'tv';
-}
-
-// Pagination (same as Search/GenrePage)
-const PaginationBar = ({ currentPage, maxPages, onSelect }: { currentPage: number; maxPages: number; onSelect: (n: number) => void }) => (
-    <div className="flex justify-center items-center gap-1.5 flex-wrap my-8">
-        <motion.button whileTap={{ scale: 0.92 }} onClick={() => onSelect(1)} disabled={currentPage <= 1}
-            className={`min-w-[40px] h-10 rounded-full text-sm font-medium transition-all ${currentPage === 1 ? 'bg-red-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border border-white/10'} disabled:opacity-30`}>
-            1
-        </motion.button>
-        {currentPage > 4 && <span className="text-white/20 px-1">...</span>}
-        {Array.from({ length: 5 }, (_, i) => {
-            const p = Math.max(2, currentPage - 2) + i;
-            return p > 1 && p < maxPages ? (
-                <motion.button key={p} whileTap={{ scale: 0.92 }} onClick={() => onSelect(p)}
-                    className={`min-w-[40px] h-10 rounded-full text-sm font-medium transition-all ${p === currentPage ? 'bg-red-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border border-white/10'}`}>
-                    {p}
-                </motion.button>
-            ) : null;
-        })}
-        {currentPage < maxPages - 3 && <span className="text-white/20 px-1">...</span>}
-        {maxPages > 1 && (
-            <motion.button whileTap={{ scale: 0.92 }} onClick={() => onSelect(maxPages)} disabled={currentPage >= maxPages}
-                className={`min-w-[40px] h-10 rounded-full text-sm font-medium transition-all ${currentPage === maxPages ? 'bg-red-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border border-white/10'} disabled:opacity-30`}>
-                {maxPages}
-            </motion.button>
-        )}
-    </div>
+// Native selects keep keyboard navigation and the mobile picker without a
+// portal measuring its position while the filter panel is opening.
+const CatalogSelect = ({ label, value, options, onChange }: {
+    label: string;
+    value: string;
+    options: FilterOption[];
+    onChange: (value: string) => void;
+}) => (
+    <label className="block min-w-0">
+        <span className="mb-2 block text-sm font-medium text-white/70">{label}</span>
+        <span className="relative block">
+            <select value={value} onChange={event => onChange(event.target.value)}
+                className="min-h-11 w-full min-w-0 appearance-none truncate rounded-xl border border-white/15 bg-[#171717] py-2.5 pl-3 pr-10 text-base text-white transition-colors hover:border-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 sm:text-sm [color-scheme:dark]">
+                {!options.some(option => option.value === value) && <option value={value}>{value}</option>}
+                {options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+            <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white opacity-60" />
+        </span>
+    </label>
 );
 
+const buttonClass = 'min-h-11 rounded-xl border border-white/15 px-3 py-2 text-sm font-medium transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 disabled:cursor-default disabled:opacity-40';
+
+const getScreenColumns = () => {
+    const width = window.innerWidth;
+    return width < 640 ? 2 : width < 768 ? 3 : width < 1024 ? 4 : width < 1280 ? 6 : width < 1536 ? 8 : 10;
+};
+
+const GRID_CLASSES: Record<number, string> = {
+    2: 'grid-cols-2',
+    3: 'grid-cols-2 sm:grid-cols-3',
+    4: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4',
+    6: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6',
+    8: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8',
+    10: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10',
+};
+
 const ProviderCatalogPage: React.FC = () => {
-    const { providerId, type, genreId } = useParams<{ providerId: string; type: string; genreId?: string }>();
+    const { providerId = '', type, genreId } = useParams<{ providerId: string; type: string; genreId?: string }>();
     const [searchParams, setSearchParams] = useSearchParams();
     const navigate = useNavigate();
-    const { t } = useTranslation();
-
-    const getGenreName = (id: number): string => t(`providerCatalog.genres.${id}`, { defaultValue: String(id) });
-
-    const [content, setContent] = useState<ContentItem[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [initialLoad, setInitialLoad] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
-    const pageFromUrl = parseInt(searchParams.get('page') || '1', 10);
-    const [currentPage, setCurrentPage] = useState(pageFromUrl);
-    const [totalPages, setTotalPages] = useState(1);
-    const [totalResults, setTotalResults] = useState(0);
-    const [sortBy, setSortBy] = useState('popularity.desc');
+    const { t, i18n } = useTranslation();
+    const isMovie = type === 'movies';
+    const mediaType: CatalogMediaType = isMovie ? 'movie' : 'tv';
+    const genre = getCatalogGenre(genreId, mediaType);
+    const providerName = PROVIDER_NAMES[Number(providerId)] || t('filter.provider');
+    const isStudio = Boolean(STUDIOS[Number(providerId)]);
+    const genreName = genre ? t(`providerCatalog.genres.${genre}`) : null;
+    const filters = useMemo(() => readCatalogFilters(searchParams), [searchParams]);
+    const rawPage = Number(searchParams.get('page') || 1);
+    const currentPage = Number.isInteger(rawPage) ? Math.min(500, Math.max(1, rawPage)) : 1;
+    const language = getTmdbLanguage();
+    const query = useMemo(() => ({ providerId, mediaType, genre, page: currentPage, filters, language }),
+        [providerId, mediaType, genre, currentPage, filters, language]);
+    const requestKey = JSON.stringify(query);
+    const [data, setData] = useState<CatalogResult | null>(null);
+    const [request, setRequest] = useState<{ key: string; status: 'loading' | 'success' | 'error' }>({ key: '', status: 'loading' });
+    const [retry, setRetry] = useState(0);
+    const loading = request.key !== requestKey || request.status === 'loading';
+    const error = request.key === requestKey && request.status === 'error';
     const [isFilterOpen, setIsFilterOpen] = useState(false);
     const [viewType, setViewType] = useState<'grid' | 'list'>('grid');
-
-    const providerName = PROVIDER_NAMES[Number(providerId)] || 'Provider';
-    const isMovie = type === 'movies';
-    const mediaType = isMovie ? 'movie' : 'tv';
-    const genreName = genreId ? getGenreName(parseInt(genreId)) : null;
-    const studio = STUDIOS[Number(providerId)];
-
-    // Responsive grid
     const [resultsPerRow, setResultsPerRow] = useState(6);
-    const [screenCols, setScreenCols] = useState(6);
+    const [screenCols, setScreenCols] = useState(getScreenColumns);
+    const resultsRef = useRef<HTMLDivElement>(null);
+    const effectivePerRow = Math.min(resultsPerRow, screenCols);
+    const gridClasses = GRID_CLASSES[effectivePerRow];
 
     useEffect(() => {
-        const update = () => {
-            const w = window.innerWidth;
-            if (w < 640) setScreenCols(2);
-            else if (w < 768) setScreenCols(3);
-            else if (w < 1024) setScreenCols(4);
-            else if (w < 1280) setScreenCols(6);
-            else setScreenCols(10);
-        };
-        update();
+        const update = () => setScreenCols(getScreenColumns());
         window.addEventListener('resize', update);
         return () => window.removeEventListener('resize', update);
     }, []);
 
-    const effectivePerRow = Math.min(resultsPerRow, screenCols);
-    const allGridOptions = [2, 3, 4, 6, 8, 10];
-    const gridOptions = allGridOptions.filter(n => n <= screenCols).map(n => ({ value: String(n), label: `${n} ${t('search.perRow')}` }));
-
-    const getGridClasses = () => {
-        switch (effectivePerRow) {
-            case 2: return 'grid-cols-2';
-            case 3: return 'grid-cols-2 sm:grid-cols-3';
-            case 4: return 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4';
-            case 8: return 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8';
-            case 10: return 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 2xl:grid-cols-10';
-            case 6:
-            default: return 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6';
+    // Canonicalize incompatible legacy genre links, without resetting their page.
+    useEffect(() => {
+        if (genreId && genreId !== genre) {
+            navigate({ pathname: `/provider/${providerId}/${type}${genre ? `/${genre}` : ''}`, search: searchParams.toString() }, { replace: true });
         }
+    }, [genreId, genre, providerId, type, searchParams, navigate]);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        setRequest({ key: requestKey, status: 'loading' });
+        fetchProviderCatalog(query, controller.signal).then(result => {
+            if (controller.signal.aborted) return;
+            if (currentPage > result.totalPages) {
+                setSearchParams(previous => {
+                    const next = new URLSearchParams(previous);
+                    next.set('page', String(result.totalPages));
+                    return next;
+                }, { replace: true });
+                return;
+            }
+            setData(result);
+            setRequest({ key: requestKey, status: 'success' });
+        }).catch(() => {
+            if (!controller.signal.aborted) setRequest({ key: requestKey, status: 'error' });
+        });
+        return () => controller.abort();
+    }, [query, requestKey, retry, currentPage, setSearchParams]);
+
+    const updateFilter = (key: keyof CatalogFilters, value: string) => {
+        setSearchParams(previous => {
+            const next = new URLSearchParams(previous);
+            if (value === DEFAULT_CATALOG_FILTERS[key]) next.delete(key);
+            else next.set(key, value);
+            next.set('page', '1');
+            return next;
+        });
     };
 
-    // Memoized so CustomDropdown sees stable refs across renders.
+    const catalogLink = (nextType: 'movies' | 'tv', nextGenre: string) => {
+        const next = new URLSearchParams(searchParams);
+        if (nextType !== type || nextGenre !== genre) next.set('page', '1');
+        return { pathname: `/provider/${providerId}/${nextType}${nextGenre ? `/${nextGenre}` : ''}`, search: next.toString() };
+    };
+    const updateGenre = (value: string) => navigate(catalogLink(isMovie ? 'movies' : 'tv', value));
+    const resetFilters = () => {
+        const next = new URLSearchParams(searchParams);
+        Object.keys(DEFAULT_CATALOG_FILTERS).forEach(key => next.delete(key));
+        next.set('page', '1');
+        navigate({ pathname: `/provider/${providerId}/${type}`, search: next.toString() });
+    };
+
     const sortOptions = useMemo(() => [
         { value: 'popularity.desc', label: t('genres.popularityDesc') },
         { value: 'popularity.asc', label: t('genres.popularityAsc') },
@@ -135,259 +150,185 @@ const ProviderCatalogPage: React.FC = () => {
         { value: 'vote_average.asc', label: t('genres.ratingAsc') },
         { value: 'release_date.desc', label: t('genres.releaseDateDesc') },
         { value: 'release_date.asc', label: t('genres.releaseDateAsc') },
+        { value: 'vote_count.desc', label: t('providerCatalog.votesDesc') },
+        { value: 'vote_count.asc', label: t('providerCatalog.votesAsc') },
+        { value: 'title.asc', label: t('providerCatalog.titleAsc') },
+        { value: 'title.desc', label: t('providerCatalog.titleDesc') },
     ], [t]);
-
-    // Sync page with URL
-    useEffect(() => {
-        const p = parseInt(searchParams.get('page') || '1', 10);
-        if (p !== currentPage) setCurrentPage(p);
-    }, [searchParams]);
-
-    // Reset on route change
-    useEffect(() => {
-        setCurrentPage(1);
-        setSearchParams({ page: '1' }, { replace: true });
-        setLoading(true);
-        setInitialLoad(true);
-    }, [providerId, type, genreId]);
-
-    // Fetch content
-    useEffect(() => {
-        const fetchContent = async () => {
-            if (!providerId || !type) return;
-            setLoading(true);
-            try {
-                const today = new Date().toISOString().split('T')[0];
-                const params: Record<string, any> = {
-                    api_key: TMDB_API_KEY,
-                    language: getTmdbLanguage(),
-                    page: currentPage,
-                    sort_by: sortBy,
-                    include_adult: false,
-                    'vote_count.gte': 5
-                };
-
-                if (isMovie) params['primary_release_date.lte'] = today;
-                else params['first_air_date.lte'] = today;
-                if (genreId) params.with_genres = genreId;
-
-                if (studio) {
-                    params.with_companies = studio.tmdbId;
-                } else {
-                    params.with_watch_providers = providerId;
-                    params.watch_region = 'FR';
-                }
-
-                const response = await axios.get(`https://api.themoviedb.org/3/discover/${mediaType}`, { params });
-
-                const filtered = response.data.results
-                    .filter((item: ContentItem) => item.overview && item.overview.trim() !== '' && item.poster_path)
-                    .map((item: ContentItem) => ({ ...item, media_type: mediaType }));
-
-                setContent(filtered);
-                setTotalPages(Math.min(response.data.total_pages, 500));
-                setTotalResults(response.data.total_results);
-            } catch {
-                setError(t('errors.contentLoadError'));
-            } finally {
-                setLoading(false);
-                setInitialLoad(false);
-            }
-        };
-        fetchContent();
-    }, [providerId, type, genreId, currentPage, sortBy]);
-
-    const handlePageChange = useCallback((newPage: number) => {
-        if (newPage > 0 && newPage <= totalPages) {
-            setSearchParams({ page: newPage.toString() });
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-    }, [totalPages, setSearchParams]);
-
-    const handleSortChange = (val: string) => {
-        setSortBy(val);
-        setSearchParams({ page: '1' }, { replace: true });
+    const genreOptions = useMemo(() => [
+        { value: '', label: t('filter.allGenres') },
+        ...GENRE_IDS[mediaType].map(id => ({ value: String(id), label: t(`providerCatalog.genres.${id}`) })),
+    ], [mediaType, t]);
+    const filterFields = useMemo(() => {
+        const currentYear = new Date().getFullYear();
+        const fields: { key: keyof CatalogFilters; label: string; options: FilterOption[] }[] = [
+            { key: 'year', label: t('filter.year'), options: [
+                { value: '', label: t('filter.allYears') },
+                ...Array.from({ length: currentYear - 1869 }, (_, i) => ({ value: String(currentYear - i), label: String(currentYear - i) })),
+            ] },
+            { key: 'rating', label: t('filter.minRating'), options: [
+                { value: '', label: t('providerCatalog.anyRating') },
+                ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(value => ({ value: String(value), label: `${value} / 10` })),
+            ] },
+            { key: 'votes', label: t('providerCatalog.minVotes'), options: [0, 5, 50, 100, 500, 1000].map(value => ({
+                value: String(value), label: value === 0 ? t('providerCatalog.anyVotes') : t('providerCatalog.votesAtLeast', { count: value }),
+            })) },
+            { key: 'language', label: t('providerCatalog.originalLanguage'), options: [
+                { value: '', label: t('filter.allLanguages') }, ...getLanguages(i18n.language),
+            ] },
+            { key: 'runtime', label: t(isMovie ? 'providerCatalog.runtime' : 'providerCatalog.episodeRuntime'), options: [
+                { value: '', label: t('providerCatalog.anyRuntime') },
+                { value: 'short', label: t('providerCatalog.runtimeUpTo', { count: isMovie ? 90 : 30 }) },
+                { value: 'medium', label: t('providerCatalog.runtimeBetween', { min: isMovie ? 91 : 31, max: isMovie ? 120 : 50 }) },
+                { value: 'long', label: t('providerCatalog.runtimeOver', { count: isMovie ? 120 : 50 }) },
+            ] },
+        ];
+        if (!isStudio) fields.push(
+            { key: 'region', label: t('providerCatalog.watchRegion'), options: getCountries(i18n.language) },
+            { key: 'offer', label: t('providerCatalog.offerType'), options: [
+                { value: '', label: t('providerCatalog.anyOffer') },
+                ...['flatrate', 'free', 'ads', 'rent', 'buy'].map(value => ({ value, label: t(`providerCatalog.offers.${value}`) })),
+            ] },
+        );
+        return fields;
+    }, [isMovie, isStudio, i18n.language, t]);
+    const activeFilters = [...filterFields, { key: 'sort' as const, label: t('genres.sort'), options: sortOptions }]
+        .filter(field => filters[field.key] !== DEFAULT_CATALOG_FILTERS[field.key]);
+    const activeCount = activeFilters.length + (genre ? 1 : 0);
+    const gridOptions = [2, 3, 4, 6, 8, 10].filter(n => n <= screenCols).map(n => ({ value: String(n), label: `${n} ${t('search.perRow')}` }));
+    const totalPages = data?.totalPages || 1;
+    const pageNumbers = [...new Set([1, ...Array.from({ length: 5 }, (_, i) => currentPage - 2 + i), totalPages])]
+        .filter(page => page > 0 && page <= totalPages).sort((a, b) => a - b);
+    const handlePageChange = (page: number) => {
+        if (loading || error || page === currentPage || page < 1 || page > totalPages) return;
+        setSearchParams(previous => {
+            const next = new URLSearchParams(previous);
+            next.set('page', String(page));
+            return next;
+        });
+        resultsRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' });
     };
-
-    // Memoized so SearchGridCard / SearchListCard (React.memo'd, shallow-equal
-    // on `item`) actually skip re-renders when the underlying content array
-    // is unchanged. The previous inline `toSearchResult(item)` call in the
-    // .map allocated a fresh object every render. — perf
-    const searchResults = useMemo(
-        () => content.map((item: ContentItem) => ({
-            id: item.id,
-            title: item.title,
-            name: item.name,
-            media_type: mediaType as 'movie' | 'tv',
-            poster_path: item.poster_path,
-            backdrop_path: item.backdrop_path,
-            release_date: item.release_date,
-            first_air_date: item.first_air_date,
-            vote_average: item.vote_average,
-            overview: item.overview,
-        })),
-        [content, mediaType]
-    );
-
-    if (initialLoad) {
-        return (
-            <SquareBackground squareSize={48} borderColor="rgba(239, 68, 68, 0.10)" mode="combined">
-                <div className="min-h-screen flex flex-col justify-center items-center">
-                    <Loader2 className="w-12 h-12 text-red-500 animate-spin mb-4" />
-                    <p className="text-white/60 animate-pulse">{t('providerCatalog.loading', { provider: providerName })}</p>
-                </div>
-            </SquareBackground>
-        );
-    }
-
-    if (error) {
-        return (
-            <SquareBackground squareSize={48} borderColor="rgba(239, 68, 68, 0.10)" mode="combined">
-                <div className="min-h-screen flex justify-center items-center">
-                    <div className="text-center">
-                        <h1 className="text-2xl font-bold text-red-500">{t('common.error')}</h1>
-                        <p className="mt-2 text-white/60">{error}</p>
-                        <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => window.location.reload()}
-                            className="mt-4 px-6 py-2 bg-red-600 hover:bg-red-500 rounded-full text-white font-medium transition-colors">
-                            {t('common.retry')}
-                        </motion.button>
-                    </div>
-                </div>
-            </SquareBackground>
-        );
-    }
 
     return (
         <SquareBackground squareSize={48} borderColor="rgba(239, 68, 68, 0.10)" mode="combined">
-            <motion.div className="min-h-screen pt-24 pb-16 px-4 md:px-8" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-                <SEO
-                    title={`${genreName ? genreName + ' - ' : ''}${isMovie ? t('providerCatalog.films') : t('providerCatalog.series')} ${providerName}`}
-                    description={`${t('providerCatalog.discover')} ${isMovie ? t('providerCatalog.films').toLowerCase() : t('providerCatalog.series').toLowerCase()} ${providerName}`}
-                />
-
-                <div className="max-w-screen-xl mx-auto">
-                    {/* Header */}
-                    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-8 flex flex-col gap-4">
-                        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-                            <div className="flex items-center gap-3">
-                                <motion.button whileHover={{ x: -3 }} whileTap={{ scale: 0.9 }} onClick={() => navigate(`/provider/${providerId}`)}
-                                    className="p-2 rounded-xl bg-white/5 border border-white/10 hover:border-white/20 hover:bg-white/10 transition-all">
-          <ArrowLeft className="w-5 h-5 text-white opacity-70" />
-                                </motion.button>
-                                <div className="flex items-center gap-3 flex-wrap">
-                                    <h1 className="text-2xl md:text-3xl font-bold">
-                                        <ShinyText text={providerName} speed={4} />
-                                    </h1>
-                                    {genreName && (
-                                        <>
-                                            <span className="text-white/30">›</span>
-                                            <span className="text-xl font-semibold text-white/80">{genreName}</span>
-                                        </>
-                                    )}
-                                    <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-sm text-white/60">
-                                        {isMovie ? t('providerCatalog.films') : t('providerCatalog.series')}
-                                    </span>
+            <div className="min-h-screen px-4 pb-16 pt-24 md:px-8">
+                <SEO title={`${genreName ? `${genreName} - ` : ''}${t(isMovie ? 'providerCatalog.films' : 'providerCatalog.series')} ${providerName}`}
+                    description={`${t('providerCatalog.discover')} ${t(isMovie ? 'providerCatalog.films' : 'providerCatalog.series').toLowerCase()} ${providerName}`} />
+                <div className="mx-auto max-w-screen-xl">
+                    <header className="mb-6 flex flex-col gap-5">
+                        <div className="flex min-w-0 flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                            <div className="flex min-w-0 items-start gap-3">
+                                <Link to={`/provider/${providerId}`} aria-label={t('common.back')}
+                                    className={`${buttonClass} flex w-11 shrink-0 items-center justify-center`}>
+                                    <ArrowLeft aria-hidden="true" className="h-5 w-5" />
+                                </Link>
+                                <div className="min-w-0">
+                                    <h1 className="break-words text-2xl font-bold leading-tight md:text-3xl">{providerName}</h1>
+                                    {genreName && <p className="mt-1 text-sm text-white/70">{genreName}</p>}
                                 </div>
                             </div>
+                            <nav aria-label={t('providerCatalog.contentType')} className="grid grid-cols-2 gap-2 md:shrink-0">
+                                {(['movies', 'tv'] as const).map(nextType => {
+                                    const active = nextType === type;
+                                    const Icon = nextType === 'movies' ? Film : Tv;
+                                    return <Link key={nextType} to={catalogLink(nextType, getCatalogGenre(genre, nextType === 'movies' ? 'movie' : 'tv'))}
+                                        aria-current={active ? 'page' : undefined}
+                                        className={`${buttonClass} flex min-w-0 items-center justify-center gap-2 ${active ? 'border-red-600 bg-red-600 text-white hover:bg-red-500' : 'bg-white/5 text-white/70'}`}>
+                                        <Icon aria-hidden="true" className={`h-4 w-4 shrink-0 text-white ${active ? '' : 'opacity-70'}`} />
+                                        {t(nextType === 'movies' ? 'providerCatalog.films' : 'providerCatalog.series')}
+                                    </Link>;
+                                })}
+                            </nav>
+                        </div>
 
-                            {/* Type switcher */}
-                            <div className="flex gap-2">
-                                <Link to={`/provider/${providerId}/movies${genreId ? `/${genreId}` : ''}`}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all text-sm font-medium ${type === 'movies' ? 'bg-red-600 text-white' : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'}`}>
-                                    <Film className="w-4 h-4" /> {t('providerCatalog.films')}
-                                </Link>
-                                <Link to={`/provider/${providerId}/tv${genreId ? `/${genreId}` : ''}`}
-                                    className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all text-sm font-medium ${type === 'tv' ? 'bg-red-600 text-white' : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'}`}>
-                                    <Tv className="w-4 h-4" /> {t('providerCatalog.series')}
-                                </Link>
+                        <div className="grid min-w-0 grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+                            <CatalogSelect label={t('filter.genre')} value={genre} options={genreOptions} onChange={updateGenre} />
+                            <CatalogSelect label={t('filter.sortBy')} value={filters.sort} options={sortOptions} onChange={value => updateFilter('sort', value)} />
+                            <button type="button" aria-expanded={isFilterOpen} aria-controls="provider-catalog-filters"
+                                className={`${buttonClass} flex items-center justify-center gap-2 ${isFilterOpen ? 'border-red-500/60 bg-red-600/20' : 'bg-white/5'}`}
+                                onClick={() => setIsFilterOpen(open => !open)}>
+                                <SlidersHorizontal aria-hidden="true" className="h-4 w-4 shrink-0" />
+                                {t('filter.title')}
+                                {activeCount > 0 && <span className="text-white/70">({activeCount})</span>}
+                            </button>
+                        </div>
+
+                        <div id="provider-catalog-filters" hidden={!isFilterOpen} className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+                            <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                                {filterFields.map(field => <CatalogSelect key={field.key} label={field.label} value={filters[field.key]}
+                                    options={field.options} onChange={value => updateFilter(field.key, value)} />)}
+                            </div>
+                            {!isStudio && <p className="mt-4 text-sm text-white/60">{t('providerCatalog.availabilityHint')}</p>}
+                        </div>
+
+                        {activeCount > 0 && <div className="flex flex-wrap items-center gap-2">
+                            {genre && <button type="button" onClick={() => updateGenre('')} aria-label={t('providerCatalog.removeFilter', { filter: genreName })}
+                                className={`${buttonClass} flex max-w-full items-center gap-2 bg-white/5`}>
+                                <span className="min-w-0 break-words">{genreName}</span><X aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                            </button>}
+                            {activeFilters.map(field => <button key={field.key} type="button" onClick={() => updateFilter(field.key, DEFAULT_CATALOG_FILTERS[field.key])}
+                                aria-label={t('providerCatalog.removeFilter', { filter: field.label })} className={`${buttonClass} flex max-w-full items-center gap-2 bg-white/5`}>
+                                <span className="min-w-0 break-words">{field.label} : {field.options.find(option => option.value === filters[field.key])?.label || filters[field.key]}</span>
+                                <X aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                            </button>)}
+                            <button type="button" onClick={resetFilters} className={`${buttonClass} border-transparent text-white/70`}>{t('filter.reset')}</button>
+                        </div>}
+                    </header>
+
+                    <div ref={resultsRef} className="scroll-mt-24">
+                        <div className="mb-5 flex min-h-11 flex-wrap items-center justify-between gap-3">
+                            <p role="status" className="flex items-center gap-2 text-sm text-white/70">
+                                {loading && <Loader2 aria-hidden="true" className="h-4 w-4 shrink-0 text-white opacity-70 animate-spin motion-reduce:animate-none" />}
+                                {loading ? t('providerCatalog.updating') : error ? (data ? t('providerCatalog.previousResults') : t('common.error'))
+                                    : t('providerCatalog.resultsAvailable', { total: (data?.totalResults || 0).toLocaleString(i18n.language) })}
+                            </p>
+                            <div className="flex flex-wrap items-end gap-2">
+                                {viewType === 'grid' && screenCols > 2 && <CatalogSelect label={t('genres.itemsPerRow')} value={String(effectivePerRow)} options={gridOptions} onChange={value => setResultsPerRow(Number(value))} />}
+                                <div role="group" aria-label={t('genres.displayType')} className="flex gap-1">
+                                    <button type="button" aria-label={t('genres.grid')} aria-pressed={viewType === 'grid'} onClick={() => setViewType('grid')}
+                                        className={`${buttonClass} ${viewType === 'grid' ? 'bg-red-600' : 'bg-white/5 text-white/70'}`}><LayoutGrid aria-hidden="true" className={`h-4 w-4 text-white ${viewType === 'grid' ? '' : 'opacity-70'}`} /></button>
+                                    <button type="button" aria-label={t('genres.listView')} aria-pressed={viewType === 'list'} onClick={() => setViewType('list')}
+                                        className={`${buttonClass} ${viewType === 'list' ? 'bg-red-600' : 'bg-white/5 text-white/70'}`}><List aria-hidden="true" className={`h-4 w-4 text-white ${viewType === 'list' ? '' : 'opacity-70'}`} /></button>
+                                </div>
                             </div>
                         </div>
 
-                        <div className="flex items-center justify-between">
-                            <p className="text-sm text-white/40">{t('providerCatalog.resultsAvailable', { count: totalResults.toLocaleString() })}</p>
-                            <motion.button
-                                className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl transition-all ${isFilterOpen
-                                    ? 'bg-red-600 border border-red-500 hover:bg-red-500'
-                                    : 'bg-white/5 backdrop-blur-md border border-white/10 hover:border-red-500/40 hover:bg-red-500/10'}`}
-                                onClick={() => setIsFilterOpen(!isFilterOpen)} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
-                                <SlidersHorizontal className="w-4 h-4" />
-                                <span className="text-sm font-medium">{t('filter.title')}</span>
-                            </motion.button>
+                        {error && <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-950/40 p-4">
+                            <p className="text-sm text-white/90">{t('errors.contentLoadError')}</p>
+                            <button type="button" onClick={() => setRetry(value => value + 1)} className={`${buttonClass} bg-white/5`}>{t('common.retry')}</button>
+                        </div>}
+
+                        <div aria-busy={loading} aria-label={t('providerCatalog.catalogResults')}>
+                            {!data && loading ? <GridSkeleton gridClassName={gridClasses} viewType={viewType} />
+                                : data && data.items.length > 0 ? <div className={`transition-opacity duration-150 motion-reduce:transition-none ${loading ? 'opacity-50' : 'opacity-100'}`}>
+                                    {viewType === 'grid' ? <div className={`grid ${gridClasses} gap-3`}>
+                                        {data.items.map((item, index) => <SearchGridCard key={`${item.media_type}-${item.id}`} item={item} index={index}
+                                            animateEntrance={false} movieLabel={t('filter.movies')} serieLabel={t('filter.series')} />)}
+                                    </div> : <div className="flex flex-col gap-3">
+                                        {data.items.map((item, index) => <SearchListCard key={`${item.media_type}-${item.id}`} item={item} index={index}
+                                            animateEntrance={false} movieLabel={t('filter.movies')} serieLabel={t('filter.series')}
+                                            watchlistLabel={t('search.watchlist')} removeLabel={t('genres.remove')} noDescLabel={t('providerCatalog.noDescription')} />)}
+                                    </div>}
+                                </div> : !loading && !error && <div className="py-16 text-center">
+                                    <p className="text-lg font-medium">{t('providerCatalog.noContent')}</p>
+                                    <p className="mt-2 text-sm text-white/60">{t('providerCatalog.tryOtherFilters')}</p>
+                                    {activeCount > 0 && <button type="button" onClick={resetFilters} className={`${buttonClass} mt-5 bg-white/5`}>{t('filter.reset')}</button>}
+                                </div>}
                         </div>
-                    </motion.div>
 
-                    {/* Filter Panel */}
-                    <AnimatePresence>
-                        {isFilterOpen && (
-                            <motion.div className="mb-8 p-5 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10"
-                                initial={{ opacity: 0, y: -20, height: 0 }} animate={{ opacity: 1, y: 0, height: 'auto' }}
-                                exit={{ opacity: 0, y: -20, height: 0 }} transition={{ duration: 0.25 }}>
-                                <div className="flex flex-col sm:flex-row gap-4 sm:items-end">
-                                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="flex-1">
-                                        <label className="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-2">{t('genres.sort')}</label>
-                                        <CustomDropdown options={sortOptions} value={sortBy} onChange={handleSortChange} searchable={false} />
-                                    </motion.div>
-                                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="flex-1">
-                                        <label className="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-2">{t('genres.itemsPerRow')}</label>
-                                        <CustomDropdown options={gridOptions} value={String(resultsPerRow)} onChange={(val) => setResultsPerRow(Number(val))} searchable={false} />
-                                    </motion.div>
-                                    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="flex gap-2">
-                                        <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setViewType('grid')}
-                                            className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${viewType === 'grid' ? 'bg-red-600 text-white' : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'}`}>
-                                            <LayoutGrid className="w-4 h-4" /><span className="text-sm hidden sm:inline">{t('genres.grid')}</span>
-                                        </motion.button>
-                                        <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setViewType('list')}
-                                            className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${viewType === 'list' ? 'bg-red-600 text-white' : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'}`}>
-                                            <List className="w-4 h-4" /><span className="text-sm hidden sm:inline">{t('genres.listView')}</span>
-                                        </motion.button>
-                                    </motion.div>
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-
-                    {/* Content */}
-                    {loading && !initialLoad ? (
-                        <div className="flex justify-center py-20">
-                            <Loader2 className="w-8 h-8 text-red-500 animate-spin" />
-                        </div>
-                    ) : content.length === 0 ? (
-                        <motion.div className="text-center py-20" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
-                            <p className="text-lg text-white/60">{t('genres.noContent')}</p>
-                            <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                                className="mt-4 px-6 py-2 bg-red-600 hover:bg-red-500 rounded-full text-white font-medium transition-colors"
-                                onClick={() => navigate(-1)}>
-                                {t('common.back')}
-                            </motion.button>
-                        </motion.div>
-                    ) : (
-                        <>
-                            {viewType === 'grid' && (
-                                <div className={`grid ${getGridClasses()} gap-3`}>
-                                    {searchResults.map((item, index) => (
-                                        <SearchGridCard key={item.id} item={item} index={index}
-                                            movieLabel={t('filter.movies')} serieLabel={t('filter.series')} />
-                                    ))}
-                                </div>
-                            )}
-
-                            {viewType === 'list' && (
-                                <div className="flex flex-col gap-3">
-                                    {searchResults.map((item, index) => (
-                                        <SearchListCard key={item.id} item={item} index={index}
-                                            movieLabel={t('filter.movies')} serieLabel={t('filter.series')}
-                                            watchlistLabel="Watchlist" removeLabel={t('genres.remove')} noDescLabel={t('genres.noContent')} />
-                                    ))}
-                                </div>
-                            )}
-
-                            {totalPages > 1 && (
-                                <PaginationBar currentPage={currentPage} maxPages={Math.min(totalPages, 500)} onSelect={handlePageChange} />
-                            )}
-                        </>
-                    )}
+                        {data && totalPages > 1 && <nav aria-label={t('providerCatalog.pagination')} className="my-8 flex flex-wrap items-center justify-center gap-1.5">
+                            {pageNumbers.map((page, index) => <React.Fragment key={page}>
+                                {index > 0 && page - pageNumbers[index - 1] > 1 && <span aria-hidden="true" className="px-1 text-white/50">…</span>}
+                                <button type="button" onClick={() => handlePageChange(page)} disabled={loading || error || page === currentPage}
+                                    aria-label={t('providerCatalog.pageNumber', { page })} aria-current={page === currentPage ? 'page' : undefined}
+                                    className={`${buttonClass} min-w-11 ${page === currentPage ? 'border-red-600 bg-red-600 text-white disabled:opacity-100' : 'bg-white/5 text-white/70'}`}>
+                                    {page}
+                                </button>
+                            </React.Fragment>)}
+                        </nav>}
+                    </div>
                 </div>
-            </motion.div>
+            </div>
         </SquareBackground>
     );
 };

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { useTranslation } from 'react-i18next';
 import axios from 'axios';
-import { Loader, ChevronRight, Film, Tv } from 'lucide-react';
+import { Loader, ChevronRight, Film, Tv, Flame } from 'lucide-react';
 
 import HeroSlider from '../components/HeroSlider';
 import CarouselTitle from '../components/CarouselTitle';
@@ -276,6 +276,41 @@ const sliderStyles = `
 .provider-tab:not(.active):hover {
   color: white;
   background: rgba(255, 255, 255, 0.15);
+}
+
+@media (max-width: 767px) {
+  .provider-nav {
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .provider-nav > span {
+    flex: 0 0 100%;
+    min-width: 0;
+    margin-right: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .provider-tab {
+    flex: 1 1 calc(50% - 0.25rem);
+    min-width: 0;
+    min-height: 44px;
+    justify-content: center;
+    padding: 0.65rem 0.5rem;
+    gap: 0.35rem;
+    white-space: nowrap;
+  }
+
+  .provider-tab svg {
+    flex-shrink: 0;
+  }
+
+  .provider-tab svg:last-child {
+    width: 14px;
+    height: 14px;
+  }
 }
 
 /* See all button */
@@ -1126,7 +1161,7 @@ const ProviderContent: React.FC = () => {
   }, [hoveredCategoryItemsMap]);
 
   const trendingTitle = useMemo(
-    () => <CarouselTitle icon="🔥" iconClass="text-red-600" label={t('providerCatalog.todayTrends')} />,
+    () => <CarouselTitle icon={Flame} iconClass="text-red-600" label={t('providerCatalog.todayTrends')} />,
     [t]
   );
 

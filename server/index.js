@@ -7,6 +7,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSocialPreviewResponse } from '../functions/_lib/socialPreview.js';
 import { registerGracefulShutdown } from './gracefulShutdown.js';
+import { isVersionedAsset, startAssetHistory } from './asset-history.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -19,6 +20,13 @@ if (!existsSync(DIST)) {
 }
 
 const app = new Hono();
+const indexHtml = await readFile(INDEX_HTML, 'utf8');
+const archivedAssets = await startAssetHistory(DIST);
+const PUBLIC_HTML_PATHS = new Set([
+  '/', '/index.html', '/movies', '/anime', '/tv-shows', '/collections', '/search',
+  '/about', '/privacy', '/terms-of-service', '/extension', '/app',
+  '/list-catalog', '/top10', '/calendar', '/live-tv', '/cinegraph',
+]);
 
 // Médias et polices servis depuis public/ : leur nom ne porte pas de hash, on
 // ne peut donc pas les déclarer immuables — mais ils ne changent quasiment
@@ -42,11 +50,41 @@ const ALWAYS_REVALIDATE = new Set([
 
 app.use('/*', async (c, next) => {
   await next();
-  if (c.res.headers.has('cache-control')) return;
   const path = new URL(c.req.url).pathname;
-  const isOk = c.res.status === 200;
+  const status = c.res.status;
 
-  if (path.startsWith('/assets/') && isOk) {
+  // Les erreurs et la sonde ne doivent jamais être conservées par un cache.
+  // Ces exceptions passent avant le garde-fou des headers pour rester
+  // effectives même lorsqu'une route en a déjà défini un.
+  if (status >= 400 || path === '/health') {
+    c.header('Cache-Control', 'no-store');
+    c.header('Cloudflare-CDN-Cache-Control', 'no-store');
+    return;
+  }
+
+  // Only the public SPA shell/metadata is eligible for a short CDN cache.
+  // Authentication, VIP, private rooms and unknown routes stay out of it.
+  if (c.res.headers.get('content-type')?.toLowerCase().startsWith('text/html')) {
+    const publicPath = PUBLIC_HTML_PATHS.has(path) || /^\/(?:movie|tv)\/[^/]+\/?$/.test(path);
+    const cacheable = status === 200 && ['GET', 'HEAD'].includes(c.req.method)
+      && publicPath && !c.req.header('authorization') && !c.res.headers.has('set-cookie');
+    c.header('Cache-Control', 'no-cache');
+    c.header('Cloudflare-CDN-Cache-Control', cacheable ? 'public, max-age=60' : 'no-store');
+    return;
+  }
+
+  // Le chargeur JS et le binaire WASM doivent chacun être revalidés avant
+  // réutilisation, car leurs noms restent stables entre les déploiements.
+  if (path.startsWith('/wasm/watchparty-sync/')) {
+    c.header('Cache-Control', 'no-cache, must-revalidate');
+    c.header('Cloudflare-CDN-Cache-Control', 'no-store');
+    return;
+  }
+
+  if (c.res.headers.has('cache-control')) return;
+  const isOk = status === 200;
+
+  if (path.startsWith('/assets/') && isOk && isVersionedAsset(path.slice('/assets/'.length))) {
     // Nom hashé par Vite : le contenu ne changera jamais sous cette URL.
     c.header('Cache-Control', 'public, max-age=31536000, immutable');
   } else if (isOk && MEDIA_ASSET_RE.test(path) && !ALWAYS_REVALIDATE.has(path)) {
@@ -55,6 +93,7 @@ app.use('/*', async (c, next) => {
     c.header('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
   } else {
     c.header('Cache-Control', 'no-cache, must-revalidate');
+    c.header('Cloudflare-CDN-Cache-Control', 'no-store');
   }
 });
 
@@ -64,8 +103,7 @@ const toCloudflareCtx = (c) => ({
   request: new Request(c.req.url, { method: c.req.method, headers: c.req.raw.headers }),
   env: process.env,
   next: async () => {
-    const html = await readFile(INDEX_HTML, 'utf8');
-    return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    return new Response(indexHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   },
 });
 
@@ -77,15 +115,28 @@ const socialPreviewHandler = async (c) => {
 app.get('/movie/:id', socialPreviewHandler);
 app.get('/tv/:id', socialPreviewHandler);
 
-app.use('/*', serveStatic({ root: './dist' }));
+app.use('/*', serveStatic({ root: DIST }));
+
+if (archivedAssets) {
+  const serveArchived = serveStatic({
+    root: archivedAssets,
+    rewriteRequestPath: (path) => path.slice('/assets/'.length),
+  });
+  app.use('/assets/*', async (c, next) => {
+    let name;
+    try { name = decodeURIComponent(c.req.path).slice('/assets/'.length); }
+    catch { return c.text('Bad Request', 400); }
+    if (!['GET', 'HEAD'].includes(c.req.method) || !isVersionedAsset(name)) return next();
+    return serveArchived(c, next);
+  });
+}
 
 app.get('*', async (c) => {
   const path = new URL(c.req.url).pathname;
-  if (/\.[^/]+$/.test(path)) {
+  if (path.startsWith('/assets/') || path === '/api' || path.startsWith('/api/') || /\.[^/]+$/.test(path)) {
     return c.text('Not Found', 404);
   }
-  const html = await readFile(INDEX_HTML, 'utf8');
-  return c.html(html);
+  return c.html(indexHtml);
 });
 
 const port = Number(process.env.PORT) || 3001;

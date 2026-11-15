@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 
 # Uqload fait tourner son domaine (.is, .bz, .cx, .vc, …) et les anciens
@@ -141,6 +141,82 @@ def decode_packed_script_from_html(html: str) -> str | None:
         return unpack_dean_edwards(payload, radix, keyword_count, keywords)
     except ValueError:
         return None
+
+
+UQLOAD_SUBTITLE_LANGS = (
+    ("fr", re.compile(r"\b(?:fr|fra|fre|french|fran[cç]ais|vf|vostfr)\b", re.IGNORECASE)),
+    ("en", re.compile(r"\b(?:en|eng|english|anglais)\b", re.IGNORECASE)),
+    ("es", re.compile(r"\b(?:es|spa|spanish|espa[nñ]ol)\b", re.IGNORECASE)),
+    ("de", re.compile(r"\b(?:de|ger|deu|german|deutsch)\b", re.IGNORECASE)),
+    ("it", re.compile(r"\b(?:it|ita|italian|italiano)\b", re.IGNORECASE)),
+    ("pt", re.compile(r"\b(?:pt|por|portuguese|portugu[eê]s)\b", re.IGNORECASE)),
+    ("ar", re.compile(r"\b(?:ar|ara|arabic|arabe)\b", re.IGNORECASE)),
+)
+TRACKS_BLOCK_RE = re.compile(r"tracks\s*:\s*\[([\s\S]{0,8000}?)\]")
+TRACK_ENTRY_RE = re.compile(r"\{[^{}]*\}")
+SUBTITLE_FILE_RE = re.compile(r"\.(?:vtt|srt)(?:[?#]|$)", re.IGNORECASE)
+EMPTY_SUBTITLE_RE = re.compile(r"/empty\.(?:srt|vtt)(?:[?#]|$)", re.IGNORECASE)
+TRACK_DEFAULT_RE = re.compile(r"""["']?default["']?\s*:\s*(?:true|["']true["'])""", re.IGNORECASE)
+
+
+def _track_field(entry: str, name: str) -> str:
+    match = re.search(rf"""["']?{name}["']?\s*:\s*["']([^"']*)["']""", entry, re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def _guess_subtitle_lang(label: str, url: str) -> str:
+    file_name = url.split("?")[0].split("#")[0].rsplit("/", 1)[-1]
+    haystack = f"{label} {re.sub(r'[_.-]', ' ', file_name)}"
+    for code, pattern in UQLOAD_SUBTITLE_LANGS:
+        if pattern.search(haystack):
+            return code
+    return "und"
+
+
+def extract_uqload_subtitles(html: str, page_url: str) -> list[dict]:
+    """Sous-titres de `jwplayer().setup({ tracks })`.
+
+    Ignore les vignettes (`kind: "thumbnails"`) et le `empty.srt` factice
+    qu'Uqload ajoute sous « Upload captions ». Même logique que l'extension.
+    """
+    sources = [str(html or "")]
+    decoded = decode_packed_script_from_html(html)
+    if decoded:
+        sources.append(decoded)
+
+    subtitles: list[dict] = []
+    seen: set[str] = set()
+    for source in sources:
+        normalized = source.replace("\\/", "/")
+        for block in TRACKS_BLOCK_RE.finditer(normalized):
+            for entry_match in TRACK_ENTRY_RE.finditer(block.group(1)):
+                entry = entry_match.group(0)
+                file_ref = _track_field(entry, "file") or _track_field(entry, "src")
+                kind = (_track_field(entry, "kind") or "captions").lower()
+                if not file_ref or kind not in ("captions", "subtitles"):
+                    continue
+                if EMPTY_SUBTITLE_RE.search(file_ref) or not SUBTITLE_FILE_RE.search(file_ref):
+                    continue
+                try:
+                    url = parse_allowed_uqload_url(urljoin(page_url, file_ref)).geturl()
+                except ValueError:
+                    continue
+                if url in seen:
+                    continue
+                seen.add(url)
+
+                label = _track_field(entry, "label")
+                lang = _guess_subtitle_lang(label, url)
+                subtitles.append({
+                    "url": url,
+                    "label": label or (lang.upper() if lang != "und" else f"Piste {len(subtitles) + 1}"),
+                    "lang": lang,
+                    "format": "srt" if re.search(r"\.srt(?:[?#]|$)", url, re.IGNORECASE) else "vtt",
+                    "default": bool(TRACK_DEFAULT_RE.search(entry)),
+                })
+                if len(subtitles) >= 8:
+                    return subtitles
+    return subtitles
 
 
 def extract_uqload_media_url(html: str) -> str | None:

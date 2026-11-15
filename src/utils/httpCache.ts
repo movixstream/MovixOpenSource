@@ -70,8 +70,16 @@ const HARD_EXPIRY_MS = 6 * 60 * 60 * 1000;
 /** Entrées persistées au maximum. Au-delà, les plus anciennes sautent. */
 const MAX_PERSISTED_ENTRIES = 40;
 
-/** Une réponse plus grosse que ça reste en mémoire, mais n'est pas persistée. */
+/** Une réponse plus grosse que ça n'est pas persistée dans `sessionStorage`. */
 const MAX_PERSISTED_BYTES = 96 * 1024;
+
+/**
+ * Le cache mémoire doit rester nettement plus petit que les images décodées de
+ * la page. La double limite couvre à la fois les nombreuses petites fiches et
+ * les quelques réponses catalogue beaucoup plus volumineuses.
+ */
+const MAX_MEMORY_ENTRIES = 80;
+const MAX_MEMORY_BYTES = 4 * 1024 * 1024;
 
 /** Fraîcheur des listes : elles bougent, mais pas d'une minute à l'autre. */
 const LIST_TTL_MS = 5 * 60 * 1000;
@@ -87,6 +95,10 @@ interface CacheRule {
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const TMDB_PREFIX = 'https://api.themoviedb.org/3/';
+// `useTmdbImages` réduit déjà ces réponses très riches à deux petites URLs et
+// les déduplique pendant leur chargement. Conserver ici le JSON TMDB complet
+// (toutes les affiches, logos et backdrops) doublait le cache pour chaque carte.
+const TMDB_IMAGES_RE = /^https:\/\/api\.themoviedb\.org\/3\/(movie|tv)\/\d+\/images(?:\?|$)/;
 const CONTENT_RE = MAIN_API
   ? new RegExp(`^${escapeRegExp(MAIN_API)}/api/content/`)
   : null;
@@ -115,11 +127,53 @@ interface CacheEntry {
 
 /** Cache mémoire : le plus rapide, et le seul disponible sans `sessionStorage`. */
 const memory = new Map<string, CacheEntry>();
+let memoryBytes = 0;
 
 /** Requêtes en cours, par clé, pour n'en lancer qu'une. */
 const inflight = new Map<string, Promise<AxiosResponse>>();
 
 const now = (): number => Date.now();
+
+const estimatedBytes = (key: string, entry: CacheEntry): number =>
+  // Les chaînes JavaScript sont généralement UTF-16. Le petit forfait couvre
+  // les nombres et l'objet Map sans prétendre mesurer le heap au byte près.
+  ((key.length + entry.body.length) * 2) + 32;
+
+const deleteMemory = (key: string): void => {
+  const existing = memory.get(key);
+  if (!existing) return;
+  memory.delete(key);
+  memoryBytes = Math.max(0, memoryBytes - estimatedBytes(key, existing));
+};
+
+const pruneMemory = (): void => {
+  const cutoff = now() - HARD_EXPIRY_MS;
+
+  // Une écriture est une bonne occasion de purger aussi les anciennes clés qui
+  // ne seraient sinon jamais relues, donc jamais supprimées.
+  for (const [key, entry] of memory) {
+    if (entry.ts <= cutoff) deleteMemory(key);
+  }
+
+  while (memory.size > MAX_MEMORY_ENTRIES || memoryBytes > MAX_MEMORY_BYTES) {
+    const oldestKey = memory.keys().next().value as string | undefined;
+    if (oldestKey === undefined) break;
+    deleteMemory(oldestKey);
+  }
+};
+
+const setMemory = (key: string, entry: CacheEntry): void => {
+  deleteMemory(key);
+  memory.set(key, entry);
+  memoryBytes += estimatedBytes(key, entry);
+  pruneMemory();
+};
+
+const touchMemory = (key: string, entry: CacheEntry): void => {
+  // L'ordre d'insertion de Map sert de LRU. Aucun changement de taille.
+  memory.delete(key);
+  memory.set(key, entry);
+};
 
 const readPersisted = (key: string): CacheEntry | null => {
   try {
@@ -191,7 +245,7 @@ const read = (key: string): CacheEntry | null => {
   if (!entry) return null;
 
   if (now() - entry.ts >= HARD_EXPIRY_MS) {
-    memory.delete(key);
+    deleteMemory(key);
     try {
       sessionStorage.removeItem(STORAGE_PREFIX + key);
     } catch {
@@ -200,7 +254,8 @@ const read = (key: string): CacheEntry | null => {
     return null;
   }
 
-  if (!inMemory) memory.set(key, entry);
+  if (inMemory) touchMemory(key, entry);
+  else setMemory(key, entry);
   return entry;
 };
 
@@ -213,7 +268,7 @@ const write = (key: string, response: AxiosResponse): void => {
     return; // réponse non sérialisable (blob, stream) : hors sujet ici
   }
   const entry: CacheEntry = { body, status: response.status, ts: now() };
-  memory.set(key, entry);
+  setMemory(key, entry);
   writePersisted(key, entry);
 };
 
@@ -266,6 +321,8 @@ export const installHttpCache = (instance: AxiosInstance): void => {
       return config;
     }
 
+    if (TMDB_IMAGES_RE.test(url)) return config;
+
     const rule = matchRule(url);
     if (!rule) return config;
 
@@ -317,6 +374,7 @@ export const installHttpCache = (instance: AxiosInstance): void => {
 /** Vide le cache. Utile après un changement de langue, qui rend tout obsolète. */
 export const clearHttpCache = (): void => {
   memory.clear();
+  memoryBytes = 0;
   inflight.clear();
   try {
     const keys: string[] = [];

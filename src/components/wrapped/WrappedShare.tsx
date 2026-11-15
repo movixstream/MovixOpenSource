@@ -1,14 +1,16 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { ArrowLeft, ChevronDown, Copy, Download, Film, Loader2, Share2 } from 'lucide-react';
+import { lazy, Suspense, useEffect, useId, useMemo, useState, type CSSProperties } from 'react';
+import { ArrowLeft, ChevronDown, Copy, Download, Loader2, Play, Share2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { WrappedShareCardData, WrappedShareFormat } from '@/types/wrapped';
-import { generateWrappedShareCard } from '@/utils/wrappedShareCards';
+import type { WrappedShareCardData, WrappedShareFormat, WrappedThemeId } from '@/types/wrapped';
+import WrappedThemePicker from './WrappedThemePicker';
+import { generateWrappedShareCard, WRAPPED_SHARE_CARD_SIZES, WRAPPED_SHARE_POSTER_BOXES } from '@/utils/wrappedShareCards';
 import WrappedTilt from './WrappedTilt';
 import WrappedPoster from './WrappedPoster';
 import type { WrappedTopContent } from '@/services/wrappedService';
 import { motion, useReducedMotion } from 'framer-motion';
 import { WRAPPED_EASE_MORPH, WRAPPED_FRAME_ANIMATION } from '@/utils/wrappedMotion';
+import { copyText } from '@/utils/clipboard';
 
 const WrappedVideo = lazy(() => import('./WrappedVideo'));
 
@@ -23,11 +25,16 @@ function download(blob: Blob, name: string) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export default function WrappedShare({ data, favorite, preparedStory, onDetails }: { data: WrappedShareCardData; favorite?: WrappedTopContent; preparedStory?: Blob; onDetails: () => void }) {
+export default function WrappedShare({ data, favorite, preparedStory, onDetails, theme, autoTheme, onTheme }: {
+    data: WrappedShareCardData; favorite?: WrappedTopContent; preparedStory?: Blob; onDetails: () => void;
+    theme?: WrappedThemeId; autoTheme?: WrappedThemeId; onTheme?: (id: WrappedThemeId) => void;
+}) {
     const { t } = useTranslation();
     const reduced = useReducedMotion();
     const [format, setFormat] = useState<WrappedShareFormat>('story');
     const [film, setFilm] = useState(false);
+    const [moreOpen, setMoreOpen] = useState(false);
+    const moreId = useId();
     const [retry, setRetry] = useState(0);
     const [preview, setPreview] = useState<{ format: WrappedShareFormat; url: string; blob: Blob } | null>(null);
     const [failed, setFailed] = useState(false);
@@ -80,24 +87,26 @@ export default function WrappedShare({ data, favorite, preparedStory, onDetails 
     };
 
     const copy = async () => {
-        try {
-            await navigator.clipboard.writeText(text);
+        if (await copyText(text)) {
             toast.success(t('wrapped.textCopied'));
-        } catch { toast.error(t('wrapped.shareError')); }
+        } else {
+            toast.error(t('wrapped.shareError'));
+        }
     };
 
     if (film) return <section className="mx-auto w-full max-w-[1050px] space-y-4" data-wrapped-interactive>
         <button type="button" onClick={() => setFilm(false)} className="inline-flex min-h-11 items-center gap-2 text-sm underline underline-offset-4"><ArrowLeft className="h-4 w-4" aria-hidden="true" />{t('wrappedMotion.backImages')}</button>
-        <Suspense fallback={<p role="status">{t('common.loading')}</p>}><WrappedVideo data={data} /></Suspense>
+        <Suspense fallback={<p role="status">{t('common.loading')}</p>}><WrappedVideo data={data} theme={theme} autoTheme={autoTheme} onTheme={onTheme} /></Suspense>
     </section>;
 
-    const posterPosition = format === 'story' ? { left: '6.667%', top: '14.375%', width: '51.111%', height: '43.125%' }
-        : format === 'poster' ? { left: '30%', top: '16.296%', width: '40%', height: '40%' }
-            : { left: '6.667%', top: '15.313%', width: '12.222%', height: '10.313%' };
-    const left = parseFloat(posterPosition.left), top = parseFloat(posterPosition.top);
-    const right = left + parseFloat(posterPosition.width), bottom = top + parseFloat(posterPosition.height);
+    // L'affiche volante se pose sur le rectangle exact où le PNG peint le n°1 ; le billet n'en a pas.
+    const cardSize = WRAPPED_SHARE_CARD_SIZES[format];
+    const posterBox = format === 'ticket' ? null : WRAPPED_SHARE_POSTER_BOXES[format];
+    const left = (posterBox?.x ?? 0) / cardSize.width * 100, top = (posterBox?.y ?? 0) / cardSize.height * 100;
+    const right = left + (posterBox?.width ?? 0) / cardSize.width * 100, bottom = top + (posterBox?.height ?? 0) / cardSize.height * 100;
+    const posterPosition = { left: `${left}%`, top: `${top}%`, width: `${right - left}%`, height: `${bottom - top}%` };
     // La photo peinte dans le PNG s'efface sous l'affiche volante, aussi au retour.
-    const posterCutout = `polygon(evenodd, 0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${left}% ${top}%, ${left}% ${bottom}%, ${right}% ${bottom}%, ${right}% ${top}%, ${left}% ${top}%)`;
+    const posterCutout = posterBox ? `polygon(evenodd, 0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${left}% ${top}%, ${left}% ${bottom}%, ${right}% ${bottom}%, ${right}% ${top}%, ${left}% ${top}%)` : 'none';
 
     return (
         <section className="mx-auto grid w-full max-w-[1160px] items-center gap-3 md:grid-cols-[0.95fr_1.05fr] md:gap-x-12 md:gap-y-5" aria-labelledby="wrapped-share-title">
@@ -115,7 +124,7 @@ export default function WrappedShare({ data, favorite, preparedStory, onDetails 
                         <p>{t('wrapped.shareError')}</p>
                         <button type="button" onClick={() => setRetry(value => value + 1)} className="min-h-11 underline underline-offset-4">{t('wrappedStory.retry')}</button>
                     </div>
-                ) : <p className="flex h-full items-center justify-center gap-2 p-5 text-sm text-white/80" role="status"><Loader2 className="h-5 w-5 motion-safe:animate-spin" aria-hidden="true" />{t('wrapped.generatingImage')}</p>}
+                ) : <p className="flex h-full items-center justify-center gap-2 p-5 text-sm text-white/80" role="status"><Loader2 className="h-5 w-5 motion-safe:animate-spin text-white opacity-80" aria-hidden="true" />{t('wrapped.generatingImage')}</p>}
                 {favorite && format !== 'ticket' && <WrappedPoster key={format} item={favorite} className="pointer-events-none absolute" style={posterPosition} settle={Boolean(ready) || failed} />}
                 </WrappedTilt>
                 </div>
@@ -125,19 +134,21 @@ export default function WrappedShare({ data, favorite, preparedStory, onDetails 
                 <button type="button" onClick={share} disabled={!ready} className="flex min-h-12 items-center justify-center gap-2 rounded-full bg-[var(--wrapped-accent)] px-3 text-sm font-bold text-[#17121f] hover:bg-white disabled:opacity-40"><Share2 className="h-4 w-4 shrink-0" aria-hidden="true" />{t('wrappedStory.share')}</button>
                 <button type="button" onClick={() => ready && download(ready.blob, filename)} disabled={!ready} className="flex min-h-12 items-center justify-center gap-2 rounded-full border border-white/20 px-3 text-sm font-semibold hover:bg-white/10 disabled:opacity-40"><Download className="h-4 w-4 shrink-0" aria-hidden="true" />{t('wrappedStory.download')}</button>
             </div>
-            <details className="group/options md:col-start-1 md:row-start-3" data-wrapped-interactive>
-                <summary className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded text-sm text-white/80 underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white md:justify-start">{t('wrappedFinish.shareOptions')}<ChevronDown className="h-4 w-4 group-open/options:rotate-180" aria-hidden="true" /></summary>
-                <div className="space-y-3 pt-3">
+            {/* Le film partage la ligne du dépliant : il est visible sans ajouter de hauteur. */}
+            <div className="grid grid-cols-2 items-start gap-2 md:col-start-1 md:row-start-3" data-wrapped-interactive>
+                <button type="button" onClick={() => setFilm(true)} className="flex min-h-11 items-center justify-center gap-2 rounded-full border border-white/25 px-2.5 text-center text-sm font-semibold leading-tight text-[var(--wrapped-accent)] hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"><Play className="h-4 w-4 shrink-0 fill-current" aria-hidden="true" />{t('wrappedMotion.film')}</button>
+                <button type="button" aria-expanded={moreOpen} aria-controls={moreId} onClick={() => setMoreOpen(value => !value)} className="flex min-h-11 items-center justify-center gap-2 rounded text-center text-sm leading-tight text-white/80 underline underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">{t('wrappedFinish.shareOptions')}<ChevronDown className={`h-4 w-4 shrink-0 text-white opacity-80 ${moreOpen ? 'rotate-180' : ''}`} aria-hidden="true" /></button>
+                <div id={moreId} hidden={!moreOpen} className="col-span-2 space-y-3 pt-1">
                     <div className="grid grid-cols-4 gap-1.5" role="group" aria-label={t('wrapped.shareFormatsTitle')}>
                         {(['story', 'top-five', 'poster', 'ticket'] as const).map(value => <button key={value} type="button" aria-pressed={format === value} onClick={() => setFormat(value)} className={`min-h-12 rounded-lg px-1 text-xs font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-white ${format === value ? 'bg-[var(--wrapped-accent)] text-[#17121f]' : 'bg-white/10 text-white/80 hover:bg-white/15'}`}>
                             {t(`wrappedStory.formats.${value}`)}<span className="mt-1 block text-[10px] font-normal">{value === 'poster' ? '2:3' : '9:16'}</span>
                         </button>)}
                     </div>
-                    <button type="button" onClick={() => setFilm(true)} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg border border-white/25 text-sm font-semibold hover:bg-white/10"><Film className="h-4 w-4" aria-hidden="true" />{t('wrappedMotion.film')}</button>
-                    <div className="flex flex-wrap gap-x-5"><button type="button" onClick={copy} className="flex min-h-11 items-center gap-2 text-sm text-white/80 underline underline-offset-4"><Copy className="h-4 w-4" aria-hidden="true" />{t('wrapped.copyText')}</button>
+                    {theme && onTheme && <WrappedThemePicker value={theme} auto={autoTheme || theme} onChange={onTheme} />}
+                    <div className="flex flex-wrap gap-x-5"><button type="button" onClick={copy} className="flex min-h-11 items-center gap-2 text-sm text-white/80 underline underline-offset-4"><Copy className="h-4 w-4 text-white opacity-80" aria-hidden="true" />{t('wrapped.copyText')}</button>
                     <button type="button" onClick={onDetails} className="min-h-11 text-sm text-white underline underline-offset-4">{t('wrappedStory.seeDetails')}</button></div>
                 </div>
-            </details>
+            </div>
         </section>
     );
 }

@@ -4,10 +4,10 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 
+import AppButton from './AppButton';
 import type { Manifest } from '../services/versionCheck';
 
 type Props = {
@@ -50,21 +50,22 @@ export default function UpdateDialog({
 
           <View style={styles.actions}>
             {!manifest.mandatory && (
-              <TouchableOpacity
+              <AppButton
+                title="Plus tard"
                 onPress={onLater}
-                style={[styles.button, styles.buttonSecondary]}
-                accessibilityRole="button"
-                activeOpacity={0.8}>
-                <Text style={styles.buttonTextSecondary}>Plus tard</Text>
-              </TouchableOpacity>
+                style={styles.buttonLayout}
+                fallbackStyle={[styles.button, styles.buttonSecondary]}
+                fallbackTextStyle={styles.buttonTextSecondary}
+              />
             )}
-            <TouchableOpacity
+            <AppButton
+              title="Mettre à jour"
+              variant="primary"
               onPress={onUpdate}
-              style={[styles.button, styles.buttonPrimary]}
-              accessibilityRole="button"
-              activeOpacity={0.8}>
-              <Text style={styles.buttonTextPrimary}>Mettre à jour</Text>
-            </TouchableOpacity>
+              style={styles.buttonLayout}
+              fallbackStyle={[styles.button, styles.buttonPrimary]}
+              fallbackTextStyle={styles.buttonTextPrimary}
+            />
           </View>
         </View>
       </View>
@@ -119,8 +120,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
   },
-  button: {
+  buttonLayout: {
     flex: 1,
+  },
+  button: {
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 10,

@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react';
+import { readLocalStorage } from './browserStorage';
 
 // ─── Presets de couleur accent ──────────────────────────────────────────
 // Partagés entre SettingsPage (sélection) et SquareBackground (application
@@ -61,7 +62,7 @@ export interface BgPrefs {
 }
 
 export function readBgPrefs(): BgPrefs {
-  const accentRaw = typeof window === 'undefined' ? null : localStorage.getItem(BG_STORAGE_KEYS.accent);
+  const accentRaw = readLocalStorage(BG_STORAGE_KEYS.accent);
   const accent: BgAccentValue =
     accentRaw === 'custom'
       ? 'custom'
@@ -69,17 +70,15 @@ export function readBgPrefs(): BgPrefs {
         ? (accentRaw as BgAccentKey)
         : 'red';
 
-  const customHex = (typeof window === 'undefined' ? null : localStorage.getItem(BG_STORAGE_KEYS.customHex)) || '#ef4444';
+  const customHex = readLocalStorage(BG_STORAGE_KEYS.customHex) || '#ef4444';
 
-  const sizeRaw = parseInt((typeof window === 'undefined' ? '' : localStorage.getItem(BG_STORAGE_KEYS.squareSize)) || '48', 10);
+  const sizeRaw = parseInt(readLocalStorage(BG_STORAGE_KEYS.squareSize) || '48', 10);
   const squareSize = [32, 48, 64, 80].includes(sizeRaw) ? sizeRaw : 48;
 
-  const forceColor = typeof window !== 'undefined' && localStorage.getItem(BG_STORAGE_KEYS.forceColor) === '1';
-  const forceSquareSize = typeof window !== 'undefined' && localStorage.getItem(BG_STORAGE_KEYS.forceSquareSize) === '1';
+  const forceColor = readLocalStorage(BG_STORAGE_KEYS.forceColor) === '1';
+  const forceSquareSize = readLocalStorage(BG_STORAGE_KEYS.forceSquareSize) === '1';
   // Default true — le halo est activé par défaut. Désactivable depuis Apparence.
-  const haloEnabled = typeof window === 'undefined'
-    ? true
-    : localStorage.getItem(BG_STORAGE_KEYS.haloEnabled) !== '0';
+  const haloEnabled = readLocalStorage(BG_STORAGE_KEYS.haloEnabled) !== '0';
 
   return { accent, customHex, squareSize, forceColor, forceSquareSize, haloEnabled };
 }

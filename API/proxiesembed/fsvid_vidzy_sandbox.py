@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -194,8 +195,16 @@ async def execute_player_scripts(
                 timeout=OUTER_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
             return SandboxResult(error="sandbox_timeout")
+        finally:
+            # Délai dépassé, mais aussi annulation de la requête appelante
+            # (client parti, arrêt du serveur) pendant `communicate()` : sans
+            # ce `finally`, le worker QuickJS restait vivant hors de toute
+            # limite et gardait sa place dans le sémaphore.
+            if process.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    process.kill()
+                with contextlib.suppress(Exception):
+                    await process.wait()
 
     return _parse_worker_response(stdout, process.returncode)

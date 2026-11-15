@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Filter, X, Film, Tv, FolderOpen, SortAsc, SortDesc, Type, Monitor, Share2 } from 'lucide-react';
+import { Search, Filter, X, Film, Tv, FolderOpen, SortAsc, SortDesc, Type, Monitor, Share2, CalendarDays } from 'lucide-react';
 import InputMask from 'react-input-mask';
 import { useTranslation } from 'react-i18next';
 import CustomDropdown from './CustomDropdown';
@@ -135,14 +135,14 @@ const FilterSystem: React.FC<FilterSystemProps> = ({
     }));
   }, [availableTypeFilters, filters.typeFilter, applyFilterUpdate]);
 
-  const handleFilterChange = useCallback((key: keyof FilterOptions, value: any) => {
+  const handleFilterChange = useCallback(<K extends keyof FilterOptions>(key: K, value: FilterOptions[K]) => {
     applyFilterUpdate((prev) => ({
       ...prev,
       [key]: value
     }));
   }, [applyFilterUpdate]);
 
-  const handleDateRangeChange = useCallback((newDateRange: any) => {
+  const handleDateRangeChange = useCallback((newDateRange: FilterOptions['dateRange']) => {
     applyFilterUpdate((prev) => ({
       ...prev,
       dateRange: newDateRange
@@ -190,25 +190,28 @@ const FilterSystem: React.FC<FilterSystemProps> = ({
   }, [filters, searchInput]);
 
   return (
-    <div className={`bg-gray-800/50 backdrop-blur-sm rounded-lg p-4 mb-6 relative z-10 ${className}`}>
-      {/* Main Filter Bar */}
-      <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
+    <div className={`mb-6 relative z-10 ${className}`}>
+      {/* Barre principale : recherche, types, tri — posée à plat sur la page */}
+      <div className="flex flex-wrap gap-2 items-center">
         {/* Search Input */}
-        <div className="relative flex-1 min-w-0">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+        <div className="relative w-full sm:w-64 lg:w-72">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white opacity-45 w-4 h-4" aria-hidden="true" />
           <input
             type="text"
             placeholder={t('filter.searchByName')}
+            aria-label={t('filter.searchByName')}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-700/50 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full h-10 pl-10 pr-10 bg-gray-900 rounded-full text-[15px] text-white placeholder:text-white/45 focus:outline-none focus:ring-2 focus:ring-white/60"
           />
           {searchInput && (
             <button
+              type="button"
               onClick={() => setSearchInput('')}
-              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
+              aria-label={t('filter.clear')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-full text-white hover:bg-white/10 group"
             >
-              <X className="w-4 h-4" />
+              <X className="w-4 h-4 opacity-55 group-hover:opacity-100" />
             </button>
           )}
         </div>
@@ -223,15 +226,18 @@ const FilterSystem: React.FC<FilterSystemProps> = ({
               <button
                 key={button.value}
                 onClick={() => handleFilterChange('typeFilter', button.value)}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  Icon ? 'flex items-center gap-1' : ''
+                type="button"
+                aria-pressed={isActive}
+                className={`group h-10 px-3.5 rounded-full text-sm font-medium transition-[background-color,color,transform] duration-150 active:scale-[0.97] ${
+                  Icon ? 'flex items-center gap-1.5' : ''
                 } ${
                   isActive
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    ? 'bg-white text-black'
+                    : 'bg-gray-900 text-white/70 hover:bg-gray-800 hover:text-white'
                 }`}
               >
-                {Icon ? <Icon className="w-4 h-4" /> : null}
+                {/* Couleur pleine + opacity sur l'icône : une couleur transparente ferait foncer les croisements de traits */}
+                {Icon ? <Icon className={`w-4 h-4 ${isActive ? 'text-black' : 'text-white opacity-70 group-hover:opacity-100'}`} aria-hidden="true" /> : null}
                 {button.label}
               </button>
             );
@@ -255,7 +261,9 @@ const FilterSystem: React.FC<FilterSystemProps> = ({
            <button
              onClick={() => handleFilterChange('sortOrder', filters.sortOrder === 'asc' ? 'desc' : 'asc')}
              disabled={isSorting}
-             className={`px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white hover:bg-gray-600 transition-colors ${
+             type="button"
+             aria-label={`${filters.sortOrder === 'asc' ? t('filter.sortOrderDesc') : t('filter.sortOrderAsc')}`}
+             className={`inline-flex h-10 w-10 items-center justify-center bg-gray-900 rounded-full text-white hover:bg-gray-800 transition-colors ${
                isSorting ? 'opacity-50 cursor-not-allowed' : ''
              }`}
              title={`${filters.sortOrder === 'asc' ? t('filter.sortOrderDesc') : t('filter.sortOrderAsc')}`}
@@ -273,21 +281,24 @@ const FilterSystem: React.FC<FilterSystemProps> = ({
         {/* Advanced Filters Toggle */}
         <button
           onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-          className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-            showAdvancedFilters || hasActiveFilters
-              ? 'bg-blue-600 text-white'
-              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          type="button"
+          aria-expanded={showAdvancedFilters}
+          className={`group h-10 px-3.5 rounded-full text-sm font-medium transition-colors flex items-center gap-2 ${
+            showAdvancedFilters
+              ? 'bg-white text-black'
+              : 'bg-gray-900 text-white/70 hover:bg-gray-800 hover:text-white'
           }`}
         >
-          <Filter className="w-4 h-4" />
+          <Filter className={`w-4 h-4 ${showAdvancedFilters ? 'text-black' : 'text-white opacity-70 group-hover:opacity-100'}`} aria-hidden="true" />
           {t('filter.advancedFilters')}
         </button>
 
         {/* Clear Filters */}
         {hasActiveFilters && (
           <button
+            type="button"
             onClick={clearFilters}
-            className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors flex items-center gap-1"
+            className="h-10 px-3.5 bg-white/10 text-white rounded-full text-sm font-medium hover:bg-white/[0.16] transition-colors flex items-center gap-1.5"
           >
             <X className="w-4 h-4" />
             {t('filter.clear')}
@@ -303,19 +314,20 @@ const FilterSystem: React.FC<FilterSystemProps> = ({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2, ease: 'easeInOut' }}
-            className="mt-4 pt-4 border-t border-gray-600"
+            className="mt-3 rounded-xl bg-gray-900 p-4"
           >
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Date Range Filter */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-gray-300">
+                  <label className="block text-sm font-medium text-white/80">
                     {t('filter.addedPeriod')}
                   </label>
                   {(filters.dateRange?.start || filters.dateRange?.end) && (
                     <button
                       onClick={() => handleDateRangeChange({ start: undefined, end: undefined })}
-                      className="text-xs text-gray-400 hover:text-white transition-colors"
+                      type="button"
+                      className="text-sm text-white/55 hover:text-white transition-colors"
                     >
                       {t('filter.clearDates')}
                     </button>
@@ -388,7 +400,7 @@ const FilterSystem: React.FC<FilterSystemProps> = ({
                           }
                         }}
                         placeholder={t('common.dateInputPlaceholder')}
-                        className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="flex-1 h-10 px-3 bg-black/40 rounded-lg text-white text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-white/60"
                       />
                       <InputMask
                         mask="99/99/9999"
@@ -415,7 +427,7 @@ const FilterSystem: React.FC<FilterSystemProps> = ({
                           }
                         }}
                         placeholder={t('common.dateInputPlaceholder')}
-                        className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="flex-1 h-10 px-3 bg-black/40 rounded-lg text-white text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-white/60"
                       />
                     </div>
                   )}
@@ -428,38 +440,35 @@ const FilterSystem: React.FC<FilterSystemProps> = ({
                       }
                       setIsTextMode(!isTextMode);
                     }}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${
-                      isTextMode
-                        ? 'bg-green-600 text-white'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    }`}
+                    type="button"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/[0.16]"
                     title={isTextMode ? t('filter.calendarMode') : t('filter.directInputMode')}
+                    aria-label={isTextMode ? t('filter.calendarMode') : t('filter.directInputMode')}
                   >
-                    <Type className="w-4 h-4" />
-                    {isTextMode ? "📅" : "✏️"}
+                    {isTextMode ? <CalendarDays className="w-4 h-4" aria-hidden="true" /> : <Type className="w-4 h-4" aria-hidden="true" />}
                   </button>
                 </div>
-                
+
                 {/* Indicateur de format en mode texte */}
                 {isTextMode && (
-                  <div className="mt-2 text-xs text-gray-400 bg-gray-800/50 px-3 py-2 rounded-lg">
-                    💡 {t('filter.dateFormatHint')}
-                  </div>
+                  <p className="mt-2 text-sm text-white/55">
+                    {t('filter.dateFormatHint')}
+                  </p>
                 )}
               </div>
 
               {/* Results Count */}
               <div className="flex flex-col items-end gap-2">
-                <div className="text-sm text-gray-400">
+                <div className="text-sm text-white/60 tabular-nums">
                   {t('filter.itemsCount', { filtered: filteredItems, total: totalItems })}
                   {filteredItems !== totalItems && (
-                    <span className="ml-2 text-blue-400">
+                    <span className="ml-2 text-white/80">
                       ({Math.round((filteredItems / totalItems) * 100)}%)
                     </span>
                   )}
                 </div>
                 {(filters.dateRange?.start || filters.dateRange?.end) && (
-                  <div className="text-xs text-blue-400 bg-blue-600/20 px-2 py-1 rounded">
+                  <div className="text-sm text-white/80 bg-white/10 px-3 py-1 rounded-full">
                     {filters.dateRange?.start && filters.dateRange?.end ? (
                       t('filter.dateRangeFromTo', { start: filters.dateRange.start.toLocaleDateString(i18n.language), end: filters.dateRange.end.toLocaleDateString(i18n.language) })
                     ) : filters.dateRange?.start ? (

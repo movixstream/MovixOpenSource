@@ -55,6 +55,14 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   highlightColor = DARK_HIGHLIGHT,
 }) => {
   const { isLightMode, effectivePrefs } = useLightMode();
+  // Un bloc, sans baseline ni <br> : les deux modes réservent la même place,
+  // y compris lorsque le skeleton remplit un parent de hauteur fixe.
+  const frameClassName = cn(
+    inline ? 'inline-block align-middle' : 'block',
+    height === '100%' && 'h-full',
+    containerClassName,
+  );
+  const blockClassName = cn('h-[1em]', variant === 'poster' && 'h-auto', className);
   if (isLightMode) {
     const total = Math.max(0, count ?? 1);
     const blocks = Array.from({ length: Math.ceil(total) }, (_, index) => {
@@ -65,30 +73,29 @@ export const Skeleton: React.FC<SkeletonProps> = ({
           key={index}
           aria-hidden="true"
           data-static-skeleton
-          className={className}
+          className={blockClassName}
           style={{
             ...variantStyle[variant],
             display: inline ? 'inline-block' : 'block',
-            width: fraction === 1 ? fullWidth : typeof fullWidth === 'number' ? fullWidth * fraction : `calc(${fullWidth} * ${fraction})`,
-            height: height ?? (variant === 'poster' ? undefined : '1em'),
+            width: fraction === 1 ? width : typeof fullWidth === 'number' ? fullWidth * fraction : `calc(${fullWidth} * ${fraction})`,
+            height,
             borderRadius: variantBorderRadius[variant] ?? '0.25rem',
             backgroundColor: baseColor,
           }}
         />
       );
     });
-    if (blocks.length === 1 && !containerClassName) return blocks[0];
-    return <span aria-hidden="true" className={containerClassName}>{blocks}</span>;
+    return <span aria-hidden="true" className={frameClassName}>{blocks}</span>;
   }
   return <RLSSkeleton
     width={width}
     height={height}
     count={count}
-    inline={inline}
-    className={cn(className)}
-    containerClassName={containerClassName}
+    inline
+    className={blockClassName}
+    containerClassName={frameClassName}
     borderRadius={variantBorderRadius[variant]}
-    style={variantStyle[variant]}
+    style={{ ...variantStyle[variant], display: inline ? 'inline-block' : 'block' }}
     baseColor={baseColor}
     highlightColor={highlightColor}
     enableAnimation={effectivePrefs.loadingAnimations}

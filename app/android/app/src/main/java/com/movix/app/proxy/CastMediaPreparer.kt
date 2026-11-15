@@ -311,6 +311,11 @@ internal class CastMediaPreparer(
             return when {
                 PngWrappedMpegTs.payloadOffset(prefix) != null ->
                     CastMediaProfile.hlsTs(requiresPngTsUnwrap = true)
+                // Segments MPEG-TS bruts servis sous une extension trompeuse
+                // (.jpg, .html, sans extension…) : on se fie aux octets de synchro.
+                isPlainMpegTsStart(prefix) ||
+                    segmentContentType in setOf("video/mp2t", "video/mp2ts") ->
+                    CastMediaProfile.hlsTs()
                 isIsoBmffFragmentStart(prefix, prefix.size) ||
                     segmentContentType in setOf("video/mp4", "audio/mp4", "application/mp4") ->
                     CastMediaProfile.hlsFmp4()
@@ -764,6 +769,14 @@ internal class CastMediaPreparer(
             if (count > 0) output.write(buffer, 0, count)
         }
         return output.toByteArray()
+    }
+
+    private fun isPlainMpegTsStart(prefix: ByteArray): Boolean {
+        val packet = PngWrappedMpegTs.TS_PACKET_BYTES
+        if (prefix.size < packet * PngWrappedMpegTs.REQUIRED_TS_PACKETS) return false
+        return (0 until PngWrappedMpegTs.REQUIRED_TS_PACKETS).all {
+            (prefix[it * packet].toInt() and 0xff) == 0x47
+        }
     }
 
     private fun looksLikeHls(contentType: String?, bytes: ByteArray): Boolean {

@@ -130,9 +130,11 @@ class StreamedProxyTests(unittest.IsolatedAsyncioTestCase):
         self.sessions.clear()
         self.assertEqual((await self.proxy.handler(self.request())).status, 503)
 
-    async def test_allowlist_covers_redirects_and_playlist_resources(self):
-        for url in ['https://127.0.0.1/a', 'https://cdn.strmd.st.evil.test/a',
-                    'http://cdn.strmd.st/a', 'https://user@lb1.strmd.st/a', 'https://lb1.strmd.st:123/a']:
+    async def test_public_https_rule_covers_redirects_and_playlist_resources(self):
+        # Aucune liste de domaines : un CDN Streamed inconnu reste accepté.
+        self.assertEqual(streamed.media_url('https://cdn.new-host.example/a'), 'https://cdn.new-host.example/a')
+        for url in ['https://127.0.0.1/a', 'http://cdn.strmd.st/a',
+                    'https://user@lb1.strmd.st/a', 'https://lb1.strmd.st:123/a']:
             with self.assertRaises(ValueError):
                 streamed.media_url(url)
         session = self.session(Upstream(status=302, headers={'Location': 'https://127.0.0.1/secret'}))
@@ -140,7 +142,7 @@ class StreamedProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.proxy.handler(self.request())).status, 502)
         self.assertEqual(session.get.call_count, 1)
         with self.assertRaises(ValueError):
-            streamed.rewrite_playlist('#EXTM3U\nhttps://evil.test/a.ts\n', BASE, REF, self.expires)
+            streamed.rewrite_playlist('#EXTM3U\nhttps://10.0.0.1/a.ts\n', BASE, REF, self.expires)
 
     async def test_bounded_body_failure_and_invalid_wrapper(self):
         upstream = Upstream(b'x' * 1025)

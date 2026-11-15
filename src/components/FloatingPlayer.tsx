@@ -6,12 +6,13 @@ import { useMiniPlayer } from '../context/MiniPlayerContext';
 import type Hls from 'hls.js';
 import { safePlay } from '../utils/safePlay';
 import { isLowLatencyEnabled } from '../utils/lowLatencyPref';
+import { loadHlsModule } from '../utils/loadHlsModule';
 
 type HlsCtor = typeof Hls;
 let HlsLib: HlsCtor | null = null;
 const loadHls = async (): Promise<HlsCtor> => {
   if (HlsLib) return HlsLib;
-  const mod = await import('hls.js');
+  const mod = await loadHlsModule();
   HlsLib = mod.default;
   return HlsLib;
 };
@@ -55,6 +56,7 @@ const FloatingPlayer: React.FC = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [duration, setDuration] = useState(contextDuration);
   const [playbackTime, setPlaybackTime] = useState(currentTime);
+  const [hlsLoadError, setHlsLoadError] = useState<Error | null>(null);
 
   // Position state for drag and drop
   const [position, setPosition] = useState(() => {
@@ -95,7 +97,7 @@ const FloatingPlayer: React.FC = () => {
     let cancelled = false;
 
     if (isHLS) {
-      (async () => {
+      void (async () => {
         const Hls = await loadHls();
         if (cancelled) return;
         if (Hls.isSupported()) {
@@ -119,7 +121,11 @@ const FloatingPlayer: React.FC = () => {
           video.src = videoSrc;
           safePlay(video).catch(e => console.error('Autoplay failed:', e));
         }
-      })();
+      })().catch((error: unknown) => {
+        if (!cancelled) {
+          setHlsLoadError(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
     } else {
       // Direct MP4 or other formats
       video.src = videoSrc;
@@ -307,6 +313,7 @@ const FloatingPlayer: React.FC = () => {
   };
 
   if (!isMinimized || !videoSrc) return null;
+  if (hlsLoadError) throw hlsLoadError;
 
   return (
     <div

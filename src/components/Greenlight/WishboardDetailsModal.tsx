@@ -182,7 +182,7 @@ const WishboardDetailsModal: React.FC<WishboardDetailsModalProps> = ({
                                 {t(statusLabels[request.status])}
                             </ReusableBadge>
                             <span className="inline-flex items-center gap-1 rounded-md bg-pantone-100/10 px-2 py-1 text-xs font-medium text-pantone-100/70">
-                                {request.media_type === 'movie' ? <Film className="h-3 w-3" /> : <Tv className="h-3 w-3" />}
+                                {request.media_type === 'movie' ? <Film className="h-3 w-3 text-pantone-100 opacity-70" /> : <Tv className="h-3 w-3 text-pantone-100 opacity-70" />}
                                 {request.media_type === 'movie' ? t('admin.movie') : t('admin.tvShow')}
                                 {request.season_number && ` • S${request.season_number}`}
                             </span>
@@ -190,7 +190,7 @@ const WishboardDetailsModal: React.FC<WishboardDetailsModalProps> = ({
 
                         <h2 className="mb-1 text-xl sm:text-2xl font-bold text-white">{request.title}</h2>
                         <p className="mb-3 flex items-center gap-2 text-sm text-pantone-100/60">
-                            <Calendar className="h-4 w-4" />
+                            <Calendar className="h-4 w-4 text-pantone-100 opacity-60" />
                             {request.year}
                         </p>
 
@@ -282,7 +282,7 @@ const WishboardDetailsModal: React.FC<WishboardDetailsModalProps> = ({
                 {/* History section */}
                 <div className="mt-4">
                     <p className="flex items-center gap-2 text-sm font-medium text-pantone-100/70 mb-3">
-                        <Clock className="h-4 w-4" />
+                        <Clock className="h-4 w-4 text-pantone-100 opacity-70" />
                         {t('greenlight.history')}
                     </p>
                     <div className="relative space-y-3">

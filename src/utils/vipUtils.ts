@@ -7,6 +7,8 @@
  * 3. Fournit un header `x-access-key` pour toutes les requêtes API
  */
 
+import { readLocalStorage } from './browserStorage';
+
 const MAIN_API = import.meta.env.VITE_MAIN_API;
 
 // Intervalle de vérification : toutes les 10 minutes
@@ -21,7 +23,7 @@ let checkInProgress: Promise<boolean> | null = null;
  * Récupère la clé d'accès stockée dans localStorage
  */
 export function getAccessKey(): string | null {
-  return localStorage.getItem('access_code') || null;
+  return readLocalStorage('access_code');
 }
 
 /**
@@ -32,7 +34,13 @@ export function getAccessKey(): string | null {
  * @returns true si VIP valide, false sinon
  */
 export async function checkVipStatus(force = false): Promise<boolean> {
-  const accessKey = getAccessKey();
+  let accessKey: string | null;
+  try {
+    accessKey = localStorage.getItem('access_code');
+  } catch {
+    // Un stockage fermé n'est pas une révocation de la clé enregistrée.
+    return false;
+  }
 
   // Pas de clé stockée → pas VIP
   if (!accessKey) {
@@ -75,7 +83,7 @@ async function _performCheck(accessKey: string): Promise<boolean> {
     if (!response.ok) {
       // Erreur serveur — ne pas révoquer immédiatement (tolérance aux pannes)
       console.warn('[VIP] Server error during check, keeping current status');
-      return localStorage.getItem('is_vip') === 'true';
+      return readLocalStorage('is_vip') === 'true';
     }
 
     const data = await response.json();
@@ -119,7 +127,7 @@ async function _performCheck(accessKey: string): Promise<boolean> {
   } catch (error) {
     // Erreur réseau — ne pas révoquer (tolérance aux pannes)
     console.warn('[VIP] Network error during check:', error);
-    return localStorage.getItem('is_vip') === 'true';
+    return readLocalStorage('is_vip') === 'true';
   }
 }
 
@@ -127,9 +135,13 @@ async function _performCheck(accessKey: string): Promise<boolean> {
  * Révoque le statut VIP local
  */
 export function revokeVipStatus(): void {
-  localStorage.removeItem('is_vip');
-  localStorage.removeItem('access_code');
-  localStorage.removeItem('access_code_expires');
+  try {
+    localStorage.removeItem('is_vip');
+    localStorage.removeItem('access_code');
+    localStorage.removeItem('access_code_expires');
+  } catch {
+    // Le résultat serveur reste connu même si le stockage est inaccessible.
+  }
   lastCheckResult = false;
   lastCheckTime = Date.now();
 
@@ -147,7 +159,7 @@ export function revokeVipStatus(): void {
  * @returns true si le localStorage indique VIP (sera corrigé en arrière-plan si invalide)
  */
 export function isUserVip(): boolean {
-  const localVip = localStorage.getItem('is_vip') === 'true';
+  const localVip = readLocalStorage('is_vip') === 'true';
 
   if (localVip) {
     // Lancer une vérification serveur en arrière-plan (non bloquante)

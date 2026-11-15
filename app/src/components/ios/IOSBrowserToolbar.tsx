@@ -50,7 +50,9 @@ export default function IOSBrowserToolbar({
     && width >= 768
     && showUrlBar
     && showNavBar;
-  const height = oneRow || !(showUrlBar && showNavBar) ? 60 : 112;
+  // Les boutons Liquid Glass ronds font ~48 pt : une rangée prend 64 pt avec
+  // les marges, deux rangées (adresse 44 pt + boutons) en prennent 116.
+  const height = oneRow || !(showUrlBar && showNavBar) ? 64 : 116;
 
   return (
     <NativeChrome

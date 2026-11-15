@@ -32,6 +32,7 @@ import {
   syncHlsActiveSource,
 } from '../../utils/hlsAutoFallbackGuard';
 import { markEpisodeHandoff } from '../../utils/playerFullscreenPersistence';
+import { writeLocalStorage } from '../../utils/browserStorage';
 
 const MAIN_API = import.meta.env.VITE_MAIN_API;
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
@@ -302,8 +303,6 @@ const WatchAnime: React.FC = () => {
   const [isInitialLoad, setIsInitialLoad] = useState<boolean>(true);
 
   const updateAnimeContinueWatching = useCallback(() => {
-    if (localStorage.getItem('settings_disable_history') === 'true') return;
-
     const showIdInt = id ? parseInt(id) : NaN;
     const seasonNumber = Number(season);
     const episodeNumber = Number(episode);
@@ -312,31 +311,36 @@ const WatchAnime: React.FC = () => {
       return;
     }
 
-    let continueWatching: ContinueWatchingStore;
     try {
-      continueWatching = JSON.parse(localStorage.getItem('continueWatching') || '{"movies": [], "tv": []}') as ContinueWatchingStore;
+      const storage = window.localStorage;
+      if (storage.getItem('settings_disable_history') === 'true') return;
+
+      const continueWatching = JSON.parse(storage.getItem('continueWatching') ?? '{"movies": [], "tv": []}') as ContinueWatchingStore;
+      if (!continueWatching || typeof continueWatching !== 'object' || Array.isArray(continueWatching)) return;
+      if (continueWatching.movies === undefined) continueWatching.movies = [];
+      else if (!Array.isArray(continueWatching.movies)) return;
+      if (continueWatching.tv === undefined) continueWatching.tv = [];
+      else if (!Array.isArray(continueWatching.tv)) return;
+
+      const existingShow = continueWatching.tv.find((tvShow) => tvShow?.id === showIdInt);
+      const updatedShow = {
+        ...(existingShow || {}),
+        id: showIdInt,
+        currentEpisode: {
+          season: seasonNumber,
+          episode: episodeNumber
+        },
+        lastAccessed: new Date().toISOString()
+      };
+
+      continueWatching.tv = continueWatching.tv.filter((tvShow) => tvShow?.id !== showIdInt);
+      continueWatching.tv.unshift(updatedShow);
+      // Pas de limite, comme les pages film et série : couper la liste ici
+      // retirait les autres séries de « Reprendre » (et les masquait côté serveur).
+      writeLocalStorage('continueWatching', JSON.stringify(continueWatching));
     } catch {
-      continueWatching = { movies: [], tv: [] };
+      // L'opt-out inconnu ou un historique illisible interdit toute réécriture.
     }
-
-    if (!Array.isArray(continueWatching.movies)) continueWatching.movies = [];
-    if (!Array.isArray(continueWatching.tv)) continueWatching.tv = [];
-
-    const existingShow = continueWatching.tv.find((tvShow) => tvShow.id === showIdInt);
-    const updatedShow = {
-      ...(existingShow || {}),
-      id: showIdInt,
-      currentEpisode: {
-        season: seasonNumber,
-        episode: episodeNumber
-      },
-      lastAccessed: new Date().toISOString()
-    };
-
-    continueWatching.tv = continueWatching.tv.filter((tvShow) => tvShow.id !== showIdInt);
-    continueWatching.tv.unshift(updatedShow);
-    continueWatching.tv = continueWatching.tv.slice(0, 20);
-    localStorage.setItem('continueWatching', JSON.stringify(continueWatching));
   }, [id, season, episode]);
 
   // Movix Wrapped 2026 - Track anime viewing time
@@ -1640,7 +1644,7 @@ const WatchAnime: React.FC = () => {
                   className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto pointer-events-auto"
                   data-lenis-prevent
                 >
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.sourcesAndLanguages')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}

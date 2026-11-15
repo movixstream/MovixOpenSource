@@ -1,3 +1,4 @@
+import { IX_MATRIX_URL } from '@/config/community';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getFrembedBase } from '../../utils/frembedConfig';
 import { useTranslation } from 'react-i18next';
@@ -1047,7 +1048,7 @@ const AdminWishboard: React.FC = () => {
 
         setDeletingBatch(true);
         const authToken = localStorage.getItem('auth_token');
-        const rejectionReason = 'Déjà disponible, pour plus d\'assistance : https://t.me/+3vNnexiqrs4yMzM8';
+        const rejectionReason = 'Déjà disponible, pour plus d\'assistance : ' + IX_MATRIX_URL;
 
         for (const item of toReject) {
             try {
@@ -1206,9 +1207,9 @@ const AdminWishboard: React.FC = () => {
                                         size="icon"
                                         type="button"
                                         onClick={() => setSelectedLeaderboardMonth(prev => shiftMonthKey(prev, -1))}
-                                        className="h-8 w-8"
+                                        className="h-8 w-8 group/icon"
                                     >
-                                        <ChevronLeft className="h-4 w-4" />
+                                        <ChevronLeft className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" />
                                     </Button>
                                     <div className="min-w-[140px] px-2 text-center text-sm font-medium text-white/80">
                                         {selectedLeaderboardMonthLabel}
@@ -1219,9 +1220,9 @@ const AdminWishboard: React.FC = () => {
                                         type="button"
                                         onClick={() => setSelectedLeaderboardMonth(prev => shiftMonthKey(prev, 1))}
                                         disabled={isCurrentLeaderboardMonth}
-                                        className="h-8 w-8"
+                                        className="h-8 w-8 group/icon"
                                     >
-                                        <ChevronRight className="h-4 w-4" />
+                                        <ChevronRight className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" />
                                     </Button>
                                 </div>
                             )}
@@ -1418,12 +1419,12 @@ const AdminWishboard: React.FC = () => {
             {/* Load More Button (top) */}
             {hasMore && !loading && (
                 <div className="p-4 flex justify-center border-b border-white/10">
-                    <Button
+                    <Button className="group/icon"
                         variant="ghost"
                         onClick={handleLoadMore}
                         disabled={loadingMore}
                     >
-                        {loadingMore ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                        {loadingMore ? <Loader2 className="h-4 w-4 animate-spin mr-2 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" /> : null}
                         {loadingMore ? 'Chargement...' : 'Charger plus'}
                     </Button>
                 </div>
@@ -1669,12 +1670,12 @@ const AdminWishboard: React.FC = () => {
                         </Button>
                     )}
                     {hasMore && !loading && (
-                        <Button
+                        <Button className="group/icon"
                             variant="ghost"
                             onClick={handleLoadMore}
                             disabled={loadingMore}
                         >
-                            {loadingMore ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                            {loadingMore ? <Loader2 className="h-4 w-4 animate-spin mr-2 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" /> : null}
                             {loadingMore ? 'Chargement...' : 'Charger plus'}
                         </Button>
                     )}
@@ -1762,9 +1763,9 @@ const AdminWishboard: React.FC = () => {
                                                 setEditingHistoryId(entry.id || null);
                                                 setEditHistoryReason(entry.reason || '');
                                             }}
-                                            className="p-1.5 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                                            className="p-1.5 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors group/icon"
                                         >
-                                            <Edit2 className="h-3.5 w-3.5" />
+                                            <Edit2 className="h-3.5 w-3.5 text-white opacity-40 group-hover/icon:opacity-100 transition-[color,opacity]" />
                                         </button>
                                     )}
                                 </div>
@@ -1780,13 +1781,13 @@ const AdminWishboard: React.FC = () => {
                                             autoFocus
                                         />
                                         <div className="flex justify-end gap-2">
-                                            <Button
+                                            <Button className="group/icon"
                                                 size="sm"
                                                 variant="ghost"
                                                 onClick={() => setEditingHistoryId(null)}
                                                 disabled={submitting}
                                             >
-                                                <X className="h-3.5 w-3.5 mr-1" />
+                                                <X className="h-3.5 w-3.5 mr-1 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" />
                                                 {t('admin.cancel')}
                                             </Button>
                                             <Button

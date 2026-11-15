@@ -120,9 +120,9 @@ const WatchPartyJoin: React.FC = () => {
         <div className="container px-6 md:px-10">
           <Link
             to="/"
-            className="inline-flex items-center gap-2 text-sm text-white/70 transition-colors hover:text-white"
+            className="inline-flex items-center gap-2 text-sm text-white/70 transition-colors hover:text-white group/icon"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" />
             {t('watchParty.backToHome')}
           </Link>
         </div>
@@ -209,7 +209,7 @@ const WatchPartyJoin: React.FC = () => {
                 {isJoining ? (
                   <>{t('watchParty.connectingLabel')}</>
                 ) : (
-                  <><Play className="h-4 w-4 mr-2" /> {t('watchParty.joinLabel')}</>
+                  <><Play className={`h-4 w-4 mr-2 transition-[color,opacity] ${(isJoining || !roomCode || !nickname ? "text-white opacity-50" : "text-white opacity-100")}`} /> {t('watchParty.joinLabel')}</>
                 )}
               </Button>
             </form>

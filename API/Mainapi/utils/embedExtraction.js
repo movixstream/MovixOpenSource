@@ -40,6 +40,8 @@ const HOSTER_PATTERNS = Object.freeze({
         '(?:lukesitturn|mariatheserepublican|marissasharecareer|matriculant401merited|matthewhotelscience|maxfinishseveral|metagnathtuggers|michaelapplysome|mikaylaarealike|nathanfromsubject|nectareousoverelate|nonesnanking|ogladaj|pamelachangemission|paulkitchendark|preferciseaccurate)\\.',
         '(?:prepareddare|ralphysuccessfull|realfinanceblogcenter|rebeccaneverbase|rebeccapracticeloss|reputationsheriffkennethsand|richardsignfish|roberteachfinal|robertordercharacter|robertplacespace|sandratableother|sandrataxeight|scatch176duplicities|sethniceletter|shannonpersonalcost|simpulumlamerop|smoki)\\.',
         '(?:stevenfamilyedge|stevenimaginelittle|strawberriesporail|telyn610zoanthropy|timberwoodanotia|timmaybealready|toddpartneranimal|toxitabellaeatrebates306|tracylocalschool|uptodatefinishconferenceroom|valeronevijao|walterprettytheir|wolfdyslectic|yodelswartlike)\\.',
+        // Domaines VOE des lecteurs d'anime-sama (table `lecteursInfos`, 2026-10-19).
+        '(?:claireguessthousand|derricknationtop|jamesbornmain|jeremyparticipantanything|megankiddifference|teresapoliticallearn)\\.',
     ],
     // `ansembed` sert le lecteur Vidmoly sous un autre nom : même extracteur.
     vidmoly: ['vidmoly', 'ansembed'],
@@ -101,7 +103,11 @@ const EXTRACTORS = Object.freeze({
     vidzy: { path: '/api/extract-vidzy', pick: (data) => data?.m3u8Url },
     vidmoly: { path: '/api/extract-vidmoly', pick: (data) => data?.sourceUrl },
     sibnet: { path: '/api/extract-sibnet', pick: (data) => data?.sourceUrl },
-    uqload: { path: '/api/extract-uqload', pick: (data) => data?.data?.url || data?.url },
+    uqload: {
+        path: '/api/extract-uqload',
+        pick: (data) => data?.data?.url || data?.url,
+        subtitles: (data) => data?.data?.subtitles || data?.subtitles,
+    },
     doodstream: { path: '/api/extract-doodstream', pick: (data) => data?.url },
     lulustream: { path: '/api/extract-lulustream', pick: (data) => data?.url },
     veev: { path: '/api/extract-veev', pick: (data) => data?.url },
@@ -226,8 +232,37 @@ function notifyExtractionFailure(hoster, embedUrl, { kind, label }) {
 }
 
 /**
+ * Ne garde que des pistes de sous-titres bien formées (URL https, champs
+ * courts) : elles sont relayées telles quelles au navigateur.
+ */
+function sanitizeSubtitles(raw) {
+    if (!Array.isArray(raw)) return [];
+    const subtitles = [];
+    for (const item of raw) {
+        if (!item || typeof item !== 'object' || typeof item.url !== 'string') continue;
+        let parsed;
+        try {
+            parsed = new URL(item.url);
+        } catch {
+            continue;
+        }
+        if (parsed.protocol !== 'https:' || parsed.username || parsed.password) continue;
+        const lang = typeof item.lang === 'string' && /^[a-z]{2,3}$/i.test(item.lang) ? item.lang.toLowerCase() : 'und';
+        subtitles.push({
+            url: parsed.href,
+            label: typeof item.label === 'string' && item.label.trim() ? item.label.trim().slice(0, 80) : lang.toUpperCase(),
+            lang,
+            format: item.format === 'srt' ? 'srt' : 'vtt',
+            default: item.default === true,
+        });
+        if (subtitles.length >= 8) break;
+    }
+    return subtitles;
+}
+
+/**
  * Résout un lien embed en URL m3u8 signée.
- * @returns {Promise<{ m3u8Url: string, hoster: string } | null>}
+ * @returns {Promise<{ m3u8Url: string, hoster: string, subtitles?: Array } | null>}
  */
 async function extractEmbed(embedUrl, accessKey) {
     const hoster = detectHoster(embedUrl);
@@ -255,7 +290,10 @@ async function extractEmbed(embedUrl, accessKey) {
         });
 
         const m3u8Url = extractor.pick(response.data);
-        if (typeof m3u8Url === 'string' && m3u8Url) return { m3u8Url, hoster };
+        if (typeof m3u8Url === 'string' && m3u8Url) {
+            const subtitles = sanitizeSubtitles(extractor.subtitles?.(response.data));
+            return subtitles.length ? { m3u8Url, hoster, subtitles } : { m3u8Url, hoster };
+        }
 
         // 2xx sans flux : l'extracteur a répondu mais n'a rien trouvé dans la
         // page. Signe habituel d'un hébergeur qui a changé son gabarit.
@@ -350,7 +388,10 @@ async function extractLanguageMap(languageMap, options = {}) {
         languages[language] = Array.isArray(players)
             ? players.map((player, index) => {
                   const resolved = resolvedByKey.get(`${language}:${index}`);
-                  return resolved ? { ...player, m3u8Url: resolved.m3u8Url } : player;
+                  if (!resolved) return player;
+                  return resolved.subtitles
+                      ? { ...player, m3u8Url: resolved.m3u8Url, subtitles: resolved.subtitles }
+                      : { ...player, m3u8Url: resolved.m3u8Url };
               })
             : players;
     }
@@ -380,7 +421,16 @@ async function extractPlayerList(players, options = {}) {
  * @returns {Promise<Object<string,string>>}
  */
 async function buildM3u8Map(urls, options = {}) {
-    if (!Array.isArray(urls) || !extractionAvailable()) return {};
+    const { m3u8ByPlayer } = await buildResolvedMaps(urls, options);
+    return m3u8ByPlayer;
+}
+
+/**
+ * Comme `buildM3u8Map`, plus `subtitlesByPlayer` : les sous-titres du lecteur
+ * hébergeur (Uqload) par lien, quand l'extracteur en a trouvé.
+ */
+async function buildResolvedMaps(urls, options = {}) {
+    if (!Array.isArray(urls) || !extractionAvailable()) return { m3u8ByPlayer: {}, subtitlesByPlayer: {} };
 
     const { accessKey, concurrency = DEFAULT_CONCURRENCY } = options;
     const cibles = [...new Set(urls.filter((url) => typeof url === 'string' && detectHoster(url)))];
@@ -389,11 +439,14 @@ async function buildM3u8Map(urls, options = {}) {
         extractEmbed(url, accessKey)
     );
 
-    const table = {};
+    const m3u8ByPlayer = {};
+    const subtitlesByPlayer = {};
     resolus.forEach((resolu, index) => {
-        if (resolu) table[cibles[index]] = resolu.m3u8Url;
+        if (!resolu) return;
+        m3u8ByPlayer[cibles[index]] = resolu.m3u8Url;
+        if (resolu.subtitles) subtitlesByPlayer[cibles[index]] = resolu.subtitles;
     });
-    return table;
+    return { m3u8ByPlayer, subtitlesByPlayer };
 }
 
 function extractionSummary(attempted, resolved) {
@@ -580,6 +633,7 @@ module.exports = {
     extractLanguageMap,
     extractPlayerList,
     buildM3u8Map,
+    buildResolvedMaps,
     extractEpisodeSources,
     extractMovieSources,
     respondWithResolvedSources,

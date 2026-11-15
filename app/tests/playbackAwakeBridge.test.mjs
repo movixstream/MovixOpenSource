@@ -57,7 +57,6 @@ test('playback-awake owners are forwarded independently when the native owner AP
   ]);
   assert.deepEqual(localCalls, []);
 });
-
 test('owner API falls back only for local playback on legacy native modules', async () => {
   const localCalls = [];
   const service = await loadPlaybackAwakeService({

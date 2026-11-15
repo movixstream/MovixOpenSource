@@ -8,7 +8,8 @@ const COMPLETE_FILL_MS = 400;
 const FADE_OUT_MS = 250;
 const ASYMPTOTE_TAU_MS = 1200;
 const ASYMPTOTE_LIMIT = 0.85;
-const COLOR = '#e50914';
+// `--movix-accent` n'existe qu'avec le thème Halloween (orange).
+const COLOR = 'rgb(var(--movix-accent, 229 9 20))';
 
 type Phase = 'idle' | 'loading' | 'completing' | 'fading';
 

@@ -125,9 +125,9 @@ const WatchPartyList: React.FC = () => {
         <div className="container px-6 md:px-10">
           <Link
             to="/"
-            className="inline-flex items-center gap-2 text-sm text-white/70 transition-colors hover:text-white"
+            className="inline-flex items-center gap-2 text-sm text-white/70 transition-colors hover:text-white group/icon"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" />
             {t('watchParty.backToHome')}
           </Link>
         </div>
@@ -322,11 +322,11 @@ const WatchPartyList: React.FC = () => {
 
                       <div className="flex items-center gap-3 mt-2 text-sm text-white/50">
                         <span className="flex items-center gap-1">
-                          <Users className="h-3 w-3" />
+                          <Users className="h-3 w-3 text-white opacity-50" />
                           {party.participantCount}/{party.maxParticipants}
                         </span>
                         <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
+                          <Clock className="h-3 w-3 text-white opacity-50" />
                           {formatCreationTime(party.createdAt).replace('Il y a ', '')}
                         </span>
                       </div>

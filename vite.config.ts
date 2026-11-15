@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv, type Plugin } from 'vite'
+import { build as viteBuild, defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import legacy from '@vitejs/plugin-legacy'
 import { resolve } from 'path'
@@ -9,8 +9,45 @@ import { sentryVitePlugin } from '@sentry/vite-plugin'
 const buildId = process.env.VITE_APP_BUILD_ID || process.env.CF_PAGES_COMMIT_SHA || process.env.COMMIT_REF || new Date().toISOString()
 process.env.VITE_APP_BUILD_ID = buildId
 
-// Les workers ont une sortie séparée et ne reçoivent pas les polyfills de la page.
-const workerBuildTarget = ['es2020', 'chrome68']
+// Chromium 68 = navigateur des TV LG sous webOS 5 (gamme 2020, ex. OLED CX) :
+// sans `?.`/`??` abaissés, le bundle y lève un SyntaxError et l'app reste noire.
+// Cible du service worker compilé séparément ; concerne la syntaxe, pas les API.
+const serviceWorkerBuildTarget = ['es2020', 'chrome68']
+
+type InMemoryBuildOutput = {
+  output: Array<{ type: string; fileName: string; code?: string }>
+}
+
+async function bundleServiceWorker(minify: boolean): Promise<string> {
+  const result = await viteBuild({
+    configFile: false,
+    publicDir: false,
+    logLevel: 'silent',
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, 'src'),
+      },
+    },
+    build: {
+      target: serviceWorkerBuildTarget,
+      minify,
+      write: false,
+      lib: {
+        entry: resolve(__dirname, 'public', 'sw.js'),
+        formats: ['iife'],
+        name: 'MovixServiceWorker',
+        fileName: () => 'sw.js',
+      },
+    },
+  }) as InMemoryBuildOutput | InMemoryBuildOutput[]
+
+  const outputs = Array.isArray(result) ? result : [result]
+  const chunk = outputs
+    .flatMap((output) => output.output)
+    .find((item) => item.type === 'chunk' && item.fileName === 'sw.js')
+  if (!chunk?.code) throw new Error('Le bundle du service worker est introuvable')
+  return chunk.code
+}
 
 const normalizeSiteUrl = (value?: string): string => {
   const candidate = value?.trim()
@@ -29,6 +66,7 @@ const normalizeSiteUrl = (value?: string): string => {
 
 function injectPublicConfig(): Plugin {
   let siteUrl: string | undefined
+  let devServiceWorker: Promise<string> | undefined
 
   const replacePlaceholders = (source: string): string => {
     const mirrors = (process.env.VITE_DEFAULT_MIRRORS || 'movix.health')
@@ -53,9 +91,12 @@ function injectPublicConfig(): Plugin {
     transformIndexHtml(html) {
       return replacePlaceholders(html)
     },
-    // Mode build : transforme dist/sw.js après que Vite ait copié public/sw.js
-    closeBundle() {
-      for (const fileName of ['sw.js', 'sitemap.xml', 'robots.txt']) {
+    // Mode build : injecte la configuration dans les fichiers publics copiés par Vite.
+    async closeBundle() {
+      const bundledServiceWorker = replacePlaceholders(await bundleServiceWorker(true))
+      writeFileSync(resolve(__dirname, 'dist', 'sw.js'), bundledServiceWorker, 'utf-8')
+
+      for (const fileName of ['sitemap.xml', 'robots.txt', 'llms.txt']) {
         const outputPath = resolve(__dirname, 'dist', fileName)
         if (!existsSync(outputPath)) continue
         const contents = readFileSync(outputPath, 'utf-8')
@@ -64,7 +105,16 @@ function injectPublicConfig(): Plugin {
     },
     // Mode dev : intercepte GET /sw.js et sert une version transformée
     configureServer(server) {
-      server.middlewares.use((req, res, next) => {
+      const serviceWorkerSources = [
+        resolve(__dirname, 'public', 'sw.js'),
+        resolve(__dirname, 'src', 'workers', 'mediaColor.serviceWorker.ts'),
+        resolve(__dirname, 'src', 'utils', 'mediaColors.ts'),
+      ]
+      server.watcher.on('change', (changedPath) => {
+        if (serviceWorkerSources.includes(resolve(changedPath))) devServiceWorker = undefined
+      })
+
+      server.middlewares.use(async (req, res, next) => {
         const pathOnly = (req.url || '').split('?')[0]
         const publicFiles: Record<string, { fileName: string; contentType: string }> = {
           '/sw.js': {
@@ -79,16 +129,27 @@ function injectPublicConfig(): Plugin {
             fileName: 'robots.txt',
             contentType: 'text/plain; charset=utf-8',
           },
+          '/llms.txt': {
+            fileName: 'llms.txt',
+            contentType: 'text/plain; charset=utf-8',
+          },
         }
         const publicFile = publicFiles[pathOnly]
         if (!publicFile) return next()
 
         const publicPath = resolve(__dirname, 'public', publicFile.fileName)
         if (!existsSync(publicPath)) return next()
-        const contents = readFileSync(publicPath, 'utf-8')
-        res.setHeader('Content-Type', publicFile.contentType)
-        res.setHeader('Cache-Control', 'no-store')
-        res.end(replacePlaceholders(contents))
+        try {
+          const contents = pathOnly === '/sw.js'
+            ? await (devServiceWorker ??= bundleServiceWorker(false))
+            : readFileSync(publicPath, 'utf-8')
+          res.setHeader('Content-Type', publicFile.contentType)
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(replacePlaceholders(contents))
+        } catch (error) {
+          devServiceWorker = undefined
+          next(error as Error)
+        }
       })
     },
   }
@@ -146,7 +207,57 @@ export default defineConfig(({ mode, command }) => {
       legacy({
         targets: ['chrome >= 53', 'edge >= 79', 'firefox >= 67', 'safari >= 15', 'ios >= 15'],
         renderLegacyChunks: true,
-        modernPolyfills: true,
+        // Liste relevée avec la détection automatique : évite une passe Babel
+        // par chunk moderne. Recalcul : voir « Bundles moderne et legacy » dans src/README.md.
+        modernPolyfills: [
+          'es.array.includes',
+          'es.array.push',
+          'es.array-buffer.detached',
+          'es.array-buffer.transfer',
+          'es.array-buffer.transfer-to-fixed-length',
+          'es.iterator.constructor',
+          'es.iterator.every',
+          'es.iterator.filter',
+          'es.iterator.find',
+          'es.iterator.flat-map',
+          'es.iterator.for-each',
+          'es.iterator.map',
+          'es.iterator.reduce',
+          'es.iterator.some',
+          'es.json.parse',
+          'es.json.stringify',
+          'es.map.get-or-insert',
+          'es.map.get-or-insert-computed',
+          'es.regexp.flags',
+          'es.set.difference.v2',
+          'es.set.intersection.v2',
+          'es.set.is-disjoint-from.v2',
+          'es.set.is-subset-of.v2',
+          'es.set.is-superset-of.v2',
+          'es.set.symmetric-difference.v2',
+          'es.set.union.v2',
+          'es.typed-array.to-reversed',
+          'es.typed-array.to-sorted',
+          'es.typed-array.with',
+          'es.uint8-array.set-from-base64',
+          'es.uint8-array.set-from-hex',
+          'es.uint8-array.to-base64',
+          'es.uint8-array.to-hex',
+          'es.weak-map.get-or-insert',
+          'es.weak-map.get-or-insert-computed',
+          'web.dom-exception.stack',
+          'web.url-search-params.delete',
+          'web.url-search-params.has',
+          'web.url-search-params.size',
+          'es.uint8-array.from-base64',
+          'esnext.array.group',
+          'es.promise.with-resolvers',
+          'es.uint8-array.from-hex',
+          'es.iterator.drop',
+          'web.immediate',
+          'web.structured-clone',
+          'es.iterator.to-array',
+        ],
         additionalLegacyPolyfills: [resolve(__dirname, 'src/compat/legacy-dom-polyfills.js')],
       }),
       ...(process.env.ANALYZE === 'true'
@@ -211,13 +322,14 @@ export default defineConfig(({ mode, command }) => {
     },
     worker: {
       format: 'iife',
+      // Les workers ne reçoivent ni les plugins ni les polyfills de la page.
       // Préserver la syntaxe Chrome 68 même si le bundle moderne cible plus haut.
       rolldownOptions: {
-        transform: { target: workerBuildTarget },
+        transform: { target: serviceWorkerBuildTarget },
         // La compression Oxc a sa propre cible ; sans elle, elle peut recréer
         // une syntaxe moderne après l'abaissement effectué par le transform.
         output: {
-          minify: { compress: { target: workerBuildTarget } },
+          minify: { compress: { target: serviceWorkerBuildTarget } },
         },
       },
     },

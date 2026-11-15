@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { readLocalStorage } from '../utils/browserStorage';
 
 interface AdWarningContextType {
   showAdWarning: boolean;
@@ -12,12 +13,12 @@ export const AdWarningProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [showAdWarning, setShowAdWarning] = useState(false);
 
   useEffect(() => {
-    const adWarningAccepted = localStorage.getItem('adWarningAccepted');
+    const adWarningAccepted = readLocalStorage('adWarningAccepted');
     setShowAdWarning(!adWarningAccepted);
   }, []);
 
   const handleAccept = useCallback(() => {
-    localStorage.setItem('adWarningAccepted', 'true');
+    try { localStorage.setItem('adWarningAccepted', 'true'); } catch { /* Préférence facultative. */ }
     setShowAdWarning(false);
   }, []);
 

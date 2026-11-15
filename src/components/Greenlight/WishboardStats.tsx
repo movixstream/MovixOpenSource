@@ -68,7 +68,7 @@ export const WishboardStats: React.FC<WishboardStatsProps> = ({
                                 gradientHeight={0}
                             />
                             <p className="text-xs text-white/50 flex items-center gap-1">
-                                <Clock className="h-3 w-3" /> {t('greenlight.underReview')}
+                                <Clock className="h-3 w-3 text-white opacity-50" /> {t('greenlight.underReview')}
                             </p>
                         </div>
                     </motion.div>
@@ -91,7 +91,7 @@ export const WishboardStats: React.FC<WishboardStatsProps> = ({
                                 gradientHeight={0}
                             />
                             <p className="text-xs text-white/50 flex items-center gap-1">
-                                <CheckCircle className="h-3 w-3" /> {t('greenlight.greenlightedThisMonth')}
+                                <CheckCircle className="h-3 w-3 text-white opacity-50" /> {t('greenlight.greenlightedThisMonth')}
                             </p>
                         </div>
                     </motion.div>

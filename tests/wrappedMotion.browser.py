@@ -233,18 +233,18 @@ async def verify(work):
                 assert await page.get_by_role('progressbar').get_attribute('aria-valuenow') == '6'
                 if mode == 'normal':
                     await page.get_by_role('button', name='Partager votre Wrapped', exact=True).click()
-                    await page.get_by_text('Formats, vidéo et statistiques', exact=True).click()
-                    await page.get_by_role('button', name='Film · 18 s', exact=True).click()
+                    await page.get_by_role('button', name='Ton film · 18 s', exact=True).click()
                     generate = page.get_by_role('button', name='Générer le film', exact=True)
+                    # La bande-son est proposée par défaut : la génération attend son décodage.
                     await page.wait_for_function('''() => [...document.querySelectorAll('button')].some(e => e.textContent.includes('Générer le film') && !e.disabled)''')
                     assert await page.locator('input[type=checkbox], input[type=range]').count() == 0
                     sound = page.get_by_role('checkbox', name='Bande-son cinématique', exact=True)
-                    assert await sound.get_attribute('aria-checked') == 'false'
+                    assert await sound.get_attribute('aria-checked') == 'true'
                     await sound.focus()
                     await page.keyboard.press('Space')
-                    assert await sound.get_attribute('aria-checked') == 'true'
-                    await page.locator('label').filter(has=sound).click()
                     assert await sound.get_attribute('aria-checked') == 'false'
+                    await page.locator('label').filter(has=sound).click()
+                    assert await sound.get_attribute('aria-checked') == 'true'
                     slider = page.get_by_role('slider', name='Position dans le film', exact=True)
                     await slider.focus()
                     await page.keyboard.press('End')
@@ -271,7 +271,6 @@ async def verify(work):
                     assert await slider.get_attribute('aria-valuenow') == disabled_value
                     await page.get_by_role('button', name='Annuler', exact=True).click()
                     await page.wait_for_function('''() => [...document.querySelectorAll('[role=checkbox]')].every(e => !e.disabled)''')
-                    await page.locator('label').filter(has=sound).click()
                     assert await sound.get_attribute('aria-checked') == 'true'
                     await page.wait_for_function('''() => [...document.querySelectorAll('button')].some(e => e.textContent.includes('Générer le film') && !e.disabled)''')
                     await page.evaluate('''() => {

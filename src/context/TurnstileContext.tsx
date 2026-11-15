@@ -1,8 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ADMIN_BYPASS_TOKEN, resolveTurnstileBypass } from '../utils/turnstileBypass';
+import { TURNSTILE_INVISIBLE_SITEKEY } from '../utils/turnstileKeys';
 
-const TURNSTILE_INVISIBLE_SITEKEY = import.meta.env.VITE_TURNSTILE_INVISIBLE_SITEKEY;
 const TOKEN_REFRESH_MS = 250_000;
 const TURNSTILE_WAIT_TIMEOUT_MS = 10_000;
 const TURNSTILE_POLL_INTERVAL_MS = 200;

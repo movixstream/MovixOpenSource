@@ -80,12 +80,18 @@ PRODUCT.md
 Poulpix-demo.html
 Poulpix.png
 Poulpix.svg
-docs/
+/docs/
 extension/Chrome/Chrome.zip
 movix-mcp/
 movix-mcp-http/
 API/Mainapi/public/oauth-icons/
 API/Mainapi/exportscripts/
+
+# Appli TV : copie locale de l'ancienne appli WebView, réglages et clés de diffusion
+/MovixTv-main/
+app-tv/local.properties
+app-tv/keys/
+app-tv/dist/
 
 # Claude Code / superpowers local state
 .claude/

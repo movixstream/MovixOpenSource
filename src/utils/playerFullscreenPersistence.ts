@@ -1,3 +1,5 @@
+import { safePlay } from './safePlay';
+
 /**
  * Plein écran du lecteur, et sa survie d'un épisode à l'autre.
  *
@@ -470,7 +472,7 @@ export const restoreEpisodeHandoff = ({ state, getContainer, getVideo, useHost =
     const video = getVideo();
     if (!video) return Promise.resolve(false);
     if (!video.paused && !video.ended) return Promise.resolve(true);
-    return video.play().then(() => true, () => false);
+    return safePlay(video).then(() => true, () => false);
   };
 
   const isAlreadyPip = (): boolean => {

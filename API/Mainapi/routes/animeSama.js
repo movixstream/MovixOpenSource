@@ -68,7 +68,6 @@ let deps = {
   getFromCacheNoExpiration: async () => null,
   saveToCache: async () => false,
   normalizeAnimeSamaUrls: (data) => data,
-  mergeStreamingLinks: () => [],
   cleanupOldCacheFiles: async () => {},
   migrateOldCacheFiles: async () => {},
   limitConcurrency10: async (fn) => fn()
@@ -216,6 +215,46 @@ const EMPTY_PLAYER_PATTERNS = [
 
 const isEmptyPlayerUrl = (url) =>
   typeof url === 'string' && EMPTY_PLAYER_PATTERNS.some((re) => re.test(url));
+
+// Le cache reprend exactement les saisons du site, dans le même ordre. Avant,
+// une saison renommée par anime-sama (« Avec Fillers » devenu « Saison 1 -
+// Avec Fillers ») restait en cache sous l'ancien nom et s'affichait en double,
+// et les nouvelles saisons s'ajoutaient en fin de liste.
+const alignToSiteSeasons = (cache, siteNames) => {
+  const seasons = {};
+  for (const name of siteNames) {
+    if (cache[name] && !(name in seasons)) seasons[name] = cache[name];
+  }
+  const before = Object.keys(cache).join('\n');
+  return { seasons, changed: before !== Object.keys(seasons).join('\n') };
+};
+
+// Les épisodes en cache reprennent eux aussi exactement le site. Avant, une
+// actualisation ne faisait qu'ajouter : un lecteur supprimé, une langue retirée
+// ou un épisode enlevé par anime-sama restait en cache pour toujours.
+const toCachedEpisodes = (episodes) => (episodes || []).map(episode => ({
+  name: episode.name,
+  serie_name: episode.serie_name || episode.serieName,
+  season_name: episode.season_name || episode.seasonName,
+  index: episode.index,
+  streaming_links: (episode.streaming_links || []).map(linkObj => ({
+    language: linkObj.language,
+    players: (Array.isArray(linkObj.players) ? linkObj.players : []).filter(url => !isEmptyPlayerUrl(url))
+  })).filter(linkObj => linkObj.players.length > 0)
+}));
+
+// Compare épisodes, langues et lecteurs dans l'ordre ; les métadonnées
+// annexes (timestamp, ancien format) ne déclenchent pas de réécriture.
+const episodesSignature = (episodes) => JSON.stringify((episodes || []).map(episode => [
+  episode.name,
+  episode.index,
+  (episode.streaming_links || []).map(linkObj => [
+    linkObj.language,
+    Array.isArray(linkObj.players) ? linkObj.players.filter(url => !isEmptyPlayerUrl(url)) : []
+  ]).filter(([, players]) => players.length > 0)
+]));
+
+const sameEpisodes = (cached, site) => episodesSignature(cached) === episodesSignature(site);
 
 // ---- Classes ----
 
@@ -429,7 +468,7 @@ class Season {
     }
   }
 
-  async episodes(existingEpisodes = null, strict = false) {
+  async episodes(strict = false) {
     const episodesPagesPromises = this.pages.map(page => this._getPlayersLinksFrom(page, strict));
     // Attendre aussi les langues restantes avant de libérer la tâche commune.
     const outcomes = await Promise.allSettled(episodesPagesPromises);
@@ -454,47 +493,18 @@ class Season {
       return new Episode(languages, this.serieName, this.name, name, index + 1);
     });
 
-    if (!existingEpisodes) {
-      return episodeObjs.map(ep => ({
-        name: ep.name,
-        serie_name: ep.serieName,
-        season_name: ep.seasonName,
-        index: ep.index,
-        streaming_links: Object.entries(ep.languages.players).map(([langId, players]) => ({
-          language: langId,
-          players: (Array.isArray(players.availables) ? players.availables : []).filter(isValidPlayerUrl)
-        })).filter(link => link.players.length > 0)
-      }));
-    }
-
-    return episodeObjs.map((ep, idx) => {
-      const oldEp = existingEpisodes[idx];
-      if (!oldEp) {
-        return {
-          name: ep.name,
-          serie_name: ep.serieName,
-          season_name: ep.seasonName,
-          index: ep.index,
-          streaming_links: Object.entries(ep.languages.players).map(([langId, players]) => ({
-            language: langId,
-            players: (Array.isArray(players.availables) ? players.availables : []).filter(isValidPlayerUrl)
-          })).filter(link => link.players.length > 0)
-        };
-      }
-      const oldLinks = oldEp.streaming_links || [];
-      const newLinks = Object.entries(ep.languages.players).map(([langId, players]) => ({
+    // Le scan rend exactement ce que publie anime-sama : un lecteur, une langue
+    // ou un épisode retiré du site disparaît aussi du résultat.
+    return episodeObjs.map(ep => ({
+      name: ep.name,
+      serie_name: ep.serieName,
+      season_name: ep.seasonName,
+      index: ep.index,
+      streaming_links: Object.entries(ep.languages.players).map(([langId, players]) => ({
         language: langId,
         players: (Array.isArray(players.availables) ? players.availables : []).filter(isValidPlayerUrl)
-      }));
-      const mergedLinks = deps.mergeStreamingLinks(oldLinks, newLinks);
-      return {
-        name: ep.name,
-        serie_name: ep.serieName,
-        season_name: ep.seasonName,
-        index: ep.index,
-        streaming_links: mergedLinks.filter(link => link.players && link.players.length > 0)
-      };
-    });
+      })).filter(link => link.players.length > 0)
+    }));
   }
 }
 
@@ -538,11 +548,13 @@ class Catalogue {
       });
       const responseData = response.data;
 
-      const seasonsMatches = responseData.match(/panneauAnime\("(.+?)", *"(.+?)(?:vostfr|vf)"\);/g) || [];
+      // Le `;` final est optionnel : anime-sama l'oublie parfois (« Saison 2 »
+      // de Black Clover) et le navigateur l'accepte, donc la saison existe.
+      const seasonsMatches = responseData.match(/panneauAnime\("(.+?)", *"(.+?)(?:vostfr|vf)"\);?/g) || [];
 
       const seasons = [];
       for (const match of seasonsMatches) {
-        const [_, name, link] = match.match(/panneauAnime\("(.+?)", *"(.+?)(?:vostfr|vf)"\);/) || [];
+        const [_, name, link] = match.match(/panneauAnime\("(.+?)", *"(.+?)(?:vostfr|vf)"\);?/) || [];
 
         if (name && link) {
           const urlParts = this.url.split('/');
@@ -945,80 +957,32 @@ router.get('/search/:query', async (req, res) => {
             throw new Error('Catalogue AnimeSama vide pendant une actualisation');
           }
           let animeDataUpdated = false;
-          const updatedAnimeCache = { ...existingAnimeCache };
+          let updatedAnimeCache = { ...existingAnimeCache };
 
           for (const seasonObj of seasonsList) {
-            let cachedEpisodes = null;
-            let shouldUpdate = false;
-
-            try {
-              const seasonCache = existingAnimeCache[seasonObj.name];
-              if (seasonCache && seasonCache.episodes) {
-                cachedEpisodes = seasonCache.episodes;
-
-                const scrapedEpisodes = await seasonObj.episodes(cachedEpisodes, true);
-
-                const hasNewEpisodes = scrapedEpisodes.length > cachedEpisodes.length;
-                const hasNewLang = scrapedEpisodes.some((ep, idx) => {
-                  const oldEp = cachedEpisodes[idx];
-                  if (!oldEp) return true;
-                  const oldLangs = (oldEp.streaming_links || []).map(l => l.language);
-                  const newLangs = (ep.streaming_links || []).map(l => l.language);
-                  return newLangs.some(l => !oldLangs.includes(l));
-                });
-
-                const hasNewPlayers = scrapedEpisodes.some((ep, idx) => {
-                  const oldEp = cachedEpisodes[idx];
-                  if (!oldEp) return false;
-
-                  return (ep.streaming_links || []).some(newLink => {
-                    const oldLink = (oldEp.streaming_links || []).find(ol => ol.language === newLink.language);
-                    if (!oldLink) return false;
-
-                    const oldPlayers = Array.isArray(oldLink.players) ? oldLink.players : [];
-                    const newPlayers = Array.isArray(newLink.players) ? newLink.players : [];
-                    return newPlayers.length > oldPlayers.length ||
-                      newPlayers.some(player => !oldPlayers.includes(player));
-                  });
-                });
-
-                if (hasNewEpisodes || hasNewLang || hasNewPlayers) {
-                  shouldUpdate = true;
-                  cachedEpisodes = scrapedEpisodes;
-                }
-              } else {
-                shouldUpdate = true;
-                cachedEpisodes = await seasonObj.episodes(null, true);
-              }
-            } catch (e) {
-              throw e;
+            const seasonCache = existingAnimeCache[seasonObj.name];
+            const cachedEpisodes = seasonCache && Array.isArray(seasonCache.episodes)
+              ? seasonCache.episodes
+              : null;
+            const siteEpisodes = toCachedEpisodes(await seasonObj.episodes(true));
+            // Une saison annoncée mais vide ressemble plus à une page cassée qu'à
+            // un retrait : on garde le cache et l'actualisation repassera plus tard.
+            if (!siteEpisodes.length && cachedEpisodes && cachedEpisodes.length) {
+              throw new Error(`Saison AnimeSama vide pendant une actualisation : ${seasonObj.name}`);
             }
+            if (cachedEpisodes && sameEpisodes(cachedEpisodes, siteEpisodes)) continue;
 
-            if (shouldUpdate) {
-              try {
-                const episodesData = cachedEpisodes.map(episode => ({
-                  name: episode.name,
-                  serie_name: episode.serie_name || episode.serieName,
-                  season_name: episode.season_name || episode.seasonName,
-                  index: episode.index,
-                  streaming_links: (episode.streaming_links || []).map(linkObj => ({
-                    language: linkObj.language,
-                    players: Array.isArray(linkObj.players)
-                      ? linkObj.players.filter(url => !isEmptyPlayerUrl(url))
-                      : linkObj.players
-                  }))
-                }));
+            updatedAnimeCache[seasonObj.name] = {
+              timestamp: Date.now(),
+              episodes: siteEpisodes
+            };
+            animeDataUpdated = true;
+          }
 
-                updatedAnimeCache[seasonObj.name] = {
-                  timestamp: Date.now(),
-                  episodes: episodesData
-                };
-                animeDataUpdated = true;
-
-              } catch (e) {
-                throw e;
-              }
-            }
+          const aligned = alignToSiteSeasons(updatedAnimeCache, seasonsList.map(s => s.name));
+          if (aligned.changed) {
+            updatedAnimeCache = aligned.seasons;
+            animeDataUpdated = true;
           }
 
           // Une vérification réussie espace aussi le prochain scan sans nouveau lecteur.
@@ -1055,3 +1019,6 @@ router.get('/search/:query', async (req, res) => {
 
 module.exports = router;
 module.exports.configure = configure;
+module.exports.alignToSiteSeasons = alignToSiteSeasons;
+module.exports.toCachedEpisodes = toCachedEpisodes;
+module.exports.sameEpisodes = sameEpisodes;

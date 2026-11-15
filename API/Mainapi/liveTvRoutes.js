@@ -1,7 +1,7 @@
 /**
  * Live TV Routes - Backend API pour TV en Direct
  *
- * Ce module gère les requêtes vers l'API Stremio TV Direct
+ * Ce module gère les requêtes vers les fournisseurs Live TV
  * avec mise en cache et résolution des URLs de streaming.
  */
 
@@ -157,7 +157,6 @@ function fctvPlaylistTarget(matchId, streamId, siteType, sportType) {
 }
 
 // === CONFIGURATION ===
-const TVDIRECT_BASE_URL = "https://tvdirect.ddns.net";
 // URL du serveur proxy local (proxiesembed)
 const PROXY_SERVER_URL = process.env.PROXY_SERVER_URL;
 
@@ -882,7 +881,7 @@ const CACHE_DIR = path.join(__dirname, "cache", "tvdirect");
 const CACHE_EXPIRATION_HOURS = 24; // Cache expire après 24h
 const liveTvDiskCache = createLiveTvDiskCache({ fs: fsp, directory: CACHE_DIR, now: () => Date.now() });
 
-// Headers Stremio pour les requêtes (principalement TV Direct)
+// Headers Stremio pour les requêtes Live TV
 const STREMIO_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Stremio/4.4.162 Chrome/114.0.0.0 Safari/537.36",
@@ -1101,39 +1100,6 @@ async function saveToCache(key, data) {
       error.message,
     );
     return false;
-  }
-}
-
-/**
- * Résout l'URL de lecture pour obtenir le lien m3u8 final
- * Suit les redirections et récupère le header Location
- */
-async function resolvePlayUrl(playUrl) {
-  try {
-    const response = await axios.get(playUrl, {
-      headers: STREMIO_HEADERS,
-      timeout: 10000,
-      maxRedirects: 0, // Ne pas suivre les redirections automatiquement
-      validateStatus: (status) => status >= 200 && status < 400, // Accepter 2xx et 3xx
-    });
-
-    // Si c'est une redirection (302, 301), récupérer le header Location
-    if (response.status === 302 || response.status === 301) {
-      return response.headers.location || null;
-    }
-
-    // Sinon retourner l'URL originale (peut-être déjà un m3u8)
-    return playUrl;
-  } catch (error) {
-    // Si erreur avec response (ex: 302), essayer de récupérer Location
-    if (
-      error.response &&
-      (error.response.status === 302 || error.response.status === 301)
-    ) {
-      return error.response.headers.location || null;
-    }
-    console.error(`[LIVETV] Erreur résolution URL ${playUrl}:`, error.message);
-    return null;
   }
 }
 
@@ -1999,12 +1965,12 @@ async function getNorthliveChannelsByCategory(catalogId) {
 
 /**
  * GET /api/livetv/manifest
- * Récupère le manifest combiné (TV Direct + Matches + Northlive + Vavoo)
+ * Récupère le manifest combiné des fournisseurs actifs
  */
 router.get("/manifest", async (req, res) => {
   try {
-    // v19 = ajout des catalogues Streamed par sport.
-    const cacheKey = generateCacheKey("manifest_combined_v19");
+    // v20 = retrait des anciens préfixes TV Direct.
+    const cacheKey = generateCacheKey("manifest_combined_v20");
 
     // 5 min seulement : la liste des sports FCTV annoncés suit les rencontres
     // en cours, un cache de 24 h la figerait sur un créneau révolu.
@@ -2013,33 +1979,17 @@ router.get("/manifest", async (req, res) => {
       return res.json(cached);
     }
 
-    // Récupérer le manifest TV Direct (catch pour ne pas bloquer si échec)
-    const tvDirectRes = await axios
-      .get(`${TVDIRECT_BASE_URL}/manifest.json`, {
-        headers: STREMIO_HEADERS,
-        timeout: 5000,
-      })
-      .catch((e) => ({ error: e }));
-
     // Manifeste de base
     const manifest = {
       id: "org.stremio.merged",
       version: "1.0.0",
       name: "Merged Live TV",
-      description: "Merged TV sources (TV Direct, Matches, Streamed, Northlive, Vavoo)",
+      description: "Merged TV sources (TVMio, Matches, Streamed, Northlive, Vavoo)",
       catalogs: [],
       resources: ["catalog", "meta", "stream"],
       types: ["tv"],
       idPrefixes: [],
     };
-
-    // Fusionner TV Direct (User request: Don't use default tv-general etc.)
-    // We only keep idPrefixes/resources if needed, but not catalogs
-    if (tvDirectRes && !tvDirectRes.error && tvDirectRes.data) {
-      const data = tvDirectRes.data;
-      // if (data.catalogs) manifest.catalogs.push(...data.catalogs);
-      if (data.idPrefixes) manifest.idPrefixes.push(...data.idPrefixes);
-    }
 
     // Ajouter les catalogues Matches (FCTV) en premier dans la liste. Un
     // catalogue par sport, comme la barre de navigation du site amont, mais
@@ -2109,6 +2059,9 @@ router.get("/manifest", async (req, res) => {
  */
 router.get("/catalog/:type/:catalogId", async (req, res) => {
   const { type, catalogId } = req.params;
+  if (!["tvmio_", "northlive_", "vavoo_", "streamed_", "matches_"].some(prefix => catalogId.startsWith(prefix))) {
+    return res.status(410).json({ error: "Cette source Live TV a été retirée", code: "source_removed", metas: [] });
+  }
 
   try {
     // v3 = étiquetage par sport réel des rencontres.
@@ -2200,13 +2153,7 @@ router.get("/catalog/:type/:catalogId", async (req, res) => {
           metas: matches,
         };
       } else {
-        // Source TV Direct (Défaut)
-        const url = `${TVDIRECT_BASE_URL}/catalog/${type}/${catalogId}.json`;
-        const response = await axios.get(url, {
-          headers: STREMIO_HEADERS,
-          timeout: 10000,
-        });
-        catalog = response.data;
+        catalog = { metas: [] };
       }
 
       // Sauvegarder en cache
@@ -2285,6 +2232,10 @@ router.get("/stream/:type/:channelId", async (req, res) => {
           },
         ],
       });
+    }
+
+    if (!["tvmio-", "streamed_", "northlive_", "vavoo_", "match_"].some(prefix => channelId.startsWith(prefix))) {
+      return res.status(410).json({ error: "Cette source Live TV a été retirée", code: "source_removed", streams: [] });
     }
 
     // Le cache externe dure 1 h : bien trop long pour un match, dont la liste
@@ -2516,44 +2467,7 @@ router.get("/stream/:type/:channelId", async (req, res) => {
       // Save to cache with timestamp
       await saveToCache(matchCacheKey, streamData);
     } else {
-      // === SOURCE TV DIRECT ===
-      const url = `${TVDIRECT_BASE_URL}/stream/${type}/${channelId}.json`;
-      const response = await axios.get(url, {
-        headers: STREMIO_HEADERS,
-        timeout: 10000,
-      });
-      streamData = response.data;
-
-      if (streamData.streams) {
-        // Résoudre les URLs (spécifique TV Direct)
-        const resolvedStreams = await Promise.all(
-          streamData.streams.map(async (stream) => {
-            if (stream.url) {
-              const resolvedUrl = await resolvePlayUrl(stream.url);
-              return {
-                ...stream,
-                url: resolvedUrl || stream.url,
-                originalUrl: stream.url,
-              };
-            }
-            return stream;
-          }),
-        );
-        streamData.streams = resolvedStreams.filter((s) => {
-          // Filter out invalid streams
-          if (!s.url) return false;
-
-          // Filter out ALL FamilyRestream sources (User Request: "non fonctionnel")
-          if (
-            s.url.includes("familyrestream.com") ||
-            (s.originalUrl && s.originalUrl.includes("familyrestream.com"))
-          ) {
-            return false;
-          }
-
-          return true;
-        });
-      }
+      return res.status(410).json({ error: "Cette source Live TV a été retirée", code: "source_removed", streams: [] });
     }
 
     if (
@@ -2678,29 +2592,9 @@ router.get("/fctv/playlist", async (req, res) => {
   }
 });
 
-/**
- * GET /api/livetv/resolve/:playId
- * Résout une URL de lecture spécifique (TV Direct)
- */
-router.get("/resolve/:playId", async (req, res) => {
-  const { playId } = req.params;
-
-  try {
-    const playUrl = `${TVDIRECT_BASE_URL}/play/${playId}`;
-    const resolvedUrl = await resolvePlayUrl(playUrl);
-
-    if (!resolvedUrl) {
-      return res.status(404).json({ error: "Impossible de résoudre l'URL" });
-    }
-
-    res.json({
-      originalUrl: playUrl,
-      resolvedUrl: resolvedUrl,
-    });
-  } catch (error) {
-    console.error(`[LIVETV] Erreur resolve ${playId}:`, error.message);
-    res.status(500).json({ error: "Erreur lors de la résolution" });
-  }
+// Ancienne route TV Direct : aucune requête vers le fournisseur retiré.
+router.get("/resolve/:playId", (req, res) => {
+  res.status(410).json({ error: "Cette source Live TV a été retirée", code: "source_removed" });
 });
 
 // === IPTV WEB (Xtream API) — VIP ONLY ===

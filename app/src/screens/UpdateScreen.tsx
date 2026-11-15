@@ -8,10 +8,10 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 
+import AppButton from '../components/AppButton';
 import type { DownloadProgress } from '../services/updateDownloader';
 import type {
   UpdateError,
@@ -172,21 +172,15 @@ export default function UpdateScreen({
               Impossible d’ouvrir la page de mise à jour sécurisée.
             </Text>
           )}
-          <TouchableOpacity
+          <UpdateButton
+            title="Télécharger l’IPA"
+            primary
+            link
+            systemImage="arrow.down.circle"
             onPress={openIosUpdatePage}
-            style={[styles.button, styles.buttonPrimary]}
-            accessibilityRole="link"
-            activeOpacity={0.8}>
-            <Text style={styles.buttonTextPrimary}>Télécharger l’IPA</Text>
-          </TouchableOpacity>
+          />
           {!manifest.mandatory && (
-            <TouchableOpacity
-              onPress={onCancel}
-              style={[styles.button, styles.buttonSecondary]}
-              accessibilityRole="button"
-              activeOpacity={0.8}>
-              <Text style={styles.buttonTextSecondary}>Plus tard</Text>
-            </TouchableOpacity>
+            <UpdateButton title="Plus tard" onPress={onCancel} />
           )}
         </View>
       </View>
@@ -232,13 +226,7 @@ export default function UpdateScreen({
             </Text>
 
             {!manifest.mandatory && (
-              <TouchableOpacity
-                onPress={onCancel}
-                style={[styles.button, styles.buttonSecondary]}
-                accessibilityRole="button"
-                activeOpacity={0.8}>
-                <Text style={styles.buttonTextSecondary}>Annuler</Text>
-              </TouchableOpacity>
+              <UpdateButton title="Annuler" onPress={onCancel} />
             )}
           </>
         )}
@@ -258,21 +246,14 @@ export default function UpdateScreen({
             <Text style={styles.statusText}>
               Autorise Movix à installer des APK pour continuer.
             </Text>
-            <TouchableOpacity
+            <UpdateButton
+              title="Ouvrir les réglages"
+              primary
+              systemImage="gearshape"
               onPress={onOpenSettings}
-              style={[styles.button, styles.buttonPrimary]}
-              accessibilityRole="button"
-              activeOpacity={0.8}>
-              <Text style={styles.buttonTextPrimary}>Ouvrir les réglages</Text>
-            </TouchableOpacity>
+            />
             {!manifest.mandatory && (
-              <TouchableOpacity
-                onPress={onCancel}
-                style={[styles.button, styles.buttonSecondary]}
-                accessibilityRole="button"
-                activeOpacity={0.8}>
-                <Text style={styles.buttonTextSecondary}>Annuler</Text>
-              </TouchableOpacity>
+              <UpdateButton title="Annuler" onPress={onCancel} />
             )}
           </>
         )}
@@ -280,26 +261,46 @@ export default function UpdateScreen({
         {stage === 'error' && (
           <>
             <Text style={styles.errorText}>{errorLabel(error)}</Text>
-            <TouchableOpacity
+            <UpdateButton
+              title="Réessayer"
+              primary
+              systemImage="arrow.clockwise"
               onPress={onRetry}
-              style={[styles.button, styles.buttonPrimary]}
-              accessibilityRole="button"
-              activeOpacity={0.8}>
-              <Text style={styles.buttonTextPrimary}>Réessayer</Text>
-            </TouchableOpacity>
+            />
             {!manifest.mandatory && (
-              <TouchableOpacity
-                onPress={onCancel}
-                style={[styles.button, styles.buttonSecondary]}
-                accessibilityRole="button"
-                activeOpacity={0.8}>
-                <Text style={styles.buttonTextSecondary}>Plus tard</Text>
-              </TouchableOpacity>
+              <UpdateButton title="Plus tard" onPress={onCancel} />
             )}
           </>
         )}
       </View>
     </View>
+  );
+}
+
+function UpdateButton({
+  title,
+  onPress,
+  primary = false,
+  link = false,
+  systemImage,
+}: {
+  title: string;
+  onPress: () => void;
+  primary?: boolean;
+  link?: boolean;
+  systemImage?: string;
+}) {
+  return (
+    <AppButton
+      title={title}
+      onPress={onPress}
+      variant={primary ? 'primary' : 'secondary'}
+      systemImage={systemImage}
+      accessibilityRole={link ? 'link' : 'button'}
+      style={styles.buttonLayout}
+      fallbackStyle={[styles.button, primary ? styles.buttonPrimary : styles.buttonSecondary]}
+      fallbackTextStyle={primary ? styles.buttonTextPrimary : styles.buttonTextSecondary}
+    />
   );
 }
 
@@ -392,14 +393,16 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     textAlign: 'center',
   },
-  button: {
+  buttonLayout: {
     width: '100%',
+    marginTop: 12,
+  },
+  button: {
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 12,
   },
   buttonPrimary: {
     backgroundColor: '#8b5cf6',

@@ -486,7 +486,7 @@ function createWishboardRouter(mysqlPool, redis) {
         try {
             if (TURNSTILE_INVISIBLE_SECRETKEY) {
                 const { turnstileToken } = req.body || {};
-                const check = await verifyTurnstileFromRequest(req, turnstileToken, TURNSTILE_INVISIBLE_SECRETKEY);
+                const check = await verifyTurnstileFromRequest(req, turnstileToken, 'invisible');
                 if (!check.valid) {
                     return res.status(check.status).json({ error: check.error });
                 }
@@ -536,7 +536,7 @@ function createWishboardRouter(mysqlPool, redis) {
         try {
             if (TURNSTILE_INVISIBLE_SECRETKEY) {
                 const { turnstileToken } = req.body || {};
-                const check = await verifyTurnstileFromRequest(req, turnstileToken, TURNSTILE_INVISIBLE_SECRETKEY);
+                const check = await verifyTurnstileFromRequest(req, turnstileToken, 'invisible');
                 if (!check.valid) {
                     return res.status(check.status).json({ error: check.error });
                 }

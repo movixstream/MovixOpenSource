@@ -1,0 +1,578 @@
+/* ─── Thème Halloween : habillage de l'interface ─────────────────────────────
+   Chargé à la demande (loadHalloweenTheme), seulement si le thème est
+   actif : cadres lumineux, en-tête, menu Explorer, titres, cartes,
+   HeroSlider et parchemin des fiches. Les textures passent par Vite (nom
+   hashé, cache d'un an) ; générées par scripts/generate-halloween-assets.py. */
+html.halloween-theme {
+  --halloween-font: 'Creepster', 'Impact', system-ui, sans-serif;
+  /* Chauve-souris sombre (même silhouette que BAT_PATH dans
+     HalloweenIcons.tsx), réutilisée trois fois sur le parchemin. */
+  --halloween-bat-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 38'%3E%3Cpath fill='%23140c08' d='M47 18C36 8 16 2 3 1Q11 7 12 16Q18 12 23 20Q30 16 35 26Q41 22 45 30ZM53 18C64 8 84 2 97 1Q89 7 88 16Q82 12 77 20Q70 16 65 26Q59 22 55 30ZM44.8 25a5.2 8.5 0 1 0 10.4 0a5.2 8.5 0 1 0-10.4 0ZM45.6 15.5a4.4 4.4 0 1 0 8.8 0a4.4 4.4 0 1 0-8.8 0ZM46.4 13.2L45.2 6.6L49 11.6ZM53.6 13.2L54.8 6.6L51 11.6Z'/%3E%3C/svg%3E");
+}
+
+/* ─── Cadres lumineux aux bords irréguliers ──────────────────────────────────
+   Image découpée en 9 morceaux (tranche de 32 px) : coins arrondis, bords
+   éraflés et halo coloré, quelle que soit la taille du bloc. Seuls les bords
+   viennent de l'image (pas de `fill`) : étirer le centre de l'image sur toute
+   la surface du bloc coûtait cher à dessiner. Le fond sombre est une simple
+   couleur. */
+html.halloween-theme [data-halloween-frame],
+html.halloween-theme [data-hero-content] .rounded-full,
+html.halloween-theme [data-hero-cta] {
+  position: relative;
+  border-style: solid;
+  border-width: 1px;
+  border-color: transparent !important;
+  border-image: url('../assets/halloween/frame-gray.webp') 32 / 14px / 5px stretch;
+  background: rgb(14 9 6 / 0.72) !important;
+  box-shadow: none !important;
+}
+html.halloween-theme [data-halloween-frame='orange'],
+html.halloween-theme [data-hero-content] .rounded-full,
+html.halloween-theme [data-hero-cta] { border-image-source: url('../assets/halloween/frame-orange.webp'); }
+html.halloween-theme [data-halloween-frame='green'] { border-image-source: url('../assets/halloween/frame-green.webp'); }
+html.halloween-theme [data-halloween-frame='purple'] { border-image-source: url('../assets/halloween/frame-purple.webp'); }
+html.halloween-theme [data-halloween-frame='yellow'] { border-image-source: url('../assets/halloween/frame-yellow.webp'); }
+html.halloween-theme [data-halloween-frame='pink'] { border-image-source: url('../assets/halloween/frame-pink.webp'); }
+html.halloween-theme [data-halloween-frame='red'] { border-image-source: url('../assets/halloween/frame-red.webp'); }
+html.halloween-theme [data-halloween-frame='blue'] { border-image-source: url('../assets/halloween/frame-blue.webp'); }
+html.halloween-theme [data-halloween-frame='indigo'] { border-image-source: url('../assets/halloween/frame-indigo.webp'); }
+html.halloween-theme [data-halloween-frame='sky'] { border-image-source: url('../assets/halloween/frame-sky.webp'); }
+
+/* Badges de date de sortie : texte assorti au cadre. */
+html.halloween-theme span[data-halloween-frame='orange'] { color: #fed7aa; }
+html.halloween-theme span[data-halloween-frame='green'] { color: #bbf7d0; }
+
+/* ─── En-tête ─────────────────────────────────────────────────────────────── */
+
+/* Logo [Movix] avec une lueur rouge et une chauve-souris. La lueur est posée
+   sur le SVG seul pour ne pas teinter la chauve-souris. */
+html.halloween-theme [data-movix-logo] {
+  position: relative;
+}
+html.halloween-theme [data-movix-logo] > svg {
+  filter: drop-shadow(0 0 8px rgb(239 68 68 / 0.6));
+}
+/* Chauve-souris claire qui s'envole du coin du logo. */
+html.halloween-theme [data-movix-logo]::after {
+  content: '';
+  position: absolute;
+  top: -12px;
+  right: -28px;
+  width: 30px;
+  height: 11.4px;
+  transform: rotate(-14deg);
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 38'%3E%3Cpath fill='%23f3e3cf' d='M47 18C36 8 16 2 3 1Q11 7 12 16Q18 12 23 20Q30 16 35 26Q41 22 45 30ZM53 18C64 8 84 2 97 1Q89 7 88 16Q82 12 77 20Q70 16 65 26Q59 22 55 30ZM44.8 25a5.2 8.5 0 1 0 10.4 0a5.2 8.5 0 1 0-10.4 0ZM45.6 15.5a4.4 4.4 0 1 0 8.8 0a4.4 4.4 0 1 0-8.8 0ZM46.4 13.2L45.2 6.6L49 11.6ZM53.6 13.2L54.8 6.6L51 11.6Z'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+
+/* Liens du menu : icônes orange lumineuses, bouton Explorer cerclé d'orange. */
+html.halloween-theme [data-main-nav] > a svg {
+  color: #fb923c;
+  filter: drop-shadow(0 0 4px rgb(249 115 22 / 0.7));
+}
+html.halloween-theme [data-main-nav] [data-explore-trigger] {
+  color: #fed7aa;
+  border-color: rgb(251 146 60 / 0.45);
+}
+
+/* Recherche : bordure orange et toile au bout, comme sur la maquette. */
+html.halloween-theme [data-header-search] input {
+  border-color: rgb(251 146 60 / 0.6);
+  box-shadow: 0 0 12px rgb(249 115 22 / 0.4), inset 0 0 8px rgb(249 115 22 / 0.15);
+}
+/* La toile se loge dans le coin arrondi : coupée au même rayon que le
+   champ (12 px). Le miroir inverse aussi le clip-path, d'où le rayon posé
+   sur le coin haut gauche. */
+html.halloween-theme [data-header-search]::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 44px;
+  height: 44px;
+  background: url('../assets/halloween/web-small.webp') no-repeat top left / contain;
+  transform: scaleX(-1);
+  clip-path: inset(0 round 11px 0 0 0);
+  pointer-events: none;
+}
+
+/* Menu « Changer de source » des lecteurs : même toile cuivrée que le coin
+   haut droit de la page (halloween-web-right), même proportion 2:3, posée
+   sur l'en-tête collant pour rester en place au défilement. Elle déborde
+   sous l'en-tête, par-dessus la liste, sans prendre les clics. Sur les
+   lecteurs, la classe du thème est retirée : la règle suit le réglage. */
+html[data-halloween-enabled] [data-source-panel-header]::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 120px;
+  height: 180px;
+  background: url('../assets/halloween/web-right.webp') no-repeat top left / 100% 100%;
+  transform: scaleX(-1);
+  pointer-events: none;
+}
+/* Bas du panneau : le cimetière du pied de page. En image de fond du
+   conteneur qui défile (attachement `scroll`), il reste collé en bas de la
+   partie visible et passe derrière la liste. `:has()` évite de marquer le
+   conteneur, recopié une quinzaine de fois dans les pages Watch ; sans
+   support, le panneau reste simplement sans cimetière. Une lueur de
+   citrouille, orange au ras du sol puis prune, passe derrière les tombes :
+   sur le fond noir, les silhouettes se détachent. */
+html[data-halloween-enabled] :has(> [data-source-panel-header]) {
+  background:
+    url('../assets/halloween/graveyard.svg') center bottom / auto 110px repeat-x,
+    radial-gradient(ellipse 85% 170px at 50% 100%, rgb(249 115 22 / 0.55), rgb(194 65 12 / 0.28) 40%, rgb(122 46 88 / 0.14) 65%, transparent 85%),
+    rgb(0 0 0 / 0.95);
+}
+
+/* Chapeau de sorcière sur l'avatar. */
+html.halloween-theme [data-profile-avatar]::before {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  top: -15px;
+  left: -5px;
+  width: 30px;
+  height: 22px;
+  transform: rotate(-14deg);
+  pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 44'%3E%3Cpath d='M30 2c4 6 6 14 9 24l-18 0c4-9 6-17 9-24z' fill='%232e1f45'/%3E%3Cpath d='M30 2c-3 3-8 4-11 1' stroke='%232e1f45' stroke-width='3' fill='none'/%3E%3Crect x='19' y='22' width='22' height='5' fill='%23f97316'/%3E%3Cellipse cx='30' cy='30' rx='28' ry='6' fill='%23221636'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+
+/* ─── Menus liquides (Explorer, profil, notifications) ───────────────────── */
+/* Ni ombre floue ni dégradé sur ces panneaux : une ombre externe de 40 px et
+   une ombre interne de 60 px coûtaient ~110 ms de dessin à chaque ouverture
+   du menu Explorer, et un dégradé radial autant. Un liseré violet suffit. */
+html.halloween-theme [data-liquid-edge] {
+  stroke: rgb(140 120 170 / 0.45);
+}
+/* Fond des menus (tracé du déroulant, panneau mobile) : la nuit du thème
+   plutôt que le gris neutre. */
+html.halloween-theme [data-liquid-surface] {
+  background-color: rgb(22 20 28);
+}
+html.halloween-theme path[data-liquid-surface] {
+  fill: rgb(22 20 28);
+}
+/* Bouton ouvert : rempli par le menu, il perd son contour orange. */
+html.halloween-theme [data-main-nav] [data-explore-trigger][aria-expanded='true'] {
+  border-color: transparent;
+}
+html.halloween-theme [data-explore-group-title] {
+  font-family: var(--halloween-font);
+  font-size: 1.45rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: #fb923c;
+  text-shadow: 0 1px 0 #7c2d12, 0 0 4px rgb(234 88 12 / 0.55);
+}
+/* ─── Cartes des carrousels ──────────────────────────────────────────────── */
+/* Cadre de branche prune tordue posé par-dessus l'affiche : liserés clairs,
+   nœuds, brindilles et toile orange dans le coin haut droit. Une image à la
+   taille de la carte (2:3, dessinée en 2x), en trois variantes qui
+   alternent. Les toiles des coins du bas sont sur un calque à part, effacé
+   au survol pour laisser lire le résumé. */
+html.halloween-theme .carousel-card {
+  border-color: transparent;
+  background-color: transparent;
+  box-shadow: 0 0 12px rgb(234 88 12 / 0.22);
+}
+html.halloween-theme .carousel-card:hover {
+  box-shadow: 0 0 18px rgb(234 88 12 / 0.4);
+}
+html.halloween-theme .carousel-card::before,
+html.halloween-theme .carousel-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url('../assets/halloween/card-frame-a.webp') 0 0 / 100% 100% no-repeat;
+  pointer-events: none;
+}
+html.halloween-theme .carousel-card::after { z-index: 12; }
+html.halloween-theme .carousel-card::before {
+  z-index: 11;
+  background-image: url('../assets/halloween/card-webs-a.webp');
+  transition: opacity 0.3s ease;
+}
+html.halloween-theme .carousel-card:hover::before { opacity: 0; }
+/* Sur petit écran, le résumé est toujours affiché : pas de toiles dessus. */
+@media (max-width: 767px) {
+  html.halloween-theme .carousel-card::before { content: none; }
+}
+html.halloween-theme .embla-slide:nth-child(3n + 2) .carousel-card::after { background-image: url('../assets/halloween/card-frame-b.webp'); }
+html.halloween-theme .embla-slide:nth-child(3n + 2) .carousel-card::before { background-image: url('../assets/halloween/card-webs-b.webp'); }
+html.halloween-theme .embla-slide:nth-child(3n) .carousel-card::after { background-image: url('../assets/halloween/card-frame-c.webp'); }
+html.halloween-theme .embla-slide:nth-child(3n) .carousel-card::before { background-image: url('../assets/halloween/card-webs-c.webp'); }
+/* Badge « FILM / SÉRIE / SAGA » : petit cercueil prune, liseré cuivré,
+   texte orange en capitales étroites sous les épaules. */
+html.halloween-theme [data-card-type-badge] {
+  top: 8px;
+  left: 12px;
+  z-index: 14;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 28px;
+  height: 39px;
+  padding: 11.5px 0 0;
+  border-radius: 0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 39'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%232a2133'/%3E%3Cstop offset='.3' stop-color='%2334293f'/%3E%3Cstop offset='1' stop-color='%232b2236'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M6.2.8h15.6l5.4 9.6-5.7 27.8H6.5L.8 10.4z' fill='url(%23g)' stroke='%238f6656' stroke-width='1.2' stroke-linejoin='round'/%3E%3Cpath d='M7 2.4h14l4.5 8.1-5.3 26.1H7.8L2.5 10.5z' fill='none' stroke='%23f3a463' stroke-opacity='.22' stroke-width='.6' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+  color: #ee9b4e;
+  font: 400 9.5px/1 Impact, 'Arial Narrow', sans-serif-condensed, sans-serif;
+  letter-spacing: 0;
+  text-shadow: 0 0 3px rgb(234 88 12 / 0.55);
+}
+/* Badge d'épisode de l'historique : sous le cercueil. */
+html.halloween-theme [data-card-episode-badge] {
+  top: 54px;
+  left: 10px;
+  z-index: 14;
+}
+@media (max-width: 767px) {
+  html.halloween-theme [data-card-type-badge] {
+    top: 6px;
+    left: 9px;
+    width: 21px;
+    height: 29px;
+    padding-top: 8.5px;
+    font-size: 7px;
+  }
+  html.halloween-theme [data-card-episode-badge] { top: 41px; }
+}
+/* Bouton « ma liste » : rond sombre cerclé d'orange, étoile orange. Au
+   survol (souris seulement), une araignée pend au bouton ; à chaque ajout,
+   elle se laisse tomber au bout de son fil puis remonte (aussi au doigt). */
+html.halloween-theme [data-card-watchlist] {
+  top: 7px;
+  right: 8px;
+  padding: 6px;
+  border: 2px solid #c96a2c;
+  background-color: rgb(30 16 12 / 0.92);
+  box-shadow: 0 0 6px rgb(234 88 12 / 0.4);
+}
+html.halloween-theme [data-card-watchlist] svg { color: #f39243; }
+/* L'araignée est dessinée en bas du pseudo-élément et le fil le remplit au
+   dessus : allonger sa hauteur la fait descendre sans étirer le dessin. */
+html.halloween-theme [data-card-watchlist]::after {
+  position: absolute;
+  top: calc(100% - 1px);
+  left: calc(50% - 3px);
+  width: 14px;
+  height: 34px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 15'%3E%3Cpath d='M7 0v4' stroke='%23e8893c' stroke-width='.6' opacity='.85'/%3E%3Cg fill='%23f08a3a'%3E%3Cellipse cx='7' cy='8.6' rx='2.5' ry='3'/%3E%3Ccircle cx='7' cy='4.6' r='1.6'/%3E%3C/g%3E%3Cpath d='M5 6.5 2.5 4 1 1.5M5 8 1.8 7 .5 5M5 9.5 2 10.5 1 13M5.5 10.8 3.5 13 3 14.5M9 6.5 11.5 4 13 1.5M9 8 12.2 7 13.5 5M9 9.5 12 10.5 13 13M8.5 10.8 10.5 13 11 14.5' fill='none' stroke='%23f08a3a' stroke-width='.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center bottom / 14px 15px,
+    linear-gradient(rgb(232 137 60 / 0.55), rgb(232 137 60 / 0.55)) no-repeat center top / 1px calc(100% - 14px);
+  pointer-events: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  html.halloween-theme [data-card-watchlist]::after { content: ''; }
+}
+/* Deux noms d'animation identiques : passer de l'un à l'autre la relance. */
+html.halloween-theme [data-card-watchlist][data-spider-drop]::after {
+  content: '';
+  animation: halloween-watchlist-spider-a 2.6s both;
+}
+html.halloween-theme [data-card-watchlist][data-spider-drop='b']::after {
+  animation-name: halloween-watchlist-spider-b;
+}
+@keyframes halloween-watchlist-spider-a {
+  0% { height: 34px; animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6); }
+  26% { height: 110px; animation-timing-function: ease-out; }
+  34% { height: 100px; animation-timing-function: ease-in-out; }
+  42%, 66% { height: 110px; animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+  100% { height: 34px; }
+}
+@keyframes halloween-watchlist-spider-b {
+  0% { height: 34px; animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6); }
+  26% { height: 110px; animation-timing-function: ease-out; }
+  34% { height: 100px; animation-timing-function: ease-in-out; }
+  42%, 66% { height: 110px; animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+  100% { height: 34px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.halloween-theme [data-card-watchlist][data-spider-drop]::after { animation: none; }
+}
+/* Détails au survol : note et année aux icônes orange. */
+html.halloween-theme [data-card-rating] svg,
+html.halloween-theme [data-card-year] svg {
+  color: #f08a3a;
+  opacity: 1;
+}
+html.halloween-theme [data-card-rating] span { color: #f6b27c; }
+/* Flèches du carrousel : panneau à bord cuivré et fond prune moucheté,
+   volutes de fer forgé, branches et chauves-souris. Tout le décor (et le
+   halo du chevron) est une seule image, dessinée pour la flèche droite et
+   retournée pour la gauche ; le chevron reste l'icône, en orange, sans
+   filtre. Le bouton garde la taille du panneau pour le clic. */
+html.halloween-theme [data-carousel-arrow] {
+  width: 54px;
+  height: 120px;
+  border-radius: 22px 22px 17px 17px;
+  background: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.halloween-theme [data-carousel-arrow]::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 136px;
+  height: 164px;
+  margin: -82px 0 0 -68px;
+  background: url('../assets/halloween/carousel-arrow.webp') 0 0 / 100% 100% no-repeat;
+  pointer-events: none;
+}
+html.halloween-theme [data-carousel-arrow='prev']::before { transform: scaleX(-1); }
+html.halloween-theme [data-carousel-arrow] svg {
+  position: relative;
+  width: 43px;
+  height: 43px;
+  color: #f6a24c;
+  opacity: 1;
+  stroke-width: 2.5;
+  stroke-linejoin: miter;
+  stroke-linecap: butt;
+}
+
+/* ─── Titres ─────────────────────────────────────────────────────────────── */
+html.halloween-theme h1 {
+  font-family: var(--halloween-font);
+  font-weight: 400;
+  color: #fcdcae;
+  letter-spacing: 0.03em;
+  text-shadow: 0 0 14px rgb(234 88 12 / 0.45);
+}
+/* Intertitres des fiches (« Synopsis »…) : police d'Halloween, orange. */
+html.halloween-theme h2.text-xl {
+  font-family: var(--halloween-font);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: #fb923c;
+}
+html.halloween-theme .section-title {
+  font-family: var(--halloween-font);
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  background: linear-gradient(90deg, #fdebd0, #fbbf7a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: none;
+  filter: drop-shadow(0 0 8px rgb(234 88 12 / 0.45));
+}
+/* Soulignement orange qui dégouline. */
+html.halloween-theme .section-title::after {
+  width: 100%;
+  height: 10px;
+  bottom: -6px;
+  animation: none;
+  border-radius: 0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 10'%3E%3Cpath fill='%23f97316' d='M0 0h120v3H86q-2 0-2 2v2.5a2 2 0 0 1-4 0V5q0-2-2-2H40q-1.5 0-1.5 1.5v1a1.5 1.5 0 0 1-3 0v-1Q35.5 3 34 3H18q-1.5 0-1.5 2v3a1.8 1.8 0 0 1-3.6 0V5Q12.9 3 11 3H0z'/%3E%3C/svg%3E") repeat-x left top / 120px 10px;
+  -webkit-mask: linear-gradient(90deg, #000 70%, transparent);
+  mask: linear-gradient(90deg, #000 70%, transparent);
+  filter: drop-shadow(0 0 4px rgb(249 115 22 / 0.8));
+}
+
+/* Boutons pleins : lueur citrouille. */
+html.halloween-theme .bg-red-600,
+html.halloween-theme .bg-red-500 {
+  box-shadow: 0 0 12px rgb(249 115 22 / 0.45);
+}
+
+/* ─── HeroSlider ─────────────────────────────────────────────────────────── */
+/* Lueur de la maquette, derrière le cadre : orange en haut et en bas,
+   rouge brun à gauche, prune à droite, fondue dans la brume (qui passe
+   derrière le HeroSlider et devant ses coins bas). Peinte une fois. Toile
+   blanche dans le coin haut gauche, sous le texte, et voile chaud au bas de
+   l'image. Hors thème, les deux calques restent vides (sans fond ni ombre),
+   donc invisibles. */
+html.halloween-theme .halloween-hero-glow {
+  box-shadow:
+    0 0 2px 1px rgb(255 150 70 / 0.26),
+    -10px 0 26px -2px rgb(120 44 28 / 0.5),
+    12px 0 30px 0 rgb(122 46 88 / 0.46),
+    0 -10px 26px -6px rgb(168 92 62 / 0.42),
+    0 12px 30px -4px rgb(200 96 34 / 0.46);
+}
+html.halloween-theme .halloween-hero-inner {
+  box-shadow: inset 0 0 48px rgb(110 44 16 / 0.42);
+  background:
+    url('../assets/halloween/web-hero.webp') no-repeat left top / clamp(104px, 10.8vw, 214px) auto,
+    radial-gradient(55% 45% at 75% 100%, rgb(234 88 12 / 0.2), transparent 70%),
+    radial-gradient(40% 35% at 15% 100%, rgb(234 88 12 / 0.12), transparent 70%);
+}
+html.halloween-theme [data-hero-frame] {
+  border-color: rgb(240 140 70 / 0.38);
+}
+html.halloween-theme [data-hero-content] .rounded-full {
+  color: #fed7aa;
+}
+html.halloween-theme [data-hero-cta] {
+  color: #fed7aa;
+  text-shadow: 0 0 8px rgb(249 115 22 / 0.6);
+}
+html.halloween-theme [data-hero-cta] svg {
+  color: #fb923c;
+  filter: drop-shadow(0 0 4px rgb(249 115 22 / 0.8));
+}
+
+/* ─── Fond du site ───────────────────────────────────────────────────────── */
+/* Le ciel, les arbres et la brume sont peints derrière le site
+   (halloween-decor.css, z-index négatif) : le fond noir de l'application et
+   des pages en SquareBackground devient transparent pour les laisser voir.
+   Le corps de la page garde la même teinte de nuit (halloween.css) : sans
+   décor (mode léger), rien ne change.
+   Seuls les fonds de page sont concernés : les SquareBackground posés en
+   calque (`fixed` ou `absolute` : Wrapped) gardent leur fond noir, sinon le
+   site se voit au travers. */
+html.halloween-theme #movix-fullscreen-host,
+html.halloween-theme [data-square-bg]:not(.fixed):not(.absolute) {
+  background-color: transparent;
+}
+/* En-tête : en haut d'une page à HeroSlider (attribut posé par
+   HalloweenDecor), dégradé noir plus léger, la fumée du ciel se devine
+   derrière la barre comme sur la maquette. Dès qu'on défile, le dégradé
+   revient en entier pour que rien ne se lise sous la barre. */
+/* Même mouvement que hors thème (Header.tsx) : opacity seule ici faisait
+   sauter le dégradé hors de l'écran en une image à l'ouverture d'un panneau
+   mobile. */
+html.halloween-theme header > div[aria-hidden='true']:first-child {
+  transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+}
+html.halloween-theme[data-halloween-top] header > div[aria-hidden='true']:first-child {
+  opacity: 0.6;
+}
+
+/* ─── Popup pub ──────────────────────────────────────────────────────────── */
+/* La popup s'ouvre surtout sur la page du lecteur, où la classe du thème est
+   retirée (contour des vidéos non teinté) : ses règles suivent donc le
+   réglage lui-même (`data-halloween-enabled`), pas la classe.
+   Voile violet translucide au lieu du bleu, avec une lueur de citrouille
+   derrière la fenêtre. Il teinte la page sans l'éteindre : sur le lecteur,
+   noir, un voile sombre donnait un écran tout noir. Fixe : dessiné une seule
+   fois. Le fond et la bordure de la fenêtre sont posés en style direct dans
+   AdFreePlayerAds, d'où les !important. L'écran noir de l'easter egg n'a pas
+   ces repères. */
+html[data-halloween-enabled] [data-ad-overlay] {
+  background:
+    radial-gradient(ellipse 50% 55% at 50% 50%, rgb(249 115 22 / 0.3), rgb(234 88 12 / 0.1) 55%, transparent 80%),
+    rgb(88 28 135 / 0.28) !important;
+}
+/* Liseré orange net et lueur, qui suivent l'arrondi de la fenêtre. La
+   texture des cadres, faite pour les cartes, laissait ici une bande sombre
+   entre le liseré et le fond, et des coins carrés. */
+html[data-halloween-enabled] [data-ad-dialog] {
+  background: #1a1222 !important;
+  border-color: rgb(251 146 60 / 0.85) !important;
+  box-shadow:
+    0 0 0 1px rgb(234 88 12 / 0.2),
+    0 0 22px 2px rgb(234 88 12 / 0.4),
+    inset 0 0 16px rgb(234 88 12 / 0.16);
+}
+/* Lueur du haut, filet et éclat de déblocage : orange au lieu de bleu. */
+html[data-halloween-enabled] [data-cinema-lightbar] {
+  background-image: radial-gradient(ellipse 85% 110% at 50% -25%, rgb(251 146 60 / 0.4), rgb(234 88 12 / 0.08) 50%, transparent 76%);
+}
+html[data-halloween-enabled] [data-cinema-line] {
+  background-image: linear-gradient(90deg, transparent, rgb(253 186 116 / 0.7), transparent);
+}
+html[data-halloween-enabled] [data-cinema-unlocked] {
+  background-image: radial-gradient(ellipse at 50% 5%, rgb(251 146 60 / 0.24), transparent 65%);
+}
+/* Bouton principal citrouille, bouclier et textes en tons chauds. */
+html[data-halloween-enabled] [data-ad-dialog] .bg-blue-600 {
+  background-color: #ea580c;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 6px 16px -8px rgb(234 88 12 / 0.7);
+}
+html[data-halloween-enabled] [data-ad-dialog] .bg-blue-600:hover { background-color: #c2410c; }
+html[data-halloween-enabled] [data-ad-dialog] .text-blue-400 { color: #fb923c; }
+html[data-halloween-enabled] [data-ad-dialog] .text-blue-200 { color: #fed7aa; }
+html[data-halloween-enabled] [data-ad-dialog] .text-blue-100\/80 { color: rgb(255 237 213 / 0.8); }
+html[data-halloween-enabled] [data-ad-dialog] .text-blue-200\/70 { color: rgb(254 215 170 / 0.7); }
+
+/* ─── Avertissement des fiches : parchemin brûlé ─────────────────────────── */
+html.halloween-theme [data-halloween-parchment] {
+  position: relative;
+  padding: 1.1rem 1.6rem;
+  border: 0;
+  background: url('../assets/halloween/parchment.webp') no-repeat center / 100% 100%;
+  filter: drop-shadow(0 6px 14px rgb(0 0 0 / 0.55));
+}
+html.halloween-theme [data-halloween-parchment] *,
+html.halloween-theme [data-halloween-parchment] svg {
+  color: #3b2412;
+}
+html.halloween-theme [data-halloween-parchment] a {
+  color: #9a3412;
+}
+/* Chauves-souris posées sur le bord haut, toile dans le coin bas droit. */
+html.halloween-theme [data-halloween-parchment]::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 22px;
+  right: 60px;
+  height: 16px;
+  background:
+    var(--halloween-bat-dark) no-repeat left center / 34px 13px,
+    var(--halloween-bat-dark) no-repeat 45% center / 24px 9px,
+    var(--halloween-bat-dark) no-repeat right center / 30px 11.4px;
+  pointer-events: none;
+}
+html.halloween-theme [data-halloween-parchment]::after {
+  content: '';
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 54px;
+  height: 54px;
+  background: url('../assets/halloween/web-small.webp') no-repeat top left / contain;
+  transform: scale(-1, -1);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+/* ─── Pied de page : cimetière en silhouette ─────────────────────────────── */
+/* Tombes, grilles et arbres morts en silhouette, posés sur le bas de la page
+   elle-même. Le sol du dessin a la teinte du pied de page : il s'y fond, et
+   la bande se répète sur les très grands écrans.
+   Rien n'est animé : peint une seule fois. */
+html.halloween-theme {
+  --halloween-graveyard-height: clamp(84px, 10vw, 140px);
+}
+html.halloween-theme [data-site-footer] {
+  /* Pas de bordure : même transparente, le dégradé du fond s'y répète et son
+     bas noir y traçait une fine ligne. */
+  border-top-width: 0;
+  /* Transparent derrière les tombes (le fond du site passe derrière),
+     noir dessous, là où sont les liens : le sol du dessin s'y raccorde. */
+  background: linear-gradient(
+    transparent var(--halloween-graveyard-height),
+    #000 var(--halloween-graveyard-height)
+  );
+  padding-top: calc(var(--halloween-graveyard-height) + 1.25rem);
+}
+/* Le pied de page remonte de la hauteur du dessin et la page qui le précède
+   s'allonge d'autant : le fond de la page, grille des SquareBackground
+   comprise, continue derrière les tombes au lieu de s'arrêter au-dessus, et
+   rien du contenu ne passe dessous. Sans :has(), l'ancienne bande reste. */
+@supports selector(:has(+ *)) {
+  html.halloween-theme [data-site-footer] {
+    margin-top: calc(-1 * var(--halloween-graveyard-height));
+  }
+  html.halloween-theme :has(+ [data-site-footer])::after {
+    content: '';
+    display: block;
+    height: var(--halloween-graveyard-height);
+  }
+}
+html.halloween-theme [data-site-footer]::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--halloween-graveyard-height);
+  background: url('../assets/halloween/graveyard.svg') center bottom / auto 100% repeat-x;
+  pointer-events: none;
+}

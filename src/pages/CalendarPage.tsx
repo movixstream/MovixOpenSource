@@ -432,14 +432,14 @@ const CalendarPage: React.FC = () => {
           {/* ── Barre d'outils ──────────────────────────────────────── */}
           <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-black/40 p-3">
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" onClick={() => shiftMonth(-1)} aria-label={t('calendar.previousMonth')}>
-                <ChevronLeft className="h-5 w-5" />
+              <Button className="group/icon" variant="ghost" size="icon" onClick={() => shiftMonth(-1)} aria-label={t('calendar.previousMonth')}>
+                <ChevronLeft className="h-5 w-5 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" />
               </Button>
               <span className="min-w-[9.5rem] text-center text-base font-semibold capitalize text-white">
                 {monthLabel}
               </span>
-              <Button variant="ghost" size="icon" onClick={() => shiftMonth(1)} aria-label={t('calendar.nextMonth')}>
-                <ChevronRight className="h-5 w-5" />
+              <Button className="group/icon" variant="ghost" size="icon" onClick={() => shiftMonth(1)} aria-label={t('calendar.nextMonth')}>
+                <ChevronRight className="h-5 w-5 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" />
               </Button>
             </div>
 
@@ -449,7 +449,7 @@ const CalendarPage: React.FC = () => {
 
             {/* Recherche — filtre les événements affichés, toutes vues confondues. */}
             <div className="relative min-w-[10rem] flex-1 sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/40" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white opacity-40" />
               <input
                 type="search"
                 value={query}
@@ -466,9 +466,9 @@ const CalendarPage: React.FC = () => {
                 <button
                   onClick={() => setQuery('')}
                   aria-label={t('calendar.clearSearch')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-white/40 transition-colors hover:text-white"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-white/40 transition-colors hover:text-white group/icon"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="h-3.5 w-3.5 text-white opacity-40 group-hover/icon:opacity-100 transition-[color,opacity]" />
                 </button>
               )}
             </div>
@@ -494,11 +494,11 @@ const CalendarPage: React.FC = () => {
                   <button
                     key={view}
                     onClick={() => setPrefs((current) => ({ ...current, view }))}
-                    className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    className={`group/icon flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                       prefs.view === view ? 'bg-red-600 text-white' : 'text-white/60 hover:text-white'
                     }`}
                   >
-                    {view === 'month' ? <LayoutGrid className="h-3.5 w-3.5" /> : <ListOrdered className="h-3.5 w-3.5" />}
+                    {view === 'month' ? <LayoutGrid className={`h-3.5 w-3.5 transition-[color,opacity] ${(prefs.view === view ? "text-white opacity-100" : "text-white opacity-60 group-hover/icon:opacity-100")}`} /> : <ListOrdered className={`h-3.5 w-3.5 transition-[color,opacity] ${(prefs.view === view ? "text-white opacity-100" : "text-white opacity-60 group-hover/icon:opacity-100")}`} />}
                     <span className="hidden sm:inline">{t(`calendar.view.${view}`)}</span>
                   </button>
                 ))}
@@ -637,17 +637,17 @@ const CalendarPage: React.FC = () => {
                   <div className="ml-auto flex items-center gap-2">
                     <button
                       onClick={() => shiftMonth(-1)}
-                      className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                      className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white group/icon"
                     >
-                      <ChevronLeft className="h-3 w-3" />
+                      <ChevronLeft className="h-3 w-3 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" />
                       {t('calendar.previousMonth')}
                     </button>
                     <button
                       onClick={() => shiftMonth(1)}
-                      className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                      className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white group/icon"
                     >
                       {t('calendar.nextMonth')}
-                      <ChevronRight className="h-3 w-3" />
+                      <ChevronRight className="h-3 w-3 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" />
                     </button>
                   </div>
                 </>
@@ -731,7 +731,7 @@ const CalendarPage: React.FC = () => {
             <div className="space-y-6">
               {agendaDays.length === 0 && !loading && (
                 <div className="rounded-2xl border border-white/10 bg-black/40 py-16 text-center">
-                  <CalendarDays className="mx-auto mb-4 h-10 w-10 text-white/20" />
+                  <CalendarDays className="mx-auto mb-4 h-10 w-10 text-white opacity-20" />
                   {/* Un mois vidé par une recherche, par un filtre ou réellement
                       vide demandent trois gestes différents : effacer la
                       recherche, réafficher les sources, ou rien du tout. */}
@@ -786,7 +786,7 @@ const CalendarPage: React.FC = () => {
                         </span>
                         {item.time && (
                           <span className="flex shrink-0 items-center gap-1 text-xs text-white/50">
-                            <Clock className="h-3 w-3" />{item.time}
+                            <Clock className="h-3 w-3 text-white opacity-50" />{item.time}
                           </span>
                         )}
                       </button>
@@ -810,9 +810,9 @@ const CalendarPage: React.FC = () => {
                   <h2 className="text-sm font-semibold capitalize text-white">{dayLabel(selectedDay)}</h2>
                   <button
                     onClick={() => setDialog({ open: true, entry: null, date: selectedDay })}
-                    className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                    className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white group/icon"
                   >
-                    <CalendarPlus className="h-3.5 w-3.5" />
+                    <CalendarPlus className="h-3.5 w-3.5 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" />
                     {t('calendar.addOnThisDay')}
                   </button>
                 </div>

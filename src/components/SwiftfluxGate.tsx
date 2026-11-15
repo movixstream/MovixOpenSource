@@ -94,7 +94,9 @@ const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onCl
   }, [close]);
 
   const openAd = useCallback(() => {
-    if (SWIFTFLUX_AD_URL) window.open(SWIFTFLUX_AD_URL, '_blank', 'noopener');
+    if (SWIFTFLUX_AD_URL && typeof window.open === 'function') {
+      try { window.open(SWIFTFLUX_AD_URL, '_blank', 'noopener'); } catch { /* Pop-up refusée par le navigateur. */ }
+    }
     setStep('verify');
   }, []);
 

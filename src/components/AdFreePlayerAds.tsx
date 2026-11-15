@@ -128,6 +128,8 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
     previousHeightRef.current = null;
     const nextHeight = parseFloat(getComputedStyle(dialog).height);
     heightAnimationRef.current?.cancel();
+    heightAnimationRef.current = null;
+    if (typeof dialog.animate !== 'function') return;
     heightAnimationRef.current = dialog.animate(
       [{ height: `${previousHeight}px` }, { height: `${nextHeight}px` }],
       { duration: 250, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' },
@@ -180,7 +182,7 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
     if (!shouldShow || popupMode !== 'normal') return;
 
     const lenis = (
-      window as Window & { lenis?: { stop: () => void; start: () => void } }
+      window as unknown as { lenis?: { stop: () => void; start: () => void } }
     ).lenis;
     if (lenis) lenis.stop();
 
@@ -378,6 +380,9 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
         <DialogPrimitive.Overlay
           className={cn("fixed inset-0 z-50", effectivePrefs.transitions && POPUP_ANIMATION_CLASS)}
           style={{ background: easterEggFound ? "#000" : "rgba(59,130,246,0.22)" }}
+          // Repère pour l'habillage Halloween (halloween-ui.css) ; l'écran
+          // noir de l'easter egg reste tel quel.
+          data-ad-overlay={easterEggFound ? undefined : ''}
           onClick={(e) => {
             if (e.target === e.currentTarget && hasClicked) {
               handleClose();
@@ -395,6 +400,7 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
             if (!hasClicked) e.preventDefault();
           }}
           data-lenis-prevent
+          data-ad-dialog={easterEggFound ? undefined : ''}
           className={cn(
             easterEggFound
               ? "fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-black px-6 py-8 transition-none"
@@ -440,9 +446,9 @@ const AdFreePlayerAds: React.FC<AdFreePlayerAdsProps> = ({
           {hasClicked && (
             <DialogPrimitive.Close
               onClick={handleClose}
-              className="absolute right-4 top-4 rounded-full p-1.5 text-white/50 transition-all duration-200 hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              className="absolute right-4 top-4 rounded-full p-1.5 text-white/50 transition-all duration-200 hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 group/icon"
             >
-              <X className="h-4 w-4" />
+              <X className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
               <span className="sr-only">{t("common.close")}</span>
             </DialogPrimitive.Close>
           )}

@@ -9,7 +9,8 @@ const RETRY_MS = 60 * 1000;
 
 // Le sidecar est partagé sur le même volume que les caches des six workers.
 // Il ne change ni les liens conservés, ni leur date de dernière publication.
-function createWiflixRefreshState({ now = Date.now } = {}) {
+function createWiflixRefreshState({ now = Date.now, successRefreshMs = SUCCESS_REFRESH_MS,
+  negativeRefreshMs = NEGATIVE_REFRESH_MS, isNegative = data => data?.success === false } = {}) {
   const retryPath = (dir, key) => path.join(dir, `${key}.retry`);
   async function mtime(file) {
     try { return (await fs.stat(file)).mtimeMs; }
@@ -18,7 +19,7 @@ function createWiflixRefreshState({ now = Date.now } = {}) {
   return {
     async remaining(dir, key, cachedData) {
       const publishedAt = cachedData ? await mtime(path.join(dir, `${key}.json`)) : null;
-      const freshness = cachedData?.success === false ? NEGATIVE_REFRESH_MS : SUCCESS_REFRESH_MS;
+      const freshness = isNegative(cachedData) ? negativeRefreshMs : successRefreshMs;
       const freshFor = publishedAt === null ? 0 : publishedAt + freshness - now();
       if (freshFor > 0) return freshFor; // Aucun accès supplémentaire pour les caches frais.
       const attemptedAt = await mtime(retryPath(dir, key));

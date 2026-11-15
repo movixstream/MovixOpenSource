@@ -12,6 +12,7 @@ import { SquareBackground } from '../components/ui/square-background';
 import BlurText from '../components/ui/blur-text';
 import ShinyText from '../components/ui/shiny-text';
 import AnimatedBorderCard from '../components/ui/animated-border-card';
+import { Skeleton } from '../components/ui/Skeleton';
 
 const MAIN_API = import.meta.env.VITE_MAIN_API;
 const TMDB_IMAGE_URL = 'https://image.tmdb.org/t/p';
@@ -383,8 +384,8 @@ const Top10Page: React.FC = () => {
     <SquareBackground squareSize={48} borderColor="rgba(99, 102, 241, 0.08)" className="min-h-screen bg-black text-white">
       <div className="container mx-auto px-4 sm:px-6 py-8 sm:py-12 relative z-10 h-full overflow-y-auto">
         {/* Back */}
-        <Link to="/" className="inline-flex items-center text-white/50 hover:text-white transition-colors mb-8">
-          <ArrowLeft className="w-5 h-5 mr-2" />
+        <Link to="/" className="inline-flex items-center text-white/50 hover:text-white transition-colors mb-8 group/icon">
+          <ArrowLeft className="w-5 h-5 mr-2 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
           {t('common.backToHome')}
         </Link>
 
@@ -475,7 +476,10 @@ const Top10Page: React.FC = () => {
                   />
                 )}
                 <span className="relative z-10 flex items-center gap-2">
-                  {tab.icon}
+                  {/* Couleur pleine + opacité : évite les croisements plus clairs du rgba hérité */}
+                  <span className={`flex transition-opacity duration-300 ${activeTab === tab.id ? 'opacity-100' : 'text-white opacity-50'}`}>
+                    {tab.icon}
+                  </span>
                   {t(tab.labelKey)}
                 </span>
               </button>
@@ -510,12 +514,14 @@ const Top10Page: React.FC = () => {
               <button
                 key={a.id}
                 onClick={() => applyFilters(period, a.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                   algo === a.id ? '' : 'text-white/40 hover:text-white/70'
                 }`}
                 style={algo === a.id ? { color: activeTabConfig.color, backgroundColor: `${activeTabConfig.color}15` } : undefined}
               >
-                {a.icon}
+                <span className={`flex transition-opacity ${algo === a.id ? '' : 'text-white opacity-40 group-hover:opacity-70'}`}>
+                  {a.icon}
+                </span>
                 {t(a.labelKey)}
               </button>
             ))}
@@ -525,9 +531,20 @@ const Top10Page: React.FC = () => {
         {/* Top 10 List */}
         <div className="max-w-4xl mx-auto mb-20">
           {isCurrentTabLoading ? (
-            <div className="space-y-4">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="h-28 rounded-xl bg-white/[0.03] animate-pulse" />
+            <div className="space-y-3" aria-hidden="true">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div key={i} className="animated-border-card bg-white/[0.03]">
+                  <div className="flex items-center gap-4 p-4 sm:p-5">
+                    <div className="flex-shrink-0 w-12 h-12 sm:w-14 sm:h-14"><Skeleton height="100%" className="!rounded-xl" /></div>
+                    <div className="flex-shrink-0 w-16 h-24 sm:w-20 sm:h-28"><Skeleton height="100%" className="!rounded-lg" /></div>
+                    <div className="flex-1 min-w-0">
+                      <Skeleton width="75%" className="h-6 sm:h-7" />
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5"><Skeleton width={72} height={16} /><Skeleton width={32} height={16} /></div>
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5"><Skeleton width={88} height={16} /><Skeleton width={112} height={16} /></div>
+                    </div>
+                    <div className="flex-shrink-0 hidden sm:block w-5 h-5" />
+                  </div>
+                </div>
               ))}
             </div>
           ) : currentError ? (
@@ -585,7 +602,7 @@ const Top10Page: React.FC = () => {
                                 <span>{entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : '🥉'}</span>
                               ) : (
                                 <span className="flex items-center gap-0.5">
-                                  <Hash className="w-3.5 h-3.5 opacity-50" />
+                                  <Hash className="w-3.5 h-3.5 text-white opacity-30" />
                                   {entry.rank}
                                 </span>
                               )}
@@ -627,7 +644,7 @@ const Top10Page: React.FC = () => {
                                 )}
                                 {entry.voteAverage && entry.voteAverage > 0 && (
                                   <span className="flex items-center gap-0.5 text-xs text-amber-400/80">
-                                    <Star className="w-3 h-3 fill-current" />
+                                    <Star className="w-3 h-3 fill-current text-amber-400 opacity-80" />
                                     {entry.voteAverage.toFixed(1)}
                                   </span>
                                 )}

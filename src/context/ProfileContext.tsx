@@ -595,9 +595,11 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
   };
 
   // Update a profile
+  // Pas de setIsLoading ici : ProfileGate remplace toutes les routes par
+  // l'écran « Chargement des profils… » tant que isLoading est vrai, ce qui
+  // démontait la page profil à chaque changement de nom ou d'avatar.
   const updateProfile = async (profileId: string, updates: Partial<Profile>) => {
     try {
-      setIsLoading(true);
       const authToken = localStorage.getItem('auth_token');
       if (!authToken) throw new Error('No auth token');
 
@@ -617,8 +619,6 @@ export const ProfileProvider: React.FC<ProfileProviderProps> = ({ children }) =>
     } catch (error) {
       console.error('Error updating profile:', error);
       throw error;
-    } finally {
-      setIsLoading(false);
     }
   };
 

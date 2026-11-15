@@ -3,6 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const lockfile = require('proper-lockfile');
 const writeFileAtomic = require('write-file-atomic');
+const { refreshStep, reportRefreshFailure, recordRefreshResult } = require('./sourceRefreshTelemetry');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const atomic = (file, value) => writeFileAtomic(file, value, { encoding: 'utf8', fsync: false });
@@ -17,7 +18,7 @@ const isUncachedResponse = (data) => data?.__fstreamResponse === true && Number.
 function createFStreamCacheStore({
   cacheDir,
   redis = null,
-  refreshMs = positive(process.env.FSTREAM_CACHE_REFRESH_MS, 40 * 60 * 1000),
+  refreshMs = positive(process.env.FSTREAM_CACHE_REFRESH_MS, 10 * 60 * 1000),
   retryMs = 60 * 1000,
   lockTtlMs = 30 * 1000,
   lockWaitMs = 35 * 1000,
@@ -208,11 +209,11 @@ function createFStreamCacheStore({
   const pruneFailures = () => {
     for (const [key, entry] of failures) if (entry.until <= Date.now()) failures.delete(key);
   };
-  const fail = (key, response = null, fence) => transaction(key, async () => {
+  const fail = (key, response = null, fence, delayMs = retryMs) => transaction(key, async () => {
     const gen = await generation(key);
     if (fence && (fence.generation !== gen || !await fence.ownsLease())) return false;
     pruneFailures();
-    const entry = { until: Date.now() + retryMs, generation: gen, response };
+    const entry = { until: Date.now() + delayMs, generation: gen, response };
     const raw = JSON.stringify(entry);
     failures.delete(key);
     failures.set(key, { ...entry, bytes: Buffer.byteLength(raw) });
@@ -222,7 +223,7 @@ function createFStreamCacheStore({
       bytes -= failures.get(first).bytes;
       failures.delete(first);
     }
-    try { await readyRedis()?.set(retryKey(key), raw, 'PX', retryMs); } catch {}
+    try { await readyRedis()?.set(retryKey(key), raw, 'PX', delayMs); } catch {}
     return true;
   });
   const cooldown = async (key) => {
@@ -284,7 +285,15 @@ function createFStreamCacheStore({
     const valid = (entry) => entry && playable(entry.data) && validate(entry.data) ? entry : null;
     const latest = async () => valid(await get(key));
     const fallback = async () => (await latest())?.data || (await cooldown(key))?.response || null;
-    const initial = await latest();
+    const rawInitial = await get(key);
+    const initial = valid(rawInitial);
+    refreshStep('cache', {
+      cacheAgeMs: rawInitial ? Date.now() - rawInitial.cachedAt : null,
+      cachedExtractedAt: rawInitial?.data?.metadata?.extractedAt,
+      cachedEpisodes: Object.keys(rawInitial?.data?.episodes || {}),
+      cachePresent: Boolean(rawInitial), cacheUsable: Boolean(initial),
+      title: rawInitial?.data?.tmdb?.title,
+    });
     if (isFresh(initial)) return initial.data;
     const retry = await cooldown(key);
     if (retry) return initial?.data || retry.response || null;
@@ -301,6 +310,7 @@ function createFStreamCacheStore({
         try { if (!await readyRedis()?.get(lockKey(key))) return shared?.data || (await cooldown(key))?.response || null; }
         catch { return shared?.data || null; }
       }
+      reportRefreshFailure('refresh_lock_timeout', 'Attente du verrou d’actualisation expirée', { cacheKey: key });
       return fallback();
     }
     let lost = false, renewing = false;
@@ -331,14 +341,31 @@ function createFStreamCacheStore({
       const data = await scrape();
       if (!playable(data) || !validate(data)) {
         const response = isUncachedResponse(data) && validate(data.body) ? data : null;
-        const recorded = await fail(key, response, fence);
+        const body = isUncachedResponse(data) ? data.body : data;
+        const dateValidation = body?.metadata?.dateValidation;
+        const reason = ['content_not_found', 'extraction_empty'].includes(body?.code) ? body.code
+          : dateValidation?.isAvailable === false ? 'release_year_mismatch'
+          : playable(data) ? 'selection_rejected' : 'unusable_result';
+        const message = reason === 'release_year_mismatch' ? 'Validation de l’année refusée'
+          : reason === 'selection_rejected' ? 'Fiche incompatible avec le titre TMDB ou la saison demandée'
+            : 'Aucune source valide produite par l’actualisation';
+        reportRefreshFailure(reason, body?.error || message, {
+          cacheKey: key, total: body?.total, success: body?.success,
+          tmdbYear: dateValidation?.tmdbYear,
+          sourceYear: dateValidation?.fstreamYear || body?.search?.bestMatch?.year,
+        });
+        const recorded = await fail(key, response, fence, reason === 'content_not_found' ? refreshMs : retryMs);
         return (await latest())?.data || (recorded ? response : await fallback());
       }
+      refreshStep('cache_write', { cacheKey: key });
       const result = await saveEntry(key, data, fence);
+      if (!result.saved) reportRefreshFailure('cache_write_rejected', 'Écriture refusée : génération du cache modifiée ou verrou perdu', { cacheKey: key });
+      else if (redis && !result.shared) reportRefreshFailure('redis_publish_failed', 'JSON actualisé, mais publication Redis impossible', { cacheKey: key });
       if (!result.saved || (redis && !result.shared)) await fail(key, null, fence);
+      if (result.saved) recordRefreshResult(data);
       return result.saved ? data : fallback();
     } catch (error) {
-      console.error(`[FSTREAM CACHE] Échec actualisation ${key}: ${error?.message || 'Erreur inconnue'}`);
+      reportRefreshFailure('refresh_exception', error, { cacheKey: key });
       await fail(key, null, fence);
       return fallback();
     } finally {

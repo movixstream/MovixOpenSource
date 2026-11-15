@@ -5,39 +5,26 @@
   position: relative;
   flex-shrink: 0;
   contain: layout;
+  height: 215px;
 }
 
-/* Skip layout/paint des slides hors viewport (CSS-native virtualization).
-   Embla calcule ses snaps sur le DOM logique (taille réservée), pas sur le
-   contenu peint. La taille intrinsèque 192×320 ≈ aspect-[2/3] de w-[192px]
-   + badges/marges. Browser support : Chrome/Edge 85+, Safari 18+, Firefox 125+.
-   Fallback gracieux (= comportement par défaut, pas de régression).
-
-   IMPORTANT — `:not(:has(.ranking-number))` : `content-visibility: auto` implique
-   `contain: paint`, qui clippe les descendants débordant la box. Le numéro
-   Top 10 est positionné en `left: -1.5rem; bottom: -0.75rem` avec font-size
-   9rem → il déborde sous/à gauche de la card et serait coupé. On exclut donc
-   les slides qui contiennent un ranking. `:has()` : Chrome 105+, Safari 15.4+,
-   Firefox 121+ (déjà aligné sur le reste du codebase). */
-.embla-slide:not(:has(.ranking-number)) {
-  content-visibility: auto;
-  contain-intrinsic-size: 192px 320px;
+/* Stable geometry even when distant poster/overlay contents are released.
+   Height follows the bordered poster: (width - 2px) × 3/2 + 2px. */
+@media (min-width: 768px) {
+  .embla-slide {
+    height: 287px;
+  }
 }
 
-/* P5 — will-change: transform pré-promotion compositing layer (PC only).
-   Le container parent d'Embla est translaté pendant le scroll horizontal ;
-   avec chaque slide pré-promu en layer indépendant, la compose phase est
-   cheaper (translate de layers existants vs re-raster du parent qui
-   contiendrait tout dans un seul gros layer). Coût mémoire GPU : 5 carousels
-   × ~6 cards visibles × ~120 KB layer ≈ 4 MB sur Home, soutenable.
+/* Avoid a permanent GPU layer for every card. Embla already transforms the
+   track; touch devices and TVs do not need desktop hover promotion. */
+@media (hover: hover) and (pointer: fine) {
+  html:not([data-light-mode="true"]) .carousel-card:hover {
+    transform: scale(1.05);
+  }
 
-   Scope PC via `(hover: hover)` : mobile = pas de lag observé + GPU plus
-   limité. `:not(:has(.ranking-number))` : même raison qu'au-dessus, l'override
-   `will-change` crée un stacking context qui pourrait clipper le digit
-   débordant du Top 10. */
-@media (hover: hover) {
-  .embla-slide:not(:has(.ranking-number)) {
-    will-change: transform;
+  .carousel-card:hover + .ranking-number {
+    opacity: 0;
   }
 }
 
@@ -69,6 +56,7 @@ body.embla-scrolling .embla-slide {
   line-height: 0.85;
   user-select: none;
   pointer-events: none;
+  transition: opacity 200ms ease-out;
   font-family: 'Arial Black', 'Helvetica Neue', Impact, Arial, sans-serif;
   letter-spacing: -0.08em;
   color: transparent;

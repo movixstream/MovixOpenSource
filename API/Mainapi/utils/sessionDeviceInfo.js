@@ -159,13 +159,19 @@ function parseStoredSessionDeviceInfo(rawDeviceInfo) {
     if (value.browserVersion !== null && typeof value.browserVersion !== 'string') return null;
     if (value.operatingSystem !== null && typeof value.operatingSystem !== 'string') return null;
     if (!DEVICE_TYPES.has(value.deviceType)) return null;
-    return {
+    const info = {
       version: 1,
       browser: value.browser || null,
       browserVersion: value.browserVersion || null,
       operatingSystem: value.operatingSystem || null,
       deviceType: value.deviceType,
     };
+    // Nom choisi par l'appareil lui-même (télé reliée par code : « Fire TV
+    // salon ») ; déjà nettoyé à l'écriture, recontrôlé ici.
+    if (typeof value.name === 'string' && value.name.length <= 40 && !/[\u0000-\u001f\u007f]/.test(value.name)) {
+      info.name = value.name;
+    }
+    return info;
   } catch {
     // Les anciennes sessions contiennent un fingerprint chiffrÃ© : fallback UA.
     return null;

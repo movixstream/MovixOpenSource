@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Share2, Facebook, Twitter, Link as LinkIcon, Check, X } from 'lucide-react';
 import { useLightMode } from '../context/LightModeContext';
+import { copyText } from '../utils/clipboard';
 
 interface ShareButtonsProps {
   title: string;
@@ -60,12 +61,11 @@ const ShareButtons: React.FC<ShareButtonsProps> = ({ title, description = '', ur
   };
 
   const copyToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(shareUrl);
+    if (await copyText(shareUrl)) {
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy: ', err);
+    } else {
+      console.error('Failed to copy');
     }
   };
   

@@ -1,0 +1,189 @@
+/* ─── Thème Halloween : rangée « Spécial Halloween » de l'accueil ────────────
+   Chargé avec HalloweenSpecialRow, seulement thème actif. Couleurs écrites en
+   dur : la palette du thème change les rouges de Tailwind en orange, or la
+   terreur doit rester rouge sang. */
+
+.halloween-special {
+  position: relative;
+}
+
+/* Ambiance de l'humeur, derrière les cartes : lueur peinte une fois par
+   changement d'humeur. Positionnée avant la rangée, elle passe dessous. */
+.halloween-special-glow {
+  position: absolute;
+  inset: 2.5rem -1rem -0.5rem;
+  pointer-events: none;
+  background: radial-gradient(60% 85% at 50% 100%, var(--halloween-special-glow), transparent 72%);
+}
+.halloween-special[data-mood='soft'] { --halloween-special-glow: rgb(245 158 11 / 0.16); }
+.halloween-special[data-mood='chills'] { --halloween-special-glow: rgb(139 92 246 / 0.2); }
+.halloween-special[data-mood='terror'] { --halloween-special-glow: rgb(185 28 28 / 0.22); }
+
+/* Humeur en cours de chargement : les films affichés s'estompent. */
+.halloween-special[data-loading] .embla-slide {
+  opacity: 0.45;
+  transition: opacity 0.2s ease;
+}
+
+/* ─── Compte à rebours et frissomètre ─────────────────────────────────────── */
+.halloween-special-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.halloween-countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 1.875rem;
+  padding: 0 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgb(251 146 60 / 0.35);
+  background: rgb(234 88 12 / 0.14);
+  color: #fed7aa;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.halloween-meter {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.05);
+}
+
+/* Curseur qui glisse sous l'humeur choisie, d'ambre à rouge sang. */
+.halloween-meter-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  border-radius: 999px;
+  background-color: #d97706;
+  box-shadow: 0 0 14px -2px var(--halloween-meter-glow, rgb(217 119 6 / 0.8));
+  transition: transform 0.3s cubic-bezier(0.23, 1, 0.32, 1), background-color 0.3s ease;
+}
+.halloween-meter[data-mood='chills'] .halloween-meter-thumb {
+  transform: translateX(100%);
+  background-color: #ea580c;
+  --halloween-meter-glow: rgb(234 88 12 / 0.8);
+}
+.halloween-meter[data-mood='terror'] .halloween-meter-thumb {
+  transform: translateX(200%);
+  background-color: #b91c1c;
+  --halloween-meter-glow: rgb(220 38 38 / 0.85);
+}
+
+.halloween-meter-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 1.75rem;
+  padding: 0 0.8rem;
+  border-radius: 999px;
+  /* Atténué par l'opacité du bouton entier, pas par une couleur
+     transparente : sinon les traits de l'icône s'additionnent là où ils se
+     croisent (le bonbon avait des nœuds plus clairs). */
+  color: #fff;
+  opacity: 0.6;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: opacity 0.2s ease;
+}
+.halloween-meter-option:hover,
+.halloween-meter-option[aria-checked='true'] {
+  opacity: 1;
+}
+.halloween-meter-option:focus-visible {
+  outline: 2px solid #fb923c;
+  outline-offset: 2px;
+}
+
+/* Petits écrans : icônes seules, l'humeur choisie est écrite à côté. */
+.halloween-meter-caption {
+  display: none;
+  align-items: center;
+  gap: 0.375rem;
+  color: #fff;
+  opacity: 0.75;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+@media (max-width: 639px) {
+  .halloween-meter-label { display: none; }
+  .halloween-meter-option { padding: 0 0.85rem; }
+  .halloween-meter-caption { display: inline-flex; }
+}
+
+/* ─── Lampe torche ─────────────────────────────────────────────────────────
+   Calque sur les cartes, sous les flèches du carrousel (z-index 950), qui ne
+   capte aucun clic. Le faisceau est un dégradé deux fois plus grand que la
+   rangée, centré sur la souris : seul son `transform` change. L'obscurité
+   naît et meurt en fondu en haut et en bas : un bord net coupait la rangée
+   sous le titre. Sur les côtés, le calque dépasse jusque sous le bord de
+   l'écran (la page le rogne), pour ne laisser aucune bande claire. Le
+   masque est fixe : la carte graphique le réapplique sans rien repeindre
+   quand le faisceau bouge. */
+.halloween-flashlight {
+  position: absolute;
+  inset: -4rem -2rem -3rem;
+  z-index: 900;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 4.5rem, #000 calc(100% - 3.5rem), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 4.5rem, #000 calc(100% - 3.5rem), transparent);
+}
+.halloween-flashlight[data-lit='true'] {
+  opacity: 1;
+}
+
+.halloween-flashlight-beam {
+  position: absolute;
+  left: -100%;
+  top: -100%;
+  width: 200%;
+  height: 200%;
+  will-change: transform;
+  background: radial-gradient(
+    circle at center,
+    rgb(255 196 120 / 0.1) 0,
+    rgb(255 170 90 / 0.04) 90px,
+    transparent 150px,
+    rgb(5 3 9 / var(--halloween-darkness)) 270px
+  );
+}
+
+/* Terreur : la lampe vacille deux fois de suite, toutes les 7,2 s (deux
+   battements d'ailes des chauves-souris du décor). Seulement allumée. */
+.halloween-flashlight-blackout {
+  position: absolute;
+  inset: 0;
+  background: rgb(5 3 9);
+  opacity: 0;
+}
+.halloween-flashlight[data-flicker='true'][data-lit='true'] .halloween-flashlight-blackout {
+  animation: halloween-flashlight-flicker 7.2s linear infinite;
+}
+
+@keyframes halloween-flashlight-flicker {
+  0%, 60%, 63%, 65%, 100% { opacity: 0; }
+  61%, 64% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .halloween-meter-thumb { transition: none; }
+  .halloween-flashlight[data-flicker='true'][data-lit='true'] .halloween-flashlight-blackout { animation: none; }
+}

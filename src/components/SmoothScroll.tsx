@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import Lenis from 'lenis';
 import 'lenis/dist/lenis.css';
 import { useLightMode } from '@/context/LightModeContext';
+import { readLocalStorage } from '@/utils/browserStorage';
+import { isTvPlatform } from '@/utils/tvPlatform';
 
 /**
  * Presets de fluidité Lenis — configurables via
@@ -30,8 +32,8 @@ export const SMOOTH_SCROLL_PRESETS: Record<SmoothScrollIntensity, LenisPreset> =
 };
 
 const getSmoothScrollIntensity = (): SmoothScrollIntensity => {
-  const v = typeof localStorage !== 'undefined'
-    ? localStorage.getItem('settings_smooth_scroll_intensity')
+  const v = typeof window !== 'undefined'
+    ? readLocalStorage('settings_smooth_scroll_intensity')
     : null;
   if (v === 'fluid' || v === 'ultra') return v;
   return 'standard';
@@ -59,8 +61,12 @@ const isCapableNonTouchDesktop = (): boolean => {
 //   - absent/autre → activé seulement sur desktop non tactile + machine
 //     correcte, sinon scroll natif (même comportement que 'false').
 const getSmoothScrollSetting = (): boolean => {
-  const v = typeof localStorage !== 'undefined'
-    ? localStorage.getItem('settings_smooth_scroll')
+  // TV : jamais de Lenis, même si le profil synchronisé l'a activé sur un PC.
+  // Le D-pad déplace le focus et `scrollIntoView` fait défiler — une boucle
+  // rAF d'interpolation par-dessus ne fait que ramer sur le CPU d'une dalle.
+  if (isTvPlatform()) return false;
+  const v = typeof window !== 'undefined'
+    ? readLocalStorage('settings_smooth_scroll')
     : null;
   if (v === 'true') return true;
   if (v === 'false') return false;
@@ -189,6 +195,9 @@ const SmoothScroll = () => {
 
     const startRaf = () => {
       if (!lenis || rafId || document.hidden) return;
+      // La pause du RAF ne doit pas avancer la nouvelle animation d'un coup.
+      // Lenis repart avec un delta nul à la première frame de chaque reprise.
+      lenis.time = 0;
       rafId = requestAnimationFrame(raf);
     };
 
@@ -241,7 +250,12 @@ const SmoothScroll = () => {
     const initLenis = () => {
       const userEnabled = getSmoothScrollSetting();
       const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      const isEnabled = userEnabled && !reducedMotion && effectivePrefs.transitions;
+      // Lenis instancie ResizeObserver en interne. Le bundle legacy fournit le
+      // polyfill, mais si celui-ci n'a pas été chargé, conserver le scroll natif.
+      const isEnabled = userEnabled
+        && !reducedMotion
+        && effectivePrefs.transitions
+        && typeof ResizeObserver !== 'undefined';
 
       if (!isEnabled) {
         if (lenis) {

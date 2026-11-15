@@ -26,10 +26,10 @@ function readSession(): WrappedSession {
 function WrappedGate({ title, children, onClose }: { title: string; children?: ReactNode; onClose: () => void }) {
     const { t } = useTranslation();
     return (
-        <main className="fixed inset-0 z-50 h-[100dvh] overflow-y-auto bg-[#17121f] px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] text-[#f4efe6]" data-lenis-prevent>
+        <main className="fixed inset-0 z-50 h-[100dvh] overflow-y-auto bg-[#101318] px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] text-[#f4efe6]" data-lenis-prevent>
             <button type="button" onClick={onClose} className="flex h-11 w-11 items-center justify-center rounded-full hover:bg-white/10" aria-label={t('wrappedStory.close')}><X className="h-5 w-5" /></button>
             <div className="mx-auto flex min-h-[75dvh] max-w-lg flex-col justify-center gap-6 py-8">
-                <p className="font-semibold text-[#d8c4ff]">MOVIX WRAPPED</p>
+                <p className="font-semibold text-[#a9dfff]">MOVIX WRAPPED</p>
                 <h1 className="text-balance text-4xl font-black leading-tight tracking-tight">{title}</h1>
                 {children}
             </div>
@@ -63,7 +63,7 @@ function WrappedContent({ year, session, version, onClose }: { year: number; ses
 
     if (failed) return <WrappedGate title={t('wrappedStory.loadErrorTitle')} onClose={onClose}>
         <p className="text-white/75">{t('wrappedStory.loadErrorCaption')}</p>
-        <button type="button" onClick={() => setRetry(value => value + 1)} className="min-h-12 rounded-xl bg-[#d8c4ff] px-6 font-bold text-[#17121f]">{t('wrappedStory.retry')}</button>
+        <button type="button" onClick={() => setRetry(value => value + 1)} className="min-h-12 rounded-xl bg-[#a9dfff] px-6 font-bold text-[#101318]">{t('wrappedStory.retry')}</button>
     </WrappedGate>;
 
     if (!response) return <WrappedLoading year={year} onClose={onClose} />;
@@ -73,14 +73,14 @@ function WrappedContent({ year, session, version, onClose }: { year: number; ses
         return <WrappedGate title={t('wrapped.notEnoughDataYet')} onClose={onClose}>
             <p className="text-white/75">{t('wrapped.notEnoughDataForYear', { year })}</p>
             {progress && <section aria-label={t('wrapped.unlockRequirementsTitle')} className="space-y-4">
-                <p className="text-sm text-[#d8c4ff]">{t('wrapped.progressPercent', { percent: progress.completionPercent })}</p>
-                <div className="h-2 overflow-hidden rounded-full bg-white/15"><div className="h-full bg-[#d8c4ff]" style={{ width: `${Math.min(100, Math.max(0, progress.completionPercent))}%` }} /></div>
+                <p className="text-sm text-[#a9dfff]">{t('wrapped.progressPercent', { percent: progress.completionPercent })}</p>
+                <div className="h-2 overflow-hidden rounded-full bg-white/15"><div className="h-full bg-[#a9dfff]" style={{ width: `${Math.min(100, Math.max(0, progress.completionPercent))}%` }} /></div>
                 <dl className="space-y-3">{(['minutes', 'uniqueTitles', 'sessions', 'activeDays'] as const).map((key, i) => <div key={key} className="flex justify-between gap-4 text-sm">
                     <dt className="text-white/75">{t(`wrapped.${['requirementWatchTime', 'requirementTitles', 'requirementSessions', 'requirementActiveDays'][i]}`)}</dt>
                     <dd className="text-right font-semibold">{key === 'minutes' ? formatWrappedDuration(progress.current[key], i18n.language) : progress.current[key]} / {key === 'minutes' ? formatWrappedDuration(progress.requirements[key], i18n.language) : progress.requirements[key]}</dd>
                 </div>)}</dl>
             </section>}
-            <button type="button" onClick={() => navigate('/')} className="min-h-12 rounded-xl bg-[#d8c4ff] px-6 font-bold text-[#17121f]">{t('wrapped.backToHome')}</button>
+            <button type="button" onClick={() => navigate('/')} className="min-h-12 rounded-xl bg-[#a9dfff] px-6 font-bold text-[#101318]">{t('wrapped.backToHome')}</button>
         </WrappedGate>;
     }
 
@@ -114,17 +114,17 @@ function WrappedLivePage({ version }: { version: WrappedVersion }) {
     // Tous les hooks de la page sont exécutés avant les écrans d'accès.
     if (!session.token) return <WrappedGate title={t('wrapped.loginRequired')} onClose={onClose}>
         <p className="text-white/75">{t('wrapped.loginRequiredDesc')}</p>
-        <button type="button" onClick={() => navigate('/login-bip39')} className="min-h-12 rounded-xl bg-[#d8c4ff] px-6 font-bold text-[#17121f]">{t('wrapped.loginAction')}</button>
+        <button type="button" onClick={() => navigate('/login-bip39')} className="min-h-12 rounded-xl bg-[#a9dfff] px-6 font-bold text-[#101318]">{t('wrapped.loginAction')}</button>
         <button type="button" onClick={() => navigate('/create-account')} className="min-h-11 underline underline-offset-4">{t('wrapped.createAccountAction')}</button>
     </WrappedGate>;
 
     if (!session.collectionEnabled) return <WrappedGate title={t('wrapped.dataCollectionDisabled')} onClose={onClose}>
         <p className="text-white/75">{t('wrapped.dataCollectionDisabledDesc')}</p>
-        <button type="button" onClick={() => navigate('/settings')} className="min-h-12 rounded-xl bg-[#d8c4ff] px-6 font-bold text-[#17121f]">{t('wrapped.goToSettings')}</button>
+        <button type="button" onClick={() => navigate('/settings')} className="min-h-12 rounded-xl bg-[#a9dfff] px-6 font-bold text-[#101318]">{t('wrapped.goToSettings')}</button>
     </WrappedGate>;
 
     if (!Number.isInteger(year) || year < 2024 || year > currentYear) return <WrappedGate title={t('wrappedStory.invalidYear')} onClose={onClose}>
-        <button type="button" onClick={() => navigate('/wrapped', { replace: true })} className="min-h-12 rounded-xl bg-[#d8c4ff] px-6 font-bold text-[#17121f]">{t('wrappedStory.currentYear')}</button>
+        <button type="button" onClick={() => navigate('/wrapped', { replace: true })} className="min-h-12 rounded-xl bg-[#a9dfff] px-6 font-bold text-[#101318]">{t('wrappedStory.currentYear')}</button>
     </WrappedGate>;
 
     if (profileLoading) return <WrappedLoading year={year} onClose={onClose} />;

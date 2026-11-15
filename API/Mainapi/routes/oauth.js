@@ -23,7 +23,16 @@ const {
   ACCESS_TOKEN_TTL_MS,
   createOAuthStorageError,
 } = require('../utils/oauthStorage');
-const { readUserData, writeUserData, readProfileData, writeProfileData, withProfileSyncLock } = require('./sync');
+const {
+  readUserData,
+  writeUserData,
+  readProfileData,
+  readProfileImportData,
+  writeProfileData,
+  withProfileSyncLock,
+  deleteProfileHistory,
+  applyProfileMarkChanges,
+} = require('./sync');
 const { recordEvent: recordOAuthAppEvent, grantVip: grantVipFromAppBalance } = require('../utils/oauthClientsDb');
 const { verifyAccessKey } = require('../checkVip');
 const { ensureSafeProfileId, getProfileFilePath, validateProfileName, SyncPolicyError } = require('../utils/syncPolicy');
@@ -1168,6 +1177,9 @@ router.delete('/profiles/:profileId', async (req, res) => {
     const profilePath = getProfileFilePath(USERS_DIR, tokenRecord.userType, tokenRecord.userId, profileId);
     try { await fsp.unlink(profilePath); } catch { /* Fichier inexistant */ }
 
+    // Historique et progression du profil (au mieux, ne lève jamais).
+    await deleteProfileHistory(tokenRecord.userType, tokenRecord.userId, profileId);
+
     // Supprimer les votes associés
     try {
       const pool = getPool();
@@ -1451,13 +1463,23 @@ async function resolveLibraryProfileId(tokenRecord, explicitProfileId) {
 // (userType, userId, profileId), lit le profile data, appelle `fn` qui
 // modifie en place, écrit, et libère le lock. Garantit qu'aucune écriture
 // concurrente (sync ou autre route OAuth) ne perd notre modif (lost-update).
+// Lecture des données complètes du fichier (`readProfileImportData`) : au-delà
+// de 600 clés, `readProfileData` rend une vue élaguée en mémoire qui ne doit
+// jamais être écrite (progressions perdues). L'écriture est alors refusée,
+// comme avant l'historique serveur.
 async function withProfileMutation(tokenRecord, profileId, fn) {
   return withProfileSyncLock(tokenRecord.userType, tokenRecord.userId, profileId, async () => {
-    const profileData = await readProfileData(tokenRecord.userType, tokenRecord.userId, profileId);
+    const profileData = await readProfileImportData(tokenRecord.userType, tokenRecord.userId, profileId);
+    const previousData = { ...profileData };
     const result = await fn(profileData);
     const success = await writeProfileData(tokenRecord.userType, tokenRecord.userId, profileId, profileData);
     if (!success) {
       throw createOAuthStorageError('Écriture profile data échouée', 500, 'server_error');
+    }
+    // Marques « Déjà vu » touchées (watched_*) : recopiées ici, sous le
+    // verrou, comme pour /api/sync. Ne fait jamais échouer la requête.
+    if (typeof applyProfileMarkChanges === 'function') {
+      await applyProfileMarkChanges({ userType: tokenRecord.userType, userId: tokenRecord.userId, profileId }, previousData, profileData);
     }
     return result;
   });
@@ -2123,3 +2145,6 @@ router.post('/vip/grant', async (req, res) => {
 });
 
 module.exports = router;
+// Réutilisés par la liaison télé (routes/tvLink.js) : même lecture de la clé VIP.
+module.exports.buildVipIdentity = buildVipIdentity;
+module.exports.extractStringField = extractStringField;

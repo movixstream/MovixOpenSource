@@ -54,9 +54,9 @@ const DnsBlockBanner: React.FC = () => {
                   type="button"
                   onClick={() => dismiss(id)}
                   aria-label={t('dnsBlock.closeAria')}
-                  className="shrink-0 -mr-1 -mt-1 p-1 rounded text-red-200/70 hover:text-red-50 hover:bg-red-900/50 transition-colors"
+                  className="shrink-0 -mr-1 -mt-1 p-1 rounded text-red-200/70 hover:text-red-50 hover:bg-red-900/50 transition-colors group/icon"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-4 h-4 text-red-200 opacity-70 group-hover/icon:text-red-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                 </button>
               </div>
               <p className="text-xs text-red-100/80 leading-relaxed mb-2">

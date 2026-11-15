@@ -6,15 +6,18 @@ import ts from 'typescript';
 const root = new URL('../', import.meta.url);
 const providerSignedUserAgent =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-  + '(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+  + '(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
 // Fsvid/Vidzy renvoient leur flux leurre (302 vers .../troll/master.m3u8) ou
 // une 403 tant que la requête n'a pas un Referer sur un de leurs domaines ET
 // un en-tête Sec-Ch-Ua.
-const providerSecChUa = '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"';
+const providerSecChUa = '"Chromium";v="142", "Not=A?Brand";v="24", "Google Chrome";v="142"';
 // Les trois indices client partent ensemble chez un vrai Chrome, avec une
 // version majeure identique à celle de l'User-Agent.
+// Fsvid/Vidzy servent un faux master à tout Accept-Encoding qui n'est pas
+// exactement celui de Chrome. Uqload garde ses tokens q=0.
+const uqloadMediaEncoding = 'identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0';
 const providerClientHints = {
-  'Accept-Encoding': 'identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0',
+  'Accept-Encoding': 'gzip, deflate, br, zstd',
   'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
   'Sec-Ch-Ua': providerSecChUa,
   'Sec-Ch-Ua-Mobile': '?0',
@@ -118,7 +121,7 @@ test('Vidzy playback preserves the user agent used to sign playback URLs', async
   );
 });
 
-test('Fsvid, Vidzy and Uqload keep browser encoding tokens without requesting compressed bodies', async () => {
+test('Fsvid, Vidzy and Uqload never request compressed media bodies', async () => {
   const { applyMediaProxyHeaderRules } = await importTypeScript(
     'src/services/mediaProxyHeaders.ts',
   );
@@ -136,7 +139,11 @@ test('Fsvid, Vidzy and Uqload keep browser encoding tokens without requesting co
         Range: 'bytes=0-1023',
       };
       const headers = applyMediaProxyHeaderRules(`https://${host}/hls/${resource}?t=example`, input);
-      assert.equal(headers['Accept-Encoding'], providerClientHints['Accept-Encoding'], host);
+      assert.equal(
+        headers['Accept-Encoding'],
+        host.includes('uqload') ? uqloadMediaEncoding : providerClientHints['Accept-Encoding'],
+        host,
+      );
       assert.equal(headers.Origin, origin, host);
       assert.equal(headers.Referer, `${origin}/`, host);
       assert.equal(headers.Range, input.Range);

@@ -361,10 +361,10 @@ const WishboardPage: React.FC = () => {
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="rounded-full h-12 w-12 border border-white/10 text-white/50 hover:text-white"
+                                className="rounded-full h-12 w-12 border border-white/10 text-white/50 hover:text-white group/icon"
                                 onClick={() => setIsHelpOpen(true)}
                             >
-                                <HelpCircle className="h-5 w-5" />
+                                <HelpCircle className="h-5 w-5 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" />
                             </Button>
                         </motion.div>
                     </div>

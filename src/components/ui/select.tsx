@@ -172,46 +172,71 @@ const SelectContent: React.FC<SelectContentProps> = ({ className, children }) =>
         bottom?: number;
         left: number;
         width: number;
+        maxHeight: number;
         placement: 'top' | 'bottom';
-    }>({ top: 0, left: 0, width: 0, placement: 'bottom' });
+    }>({ top: 0, left: 0, width: 0, maxHeight: 0, placement: 'bottom' });
 
     // Calculate position
     const updatePosition = React.useCallback(() => {
         if (triggerRef.current) {
             const rect = triggerRef.current.getBoundingClientRect();
             const viewportHeight = window.innerHeight;
-            const spaceBelow = viewportHeight - rect.bottom;
-            const spaceAbove = rect.top;
+            const viewport = window.visualViewport;
+            const viewportTop = viewport?.offsetTop ?? 0;
+            const viewportBottom = viewportTop + (viewport?.height ?? viewportHeight);
+            const gap = 4;
+            const margin = 8;
+            const spaceBelow = Math.max(0, viewportBottom - rect.bottom - gap - margin);
+            const spaceAbove = Math.max(0, rect.top - viewportTop - gap - margin);
+            const menu = contentRef.current;
+            const maxMenuHeight = menu ? parseFloat(window.getComputedStyle(menu).maxHeight) : 320;
+            const menuHeight = menu
+                ? Math.min(menu.scrollHeight + menu.offsetHeight - menu.clientHeight, maxMenuHeight)
+                : maxMenuHeight;
 
-            // Simple logic: if less than 250px below and more space above, go up
-            const placement = (spaceBelow < 250 && spaceAbove > spaceBelow) ? 'top' : 'bottom';
+            // Use the menu's actual height, then keep it inside the visible viewport.
+            const placement = (spaceBelow < menuHeight && spaceAbove > spaceBelow) ? 'top' : 'bottom';
 
             if (placement === 'top') {
                 setPosition({
-                    bottom: viewportHeight - rect.top + 4,
+                    bottom: viewportHeight - rect.top + gap,
                     left: rect.left,
                     width: rect.width,
+                    maxHeight: spaceAbove,
                     placement: 'top'
                 });
             } else {
                 setPosition({
-                    top: rect.bottom + 4,
+                    top: rect.bottom + gap,
                     left: rect.left,
                     width: rect.width,
+                    maxHeight: spaceBelow,
                     placement: 'bottom'
                 });
             }
         }
-    }, [triggerRef]);
+    }, [triggerRef, contentRef]);
 
     React.useLayoutEffect(() => {
         if (open) {
             updatePosition();
-            // Update position on window resize
+            const viewport = window.visualViewport;
+            const handleScroll = (event: Event) => {
+                if (event.target instanceof Node && contentRef.current?.contains(event.target)) return;
+                updatePosition();
+            };
             window.addEventListener('resize', updatePosition);
-            return () => window.removeEventListener('resize', updatePosition);
+            window.addEventListener('scroll', handleScroll, true);
+            viewport?.addEventListener('resize', updatePosition);
+            viewport?.addEventListener('scroll', updatePosition);
+            return () => {
+                window.removeEventListener('resize', updatePosition);
+                window.removeEventListener('scroll', handleScroll, true);
+                viewport?.removeEventListener('resize', updatePosition);
+                viewport?.removeEventListener('scroll', updatePosition);
+            };
         }
-    }, [open, updatePosition]);
+    }, [open, updatePosition, contentRef, children, position.width]);
 
     // Stop Lenis smooth scroll while dropdown is open to prevent interference
     React.useEffect(() => {
@@ -254,7 +279,6 @@ const SelectContent: React.FC<SelectContentProps> = ({ className, children }) =>
         <AnimatePresence mode="wait">
             {open && (
                 <motion.div
-                    ref={contentRef}
                     initial={{
                         opacity: 0,
                         scale: 0.95,
@@ -278,18 +302,23 @@ const SelectContent: React.FC<SelectContentProps> = ({ className, children }) =>
                         bottom: position.placement === 'top' ? position.bottom : undefined,
                         left: position.left,
                         width: position.width,
+                        maxHeight: position.maxHeight,
                         zIndex: 100000,
-                        overscrollBehavior: 'contain',
                         transformOrigin: position.placement === 'bottom' ? 'top center' : 'bottom center'
                     }}
-                    className={cn(
-                        "overflow-hidden rounded-lg border border-white/10 bg-gray-900/95 text-white shadow-xl backdrop-blur-xl",
-                        "max-h-80 overflow-y-auto",
-                        className
-                    )}
+                    className="flex flex-col"
                 >
-                    <div className="p-1">
-                        {children}
+                    <div
+                        ref={contentRef}
+                        className={cn(
+                            "min-h-0 rounded-lg border border-white/10 bg-gray-900/95 text-white shadow-xl backdrop-blur-xl",
+                            "max-h-80 overflow-y-auto overscroll-contain",
+                            className
+                        )}
+                    >
+                        <div className="p-1">
+                            {children}
+                        </div>
                     </div>
                 </motion.div>
             )}

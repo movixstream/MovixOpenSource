@@ -3,7 +3,7 @@
  * System for users to propose streaming links for movies/episodes/seasons
  * Links must be approved by staff before being added
  * 
- * Encourages usage of https://seekstreaming.com/ as a preferred source
+ * Encourages usage of https://uqload.vc/ as a preferred source
  * 
  * Uses MySQL database (same as the rest of the app)
  */

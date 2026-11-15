@@ -31,9 +31,44 @@ import { normalizeAlternateTitles, normalizeKeywords, type AlternateTitle } from
 import { rememberMedia } from '../utils/mediaSearchIndex';
 import { formatMovieReleaseDate, getMovieReleaseLabel, isMovieReleaseDatePending, needsMovieReleaseWarning, parseMovieReleases } from '@/utils/movieRelease';
 import { useMovieReleaseWarnings } from '@/hooks/useMovieReleaseWarnings';
+import { useImageQuality, useImageViewport } from '../hooks/useImageQuality';
+import { useImageSlot } from '../hooks/useImageSlot';
+import { getCoverImageWidth, getTmdbImageProps, getTmdbImageUrl } from '../utils/tmdbImages';
+import { readLocalStorage, writeLocalStorage } from '../utils/browserStorage';
+import { useTitleHistory } from '../hooks/useTitleHistory';
+import { localProgressFinished, movieResume, movieWatchedState, seedProgress } from '../utils/titleHistoryMerge';
+import { EstimateInfoDialog } from '../components/profile/EstimateInfo';
 
 const MAIN_API = import.meta.env.VITE_MAIN_API;
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
+
+const parseStoredMediaList = (stored: string | null): any[] | null => {
+  if (stored === null) return [];
+  try {
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const readStoredMediaList = (key: string): any[] | null => {
+  try {
+    return parseStoredMediaList(window.localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+};
+
+const updateStoredMediaList = (key: string, update: (items: any[]) => any[]): boolean => {
+  try {
+    const items = parseStoredMediaList(window.localStorage.getItem(key));
+    if (items === null) return false;
+    return writeLocalStorage(key, JSON.stringify(update(items)));
+  } catch {
+    return false;
+  }
+};
 
 interface Movie {
   title: string;
@@ -180,10 +215,13 @@ const groupCrewMembers = (crew: CrewMember[]): GroupedCrewMember[] => {
 };
 
 const DEFAULT_IMAGE = 'https://via.placeholder.com/185x278/1F2937/FFFFFF?text=Aucune+image';
+const PENDING_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
 
 // Composant pour une image avec lazy loading
-const LazyImage = ({ src, alt, className, onLoad }: {
+const LazyImage = ({ src, srcSet, sizes, alt, className, onLoad }: {
   src: string;
+  srcSet?: string;
+  sizes?: string;
   alt: string;
   className: string;
   onLoad?: () => void;
@@ -230,6 +268,8 @@ const LazyImage = ({ src, alt, className, onLoad }: {
           )}
           <img
             src={src}
+            srcSet={srcSet}
+            sizes={sizes}
             alt={alt}
             className={`w-full h-auto object-cover transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'
               }`}
@@ -245,17 +285,54 @@ const LazyImage = ({ src, alt, className, onLoad }: {
 // Composant pour la section Images
 const ImagesSection = ({ movieId, images, loading }: { movieId: string; images: MovieImages | null; loading: boolean }) => {
   const { t } = useTranslation();
+  const { effectiveImageQuality } = useImageQuality();
+  const { width: viewportWidth, dpr } = useImageViewport();
+  const imageDpr = Math.min(dpr, effectiveImageQuality === 'high' ? 3 : 2);
   const [selectedCategory, setSelectedCategory] = useState<'backdrops' | 'posters' | 'logos'>('backdrops');
   const [showImages, setShowImages] = useState(true);
   const [loadedImagesCount, setLoadedImagesCount] = useState(0);
   const [selectedLanguage, setSelectedLanguage] = useState<string>('all');
   const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
+  const mobileLogoGridRef = useRef<HTMLDivElement | null>(null);
+  const desktopLogoGridRef = useRef<HTMLDivElement | null>(null);
+  const logoSlotEnabled = !loading && Boolean(images) && showImages && selectedCategory === 'logos';
+  const mobileLogoGridSlot = useImageSlot(mobileLogoGridRef, logoSlotEnabled && viewportWidth < 768);
+  const desktopLogoGridSlot = useImageSlot(desktopLogoGridRef, logoSlotEnabled && viewportWidth >= 768);
 
   // États pour le téléchargement ZIP
   const [isDownloadingZip, setIsDownloadingZip] = useState(false);
   const [zipProgress, setZipProgress] = useState(0);
   const [zipStatus, setZipStatus] = useState<'idle' | 'downloading' | 'zipping' | 'complete' | 'error'>('idle');
   const [downloadedCount, setDownloadedCount] = useState(0);
+
+  const getGalleryImageProps = (image: TMDBImage) => {
+    if (selectedCategory === 'logos') {
+      const gridSlot = viewportWidth < 768 ? mobileLogoGridSlot : desktopLogoGridSlot;
+      if (gridSlot.width <= 0) return { src: PENDING_IMAGE };
+      const columns = viewportWidth < 768 ? 1 : viewportWidth < 1024 ? 3 : 4;
+      const cardWidth = viewportWidth < 768
+        ? (viewportWidth < 640 ? 256 : 288)
+        : (gridSlot.width - 16 * (columns - 1)) / columns;
+      const horizontalPadding = viewportWidth < 768 ? 48 : 64;
+      const imageWidth = Math.max(1, cardWidth - horizontalPadding);
+      return {
+        src: getTmdbImageUrl(image.file_path, {
+          kind: 'logo',
+          quality: effectiveImageQuality,
+          width: Math.ceil(imageWidth * imageDpr),
+          role: 'card',
+        }),
+      };
+    }
+
+    return getTmdbImageProps(image.file_path, {
+      kind: selectedCategory === 'posters' ? 'poster' : 'backdrop',
+      quality: effectiveImageQuality,
+      sizes: '(max-width: 639px) 16rem, (max-width: 767px) 18rem, (max-width: 1023px) calc(22.222vw - 1.778rem), calc(16.667vw - 2.25rem)',
+      role: 'card',
+      originalWidth: image.width,
+    });
+  };
 
   // Cap initial render to ~24 images, reveal the rest on idle (Audit #15)
   const [showAllImages, setShowAllImages] = useState(false);
@@ -708,6 +785,7 @@ const ImagesSection = ({ movieId, images, loading }: { movieId: string; images: 
 
                 {/* Mobile: Ligne défilante d'images (horizontal scroll) */}
                 <motion.div
+                  ref={mobileLogoGridRef}
                   key={selectedCategory + '-mobile'}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -724,7 +802,7 @@ const ImagesSection = ({ movieId, images, loading }: { movieId: string; images: 
                     >
                       <div className={`w-full h-auto ${selectedCategory === 'logos' ? 'p-6 bg-white/5 flex items-center justify-center' : ''}`}>
                         <LazyImage
-                          src={`https://image.tmdb.org/t/p/w500${image.file_path}`}
+                          {...getGalleryImageProps(image)}
                           alt={`${selectedCategory} ${index + 1}`}
                           className="w-full h-auto object-contain"
                           onLoad={handleImageLoad}
@@ -753,6 +831,7 @@ const ImagesSection = ({ movieId, images, loading }: { movieId: string; images: 
 
                 {/* Desktop: grille d'images (grid) */}
                 <motion.div
+                  ref={desktopLogoGridRef}
                   key={selectedCategory + '-desktop'}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -770,7 +849,7 @@ const ImagesSection = ({ movieId, images, loading }: { movieId: string; images: 
                     >
                       <div className={`w-full h-auto ${selectedCategory === 'logos' ? 'p-8 bg-white/5' : ''}`}>
                         <LazyImage
-                          src={`https://image.tmdb.org/t/p/w500${image.file_path}`}
+                          {...getGalleryImageProps(image)}
                           alt={`${selectedCategory} ${index + 1}`}
                           className="w-full h-auto object-contain"
                           onLoad={handleImageLoad}
@@ -835,6 +914,9 @@ interface NextMovieType {
 
 const MovieDetails = (): JSX.Element => {
   const { t } = useTranslation();
+  const { effectiveImageQuality } = useImageQuality();
+  const { width: viewportWidth, height: viewportHeight, dpr } = useImageViewport();
+  const imageDpr = Math.min(dpr, effectiveImageQuality === 'high' ? 3 : 2);
   const { id: encodedId } = useParams<{ id: string }>();
   const id = encodedId ? getTmdbId(encodedId) : null;
   const navigate = useNavigate();
@@ -883,7 +965,7 @@ const MovieDetails = (): JSX.Element => {
   const [charactersLoading, setCharactersLoading] = useState(false);
   const [alternateTitles, setAlternateTitles] = useState<AlternateTitle[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
-  const [backdropImage, setBackdropImage] = useState<string | null>(null);
+  const [bestBackdrop, setBestBackdrop] = useState<TMDBImage | null>(null);
   const [showTrailerPopup, setShowTrailerPopup] = useState(false);
   const [isClosingTrailer, setIsClosingTrailer] = useState(false);
 
@@ -935,6 +1017,10 @@ const MovieDetails = (): JSX.Element => {
     favorite: false,
     watched: false
   });
+  // Historique serveur du film (autre appareil, lecteurs web, « Déjà vu ») :
+  // le stockage local gagne toujours, le serveur comble ce qui manque.
+  const titleHistory = useTitleHistory('movie', id);
+  const [estimateInfoOpen, setEstimateInfoOpen] = useState(false);
 
   const [showAddToList, setShowAddToList] = useState(false);
 
@@ -1316,14 +1402,14 @@ const MovieDetails = (): JSX.Element => {
 
   useEffect(() => {
     const loadWatchStatus = () => {
-      const watchlistItems = JSON.parse(localStorage.getItem('watchlist_movie') || '[]');
-      const favoriteItems = JSON.parse(localStorage.getItem('favorite_movie') || '[]');
-      const watchedItems = JSON.parse(localStorage.getItem('watched_movie') || '[]');
+      const watchlistItems = readStoredMediaList('watchlist_movie') ?? [];
+      const favoriteItems = readStoredMediaList('favorite_movie') ?? [];
+      const watchedItems = readStoredMediaList('watched_movie') ?? [];
 
       setWatchStatus({
-        watchlist: watchlistItems.some((item: any) => item.id === Number(id)),
-        favorite: favoriteItems.some((item: any) => item.id === Number(id)),
-        watched: watchedItems.some((item: any) => item.id === Number(id))
+        watchlist: watchlistItems.some((item: any) => item?.id === Number(id)),
+        favorite: favoriteItems.some((item: any) => item?.id === Number(id)),
+        watched: watchedItems.some((item: any) => item?.id === Number(id))
       });
     };
 
@@ -1343,22 +1429,24 @@ const MovieDetails = (): JSX.Element => {
       };
 
       const key = `${type}_movie`;
-      const existingItems = JSON.parse(localStorage.getItem(key) || '[]');
+      const persisted = updateStoredMediaList(key, existingItems => (
+        value
+          ? [itemToSave, ...existingItems.filter((item: any) => item?.id !== Number(id))]
+          : existingItems.filter((item: any) => item?.id !== Number(id))
+      ));
 
-      if (value) {
-        const updatedItems = [
-          itemToSave,
-          ...existingItems.filter((item: any) => item.id !== Number(id))
-        ];
-        localStorage.setItem(key, JSON.stringify(updatedItems));
-      } else {
-        const filteredItems = existingItems.filter((item: any) => item.id !== Number(id));
-        localStorage.setItem(key, JSON.stringify(filteredItems));
-      }
-
-      return newStatus;
+      return persisted ? newStatus : prev;
     });
   };
+
+  // Vu et reprise fusionnés avec le serveur. Une clé progress_ locale, même
+  // finie, gagne : le serveur ne sert que s'il n'y en a pas.
+  const watchedView = movieWatchedState(
+    watchStatus.watched,
+    id ? localProgressFinished(readLocalStorage(`progress_${id}`)) : false,
+    titleHistory,
+  );
+  const serverResume = id && !hasProgress && !readLocalStorage(`progress_${id}`) ? movieResume(null, titleHistory) : null;
 
   // Convert WatchButtons to a regular function to access parent scope variables
   function WatchButtons() {
@@ -1396,6 +1484,19 @@ const MovieDetails = (): JSX.Element => {
                   </span>
                 </div>
               </>
+            ) : serverResume ? (
+              <>
+                <Play className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" />
+                <div className="flex flex-col items-center text-center w-full min-w-0">
+                  {/* Estimé seul : le lecteur repartira du début, donc « Regarder ». */}
+                  <span>{serverResume.estimated ? t('details.watchBtn') : t('details.continueBtn')}</span>
+                  <span className="text-xs bg-red-800/80 text-white px-1.5 py-0.5 rounded font-medium mt-1">
+                    {serverResume.estimated
+                      ? t('profilePage.progress.estimated', { percent: Math.round((serverResume.position / serverResume.duration) * 100), defaultValue: '≈ {{percent}} % · estimé' })
+                      : `${formatTime(serverResume.position)}/${formatTime(serverResume.duration)}`}
+                  </span>
+                </div>
+              </>
             ) : (
               <>
                 <Play className="w-5 h-5 sm:w-6 sm:h-6 flex-shrink-0" />
@@ -1404,7 +1505,7 @@ const MovieDetails = (): JSX.Element => {
             )}
           </motion.button>
 
-          {(!ENABLE_VIP_DOWNLOAD_CHECK || localStorage.getItem('is_vip') === 'true') && (
+          {(!ENABLE_VIP_DOWNLOAD_CHECK || readLocalStorage('is_vip') === 'true') && (
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -1478,13 +1579,13 @@ const MovieDetails = (): JSX.Element => {
             whileTap={{ scale: 0.95 }}
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
             onClick={() => updateWatchStatus('watched', !watchStatus.watched)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg ${watchStatus.watched
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg ${watchedView.toggleOn
               ? 'bg-red-600 text-white'
               : 'bg-gray-800 hover:bg-gray-700'
               }`}
           >
             <motion.div
-              animate={watchStatus.watched ?
+              animate={watchedView.toggleOn ?
                 { scale: [1, 1.3, 1], rotate: [0, 0, 360] } :
                 {}
               }
@@ -1494,6 +1595,25 @@ const MovieDetails = (): JSX.Element => {
             </motion.div>
             {t('details.watchedBtn')}
           </motion.button>
+          {/* « Vu » connu du serveur seulement : indication à côté, le bouton
+              ne pose et ne retire que la marque locale. */}
+          {watchedView.serverWatched === 'estimated' && (
+            <button
+              type="button"
+              onClick={() => setEstimateInfoOpen(true)}
+              aria-haspopup="dialog"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-dashed border-white/25 px-3 text-sm text-white/75 underline decoration-dotted underline-offset-4 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+            >
+              {t('details.watchedEstimatedBtn', 'Vu (estimé)')}
+              <Info className="w-4 h-4 text-white opacity-60" aria-hidden="true" />
+            </button>
+          )}
+          {watchedView.serverWatched === 'otherDevice' && (
+            <span className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-dashed border-white/25 px-3 text-sm text-white/75">
+              <Check className="w-4 h-4 text-white opacity-60" aria-hidden="true" />
+              {t('details.watchedOtherDevice', 'Vu sur un autre appareil')}
+            </span>
+          )}
 
 
           <AddToListButton
@@ -1525,6 +1645,13 @@ const MovieDetails = (): JSX.Element => {
       releaseWarningRef.current?.focus({ preventScroll: true });
       return;
     }
+    // Reprise venue du serveur : le lecteur ne lit que progress_ local, on
+    // y recopie la position exacte (jamais un estimé de lecteur web).
+    // Relu au clic : une position locale apparue depuis le rendu gagne.
+    const seed = serverResume && !readLocalStorage(`progress_${id}`)
+      ? seedProgress(serverResume, new Date().toISOString())
+      : null;
+    if (seed) writeLocalStorage(`progress_${id}`, seed);
     // Mode cinéma toujours actif - naviguer vers la page de visionnage
     navigate(`/watch/movie/${encodeId(id)}`);
   };
@@ -1597,8 +1724,8 @@ const MovieDetails = (): JSX.Element => {
       const backdrops = response.data.backdrops;
       if (backdrops && backdrops.length > 0) {
         // Trier par résolution et choisir la meilleure
-        const bestBackdrop = backdrops.sort((a: any, b: any) => b.width - a.width)[0];
-        setBackdropImage(`https://image.tmdb.org/t/p/w1280${bestBackdrop.file_path}`);
+        const largestBackdrop = backdrops.sort((a: TMDBImage, b: TMDBImage) => b.width - a.width)[0];
+        setBestBackdrop(largestBackdrop);
       }
     } catch (error) {
       console.error('Error fetching movie images:', error);
@@ -1606,6 +1733,7 @@ const MovieDetails = (): JSX.Element => {
   };
 
   useEffect(() => {
+    setBestBackdrop(null);
     if (id) {
       fetchMovieImages();
     }
@@ -1686,7 +1814,7 @@ const MovieDetails = (): JSX.Element => {
     // Load watch progress when movie ID changes
     if (id) {
       const progressKey = `progress_${id}`;
-      const savedData = localStorage.getItem(progressKey);
+      const savedData = readLocalStorage(progressKey);
 
       if (savedData) {
         try {
@@ -1759,6 +1887,34 @@ const MovieDetails = (): JSX.Element => {
     ? `https://image.tmdb.org/t/p/original${movie.backdrop_path || movie.poster_path}`
     : undefined;
   const movieDescription = movie.overview?.trim() || `Découvrez ${movie.title} sur Movix.`;
+  const posterCssWidth = viewportWidth < 768
+    ? viewportWidth - 32
+    : viewportWidth < 1024
+      ? (viewportWidth - 128) / 3
+      : (viewportWidth - 192) / 3;
+  const mainPosterUrl = getTmdbImageUrl(movie.poster_path, {
+    kind: 'poster',
+    quality: effectiveImageQuality,
+    width: Math.ceil(Math.max(1, posterCssWidth) * imageDpr),
+    role: 'detail',
+    fallback: DEFAULT_IMAGE,
+  });
+  const backdropImage = bestBackdrop
+    ? getTmdbImageUrl(bestBackdrop.file_path, {
+      kind: 'backdrop',
+      quality: effectiveImageQuality,
+      width: getCoverImageWidth(viewportWidth, viewportHeight, bestBackdrop.aspect_ratio, imageDpr),
+      role: 'background',
+    })
+    : null;
+  const playerBackdropImage = movie.backdrop_path
+    ? getTmdbImageUrl(movie.backdrop_path, {
+      kind: 'backdrop',
+      quality: effectiveImageQuality,
+      width: getCoverImageWidth(viewportWidth, 500, 16 / 9, imageDpr),
+      role: 'hero',
+    })
+    : null;
 
   return (
     <MotionConfig reducedMotion="user">
@@ -1967,15 +2123,15 @@ const MovieDetails = (): JSX.Element => {
           {movieReleaseWarningsEnabled && (
             <>
               <div className="mt-3 flex flex-wrap items-start gap-2 text-sm font-medium">
-                <span className={`max-w-full px-2 py-1 rounded-md ${movieReleases.homeVideo && isMovieReleaseDatePending(movieReleases.homeVideo.date, releaseNow) ? 'bg-yellow-800 text-yellow-50' : 'bg-gray-800 text-gray-100'}`}>
+                <span data-halloween-frame="orange" className={`max-w-full px-2 py-1 rounded-md ${movieReleases.homeVideo && isMovieReleaseDatePending(movieReleases.homeVideo.date, releaseNow) ? 'bg-yellow-800 text-yellow-50' : 'bg-gray-800 text-gray-100'}`}>
                   {getMovieReleaseLabel(movieReleases.homeVideo, 'homeVideo', t, i18n.language, releaseNow)}
                 </span>
                 {movieReleases.theatrical ? (
-                  <span className="max-w-full px-2 py-1 rounded-md bg-gray-800 text-gray-100">
+                  <span data-halloween-frame="green" className="max-w-full px-2 py-1 rounded-md bg-gray-800 text-gray-100">
                     {getMovieReleaseLabel(movieReleases.theatrical, 'theatrical', t, i18n.language, releaseNow)}
                   </span>
                 ) : movieReleases.referenceDate && (
-                  <span className="max-w-full px-2 py-1 rounded-md bg-gray-800 text-gray-100">
+                  <span data-halloween-frame="green" className="max-w-full px-2 py-1 rounded-md bg-gray-800 text-gray-100">
                     {t('details.movieRelease.announcedDate', { date: formatMovieReleaseDate(movieReleases.referenceDate, i18n.language) })}
                   </span>
                 )}
@@ -1996,7 +2152,7 @@ const MovieDetails = (): JSX.Element => {
             <motion.img
               whileHover={{ scale: 1.03 }}
               transition={{ type: "spring", stiffness: 300, damping: 10 }}
-              src={movie.poster_path ? `https://image.tmdb.org/t/p/original${movie.poster_path}` : DEFAULT_IMAGE}
+              src={mainPosterUrl}
               alt={movie.title}
               className="w-full rounded-lg shadow-lg"
             />
@@ -2004,6 +2160,7 @@ const MovieDetails = (): JSX.Element => {
             {/* Boutons d'action en-dessous du poster */}
             <div className="mt-6">
               <WatchButtons />
+              <EstimateInfoDialog open={estimateInfoOpen} onOpenChange={setEstimateInfoOpen} />
             </div>
           </motion.div>
 
@@ -2247,7 +2404,7 @@ const MovieDetails = (): JSX.Element => {
                     </div>
 
                     {/* TMDB Info Box */}
-                    <div className="mb-6 p-4 border border-red-500/50 bg-red-500/10 rounded-lg flex gap-3 items-start">
+                    <div data-halloween-parchment className="mb-6 p-4 border border-red-500/50 bg-red-500/10 rounded-lg flex gap-3 items-start">
                       <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
                       <div className="text-sm text-gray-300">
                         <p>
@@ -2397,7 +2554,12 @@ const MovieDetails = (): JSX.Element => {
                       >
                         {actor.profile_path ? (
                           <motion.img
-                            src={`https://image.tmdb.org/t/p/original${actor.profile_path}`}
+                            src={getTmdbImageUrl(actor.profile_path, {
+                              kind: 'profile',
+                              quality: effectiveImageQuality,
+                              width: Math.ceil(48 * imageDpr),
+                              role: 'card',
+                            })}
                             alt={actor.name}
                             className="w-12 h-12 rounded-full object-cover"
                             whileHover={{ scale: 1.1 }}
@@ -2455,7 +2617,12 @@ const MovieDetails = (): JSX.Element => {
                       >
                         {member.profile_path ? (
                           <motion.img
-                            src={`https://image.tmdb.org/t/p/original${member.profile_path}`}
+                            src={getTmdbImageUrl(member.profile_path, {
+                              kind: 'profile',
+                              quality: effectiveImageQuality,
+                              width: Math.ceil(48 * imageDpr),
+                              role: 'card',
+                            })}
                             alt={member.name}
                             className="w-12 h-12 rounded-full object-cover"
                             whileHover={{ scale: 1.1 }}
@@ -2539,7 +2706,12 @@ const MovieDetails = (): JSX.Element => {
                             >
                               {company.logo_path ? (
                                 <img
-                                  src={`https://image.tmdb.org/t/p/original${company.logo_path}`}
+                                  src={getTmdbImageUrl(company.logo_path, {
+                                    kind: 'logo',
+                                    quality: effectiveImageQuality,
+                                    width: Math.ceil(40 * imageDpr),
+                                    role: 'card',
+                                  })}
                                   alt={company.name}
                                   className="max-h-10 max-w-10"
                                 />
@@ -3183,12 +3355,19 @@ const MovieDetails = (): JSX.Element => {
                                 <div className="poster-card">
                                   {/* Poster image */}
                                   <img
-                                    src={part.poster_path ? `https://image.tmdb.org/t/p/original${part.poster_path}` : DEFAULT_IMAGE}
+                                    {...getTmdbImageProps(part.poster_path, {
+                                      kind: 'poster',
+                                      quality: effectiveImageQuality,
+                                      sizes: '(max-width: 639px) calc(50vw - 2.5rem), (max-width: 767px) calc(33.333vw - 2rem), (max-width: 1023px) calc(16.667vw - 2.583rem), calc(13.333vw - 2.8rem)',
+                                      role: 'card',
+                                      fallback: DEFAULT_IMAGE,
+                                    })}
                                     alt={part.title}
                                     className="w-full h-auto object-cover rounded-lg poster"
                                     onError={(e) => {
                                       const target = e.target as HTMLImageElement;
                                       target.onerror = null;
+                                      target.removeAttribute('srcset');
                                       target.src = 'data:image/svg+xml;utf8,<svg width="500" height="750" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 750" preserveAspectRatio="xMidYMid meet"><rect width="100%" height="100%" fill="%23333"/><text x="50%" y="50%" fill="%23ccc" font-size="50" font-family="Arial, sans-serif" text-anchor="middle" dy=".3em">MOVIX</text></svg>';
                                     }}
                                   />
@@ -3198,12 +3377,19 @@ const MovieDetails = (): JSX.Element => {
                                     {/* Top section: landscape image */}
                                     <div className="w-full h-24 md:h-28 relative">
                                       <img
-                                        src={part.poster_path ? `https://image.tmdb.org/t/p/original${part.poster_path}` : DEFAULT_IMAGE}
+                                        {...getTmdbImageProps(part.poster_path, {
+                                          kind: 'poster',
+                                          quality: effectiveImageQuality,
+                                          sizes: '(max-width: 639px) calc(50vw - 2.5rem), (max-width: 767px) calc(33.333vw - 2rem), (max-width: 1023px) calc(16.667vw - 2.583rem), calc(13.333vw - 2.8rem)',
+                                          role: 'card',
+                                          fallback: DEFAULT_IMAGE,
+                                        })}
                                         alt={part.title}
                                         className="w-full h-full object-cover"
                                         onError={(e) => {
                                           const target = e.target as HTMLImageElement;
                                           target.onerror = null;
+                                          target.removeAttribute('srcset');
                                           target.src = 'data:image/svg+xml;utf8,<svg width="500" height="281" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 281" preserveAspectRatio="xMidYMid meet"><rect width="100%" height="100%" fill="%23333"/><text x="50%" y="50%" fill="%23ccc" font-size="30" font-family="Arial, sans-serif" text-anchor="middle" dy=".3em">MOVIX</text></svg>';
                                         }}
                                       />
@@ -3217,17 +3403,23 @@ const MovieDetails = (): JSX.Element => {
                                             e.stopPropagation();
                                             // Watchlist logic
                                             const storageKey = 'watchlist_movie';
-                                            const typeWatchlist = JSON.parse(localStorage.getItem(storageKey) || '[]');
-                                            const exists = typeWatchlist.some((media: any) => media.id === part.id);
-                                            if (!exists) {
-                                              typeWatchlist.push({
+                                            let existed = false;
+                                            const persisted = updateStoredMediaList(storageKey, typeWatchlist => {
+                                              existed = typeWatchlist.some((media: any) => media?.id === part.id);
+                                              if (existed) {
+                                                return typeWatchlist.filter((media: any) => media?.id !== part.id);
+                                              }
+                                              return [...typeWatchlist, {
                                                 id: part.id,
                                                 type: 'movie',
                                                 title: part.title,
                                                 poster_path: part.poster_path,
                                                 addedAt: new Date().toISOString()
-                                              });
-                                              localStorage.setItem(storageKey, JSON.stringify(typeWatchlist));
+                                              }];
+                                            });
+                                            if (!persisted) return;
+
+                                            if (!existed) {
                                               // Notification
                                               const notification = document.createElement('div');
                                               notification.className = 'fixed top-16 right-4 bg-green-500 text-white py-2 px-4 rounded shadow-lg z-50 animate-fadeIn';
@@ -3244,8 +3436,6 @@ const MovieDetails = (): JSX.Element => {
                                                 }, 500);
                                               }, 1500);
                                             } else {
-                                              const updatedTypeWatchlist = typeWatchlist.filter((media: any) => media.id !== part.id);
-                                              localStorage.setItem(storageKey, JSON.stringify(updatedTypeWatchlist));
                                               // Update button
                                               const button = e.currentTarget;
                                               button.querySelector('svg')?.classList.remove('text-yellow-400');
@@ -3268,22 +3458,22 @@ const MovieDetails = (): JSX.Element => {
                                           <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 bg-black text-white text-xs py-1 px-2 rounded opacity-0 group-hover/watchlist:opacity-100 transition-opacity whitespace-nowrap hidden md:block">
                                             {(() => {
                                               const storageKey = 'watchlist_movie';
-                                              const typeWatchlist = JSON.parse(localStorage.getItem(storageKey) || '[]');
-                                              const exists = typeWatchlist.some((media: any) => media.id === part.id);
+                                              const typeWatchlist = readStoredMediaList(storageKey) ?? [];
+                                              const exists = typeWatchlist.some((media: any) => media?.id === part.id);
                                               return exists ? t('search.removeFromWatchlist') : t('search.addToWatchlist');
                                             })()}
                                           </div>
                                           <Star
                                             className={`w-4 h-4 ${(() => {
                                               const storageKey = 'watchlist_movie';
-                                              const typeWatchlist = JSON.parse(localStorage.getItem(storageKey) || '[]');
-                                              const exists = typeWatchlist.some((media: any) => media.id === part.id);
+                                              const typeWatchlist = readStoredMediaList(storageKey) ?? [];
+                                              const exists = typeWatchlist.some((media: any) => media?.id === part.id);
                                               return exists ? 'text-yellow-400' : 'text-black';
                                             })()}`}
                                             fill={(() => {
                                               const storageKey = 'watchlist_movie';
-                                              const typeWatchlist = JSON.parse(localStorage.getItem(storageKey) || '[]');
-                                              const exists = typeWatchlist.some((media: any) => media.id === part.id);
+                                              const typeWatchlist = readStoredMediaList(storageKey) ?? [];
+                                              const exists = typeWatchlist.some((media: any) => media?.id === part.id);
                                               return exists ? 'currentColor' : 'black';
                                             })()}
                                           />
@@ -3433,8 +3623,8 @@ const MovieDetails = (): JSX.Element => {
               <motion.div
                 className="h-[500px] flex flex-col items-center justify-center bg-gradient-to-b from-black/40 to-black/80 rounded-lg p-6"
                 style={{
-                  backgroundImage: movie?.backdrop_path
-                    ? `linear-gradient(to bottom, rgba(0,0,0,0.6), rgba(0,0,0,0.8)), url(https://image.tmdb.org/t/p/original${movie.backdrop_path})`
+                  backgroundImage: playerBackdropImage
+                    ? `linear-gradient(to bottom, rgba(0,0,0,0.6), rgba(0,0,0,0.8)), url(${playerBackdropImage})`
                     : undefined,
                   backgroundSize: 'cover',
                   backgroundPosition: 'center',

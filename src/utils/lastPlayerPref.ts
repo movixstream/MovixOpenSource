@@ -14,6 +14,9 @@ import { TOP_LEVEL_SOURCE_IDS, type TopLevelSourceId } from '../types/sourcePrio
 // / `movix_last_player` étaient silencieusement filtrés par le client.
 const TOGGLE_KEY = 'playerRememberLast';
 const VALUE_KEY = 'playerLastId';
+// Lecteur précis choisi DANS la source (Lulu, Vidara… dans « Lecteur Movix »).
+// Sans lui, seule la source est reprise et le tri hoster remet son n°1 en tête.
+const HOSTER_KEY = 'playerLastHoster';
 const CHANGE_EVENT = 'movix-last-player-changed';
 
 const VALID_IDS = new Set<string>(TOP_LEVEL_SOURCE_IDS);
@@ -51,14 +54,30 @@ export function getLastPlayer(): TopLevelSourceId | null {
   }
 }
 
+/** Clé du lecteur précis choisi dans la dernière source (voir `hosterKeyOf`). */
+export function getLastHoster(): string | null {
+  try {
+    return localStorage.getItem(HOSTER_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Enregistre l'id si c'est un `TopLevelSourceId` valide. No-op sinon (laisse
  * le caller relayer n'importe quel string sans craindre de polluer le storage).
+ * `hoster` mémorise le lecteur précis dans la source ; absent = on l'oublie,
+ * pour ne pas réappliquer un lecteur d'une autre source.
  */
-export function setLastPlayer(id: string): void {
+export function setLastPlayer(id: string, hoster?: string | null): void {
+  // `nexus_file` est retiré de l'UI de priorité : ses fichiers sont triés
+  // avec ceux de `nexus_hls`, sous la même entrée « Lecteur Movix ».
+  if (id === 'nexus_file') id = 'nexus_hls';
   if (!id || !VALID_IDS.has(id)) return;
   try {
     localStorage.setItem(VALUE_KEY, id);
+    if (hoster) localStorage.setItem(HOSTER_KEY, hoster);
+    else localStorage.removeItem(HOSTER_KEY);
     window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
   } catch {
     /* noop */
@@ -69,7 +88,7 @@ export function setLastPlayer(id: string): void {
 export function subscribeToLastPlayerChanges(cb: () => void): () => void {
   const handler = () => cb();
   const storageHandler = (e: StorageEvent) => {
-    if (e.key === TOGGLE_KEY || e.key === VALUE_KEY) cb();
+    if (e.key === TOGGLE_KEY || e.key === VALUE_KEY || e.key === HOSTER_KEY) cb();
   };
   window.addEventListener(CHANGE_EVENT, handler);
   window.addEventListener('storage', storageHandler);

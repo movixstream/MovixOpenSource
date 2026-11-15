@@ -19,7 +19,7 @@ const LOCK_MAX_RETRIES = 50; // 50 × 100ms = 5s max d'attente
  * Acquiert un verrou distribué Redis sur une clé donnée.
  * @param {string} resourceKey - Identifiant unique de la ressource (ex: chemin de fichier)
  * @param {object} opts - Options : ttl (sec), retries, retryDelay (ms)
- * @returns {Promise<{release: Function}|null>} - Objet avec release(), ou null si échec
+ * @returns {Promise<{release: Function, renew: Function}|null>} - Bail renouvelable, ou null si échec
  */
 async function acquireRedisLock(resourceKey, opts = {}) {
   if (isShuttingDown()) return null;
@@ -37,6 +37,12 @@ async function acquireRedisLock(resourceKey, opts = {}) {
       if (result === 'OK') {
         // Verrou acquis — retourner une fonction release sécurisée
         return {
+          renew: async () => {
+            try {
+              return await redis.eval('if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("expire", KEYS[1], ARGV[2]) else return 0 end',
+                1, lockKey, lockValue, ttl) === 1;
+            } catch { return false; }
+          },
           release: async () => {
             try {
               // Script Lua atomique : ne supprime que si la valeur correspond (évite de libérer le lock d'un autre process)

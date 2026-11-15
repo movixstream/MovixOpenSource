@@ -46,7 +46,7 @@ app/
 
 - Node.js 18+
 - React Native CLI (`npm install -g @react-native-community/cli`)
-- **Android** : Android Studio, JDK 17, Android SDK 35
+- **Android** : Android Studio, JDK 17, Android SDK 35, NDK 26.1 et CMake 3.22 (le build télécharge [libcurl-impersonate](https://github.com/lexiforest/curl-impersonate), utilisée par le proxy média)
 - **iOS** : Xcode 15+, CocoaPods (`gem install cocoapods`)
 
 ## Installation
@@ -140,9 +140,11 @@ Différence importante : Scarlet signe avec un **certificat d'entreprise partag�
 
 ### Android
 - Utilise `VpnService` pour créer un VPN local
-- Seules les requêtes DNS sont redirigées vers 1.1.1.1
+- Seul un serveur DNS virtuel (`10.215.173.2`) est routé dans le tunnel : le reste du trafic n'y passe pas
+- Les requêtes DNS partent chiffrées en DNS-over-HTTPS vers `https://1.1.1.1/dns-query` (puis `1.0.0.1`) ; l'UDP port 53 en clair ne sert qu'en dernier recours, si le HTTPS échoue (pause DoH de 30 s)
 - Aucune donnée ne transite par un serveur tiers
 - L'utilisateur doit approuver la connexion VPN
+- Au démarrage, l'app attend que le tunnel soit monté (6 s max) avant de charger Movix : le changement de réseau coupait sinon les premières requêtes
 
 ### iOS
 - Utilise `NEDNSSettingsManager` (iOS 14+)
@@ -164,5 +166,5 @@ Puis rebuild l'app.
 
 - Le `DnsPackage.kt` doit être enregistré dans `MainApplication.kt` (ajouté au `getPackages()`)
 - Pour iOS, le bridging header doit pointer vers `Movix-Bridging-Header.h`
-- L'app exclut son propre trafic du VPN DNS pour éviter les boucles
+- L'app reste dans le VPN DNS (sinon le WebView contournerait le DNS) ; ses propres sockets vers Cloudflare sont protégées par `protect()` pour éviter les boucles
 - Le mode audio en arrière-plan est activé pour la lecture vidéo continue

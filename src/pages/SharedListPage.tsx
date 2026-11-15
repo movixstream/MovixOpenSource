@@ -24,6 +24,7 @@ import {
   type SharedListFavorite,
 } from '../utils/sharedListFavorites';
 import { getOverlayPortalRoot } from '@/utils/overlayPortal';
+import { copyText } from '@/utils/clipboard';
 
 const API_URL = import.meta.env.VITE_MAIN_API;
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
@@ -273,7 +274,8 @@ const SharedListPage: React.FC = () => {
 
   const handleCopyLink = () => {
     const url = window.location.href;
-    navigator.clipboard.writeText(url).then(() => {
+    void copyText(url).then((copied) => {
+      if (!copied) return;
       toast.success(t('common.linkCopied'));
     });
   };
@@ -414,8 +416,8 @@ const SharedListPage: React.FC = () => {
     return (
       <SquareBackground squareSize={48} borderColor="rgba(168, 85, 247, 0.12)" className="min-h-screen bg-black text-white">
         <div className="container mx-auto px-4 sm:px-6 py-8 sm:py-12 relative z-10">
-          <Link to="/" className="inline-flex items-center text-white/50 hover:text-white transition-colors mb-8">
-            <ArrowLeft className="w-5 h-5 mr-2" />
+          <Link to="/" className="inline-flex items-center text-white/50 hover:text-white transition-colors mb-8 group/icon">
+            <ArrowLeft className="w-5 h-5 mr-2 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
             {t('common.backToHome')}
           </Link>
           <div className="max-w-2xl mx-auto text-center mt-20">
@@ -453,8 +455,8 @@ const SharedListPage: React.FC = () => {
     <SquareBackground squareSize={48} borderColor="rgba(168, 85, 247, 0.12)" className="min-h-screen bg-black text-white">
       <div className="container mx-auto px-4 sm:px-6 py-8 sm:py-12 relative z-10">
         {/* Back Button */}
-        <Link to="/" className="inline-flex items-center text-white/50 hover:text-white transition-colors mb-8">
-          <ArrowLeft className="w-5 h-5 mr-2" />
+        <Link to="/" className="inline-flex items-center text-white/50 hover:text-white transition-colors mb-8 group/icon">
+          <ArrowLeft className="w-5 h-5 mr-2 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
           {t('common.backToHome')}
         </Link>
 
@@ -555,9 +557,9 @@ const SharedListPage: React.FC = () => {
             )}
             <button
               onClick={handleCopyLink}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-white/10 hover:border-purple-500/40 hover:bg-purple-500/10 transition-all text-sm text-white/60 hover:text-white"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-white/10 hover:border-purple-500/40 hover:bg-purple-500/10 transition-all text-sm text-white/60 hover:text-white group/icon"
             >
-              <Copy className="w-4 h-4" />
+              <Copy className="w-4 h-4 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity]" />
               <span>{t('common.copyLink')}</span>
             </button>
             {shareCode && (
@@ -567,15 +569,15 @@ const SharedListPage: React.FC = () => {
             {isAuthenticated && !reported && (
               <button
                 onClick={() => setReportModal(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-white/10 hover:border-orange-500/40 hover:bg-orange-500/10 transition-all text-sm text-white/60 hover:text-orange-400"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-white/10 hover:border-orange-500/40 hover:bg-orange-500/10 transition-all text-sm text-white/60 hover:text-orange-400 group/icon"
               >
-                <Flag className="w-4 h-4" />
+                <Flag className="w-4 h-4 text-white opacity-60 group-hover/icon:text-orange-400 group-hover/icon:opacity-100 transition-[color,opacity]" />
                 <span>{t('comments.report', 'Signaler')}</span>
               </button>
             )}
             {reported && (
               <span className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-500/10 border border-orange-500/20 text-sm text-orange-400/70">
-                <Flag className="w-4 h-4" />
+                <Flag className="w-4 h-4 text-orange-400 opacity-70" />
                 <span>{t('comments.reported', 'Signalé')}</span>
               </span>
             )}

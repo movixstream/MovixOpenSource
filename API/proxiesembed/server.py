@@ -45,6 +45,7 @@ from dotenv import load_dotenv
 from uqload_utils import (
     decode_packed_script_from_html,
     extract_uqload_media_url,
+    extract_uqload_subtitles,
     get_uqload_site_origin,
     normalize_uqload_embed_url,
     parse_allowed_uqload_url,
@@ -885,16 +886,58 @@ PROBLEMATIC_DOMAINS = frozenset([
     '1396168994.live', 'vuunov.1396168994.live'
 ])
 
-# Fsvid/Vidzy gate their HLS CDN on Referer + the presence of Sec-Ch-Ua.
-# A request missing either one is answered with a 302 to their decoy stream
-# (s1.fsvid.lol/troll/master.m3u8) on fsvid, or a bare 403 on vidzy.
-FSVID_VIDZY_SEC_CH_UA = '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"'
+# Fsvid/Vidzy servent un flux leurre (« vidéo troll ») au client qu'ils jugent
+# illégitime : jadis une 302 vers s1.fsvid.lol/troll/master.m3u8, désormais
+# aussi une playlist 200 servie à l'URL réelle, de neuf segments `/e/segN.ts`.
+# Vidzy répond en plus 403 à une empreinte TLS non navigateur (d'où curl_cffi).
+FSVID_VIDZY_SEC_CH_UA = '"Chromium";v="142", "Not=A?Brand";v="24", "Google Chrome";v="142"'
 
-# Le CDN Vidzy refuse l'absence du token zstd dans Accept-Encoding (403).
-# q=0 conserve les tokens du navigateur tout en demandant un corps identity :
+# Uqload : q=0 conserve les tokens du navigateur tout en demandant un corps
+# identity (surtout pas pour Fsvid/Vidzy, voir plus bas) :
 # aiohttp 3.11 ne décode pas zstd, et les plages MP4 doivent rester inchangées.
 # Réservé aux médias : les pages d'extraction renvoient du zstd même avec q=0.
 PROVIDER_MEDIA_ACCEPT_ENCODING = 'identity, gzip;q=0, deflate;q=0, br;q=0, zstd;q=0'
+
+# Fsvid/Vidzy : refuser explicitement gzip (`gzip;q=0`) suffit à recevoir le
+# leurre `/e/segN.ts` à la place du vrai master (mesuré le 2026-10-15 sur
+# s1.fsvid.lol et v6/u14.vidzy.cc). `identity` seul donne le vrai flux, non
+# compressé, playlists comme plages de segments. Le 403 qui avait motivé le
+# token zstd venait de l'empreinte TLS, pas de cet en-tête.
+#
+# Depuis le 2026-10-26 au soir, c'est l'inverse : le CDN sert son faux master
+# statique (variante qui renvoie le master lui-même) à tout Accept-Encoding
+# autre que celui de Chrome, `identity` compris. Seule la valeur exacte de
+# Chrome passe. Le CDN répond alors en gzip pour les playlists (décodé par
+# curl_cffi comme par aiohttp, puis réécrit avec sa nouvelle longueur) et sans
+# compression pour les segments.
+FSVID_VIDZY_MEDIA_ACCEPT_ENCODING = 'gzip, deflate, br, zstd'
+_FSVID_VIDZY_DECOY_PATH = re.compile(r'^/e/seg\d+\.ts$', re.IGNORECASE)
+
+
+def is_fsvid_vidzy_decoy_url(url: str) -> bool:
+    """Vrai pour une URL du flux leurre Fsvid/Vidzy (`/troll/…` ou `/e/segN.ts`)."""
+    try:
+        parsed = urlparse(str(url or ''))
+    except ValueError:
+        return False
+    hostname = (parsed.hostname or '').lower().rstrip('.')
+    if not any(
+        hostname == suffix or hostname.endswith(f'.{suffix}')
+        for suffix in ('fsvid.lol', 'vidzy.cc', 'vidzy.org')
+    ):
+        return False
+    path = parsed.path.lower()
+    return 'troll' in path.split('/') or bool(_FSVID_VIDZY_DECOY_PATH.match(path))
+
+
+def is_fsvid_vidzy_decoy_playlist(text: str, base_url: str) -> bool:
+    """Vrai si une playlist Fsvid/Vidzy ne référence que le flux leurre."""
+    uris = [
+        urljoin(base_url, line.strip())
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith('#')
+    ]
+    return bool(uris) and all(is_fsvid_vidzy_decoy_url(uri) for uri in uris)
 
 # Un vrai Chrome n'émet jamais Sec-Ch-Ua seul : les trois indices client
 # partent ensemble, avec un User-Agent dont la version majeure correspond à
@@ -904,9 +947,16 @@ PROVIDER_MEDIA_ACCEPT_ENCODING = 'identity, gzip;q=0, deflate;q=0, br;q=0, zstd;
 # une signature qu'aucun navigateur ne produit. L'extraction et le relais
 # partagent désormais le même jeu, pour que la page d'embed et le CDN voient un
 # client identique.
+#
+# Depuis le 2026-10-26, le CDN sert un faux master statique (sa variante
+# `index.m3u8` renvoie le master lui-même, le lecteur tourne en rond) à cette
+# chaîne exacte en Chrome 140 Windows : Chrome 139, 141 ou 142 passent, comme
+# 140 sous Android. On annonce donc Chrome 142, la version que curl_cffi imite
+# en TLS (`impersonate='chrome'`). Prochaine coupure : essayer d'abord une
+# autre version de l'User-Agent sur le master.
 FSVID_VIDZY_USER_AGENT = (
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-    '(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
+    '(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
 )
 FSVID_VIDZY_CLIENT_HINTS = {
     'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -915,6 +965,33 @@ FSVID_VIDZY_CLIENT_HINTS = {
     'Sec-Ch-Ua-Platform': '"Windows"',
     'User-Agent': FSVID_VIDZY_USER_AGENT,
 }
+
+# Sans clé `gk`, le CDN Fsvid/Vidzy ne sert que les 9 à 19 premiers segments
+# (selon le serveur), puis répond 403 (mesuré le 2026-10-23). Leur lecteur
+# demande cette clé à une « porte » (gate.php chez Vidzy, /gk chez Fsvid) avec
+# une empreinte du navigateur, puis l'ajoute au master ; le CDN la recopie
+# ensuite dans les URLs des variantes et des segments. La clé ne dépend ni de
+# l'IP (le relais SOCKS tiré au hasard la garde) ni de la vidéo, et les deux
+# hébergeurs partagent la même. La porte refuse (`{"ok":0}`) une empreinte
+# sans canvas : on envoie les largeurs que mesure Chrome sous Windows, comme
+# l'User-Agent ci-dessus. Même logique dans extension/*/extractors.js et
+# userscript/movix.user.js.
+FSVID_VIDZY_GATE_URLS = {
+    'vidzy': 'https://v6.vidzy.cc/gate.php',
+    'fsvid': 'https://fsvid.lol/gk',
+}
+FSVID_VIDZY_GATE_QUERY = urllib.parse.urlencode([
+    ('v', 'p1'), ('cw', '159.56'), ('cw2', '170.34'), ('wg', '1'), ('dpr', '1'),
+    ('sw', '1920'), ('hw', '8'), ('ft', 'TOP'), ('rf', ''),
+])
+FSVID_VIDZY_GATE_MAX_AGE = 6 * 3600
+FSVID_VIDZY_GATE_RETRY_AFTER = 60
+_FSVID_VIDZY_GATE_KEY = re.compile(r'[A-Za-z0-9_.-]{16,512}')
+_FSVID_VIDZY_INLINE_GATE = re.compile(
+    r'fetch\(\s*[\'"](https://[a-z0-9.-]+/gate\.php)\?',
+    re.IGNORECASE,
+)
+_FSVID_VIDZY_HAS_GATE_KEY = re.compile(r'[?&]gk=')
 
 # AES decryption constants for seekstreaming (embed4me)
 SEEKSTREAMING_AES_KEY = b"kiemtienmua911ca"
@@ -1226,25 +1303,53 @@ class _CurlResponseAdapter:
         return self.content._body
 
 
+# Services dont le CDN filtre l'empreinte TLS : le client Python (aiohttp,
+# requests) y prend 403 sur le master, les variantes et les segments, quels
+# que soient les en-têtes, alors que curl et curl_cffi passent. Constaté
+# sur vidzy (u*.vidzy.cc) le 2026-10-07.
+CURL_CFFI_SERVICES = frozenset({'cinep', 'vidzy'})
+
+
+def _socks5_proxy_url_for_session(session_key: str) -> Optional[str]:
+    """URL SOCKS5 derrière une session `proxy_N`, None pour les autres."""
+    match = re.fullmatch(r'proxy_(\d+)', session_key or '')
+    if not match:
+        return None
+    index = int(match.group(1))
+    return _build_socks5_proxy_url(PROXIES[index]) if index < len(PROXIES) else None
+
+
 class _CurlCffiUpstream:
     """Async context manager: curl_cffi request with JA3 impersonation.
-    Retries once through a random SOCKS5 proxy if the direct attempt is a 403."""
-    __slots__ = ('_session', '_url', '_headers', '_timeout_s', '_service_name')
+    The first attempt goes through `proxy_url` when given (direct otherwise);
+    a 403 is retried once through another random SOCKS5 proxy."""
+    __slots__ = ('_session', '_url', '_headers', '_timeout_s', '_service_name', '_proxy_url')
 
-    def __init__(self, session, url: str, headers: Dict, timeout_s: float, service_name: str):
+    def __init__(self, session, url: str, headers: Dict, timeout_s: float, service_name: str,
+                 proxy_url: Optional[str] = None):
         self._session = session
         self._url = url
         self._headers = headers
         self._timeout_s = timeout_s
         self._service_name = service_name
+        self._proxy_url = proxy_url
 
     async def __aenter__(self):
+        first_proxies = (
+            {'http': self._proxy_url, 'https': self._proxy_url}
+            if self._proxy_url else None
+        )
         resp = await self._session.get(
             self._url, headers=self._headers, timeout=self._timeout_s,
             impersonate='chrome', allow_redirects=False,
+            proxies=first_proxies,
         )
         if resp.status_code == 403 and PROXIES:
-            proxy_url = _build_socks5_proxy_url(random.choice(PROXIES))
+            candidates = [
+                url for url in (_build_socks5_proxy_url(proxy) for proxy in PROXIES)
+                if url and url != self._proxy_url
+            ]
+            proxy_url = random.choice(candidates) if candidates else None
             if proxy_url:
                 logger.warning(f'[{self._service_name.upper()}-PROXY] 403 direct â€” retrying via {_redact_proxy_url(proxy_url)}')
                 try:
@@ -1336,6 +1441,9 @@ class ProxyServer:
         # court, sinon on ressert une URL déjà morte.
         self.vidara_cache = TTLCache(maxsize=500, ttl=900)
         self.seekstreaming_cache = TTLCache(maxsize=500, ttl=300)
+        # Clé `gk` commune à Fsvid et Vidzy : (valeur ou None, échéance monotonic).
+        self._fsvid_vidzy_gate_key_entry: Optional[tuple] = None
+        self._fsvid_vidzy_gate_lock = asyncio.Lock()
         self.vip_cache = TTLCache(maxsize=5000, ttl=VIP_CACHE_TTL)  # VIP access key verification cache
         self.m3u8_response_cache = TTLCache(maxsize=2000, ttl=M3U8_CACHE_TTL)  # Short-lived M3U8 response cache
         self.m3u8_vod_cache = TTLCache(maxsize=1000, ttl=M3U8_VOD_CACHE_TTL)   # Longer-lived VOD M3U8 cache
@@ -1965,14 +2073,30 @@ class ProxyServer:
         if password:
             form_data.add_field('pass', password)
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                'https://www.deepbrid.com/api/v1/generate/link',
-                headers=headers,
-                data=form_data,
-                timeout=ClientTimeout(total=30)
-            ) as resp:
-                result = await resp.json(content_type=None)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    'https://www.deepbrid.com/api/v1/generate/link',
+                    headers=headers,
+                    data=form_data,
+                    timeout=ClientTimeout(total=30)
+                ) as resp:
+                    status_code = resp.status
+                    raw_text = (await resp.text()).strip()
+        except aiohttp.ClientError as e:
+            logger.warning(f'[DEBRID][DEEPBRID] Network error: {e}')
+            return web.json_response({'status': 'error', 'error': 'Deepbrid est injoignable pour le moment, réessaie plus tard.'}, status=502)
+
+        try:
+            result = json.loads(raw_text) if raw_text else None
+        except ValueError:
+            result = None
+
+        # Deepbrid passe par Cloudflare : quand son serveur tombe, on reçoit une
+        # page texte (« error code: 522 ») au lieu du JSON attendu.
+        if not isinstance(result, dict):
+            logger.warning(f'[DEBRID][DEEPBRID] Non-JSON response (HTTP {status_code}): {raw_text[:120]!r}')
+            return web.json_response({'status': 'error', 'error': f'Deepbrid ne répond pas (HTTP {status_code}), réessaie plus tard.'}, status=502)
 
         if result.get('error') == 0 and result.get('link'):
             return web.json_response({
@@ -2406,7 +2530,7 @@ class ProxyServer:
 
 
         except asyncio.TimeoutError:
-            return web.json_response({'status': 'error', 'error': 'Timeout lors du dÃ©bridage'}, status=504)
+            return web.json_response({'status': 'error', 'error': 'Timeout lors du débridage'}, status=504)
         except Exception as e:
             logger.error(f'[DEBRID] Error unlocking link: {e}')
             return web.json_response({'status': 'error', 'error': 'Erreur interne du serveur'}, status=500)
@@ -3387,7 +3511,7 @@ class ProxyServer:
         if self.RE_FSVID.search(target_url):
             return {
                 'Accept': 'application/vnd.apple.mpegurl,*/*',
-                'Accept-Encoding': PROVIDER_MEDIA_ACCEPT_ENCODING,
+                'Accept-Encoding': FSVID_VIDZY_MEDIA_ACCEPT_ENCODING,
                 'Host': target_host,
                 'Origin': 'https://fsvid.lol',
                 'Referer': 'https://fsvid.lol/',
@@ -3414,7 +3538,7 @@ class ProxyServer:
         if self.RE_VIDZY.search(target_url):
             return {
                 'Accept': 'application/vnd.apple.mpegurl,*/*',
-                'Accept-Encoding': PROVIDER_MEDIA_ACCEPT_ENCODING,
+                'Accept-Encoding': FSVID_VIDZY_MEDIA_ACCEPT_ENCODING,
                 'Host': target_host,
                 'Origin': 'https://vidzy.org',
                 'Referer': 'https://vidzy.org/',
@@ -4035,12 +4159,14 @@ class ProxyServer:
                     )
                     return web.json_response({'error': 'M3U8 not found'}, status=404)
 
+                m3u8_url = await self._with_fsvid_vidzy_gate_key(m3u8_url, html, 'fsvid')
                 result = {
                     'm3u8Url': _signed_service_url('/fsvid-proxy', m3u8_url),
                     'source': 'fsvid'
                 }
 
-                self.fsvid_cache.set(cache_key, result)
+                if _FSVID_VIDZY_HAS_GATE_KEY.search(m3u8_url):
+                    self.fsvid_cache.set(cache_key, result)
                 resp = web.json_response(result)
                 resp.headers['X-Cache'] = 'MISS'
                 return resp
@@ -4203,14 +4329,63 @@ class ProxyServer:
                 elif numeric_literal.match(body):
                     seed += sign * int(body, 0)
                 elif identifier.match(body):
-                    # The only non-numeric term these players use is the
-                    # hostname checksum computed just above the loop.
-                    if host_sum is None:
-                        host_sum = hostname_char_sum(mask)
-                    seed += sign * host_sum
+                    resolved = resolve_identifier(body)
+                    if resolved is None:
+                        if host_sum is None:
+                            host_sum = hostname_char_sum(mask)
+                        resolved = host_sum
+                    seed += sign * resolved
                 else:
                     return None
             return seed, step
+
+        css_px_per_unit = {
+            'px': 1.0, 'in': 96.0, 'cm': 96 / 2.54, 'mm': 96 / 25.4,
+            'pt': 96 / 72, 'pc': 16.0, 'q': 96 / 101.6,
+        }
+
+        def css_length_to_px(value: str) -> Optional[int]:
+            """Convertit `1in` ou `calc(1in + 43px)` en pixels CSS."""
+            total = 0.0
+            found = False
+            for sign, number, unit in re.findall(
+                r'([-+]?)\s*(\d+(?:\.\d+)?)\s*(px|in|cm|mm|pt|pc|q)\b',
+                value,
+                re.IGNORECASE,
+            ):
+                total += (-1 if sign == '-' else 1) * float(number) * css_px_per_unit[unit.lower()]
+                found = True
+            return round(total) if found else None
+
+        def resolve_identifier(name: str) -> Optional[int]:
+            """Valeur d'une variable de la clé autre que la somme du hostname.
+
+            Le lecteur ajoute la largeur mesurée d'un div caché
+            (`width:calc(1in + 43px)` → offsetWidth = 139 px CSS) : on relit
+            la valeur dans la page pour suivre une rotation. Renvoie None pour
+            la somme du hostname, que l'appelant calcule.
+            """
+            token = re.escape(name)
+            measured = re.search(
+                rf'\b{token}\s*=\s*[A-Za-z_$][\w$]*\.(?:offset|client)(Width|Height)\b',
+                script,
+            )
+            if measured:
+                axis = 'width' if measured.group(1) == 'Width' else 'height'
+                css = re.search(
+                    rf'(?:^|[;"\'\s]){axis}\s*:\s*([^;"\']+)',
+                    script[max(0, measured.start() - 600):measured.start()],
+                    re.IGNORECASE,
+                )
+                if css:
+                    pixels = css_length_to_px(css.group(1))
+                    if pixels is not None:
+                        return pixels
+                return 0
+            literal = re.search(rf'\b{token}\s*=\s*(0[xX][0-9a-fA-F]+|\d+)\s*[;,]', script)
+            if literal and not re.search(rf'\b{token}\s*=\s*\(?\s*{token}\s*\+', script):
+                return int(literal.group(1), 0)
+            return None
 
         for match in rolling_xor_pattern.finditer(script):
             try:
@@ -4233,19 +4408,41 @@ class ProxyServer:
                 encrypted = base64.b64decode(payload, altchars=b'-_', validate=True)
                 if match.group('pre_reverse'):
                     encrypted = encrypted[::-1]
-                decoded_bytes = bytes(
-                    value ^ ((seed + index * step) & mask)
-                    for index, value in enumerate(encrypted)
-                )
-                if not match.group('pre_reverse') and re.search(
+                post_reverse = not match.group('pre_reverse') and re.search(
                     r'\.reverse\(\s*\)\s*\.join',
                     match.group('tail'),
-                ):
-                    decoded_bytes = decoded_bytes[::-1]
-                candidate = normalize(decoded_bytes.decode('utf-8'))
+                )
+
+                def decode_with(seed_value: int) -> Optional[str]:
+                    decoded_bytes = bytes(
+                        value ^ ((seed_value + index * step) & mask)
+                        for index, value in enumerate(encrypted)
+                    )
+                    if post_reverse:
+                        decoded_bytes = decoded_bytes[::-1]
+                    try:
+                        return normalize(decoded_bytes.decode('utf-8'))
+                    except UnicodeDecodeError:
+                        return None
+
+                candidate = decode_with(seed)
                 if candidate:
                     return candidate
-            except (ValueError, UnicodeDecodeError, binascii.Error):
+
+                # La graine dépend de mesures faites dans le navigateur
+                # (offsetWidth d'un div enfant à 50 % d'un parent en
+                # `calc(1in + Npx)`, somme du hostname…) que la page fait
+                # tourner. Une mesure mal relue donnait une clé fausse, donc le
+                # leurre `troll` et un 404. La graine n'a que `mask + 1`
+                # valeurs possibles : on les essaie toutes, et `normalize`
+                # n'accepte qu'une URL m3u8 complète hors leurre.
+                for alternative in range(mask + 1):
+                    if alternative == seed & mask:
+                        continue
+                    candidate = decode_with(alternative)
+                    if candidate and re.fullmatch(r'[\x21-\x7e]+', candidate):
+                        return candidate
+            except (ValueError, binascii.Error):
                 continue
 
         # New fsvid/vidzy player format:
@@ -4397,7 +4594,78 @@ class ProxyServer:
         if fallback and self._is_fsvid_vidzy_media_candidate(fallback, provider):
             return fallback
         return None
-    
+
+    @staticmethod
+    def _fsvid_vidzy_gate_urls(html: str, provider: str) -> list:
+        urls = []
+        # Vidzy écrit l'adresse de sa porte dans la page : la suivre si elle change.
+        match = _FSVID_VIDZY_INLINE_GATE.search(html or '')
+        if match:
+            hostname = (urlparse(match.group(1)).hostname or '').lower()
+            if any(
+                hostname == suffix or hostname.endswith(f'.{suffix}')
+                for suffix in ('vidzy.cc', 'vidzy.org', 'fsvid.lol')
+            ):
+                urls.append(match.group(1))
+        other = 'vidzy' if provider == 'fsvid' else 'fsvid'
+        for url in (FSVID_VIDZY_GATE_URLS[provider], FSVID_VIDZY_GATE_URLS[other]):
+            if url not in urls:
+                urls.append(url)
+        return urls
+
+    async def _fsvid_vidzy_gate_key(self, html: str, provider: str) -> Optional[str]:
+        """Clé `gk` en cache, sinon demandée aux portes Vidzy/Fsvid."""
+        entry = self._fsvid_vidzy_gate_key_entry
+        if entry and entry[1] > time.monotonic():
+            return entry[0]
+        async with self._fsvid_vidzy_gate_lock:
+            entry = self._fsvid_vidzy_gate_key_entry
+            if entry and entry[1] > time.monotonic():
+                return entry[0]
+            for gate_url in self._fsvid_vidzy_gate_urls(html, provider):
+                try:
+                    async with self.sessions['normal'].get(
+                        f'{gate_url}?{FSVID_VIDZY_GATE_QUERY}',
+                        headers={'Accept': '*/*', **FSVID_VIDZY_CLIENT_HINTS},
+                        timeout=ClientTimeout(total=4),
+                    ) as response:
+                        if response.status != 200:
+                            continue
+                        data = await response.json(content_type=None)
+                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                    continue
+                gate_key = data.get('gk') if isinstance(data, dict) else None
+                if not isinstance(gate_key, str) or not _FSVID_VIDZY_GATE_KEY.fullmatch(gate_key):
+                    continue
+                # La clé se termine par `.<émission>.<durée en s>` : la garder
+                # la moitié de sa durée, sans dépasser six heures.
+                try:
+                    ttl = int(gate_key.split('.')[2])
+                except (IndexError, ValueError):
+                    ttl = 0
+                lifetime = min(FSVID_VIDZY_GATE_MAX_AGE, ttl / 2) if ttl > 0 else FSVID_VIDZY_GATE_MAX_AGE
+                self._fsvid_vidzy_gate_key_entry = (gate_key, time.monotonic() + lifetime)
+                return gate_key
+            logger.warning(
+                '[%s-EXTRACT] Clé gk indisponible : la lecture s\'arrêtera après quelques segments',
+                provider.upper(),
+            )
+            # Ne pas rappeler les portes à chaque extraction pendant une panne.
+            self._fsvid_vidzy_gate_key_entry = (
+                None,
+                time.monotonic() + FSVID_VIDZY_GATE_RETRY_AFTER,
+            )
+            return None
+
+    async def _with_fsvid_vidzy_gate_key(self, m3u8_url: str, html: str, provider: str) -> str:
+        if _FSVID_VIDZY_HAS_GATE_KEY.search(m3u8_url):
+            return m3u8_url
+        gate_key = await self._fsvid_vidzy_gate_key(html, provider)
+        if not gate_key:
+            return m3u8_url
+        separator = '&' if '?' in m3u8_url else '?'
+        return f"{m3u8_url}{separator}gk={urllib.parse.quote(gate_key, safe='')}"
+
     async def vidzy_extract_handler(self, request: Request) -> Response:
         """VIDZY M3U8 extraction"""
         internal_error = self._require_internal(request)
@@ -4449,12 +4717,14 @@ class ProxyServer:
                     )
                     return web.json_response({'error': 'M3U8 not found'}, status=404)
 
+                m3u8_url = await self._with_fsvid_vidzy_gate_key(m3u8_url, html, 'vidzy')
                 result = {
                     'm3u8Url': _signed_service_url('/vidzy-proxy', m3u8_url),
                     'source': 'vidzy'
                 }
 
-                self.vidzy_cache.set(cache_key, result)
+                if _FSVID_VIDZY_HAS_GATE_KEY.search(m3u8_url):
+                    self.vidzy_cache.set(cache_key, result)
                 resp = web.json_response(result)
                 resp.headers['X-Cache'] = 'MISS'
                 return resp
@@ -4670,6 +4940,11 @@ class ProxyServer:
     
     async def _extract_uqload_media_url(self, embed_url: str) -> str:
         """Extract an HLS or MP4 URL from a UQLOAD embed without executing it."""
+        media_url, _subtitles = await self._extract_uqload_media(embed_url)
+        return media_url
+
+    async def _extract_uqload_media(self, embed_url: str) -> Tuple[str, list]:
+        """URL média et sous-titres d'un embed UQLOAD, sans exécuter la page."""
         validated = self._validate_uqload_url(embed_url)
         site_origin = get_uqload_site_origin(validated)
         urls = [validated, validated.replace('/embed-', '/')]
@@ -4682,6 +4957,7 @@ class ProxyServer:
         }
         
         html = None
+        page_url = validated
         for url in urls:
             try:
                 # UQLOAD generic fetch -> normal session
@@ -4689,21 +4965,24 @@ class ProxyServer:
                                            timeout=ClientTimeout(total=5)) as resp:
                     if resp.status == 200:
                         html = await resp.text()
+                        page_url = url
                         break
             except (aiohttp.ClientError, asyncio.TimeoutError):
                 continue
-        
+
         if not html:
             raise ValueError('No content from UQLOAD')
-        
+
         if 'File was deleted' in html:
             raise ValueError('Video deleted')
-        
+
         media_url = extract_uqload_media_url(html)
         if not media_url:
             raise ValueError('Uqload media URL not found')
-        
-        return media_url
+
+        # Les fichiers VTT d'Uqload sont servis avec `Access-Control-Allow-Origin: *` :
+        # le lecteur peut les charger en direct, sans passer par le proxy.
+        return media_url, extract_uqload_subtitles(html, page_url)
     
     async def uqload_extract_handler(self, request: Request) -> Response:
         """UQLOAD extraction"""
@@ -4725,15 +5004,17 @@ class ProxyServer:
                 return resp
             
             validated = self._validate_uqload_url(url)
-            media_url = await self._extract_uqload_media_url(validated)
-            
+            media_url, subtitles = await self._extract_uqload_media(validated)
+
             if not media_url:
                 return web.json_response({'error': 'Extraction failed'}, status=404)
-            
+
             result = {
                 'url': _signed_service_url('/uqload-proxy', media_url),
                 'source': 'uqload'
             }
+            if subtitles:
+                result['subtitles'] = subtitles
             
             self.uqload_cache.set(cache_key, result)
             resp = web.json_response(result)
@@ -5335,6 +5616,29 @@ class ProxyServer:
     
     # ===== Service-Specific Proxy Routes =====
     
+    @staticmethod
+    def _fsvid_vidzy_decoy_playlist_response(
+        service_name: str,
+        text: str,
+        response_url: str,
+        target_url: str,
+    ) -> Optional[Response]:
+        """502 au lieu de relayer la playlist leurre que Fsvid/Vidzy servent en 200."""
+        if service_name not in ('fsvid', 'vidzy'):
+            return None
+        if not is_fsvid_vidzy_decoy_playlist(text, response_url):
+            return None
+        logger.warning(
+            "[%s-PROXY] Decoy playlist refused for %s",
+            service_name.upper(),
+            redact_url_for_log(target_url),
+        )
+        return web.json_response(
+            {"error": "Upstream returned a decoy stream"},
+            status=502,
+            headers=CORS_HEADERS,
+        )
+
     def _rewrite_m3u8_for_service(self, content: str, base_url: str, proxy_route: str, extra_query: str = '') -> str:
         """Rewrite M3U8 URLs to go through a service-specific proxy route"""
         base_url_dir = base_url.rsplit('/', 1)[0] + '/'
@@ -5460,7 +5764,7 @@ class ProxyServer:
         
         # Same guard as on the redirect below: never relay the Fsvid/Vidzy decoy
         # stream, even when it reaches us through a stale cache or a crafted url.
-        if service_name in ('fsvid', 'vidzy') and 'troll' in target_url.lower():
+        if service_name in ('fsvid', 'vidzy') and is_fsvid_vidzy_decoy_url(target_url):
             logger.warning(
                 "[%s-PROXY] Decoy target refused for %s",
                 service_name.upper(),
@@ -5602,9 +5906,16 @@ class ProxyServer:
                         'X-Segment-Cache': 'HIT',
                     })
 
-            if service_name == 'cinep' and self.curl_session is not None:
+            if service_name in CURL_CFFI_SERVICES and self.curl_session is not None:
                 timeout_s = timeout.total or timeout.sock_read or 30
-                upstream_cm = _CurlCffiUpstream(self.curl_session, target_url, headers, timeout_s, service_name)
+                upstream_cm = _CurlCffiUpstream(
+                    self.curl_session,
+                    target_url,
+                    headers,
+                    timeout_s,
+                    service_name,
+                    proxy_url=_socks5_proxy_url_for_session(actual_session_key),
+                )
             else:
                 upstream_cm = session.get(
                     target_url,
@@ -5643,7 +5954,7 @@ class ProxyServer:
                     # troll video, so surface the rejection instead.
                     if (
                         service_name in ('fsvid', 'vidzy')
-                        and 'troll' in redirected.lower()
+                        and is_fsvid_vidzy_decoy_url(redirected)
                     ):
                         logger.warning(
                             "[%s-PROXY] Decoy redirect refused for %s",
@@ -5721,6 +6032,11 @@ class ProxyServer:
                             status=502,
                             headers=CORS_HEADERS,
                         )
+                    decoy = self._fsvid_vidzy_decoy_playlist_response(
+                        service_name, text, response_url, target_url,
+                    )
+                    if decoy is not None:
+                        return decoy
                     rewritten = self._rewrite_m3u8_for_service(
                         text,
                         response_url,
@@ -5763,6 +6079,11 @@ class ProxyServer:
                                 status=502,
                                 headers=CORS_HEADERS,
                             )
+                        decoy = self._fsvid_vidzy_decoy_playlist_response(
+                            service_name, text, response_url, target_url,
+                        )
+                        if decoy is not None:
+                            return decoy
                         rewritten = self._rewrite_m3u8_for_service(
                             text,
                             response_url,
@@ -5951,7 +6272,7 @@ class ProxyServer:
         """FSVID proxy"""
         return await self._service_proxy_via_random_socks(request, 'fsvid', {
             'Accept': 'application/vnd.apple.mpegurl,*/*',
-            'Accept-Encoding': PROVIDER_MEDIA_ACCEPT_ENCODING,
+            'Accept-Encoding': FSVID_VIDZY_MEDIA_ACCEPT_ENCODING,
             'Origin': 'https://fsvid.lol',
             'Referer': 'https://fsvid.lol/',
             **FSVID_VIDZY_CLIENT_HINTS,
@@ -6039,7 +6360,7 @@ class ProxyServer:
         """Vidzy proxy"""
         return await self._service_proxy_via_random_socks(request, 'vidzy', {
             'Accept': 'application/vnd.apple.mpegurl,*/*',
-            'Accept-Encoding': PROVIDER_MEDIA_ACCEPT_ENCODING,
+            'Accept-Encoding': FSVID_VIDZY_MEDIA_ACCEPT_ENCODING,
             'Origin': 'https://vidzy.org',
             'Referer': 'https://vidzy.org/',
             **FSVID_VIDZY_CLIENT_HINTS,

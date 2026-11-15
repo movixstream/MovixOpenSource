@@ -18,7 +18,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    // Il n'existe pas de route /login : la connexion passe par /create-account.
+    return <Navigate to="/create-account" replace />;
   }
 
   return <>{children}</>;

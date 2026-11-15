@@ -24,6 +24,9 @@
 
 const { makeCinestreamRequest } = require("../utils/proxyManager");
 const { fetchTmdbDetails } = require("../utils/tmdbCache");
+const { redis } = require("../config/redis");
+const { createCinestreamAvailability } = require("../utils/cinestreamAvailability");
+const cinestreamAvailability = createCinestreamAvailability({ redis });
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY || "";
 const TMDB_API_URL = "https://api.themoviedb.org/3";
@@ -38,13 +41,18 @@ const MAX_FILM_PAGE_FETCHES = 8;
 const toBody = (res) =>
   typeof res.data === "string" ? res.data : JSON.stringify(res.data);
 
-// All cinestream fetches go through CycleTLS + ProxyScrape rotation (see
-// makeCinestreamRequest) — same mechanism as the other Cloudflare-fronted
-// scrapers. It returns a response even on 525/5xx (never throws on status), so a
-// flaky upstream just yields HTML our regexes can't match -> "not found", quiet.
-// timeout is ms here; the helper takes seconds.
+// Les erreurs réseau/HTTP restent temporaires jusqu'au gestionnaire de cache.
+// timeout est en millisecondes ici ; le helper attend des secondes.
 async function cinestreamGet(url, timeout = 15000) {
-  return makeCinestreamRequest(url, { timeout: Math.ceil(timeout / 1000) });
+  try {
+    return await makeCinestreamRequest(url, { timeout: Math.ceil(timeout / 1000) });
+  } catch (error) {
+    if (error?.code === 'CINESTREAM_UPSTREAM_UNAVAILABLE') throw error;
+    // Ne pas conserver le corps HTML ni les identifiants d'un proxy en erreur.
+    throw Object.assign(new Error('Connexion à CineStream temporairement indisponible'), {
+      code: 'CINESTREAM_UPSTREAM_UNAVAILABLE', httpStatus: 503,
+    });
+  }
 }
 
 // Every cinestream slug ends with its release year ("toy-story-5-2026").
@@ -103,7 +111,8 @@ async function fetchCinestreamEmbed(tmdbid, index) {
     const html = toBody(res);
     const m = html.match(/<iframe[^>]+src="([^"]+)"/i);
     return m ? m[1] : null;
-  } catch {
+  } catch (error) {
+    if (error?.code === 'CINESTREAM_UPSTREAM_UNAVAILABLE') throw error;
     return null;
   }
 }
@@ -138,125 +147,137 @@ async function fetchCinestreamMovieData(tmdbId, cachedData = null) {
       };
     }
 
-    const tmdbYear = tmdbData.release_date
-      ? new Date(tmdbData.release_date).getFullYear()
-      : null;
+    return await cinestreamAvailability.run(async () => {
+      const tmdbYear = tmdbData.release_date
+        ? new Date(tmdbData.release_date).getFullYear()
+        : null;
 
-    const titlesToTry = [tmdbData.title, tmdbData.original_title].filter(
-      (t, i, arr) => t && arr.indexOf(t) === i,
-    );
+      const titlesToTry = [tmdbData.title, tmdbData.original_title].filter(
+        (t, i, arr) => t && arr.indexOf(t) === i,
+      );
 
-    // Gather candidate slugs across titles (dedup, keep order).
-    const candidates = [];
-    const seen = new Set();
-    for (const title of titlesToTry) {
-      let slugs = [];
-      try {
-        slugs = await searchCinestream(title);
-      } catch (err) {
-        console.log(`[CINESTREAM SEARCH] "${title}": ${err.message}`);
+      // Gather candidate slugs across titles (dedup, keep order).
+      const candidates = [];
+      const seen = new Set();
+      for (const title of titlesToTry) {
+        let slugs = [];
+        try {
+          slugs = await searchCinestream(title);
+        } catch (err) {
+          if (err?.code === 'CINESTREAM_UPSTREAM_UNAVAILABLE') throw err;
+          console.log(`[CINESTREAM SEARCH] "${title}": ${err.message}`);
+        }
+        for (const slug of slugs) {
+          if (seen.has(slug)) continue;
+          seen.add(slug);
+          candidates.push(slug);
+        }
       }
-      for (const slug of slugs) {
-        if (seen.has(slug)) continue;
-        seen.add(slug);
-        candidates.push(slug);
+
+      if (candidates.length === 0)
+        return {
+          success: false,
+          error: "Film non trouve sur CineStream",
+          tmdb_id: tmdbId,
+          titles_tried: titlesToTry,
+        };
+
+      // Bump year-matches first (stable) — tmdbid is the real match, this just
+      // minimises wasted film-page fetches on common titles.
+      const ranked = tmdbYear
+        ? candidates
+            .map((slug, i) => ({ slug, i, yearHit: yearFromSlug(slug) === tmdbYear }))
+            .sort((a, b) => (b.yearHit ? 1 : 0) - (a.yearHit ? 1 : 0) || a.i - b.i)
+            .map((c) => c.slug)
+        : candidates;
+
+      // Confirm the right film by tmdbid.
+      let matched = null;
+      for (const slug of ranked.slice(0, MAX_FILM_PAGE_FETCHES)) {
+        let film;
+        try {
+          film = await fetchCinestreamFilm(slug);
+        } catch (err) {
+          if (err?.code === 'CINESTREAM_UPSTREAM_UNAVAILABLE') throw err;
+          console.log(`[CINESTREAM FILM] "${slug}": ${err.message}`);
+          continue;
+        }
+        if (film.tmdbid === Number(tmdbId)) {
+          matched = film;
+          break;
+        }
       }
-    }
 
-    if (candidates.length === 0)
-      return {
-        success: false,
-        error: "Film non trouve sur CineStream",
-        tmdb_id: tmdbId,
-        titles_tried: titlesToTry,
-      };
+      if (!matched)
+        return {
+          success: false,
+          error: "Film non trouve sur CineStream",
+          tmdb_id: tmdbId,
+          titles_tried: titlesToTry,
+        };
 
-    // Bump year-matches first (stable) — tmdbid is the real match, this just
-    // minimises wasted film-page fetches on common titles.
-    const ranked = tmdbYear
-      ? candidates
-          .map((slug, i) => ({ slug, i, yearHit: yearFromSlug(slug) === tmdbYear }))
-          .sort((a, b) => (b.yearHit ? 1 : 0) - (a.yearHit ? 1 : 0) || a.i - b.i)
-          .map((c) => c.slug)
-      : candidates;
+      if (!matched.players.length)
+        return {
+          success: false,
+          error: "Aucun lecteur video trouve",
+          tmdb_id: tmdbId,
+          cinestream_url: matched.url,
+        };
 
-    // Confirm the right film by tmdbid.
-    let matched = null;
-    for (const slug of ranked.slice(0, MAX_FILM_PAGE_FETCHES)) {
-      let film;
-      try {
-        film = await fetchCinestreamFilm(slug);
-      } catch (err) {
-        console.log(`[CINESTREAM FILM] "${slug}": ${err.message}`);
-        continue;
+      // Resolve each player[index] -> embed url (parallel). Index = the
+      // /player/{tmdbid}/{index} index, so map over the array as-is.
+      const resolved = await Promise.allSettled(
+        matched.players.map((p, index) =>
+          fetchCinestreamEmbed(matched.tmdbid, index).then((url) => ({
+            name: p.name,
+            url,
+          })),
+        ),
+      );
+      // Terminer tous les appels déjà lancés avant de libérer la tentative de
+      // reprise. Aucun résultat partiel ne remplace les lecteurs en cache.
+      const failed = resolved.find((result) => result.status === 'rejected');
+      if (failed) throw failed.reason;
+      const embeds = resolved.map((result) => result.value);
+
+      const players = [];
+      for (const e of embeds) {
+        if (!e.url) continue;
+        const type = /^vostfr/i.test((e.name || "").trim()) ? "VOSTFR" : "VF";
+        const domainMatch = e.url.match(/https?:\/\/(?:www\.)?([^/]+)/);
+        players.push({
+          name: domainMatch ? domainMatch[1] : e.name,
+          url: e.url,
+          episode: 1,
+          type,
+        });
       }
-      if (film.tmdbid === Number(tmdbId)) {
-        matched = film;
-        break;
-      }
-    }
 
-    if (!matched)
+      if (players.length === 0)
+        return {
+          success: false,
+          error: "Aucun lecteur video trouve",
+          tmdb_id: tmdbId,
+          cinestream_url: matched.url,
+        };
+
+      const categorized = categorize(players);
       return {
-        success: false,
-        error: "Film non trouve sur CineStream",
+        success: true,
         tmdb_id: tmdbId,
-        titles_tried: titlesToTry,
+        title: tmdbData.title,
+        original_title: tmdbData.original_title,
+        source: "cinestream",
+        // Key kept as wiflix_url for response-shape compat with the wiflix route.
+        wiflix_url: matched.url,
+        players: { vf: categorized.vf, vostfr: categorized.vostfr },
+        cache_timestamp: new Date().toISOString(),
       };
-
-    if (!matched.players.length)
-      return {
-        success: false,
-        error: "Aucun lecteur video trouve",
-        tmdb_id: tmdbId,
-        cinestream_url: matched.url,
-      };
-
-    // Resolve each player[index] -> embed url (parallel). Index = the
-    // /player/{tmdbid}/{index} index, so map over the array as-is.
-    const embeds = await Promise.all(
-      matched.players.map((p, index) =>
-        fetchCinestreamEmbed(matched.tmdbid, index).then((url) => ({
-          name: p.name,
-          url,
-        })),
-      ),
-    );
-
-    const players = [];
-    for (const e of embeds) {
-      if (!e.url) continue;
-      const type = /^vostfr/i.test((e.name || "").trim()) ? "VOSTFR" : "VF";
-      const domainMatch = e.url.match(/https?:\/\/(?:www\.)?([^/]+)/);
-      players.push({
-        name: domainMatch ? domainMatch[1] : e.name,
-        url: e.url,
-        episode: 1,
-        type,
-      });
-    }
-
-    if (players.length === 0)
-      return {
-        success: false,
-        error: "Aucun lecteur video trouve",
-        tmdb_id: tmdbId,
-        cinestream_url: matched.url,
-      };
-
-    const categorized = categorize(players);
-    return {
-      success: true,
-      tmdb_id: tmdbId,
-      title: tmdbData.title,
-      original_title: tmdbData.original_title,
-      source: "cinestream",
-      // Key kept as wiflix_url for response-shape compat with the wiflix route.
-      wiflix_url: matched.url,
-      players: { vf: categorized.vf, vostfr: categorized.vostfr },
-      cache_timestamp: new Date().toISOString(),
-    };
+    });
   } catch (error) {
+    // updateWiflixCache conserve le fichier et diffère l'actualisation sur
+    // exception, y compris sans cache : aucune panne ne devient un cache négatif.
+    if (error?.code?.startsWith('CINESTREAM_')) throw error;
     console.error(`[CINESTREAM MOVIE] ${tmdbId}: ${error.message}`);
     if (cachedData) return cachedData;
     return {

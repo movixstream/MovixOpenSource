@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from './ui/select';
 import ReusableModal from './ui/reusable-modal';
+import { copyText } from '../utils/clipboard';
 
 interface VipKey {
   key_value: string;
@@ -128,10 +129,9 @@ const VipKeysManager: React.FC = () => {
   };
 
   const copyKey = async (key: string) => {
-    try {
-      await navigator.clipboard.writeText(key);
+    if (await copyText(key)) {
       toast.success(t('admin.keyCopied'));
-    } catch {
+    } else {
       toast.error(t('admin.copyError'));
     }
   };

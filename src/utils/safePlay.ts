@@ -11,7 +11,7 @@ export const safePlay = (
   if (!el) return Promise.resolve();
   try {
     const result = el.play();
-    return result instanceof Promise ? result : Promise.resolve();
+    return Promise.resolve(result);
   } catch (err) {
     return Promise.reject(err);
   }

@@ -21,6 +21,7 @@ import axios from 'axios';
 import { getTmdbLanguage } from '@/i18n';
 import { toast } from 'sonner';
 import { areSoundEffectsEnabled, SOUND_EFFECTS_CHANGED_EVENT } from '@/utils/soundSettings';
+import { copyText } from '@/utils/clipboard';
 
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
@@ -92,23 +93,6 @@ function downloadBlob(blob: Blob, filename: string) {
     link.click();
     link.remove();
     URL.revokeObjectURL(blobUrl);
-}
-
-async function copyTextToClipboard(text: string) {
-    if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        return;
-    }
-
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.setAttribute('readonly', '');
-    textarea.style.position = 'absolute';
-    textarea.style.left = '-9999px';
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    textarea.remove();
 }
 
 function isShareAbortError(error: unknown): boolean {
@@ -1408,7 +1392,7 @@ const SlideClosing: React.FC<{
                         disabled={isPreparingImage}
                         className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-white/90 disabled:opacity-60"
                     >
-                        <Download className="w-4 h-4" />
+                        <Download className="w-4 h-4 text-white opacity-90" />
                         {i18n.t('wrapped.downloadImage')}
                     </motion.button>
 
@@ -1418,7 +1402,7 @@ const SlideClosing: React.FC<{
                         onClick={onShareText}
                         className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-white/90"
                     >
-                        <FileText className="w-4 h-4" />
+                        <FileText className="w-4 h-4 text-white opacity-90" />
                         {i18n.t('wrapped.shareAsText')}
                     </motion.button>
 
@@ -1428,7 +1412,7 @@ const SlideClosing: React.FC<{
                         onClick={onCopyText}
                         className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-white/90"
                     >
-                        <Copy className="w-4 h-4" />
+                        <Copy className="w-4 h-4 text-white opacity-90" />
                         {i18n.t('wrapped.copyText')}
                     </motion.button>
                 </div>
@@ -3070,11 +3054,10 @@ const WrappedPage: React.FC<{ data: WrappedData; onClose: () => void }> = ({ dat
     }, [getOrGenerateShareBlob, shareFormat, t, wrappedData, wrappedShareText, year]);
 
     const handleCopyShareText = useCallback(async () => {
-        try {
-            await copyTextToClipboard(wrappedShareText);
+        if (await copyText(wrappedShareText)) {
             toast.success(t('wrapped.textCopied'));
-        } catch (error) {
-            console.error('[Wrapped] Unable to copy share text:', error);
+        } else {
+            console.error('[Wrapped] Unable to copy share text');
             toast.error(t('wrapped.shareError'));
         }
     }, [t, wrappedShareText]);
@@ -3091,8 +3074,12 @@ const WrappedPage: React.FC<{ data: WrappedData; onClose: () => void }> = ({ dat
                 return;
             }
 
-            await copyTextToClipboard(wrappedShareText);
-            toast.success(t('wrapped.textCopied'));
+            if (await copyText(wrappedShareText)) {
+                toast.success(t('wrapped.textCopied'));
+            } else {
+                console.error('[Wrapped] Unable to share text: copy failed');
+                toast.error(t('wrapped.shareError'));
+            }
         } catch (error) {
             if (!isShareAbortError(error)) {
                 console.error('[Wrapped] Unable to share text:', error);

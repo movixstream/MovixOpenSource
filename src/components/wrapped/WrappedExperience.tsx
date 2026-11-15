@@ -13,7 +13,7 @@ import WrappedTransitionLayer from './WrappedTransitionLayer';
 import WrappedPosterFlights from './WrappedPosterFlights';
 import { wrappedTransition, wrappedTransitionDuration } from '@/utils/wrappedMotion';
 import { generateWrappedShareCard } from '@/utils/wrappedShareCards';
-import type { WrappedShareCardData } from '@/types/wrapped';
+import type { WrappedShareCardData, WrappedThemeId } from '@/types/wrapped';
 import '@fontsource/archivo-black/latin-400.css';
 import '@fontsource/inter/latin-400.css';
 import '@fontsource/inter/latin-600.css';
@@ -69,7 +69,11 @@ export default function WrappedExperience({ data, onClose }: { data: WrappedData
     const automatic = playing && visible && !holding && !details && !exploring && !overflowing && !transitioning && !['intro', 'quiz', 'closing'].includes(scene);
     const transitionKind = wrappedTransition(navigation.from, navigation.to, navigation.direction);
     const tone = SCENE_TONES[scene] || SCENE_TONES.intro;
-    const shareData = useMemo(() => buildWrappedShareData(data, i18n.language, t, DEFAULT_PUBLIC_DOMAIN), [data, i18n.language, t]);
+    const profileShareData = useMemo(() => buildWrappedShareData(data, i18n.language, t, DEFAULT_PUBLIC_DOMAIN), [data, i18n.language, t]);
+    // L'ambiance vient du profil ; un choix explicite la remplace pour le film et les images.
+    const [themeChoice, setThemeChoice] = useState<WrappedThemeId | null>(null);
+    const autoTheme = profileShareData.theme || 'electric';
+    const shareData = useMemo(() => themeChoice && themeChoice !== profileShareData.theme ? { ...profileShareData, theme: themeChoice } : profileShareData, [profileShareData, themeChoice]);
     const iconButton = 'flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white/90 transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:opacity-30';
 
     useEffect(() => {
@@ -150,7 +154,7 @@ export default function WrappedExperience({ data, onClose }: { data: WrappedData
         currentIndex.current = 0;
         requestedIndex.current = 0;
         busy.current = false;
-        setIndex(0); setPicked(null); setPlaying(false); setDetails(false); setTransitioning(false);
+        setIndex(0); setPicked(null); setPlaying(false); setDetails(false); setTransitioning(false); setThemeChoice(null);
         setNavigation({ id: 0, from: 'intro', to: 'intro', direction: 1 });
     }, [data]);
 
@@ -268,10 +272,10 @@ export default function WrappedExperience({ data, onClose }: { data: WrappedData
                 style={{ '--wrapped-accent': tone.accent, '--wrapped-background': tone.background, backgroundColor: tone.background } as CSSProperties}>
                 <header className="relative z-10 flex shrink-0 items-center justify-between gap-2 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] lg:px-7 lg:pt-5">
                     <button type="button" onClick={details ? () => setDetails(false) : onClose} className={iconButton} aria-label={t(details ? 'wrappedStory.backToStory' : 'wrappedStory.close')}>
-                        {details ? <ArrowLeft className="h-5 w-5" /> : <X className="h-5 w-5" />}
+                        {details ? <ArrowLeft className="h-5 w-5 text-white opacity-90" /> : <X className="h-5 w-5 text-white opacity-90" />}
                     </button>
                     <p className="flex items-center gap-3 text-sm font-bold tracking-tight"><span className="font-['Archivo_Black']">MOVIX</span><span className="h-3 w-px bg-white/25" aria-hidden="true" /><span className="font-normal text-white/60">Wrapped {data.year}</span></p>
-                    <button type="button" className={iconButton} aria-label={t('wrapped.shareWrapped')} onClick={() => { setDetails(false); requestIndex(scenes.length - 1); }}><Share2 className="h-5 w-5" /></button>
+                    <button type="button" className={iconButton} aria-label={t('wrapped.shareWrapped')} onClick={() => { setDetails(false); requestIndex(scenes.length - 1); }}><Share2 className="h-5 w-5 text-white opacity-90" /></button>
                 </header>
                 {!details && <div className="relative z-10 flex shrink-0 gap-1.5 px-6 py-3 lg:px-10 lg:py-4" role="progressbar" aria-label={t('wrappedStory.progress')} aria-valuemin={1} aria-valuemax={scenes.length} aria-valuenow={index + 1}>
                     {scenes.map((item, i) => <div key={item} className={`h-[3px] flex-1 overflow-hidden rounded-full ${i === index ? 'bg-white/30' : 'bg-white/10'}`}><motion.div className="h-full origin-left bg-[var(--wrapped-accent)]" style={{ scaleX: i < index ? 1 : i === index ? progress : 0 }} /></div>)}
@@ -281,19 +285,19 @@ export default function WrappedExperience({ data, onClose }: { data: WrappedData
                     {navigation.id > 0 && transitioning && <WrappedTransitionLayer key={navigation.id} kind={transitionKind} direction={direction} accent={tone.accent} reduced={Boolean(reducedMotion)} />}
                     <AnimatePresence mode="sync" initial={false} custom={{ direction, transitionKind: details ? 'fade' : transitionKind, reducedMotion: Boolean(reducedMotion) }}>
                         <WrappedSceneViewport key={details ? 'details' : scene} scene={details ? 'details' : scene} transitionKind={details ? 'fade' : transitionKind} direction={direction} reducedMotion={Boolean(reducedMotion)} tone={tone} backdrop={details ? null : backdrop} onViewport={attachViewport} onMeasure={measureViewport}>
-                            {details ? <div className="mx-auto w-full max-w-3xl py-4"><WrappedDetails data={data} /></div> : scene === 'closing' ? <WrappedShare data={shareData} preparedStory={preparedStory?.data === shareData ? preparedStory.blob : undefined} favorite={data.topContent[0]} onDetails={() => setDetails(true)} /> : <WrappedScenes scene={scene} data={data} picked={picked} onPick={setPicked} playing={automatic} assembleQuiz={transitionKind === 'gallery'} onExplore={active => reportExploration(scene, active)} onNext={() => move(1)} onStart={() => { setPlaying(!reducedMotion); move(1); }} />}
+                            {details ? <div className="mx-auto w-full max-w-3xl py-4"><WrappedDetails data={data} /></div> : scene === 'closing' ? <WrappedShare data={shareData} preparedStory={preparedStory?.data === shareData ? preparedStory.blob : undefined} favorite={data.topContent[0]} onDetails={() => setDetails(true)} theme={shareData.theme || autoTheme} autoTheme={autoTheme} onTheme={setThemeChoice} /> : <WrappedScenes scene={scene} data={data} picked={picked} onPick={setPicked} assembleQuiz={transitionKind === 'gallery'} onExplore={active => reportExploration(scene, active)} onNext={() => move(1)} onStart={() => { setPlaying(!reducedMotion); move(1); }} />}
                         </WrappedSceneViewport>
                     </AnimatePresence>
                     {navigation.id > 0 && transitioning && !details && <WrappedPosterFlights key={navigation.id} from={navigation.from} to={navigation.to} kind={transitionKind} reduced={Boolean(reducedMotion)} />}
                 </div>
                 <footer className="relative z-10 flex shrink-0 items-center justify-between gap-3 px-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 lg:px-7 lg:pb-5">
                     {details ? <button type="button" onClick={() => setDetails(false)} className="min-h-11 px-2 text-sm underline underline-offset-4">{t('wrappedStory.backToStory')}</button> : <>
-                        <button type="button" className={iconButton} disabled={index === 0} onClick={() => move(-1)} aria-label={t('wrappedStory.previous')}><ChevronLeft className="h-6 w-6" /></button>
-                        {overflowing && moreBelow ? <button type="button" className="flex min-h-11 items-center gap-2 text-xs text-white/70 sm:text-sm" onClick={() => scrollRef.current?.scrollBy({ top: scrollRef.current.clientHeight * 0.65, behavior: reducedMotion ? 'instant' : 'smooth' })}><ChevronDown className="h-4 w-4" aria-hidden="true" />{t('wrappedCinema.scrollForMore')}</button> : scene === 'closing' ? <button type="button" className="flex min-h-11 items-center gap-2 text-sm" onClick={() => { setPicked(null); requestIndex(0); setPlaying(false); }}><RotateCcw className="h-4 w-4" aria-hidden="true" />{t('wrappedStory.replay')}</button> : <button type="button" className="flex min-h-11 items-center gap-2 px-3 text-xs text-white/70 sm:text-sm" aria-pressed={playing} disabled={scene === 'quiz' || overflowing} onClick={() => { if (scene === 'intro') move(1); setPlaying(value => !value); }}>
-                            {scene !== 'quiz' && (playing ? <Pause className="h-4 w-4" aria-hidden="true" /> : <Play className="h-4 w-4" aria-hidden="true" />)}{t(scene === 'quiz' ? picked ? 'wrappedFinish.guessAnswered' : 'wrappedStory.quizPaused' : overflowing ? 'wrappedCinema.manualPlayback' : exploring && playing ? 'wrappedCinema.exploring' : playing ? 'wrappedStory.pause' : 'wrappedStory.play')}
+                        <button type="button" className={iconButton} disabled={index === 0} onClick={() => move(-1)} aria-label={t('wrappedStory.previous')}><ChevronLeft className="h-6 w-6 text-white opacity-90" /></button>
+                        {overflowing && moreBelow ? <button type="button" className="flex min-h-11 items-center gap-2 text-xs text-white/70 sm:text-sm" onClick={() => scrollRef.current?.scrollBy({ top: scrollRef.current.clientHeight * 0.65, behavior: reducedMotion ? 'instant' : 'smooth' })}><ChevronDown className="h-4 w-4 text-white opacity-70" aria-hidden="true" />{t('wrappedCinema.scrollForMore')}</button> : scene === 'closing' ? <button type="button" className="flex min-h-11 items-center gap-2 text-sm" onClick={() => { setPicked(null); requestIndex(0); setPlaying(false); }}><RotateCcw className="h-4 w-4" aria-hidden="true" />{t('wrappedStory.replay')}</button> : <button type="button" className="flex min-h-11 items-center gap-2 px-3 text-xs text-white/70 sm:text-sm" aria-pressed={playing} disabled={scene === 'quiz' || overflowing} onClick={() => { if (scene === 'intro') move(1); setPlaying(value => !value); }}>
+                            {scene !== 'quiz' && (playing ? <Pause className="h-4 w-4 text-white opacity-70" aria-hidden="true" /> : <Play className="h-4 w-4 text-white opacity-70" aria-hidden="true" />)}{t(scene === 'quiz' ? picked ? 'wrappedFinish.guessAnswered' : 'wrappedStory.quizPaused' : overflowing ? 'wrappedCinema.manualPlayback' : exploring && playing ? 'wrappedCinema.exploring' : playing ? 'wrappedStory.pause' : 'wrappedStory.play')}
                         </button>}
                         <span className="hidden text-xs tabular-nums text-white/60 lg:block">{String(index + 1).padStart(2, '0')} / {String(scenes.length).padStart(2, '0')}</span>
-                        <button type="button" className={iconButton} disabled={index === scenes.length - 1} onClick={() => move(1)} aria-label={t('wrappedStory.next')}><ChevronRight className="h-6 w-6" /></button>
+                        <button type="button" className={iconButton} disabled={index === scenes.length - 1} onClick={() => move(1)} aria-label={t('wrappedStory.next')}><ChevronRight className="h-6 w-6 text-white opacity-90" /></button>
                     </>}
                 </footer>
             </div>

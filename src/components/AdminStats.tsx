@@ -10,6 +10,7 @@ import {
 import { fetchStatsOverview } from '../services/adminStatsService';
 import type { StatsOverview, StatsRange } from '../services/adminStatsService';
 import ChartCard from './stats/ChartCard';
+import { Skeleton } from './ui/Skeleton';
 import { CHART_COLORS, PROVIDER_COLORS, formatDayLabel, tooltipStyle } from './stats/chartTheme';
 
 const RANGES: StatsRange[] = [7, 30, 90];
@@ -63,16 +64,14 @@ const AdminStats = () => {
     [data],
   );
 
-  const kpis = data
-    ? [
-        { label: t('admin.stats.totalUsers', 'Utilisateurs'), value: data.totals.users, icon: Users, color: 'text-sky-300' },
-        { label: t('admin.stats.registrations', 'Inscriptions'), value: data.totals.registrationsInRange, icon: UserPlus, color: 'text-emerald-300' },
-        { label: t('admin.stats.logins', 'Connexions'), value: data.totals.sessionsInRange, icon: BarChart3, color: 'text-rose-300' },
-        { label: t('admin.stats.avgDau', 'DAU moyen'), value: data.totals.avgDau, icon: Users, color: 'text-purple-300' },
-        { label: t('admin.stats.comments', 'Commentaires'), value: data.totals.commentsInRange, icon: MessageSquare, color: 'text-orange-300' },
-        { label: t('admin.stats.vip', 'VIP'), value: data.totals.vipInRange, icon: Sparkles, color: 'text-yellow-300' },
-      ]
-    : [];
+  const kpis = [
+    { label: t('admin.stats.totalUsers', 'Utilisateurs'), value: data?.totals.users ?? 0, icon: Users, color: 'text-sky-300' },
+    { label: t('admin.stats.registrations', 'Inscriptions'), value: data?.totals.registrationsInRange ?? 0, icon: UserPlus, color: 'text-emerald-300' },
+    { label: t('admin.stats.logins', 'Connexions'), value: data?.totals.sessionsInRange ?? 0, icon: BarChart3, color: 'text-rose-300' },
+    { label: t('admin.stats.avgDau', 'DAU moyen'), value: data?.totals.avgDau ?? 0, icon: Users, color: 'text-purple-300' },
+    { label: t('admin.stats.comments', 'Commentaires'), value: data?.totals.commentsInRange ?? 0, icon: MessageSquare, color: 'text-orange-300' },
+    { label: t('admin.stats.vip', 'VIP'), value: data?.totals.vipInRange ?? 0, icon: Sparkles, color: 'text-yellow-300' },
+  ];
 
   return (
     <div className="space-y-6">
@@ -110,13 +109,7 @@ const AdminStats = () => {
       )}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        {loading && !data
-          ? Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="rounded-xl border border-white/10 bg-white/5 p-4">
-                <div className="h-12 animate-pulse rounded bg-white/10" />
-              </div>
-            ))
-          : kpis.map((k) => {
+        {(loading || data) && kpis.map((k) => {
               const Icon = k.icon;
               return (
                 <div key={k.label} className="rounded-xl border border-white/10 bg-white/5 p-4">
@@ -124,7 +117,9 @@ const AdminStats = () => {
                     <span className="text-xs font-medium uppercase tracking-wide text-white/50">{k.label}</span>
                     <Icon className={`h-4 w-4 ${k.color}`} />
                   </div>
-                  <div className="mt-2 text-2xl font-bold tabular-nums text-white">{nf.format(k.value)}</div>
+                  <div className="mt-2 text-2xl font-bold tabular-nums text-white">
+                    {loading && !data ? <Skeleton width={80} height={32} /> : nf.format(k.value)}
+                  </div>
                 </div>
               );
             })}

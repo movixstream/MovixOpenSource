@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, HelpCircle, Users, ChevronLeft, ChevronRight } from 'lucide-react';
-import useEmblaCarousel from 'embla-carousel-react';
+import useEmblaCarousel from '@/hooks/useFlexGapEmblaCarousel';
 import { useTranslation } from 'react-i18next';
 import { getOverlayPortalRoot } from '../utils/overlayPortal';
 
@@ -120,9 +120,9 @@ const WatchPartyTutorialModal: React.FC<WatchPartyTutorialModalProps> = ({ isOpe
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
                                 onClick={handleClose}
-                                className="text-white/50 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
+                                className="text-white/50 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors group/icon"
                             >
-                                <X className="w-5 h-5 md:w-6 md:h-6" />
+                                <X className="w-5 h-5 md:w-6 md:h-6 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                             </motion.button>
                         </div>
 

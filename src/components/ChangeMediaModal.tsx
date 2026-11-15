@@ -163,15 +163,15 @@ const ChangeMediaModal: React.FC<ChangeMediaModalProps> = ({ isOpen, onClose, on
             </button>
             {step === 'season' && selectedShow && (
               <>
-                <ArrowRight className="w-3 h-3" />
+                <ArrowRight className="w-3 h-3 text-white opacity-40" />
                 <span className="text-white/70">{selectedShow.name}</span>
               </>
             )}
             {step === 'episode' && selectedShow && (
               <>
-                <ArrowRight className="w-3 h-3" />
+                <ArrowRight className="w-3 h-3 text-white opacity-40" />
                 <button onClick={goBack} className="hover:text-white transition-colors">{selectedShow.name}</button>
-                <ArrowRight className="w-3 h-3" />
+                <ArrowRight className="w-3 h-3 text-white opacity-40" />
                 <span className="text-white/70">{t('watchParty.season')} {selectedSeason}</span>
               </>
             )}
@@ -192,8 +192,8 @@ const ChangeMediaModal: React.FC<ChangeMediaModalProps> = ({ isOpen, onClose, on
                 autoFocus
               />
               {query && (
-                <button onClick={() => { setQuery(''); setResults([]); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white">
-                  <X className="w-4 h-4" />
+                <button onClick={() => { setQuery(''); setResults([]); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white group/icon">
+                  <X className="w-4 h-4 text-white opacity-30 group-hover/icon:opacity-100" />
                 </button>
               )}
             </div>
@@ -229,7 +229,7 @@ const ChangeMediaModal: React.FC<ChangeMediaModalProps> = ({ isOpen, onClose, on
                           <span className="text-[10px] text-white/70">{item.vote_average?.toFixed(1)}</span>
                         </div>
                         <span className="text-[10px] text-white/50">
-                          {item.media_type === 'movie' ? <Film className="w-3 h-3 inline" /> : <Tv className="w-3 h-3 inline" />}
+                          {item.media_type === 'movie' ? <Film className="w-3 h-3 inline text-white opacity-50" /> : <Tv className="w-3 h-3 inline text-white opacity-50" />}
                         </span>
                       </div>
                     </div>

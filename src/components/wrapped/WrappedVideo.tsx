@@ -3,8 +3,9 @@ import { Download, Loader2, Pause, Play, Share2, Volume2, VolumeX, X } from 'luc
 import { useTranslation } from 'react-i18next';
 import { useIsPresent } from 'framer-motion';
 import { toast } from 'sonner';
-import type { WrappedShareCardData } from '@/types/wrapped';
+import type { WrappedShareCardData, WrappedThemeId } from '@/types/wrapped';
 import { Checkbox } from '@/components/ui/checkbox';
+import WrappedThemePicker from './WrappedThemePicker';
 import { SmoothRange } from '@/components/ui/SmoothRange';
 import { prepareWrappedScore, startWrappedScore } from '@/utils/wrappedVideoAudio';
 import { ensureShareFonts, loadCanvasImage } from '@/utils/wrappedCanvas';
@@ -30,7 +31,9 @@ function download(blob: Blob, name: string) {
     setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-export default function WrappedVideo({ data }: { data: WrappedShareCardData }) {
+export default function WrappedVideo({ data, theme, autoTheme, onTheme }: {
+    data: WrappedShareCardData; theme?: WrappedThemeId; autoTheme?: WrappedThemeId; onTheme?: (id: WrappedThemeId) => void;
+}) {
     const { t } = useTranslation();
     const present = useIsPresent();
     const optionsId = useId();
@@ -69,7 +72,8 @@ export default function WrappedVideo({ data }: { data: WrappedShareCardData }) {
         intro: t('wrappedVideo.intro'), time: t('wrappedVideo.time'), titles: t('wrappedVideo.titles'),
         favorite: t('wrappedVideo.favorite'), portrait: t('wrappedVideo.portrait'), final: t('wrappedVideo.final'), missingPoster: t('wrappedVideo.missingPoster'),
     }), [t]);
-    const effectiveOptions = useMemo(() => getEffectiveWrappedVideoOptions(options, data.items.length), [data.items.length, options]);
+    const hasSignature = Boolean(data.signatureScene);
+    const effectiveOptions = useMemo(() => getEffectiveWrappedVideoOptions(options, data.items.length, hasSignature), [data.items.length, hasSignature, options]);
     const timeline = useMemo(() => buildWrappedVideoTimeline(effectiveOptions), [effectiveOptions]);
     const mime = useMemo(getSupportedMime, []);
 
@@ -111,16 +115,18 @@ export default function WrappedVideo({ data }: { data: WrappedShareCardData }) {
     }, []);
 
     useEffect(() => {
-        setOptions(current => normalizeWrappedVideoOptions(current, data.items.length));
+        setOptions(current => normalizeWrappedVideoOptions(current, data.items.length, Boolean(data.signatureScene)));
     }, [data]);
 
     useEffect(() => {
         let active = true;
         imagesRef.current = new Map();
         setImagesReady(false);
-        void Promise.all([ensureShareFonts(), ...data.items.slice(0, 3).map(async item => {
-            if (!item.posterUrl) return;
-            imagesRef.current.set(item.posterUrl, await loadCanvasImage(item.posterUrl));
+        // Les trois affiches de l'ouverture et l'image de fond du numéro 1.
+        const urls = [...data.items.slice(0, 3).map(item => item.posterUrl), data.backdropUrl];
+        void Promise.all([ensureShareFonts(), ...urls.map(async url => {
+            if (!url) return;
+            imagesRef.current.set(url, await loadCanvasImage(url));
         })]).finally(() => { if (active && mountedRef.current) { setImagesReady(true); renderRef.current(0); } });
         return () => { active = false; };
     }, [data]);
@@ -146,7 +152,7 @@ export default function WrappedVideo({ data }: { data: WrappedShareCardData }) {
     const toggle = (key: keyof WrappedVideoOptions) => {
         if (key === 'sound') return setOptions(value => ({ ...value, sound: !value.sound }));
         setOptions(value => {
-            const effective = getEffectiveWrappedVideoOptions(value, data.items.length);
+            const effective = getEffectiveWrappedVideoOptions(value, data.items.length, hasSignature);
             const selected = Object.entries(effective).filter(([name, enabled]) => name !== 'sound' && enabled).map(([name]) => name);
             if (effective[key] && selected.length === 1) return value;
             return { ...value, [key]: !effective[key] };
@@ -201,6 +207,10 @@ export default function WrappedVideo({ data }: { data: WrappedShareCardData }) {
         const isCurrent = () => belongsToSession() && !controller.signal.aborted;
         encodingAbort.current = controller;
         stopPreview(); setEncodeState('encoding'); setProgress(0); setRetryHidden(false);
+        // Chaque plan est tracé une fois avant la capture : glyphes et images sont prêts,
+        // le premier passage d'une scène ne coûte pas d'image au fichier.
+        timeline.forEach(beat => { render((beat.start + beat.end) / 2); render(Math.min(WRAPPED_VIDEO_DURATION, beat.start + 0.05)); });
+        render(0);
         let stream: MediaStream | null = null;
         let audioContext: AudioContext | null = null;
         let disconnectMusic: (() => void) | null = null;
@@ -251,7 +261,8 @@ export default function WrappedVideo({ data }: { data: WrappedShareCardData }) {
                 startMusic = () => { disconnectMusic = startWrappedScore(audioContext!, destination, score!); };
             }
             const blob = await new Promise<Blob>((resolve, reject) => {
-                const activeRecorder = new MediaRecorder(captureStream, { mimeType: mime, videoBitsPerSecond: 4_000_000 });
+                // Le grain et les volets rapides demandent un débit plus généreux qu'un plan fixe.
+                const activeRecorder = new MediaRecorder(captureStream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
                 recorder = activeRecorder;
                 let settled = false;
                 const finish = (error?: Error, result?: Blob) => {
@@ -327,11 +338,22 @@ export default function WrappedVideo({ data }: { data: WrappedShareCardData }) {
     return <section className="mx-auto w-full max-w-5xl space-y-5" aria-labelledby="wrapped-video-title">
         <header className="space-y-2"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--wrapped-accent)]">MOVIX</p><h2 id="wrapped-video-title" className="font-['Archivo_Black'] text-3xl tracking-[-0.035em] sm:text-4xl">{t('wrappedVideo.title')}</h2><p className="max-w-xl text-sm text-white/65">{t('wrappedVideo.caption')}</p></header>
         <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-            <div className="mx-auto w-full max-w-[300px]"><canvas ref={canvasRef} width={WRAPPED_VIDEO_SIZE.width} height={WRAPPED_VIDEO_SIZE.height} className="w-full rounded-xl shadow-[0_20px_44px_rgba(0,0,0,0.4)]" aria-label={t('wrappedVideo.previewAlt', { year: data.year })} /></div>
+            <div className="relative mx-auto w-full max-w-[300px]">
+                <canvas ref={canvasRef} width={WRAPPED_VIDEO_SIZE.width} height={WRAPPED_VIDEO_SIZE.height} className="w-full rounded-xl shadow-[0_20px_44px_rgba(0,0,0,0.4)]" aria-label={t('wrappedVideo.previewAlt', { year: data.year })} />
+                {/* Raccourci au pointeur ; le clavier et les lecteurs d'écran utilisent le bouton Lire. */}
+                {!playing && imagesReady && encodeState !== 'encoding' && !(options.sound && !score) && <button type="button" onClick={playPreview} aria-hidden="true" tabIndex={-1}
+                    className="group/play absolute inset-0 flex items-center justify-center rounded-xl">
+                    <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/90 text-[#101318] shadow-[0_12px_32px_rgba(0,0,0,0.45)] transition-transform duration-150 group-hover/play:scale-105 group-active/play:scale-95 motion-reduce:transition-none"><Play className="ml-1 h-7 w-7" fill="currentColor" aria-hidden="true" /></span>
+                </button>}
+            </div>
             <div className="space-y-4">
+                {theme && onTheme && <fieldset disabled={encodeState === 'encoding'}><WrappedThemePicker value={theme} auto={autoTheme || theme} onChange={onTheme} /></fieldset>}
                 <fieldset disabled={encodeState === 'encoding'} className="grid grid-cols-2 gap-2"><legend className="mb-2 text-sm font-semibold">{t('wrappedVideo.include')}</legend>{([
-                    ['watchTime', t('wrappedVideo.time')], ['titleCount', t('wrappedVideo.titles')], ['favorite', t('wrappedVideo.favorite')], ['portrait', t('wrappedVideo.portrait')],
-                ] as const).map(([key, name]) => <label key={key} htmlFor={`${optionsId}-${key}`} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg bg-white/5 px-3 text-sm"><Checkbox id={`${optionsId}-${key}`} aria-label={name} checked={key === 'favorite' ? effectiveOptions.favorite : options[key]} disabled={encodeState === 'encoding' || (key === 'favorite' && !data.items.length)} onCheckedChange={() => toggle(key)} className="shadow-none aria-checked:border-[var(--wrapped-accent)] aria-checked:bg-[var(--wrapped-accent)] focus-visible:ring-[var(--wrapped-accent)]" />{name}</label>)}
+                    ['watchTime', t('wrappedVideo.time')], ['titleCount', t('wrappedVideo.titles')],
+                    // Le plan signature n'est proposé que si le profil en fournit un.
+                    ...(data.signatureScene ? [['signature', data.signatureScene.title] as const] : []),
+                    ['favorite', t('wrappedVideo.favorite')], ['portrait', t('wrappedVideo.portrait')],
+                ] as const).map(([key, name]) => <label key={key} htmlFor={`${optionsId}-${key}`} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg bg-white/5 px-3 text-sm"><Checkbox id={`${optionsId}-${key}`} aria-label={name} checked={key === 'favorite' || key === 'signature' ? effectiveOptions[key] : options[key]} disabled={encodeState === 'encoding' || (key === 'favorite' && !data.items.length)} onCheckedChange={() => toggle(key)} className="shadow-none aria-checked:border-[var(--wrapped-accent)] aria-checked:bg-[var(--wrapped-accent)] focus-visible:ring-[var(--wrapped-accent)]" />{name}</label>)}
                     <label htmlFor={`${optionsId}-sound`} className="col-span-2 flex min-h-11 cursor-pointer items-center gap-3 rounded-lg bg-white/5 px-3 text-sm"><Checkbox id={`${optionsId}-sound`} aria-label={t('wrappedVideo.sound')} checked={options.sound} disabled={encodeState === 'encoding'} onCheckedChange={() => toggle('sound')} className="shadow-none aria-checked:border-[var(--wrapped-accent)] aria-checked:bg-[var(--wrapped-accent)] focus-visible:ring-[var(--wrapped-accent)]" />{options.sound ? <Volume2 className="h-4 w-4" aria-hidden="true" /> : <VolumeX className="h-4 w-4" aria-hidden="true" />}{t('wrappedVideo.sound')}</label></fieldset>
                 {options.sound && !score && !scoreError && <p className="text-xs text-white/70" role="status">{t('wrappedVideo.musicLoading')}</p>}
                 {options.sound && scoreError && <p className="text-sm text-amber-200" role="alert">{t('wrappedVideo.musicError')} <button type="button" onClick={() => { setScore(null); setScoreRetry(value => value + 1); }} className="min-h-11 underline">{t('wrappedStory.retry')}</button></p>}

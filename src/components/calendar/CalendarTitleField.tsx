@@ -170,8 +170,8 @@ const CalendarTitleField: React.FC<CalendarTitleFieldProps> = ({
         />
         <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
           {loading
-            ? <Loader2 className="h-4 w-4 animate-spin text-white/40" />
-            : <Search className="h-4 w-4 text-white/30" />}
+            ? <Loader2 className="h-4 w-4 animate-spin text-white opacity-40" />
+            : <Search className="h-4 w-4 text-white opacity-30" />}
         </span>
       </div>
 
@@ -179,13 +179,13 @@ const CalendarTitleField: React.FC<CalendarTitleFieldProps> = ({
         <button
           type="button"
           onClick={onUnlink}
-          className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 py-1 pl-1 pr-3 text-xs text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+          className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 py-1 pl-1 pr-3 text-xs text-white/60 transition-colors hover:bg-white/10 hover:text-white group/icon"
         >
           {linked.posterPath
             ? <img src={`https://image.tmdb.org/t/p/w92${linked.posterPath}`} alt="" loading="lazy" decoding="async" className="h-6 w-4 rounded-sm object-cover" />
             : <span className="h-6 w-4 rounded-sm bg-white/10" />}
           {t('calendar.linkedToCatalog')}
-          <X className="h-3 w-3" />
+          <X className="h-3 w-3 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity]" />
         </button>
       )}
 

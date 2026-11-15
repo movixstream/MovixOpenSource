@@ -29,18 +29,31 @@ function getCachedPool() {
 const SHARED_LIST_CACHE_TTL = 600; // 10 minutes
 const USERS_DIR = path.join(__dirname, 'data', 'users');
 
-// === ZZAPI API Configuration for content moderation ===
-const ZZAPI_API_KEY = process.env.ZZAPI_API_KEY;
-const ZZAPI_API_URL = 'https://zzapi.cc/v1/chat/completions';
-const ZZAPI_MODEL = 'claude-haiku-4-5-20251001';
-
-// === OpenRouter Fallback Configuration ===
+// === OpenRouter Configuration for content moderation (Claude Haiku 5.5) ===
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_MODEL = 'deepseek/deepseek-v4-flash';
+const OPENROUTER_MODEL = 'anthropic/claude-haiku-5.5';
 const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL;
 
-// Fonction de modération des listes partagées avec OpenRouter (exécutée en background)
+const SHARED_LIST_MODERATION_REASONS = ['INSULTES', 'EROTIQUE', 'PSEUDO_INAPPROPRIE', 'NOM_LISTE_INAPPROPRIE', 'CONTENU_INAPPROPRIE'];
+
+// Schéma imposé à la réponse : flagged reste un vrai booléen, jamais une chaîne.
+const SHARED_LIST_MODERATION_SCHEMA = {
+  name: 'shared_list_moderation',
+  strict: true,
+  schema: {
+    type: 'object',
+    properties: {
+      flagged: { type: 'boolean' },
+      reason: { anyOf: [{ type: 'string', enum: SHARED_LIST_MODERATION_REASONS }, { type: 'null' }] },
+      details: { type: 'string' }
+    },
+    required: ['flagged', 'reason', 'details'],
+    additionalProperties: false
+  }
+};
+
+// Fonction de modération des listes partagées avec Claude Haiku 5.5 via OpenRouter (exécutée en background)
 async function moderateSharedListWithAI(shareId, listName, items, username) {
   try {
     // Construire un résumé des items de la liste
@@ -64,56 +77,58 @@ Note: Les films et séries sont des contenus TMDB officiels, donc ils sont gén�
 Réponds UNIQUEMENT avec ce format JSON (sans markdown, sans backticks):
 {"flagged": true/false, "reason": "INSULTES" ou "EROTIQUE" ou "PSEUDO_INAPPROPRIE" ou "NOM_LISTE_INAPPROPRIE" ou "CONTENU_INAPPROPRIE" ou null, "details": "explication courte"}`;
 
-    let responseText = '';
-    try {
-      const response = await axios.post(
-        ZZAPI_API_URL,
-        {
-          model: ZZAPI_MODEL,
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 500,
-          temperature: 0.1
+    const response = await axios.post(
+      OPENROUTER_API_URL,
+      {
+        model: OPENROUTER_MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        // Le budget inclut le raisonnement. Pas de temperature : Haiku 5.5 la rejette (400).
+        max_tokens: 2048,
+        reasoning: { effort: 'low' },
+        response_format: { type: 'json_schema', json_schema: SHARED_LIST_MODERATION_SCHEMA }
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'HTTP-Referer': FRONTEND_BASE_URL,
+          'X-Title': 'Movix Shared List Moderation'
         },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${ZZAPI_API_KEY}`,
-            'HTTP-Referer': FRONTEND_BASE_URL,
-            'X-Title': 'Movix Shared List Moderation'
-          },
-          timeout: 15000
-        }
-      );
-      responseText = response.data?.choices?.[0]?.message?.content || '';
-    } catch (primaryError) {
-      console.warn('⚠️ ZZAPI failed for moderation, falling back to OpenRouter:', primaryError.message);
-      const response = await axios.post(
-        OPENROUTER_API_URL,
-        {
-          model: OPENROUTER_MODEL,
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 500,
-          temperature: 0.1
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-            'HTTP-Referer': FRONTEND_BASE_URL,
-            'X-Title': 'Movix Shared List Moderation'
-          },
-          timeout: 15000
-        }
-      );
-      responseText = response.data?.choices?.[0]?.message?.content || '';
-    }
+        timeout: 30000
+      }
+    ).catch((requestError) => {
+      // OpenRouter filtre lui-même les entrées envoyées aux modèles Anthropic et
+      // répond 403 avec les catégories détectées : ce refus vaut décision de modération.
+      const blockReasons = requestError?.response?.data?.error?.metadata?.reasons;
+      if (requestError?.response?.status !== 403 || !Array.isArray(blockReasons) || !blockReasons.length) throw requestError;
+      return { blockReasons };
+    });
+    const responseText = response.data?.choices?.[0]?.message?.content || '';
 
     let moderationResult;
-    try {
-      const cleanedResponse = responseText.replace(/```json\n?|```\n?/g, '').trim();
-      moderationResult = JSON.parse(cleanedResponse);
-    } catch (parseError) {
-      console.error('❌ Erreur parsing réponse OpenRouter (shared list):', parseError, 'Response:', responseText);
+    if (response.blockReasons) {
+      moderationResult = {
+        flagged: true,
+        reason: response.blockReasons.some(r => r.startsWith('sexual')) ? 'EROTIQUE' : 'INSULTES',
+        details: `Bloqué par le filtre OpenRouter (${response.blockReasons.join(', ')}).`
+      };
+    } else {
+      try {
+        const cleanedResponse = responseText.replace(/```json\n?|```\n?/g, '').trim();
+        moderationResult = JSON.parse(cleanedResponse);
+      } catch (parseError) {
+        console.error('❌ Erreur parsing réponse OpenRouter (shared list):', parseError, 'Response:', responseText);
+        return { flagged: false };
+      }
+    }
+
+    // Une réponse ambiguë ou mal formée ne doit pas retirer une liste du catalogue.
+    if (
+      !moderationResult ||
+      typeof moderationResult.flagged !== 'boolean' ||
+      (moderationResult.flagged && !SHARED_LIST_MODERATION_REASONS.includes(moderationResult.reason))
+    ) {
+      console.error('❌ Réponse de modération invalide (shared list, non bloquant):', responseText);
       return { flagged: false };
     }
 

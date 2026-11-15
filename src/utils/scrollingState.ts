@@ -17,19 +17,29 @@
 
 let activeEmblaCount = 0;
 
+// Sur certains Chrome Windows (FRONTEND-F7/FD), `document.body.classList.add`
+// n'est pas une fonction : une extension remplace le body ou son classList.
+// La classe n'est qu'une optimisation de survol, elle ne doit jamais faire
+// tomber le carrousel : on vérifie la méthode et on avale toute erreur.
+const setEmblaScrollingClass = (active: boolean): void => {
+  try {
+    const classList = (document.body as HTMLElement | null | undefined)?.classList;
+    const method = classList ? (active ? classList.add : classList.remove) : undefined;
+    if (typeof method === 'function') method.call(classList, 'embla-scrolling');
+  } catch {
+    // body altéré : on renonce à la classe, le défilement reste fonctionnel.
+  }
+};
+
 export const beginEmblaScroll = (): void => {
   if (typeof document === 'undefined') return;
   activeEmblaCount += 1;
-  if (activeEmblaCount === 1) {
-    document.body?.classList.add('embla-scrolling');
-  }
+  if (activeEmblaCount === 1) setEmblaScrollingClass(true);
 };
 
 export const endEmblaScroll = (): void => {
   if (typeof document === 'undefined') return;
   if (activeEmblaCount === 0) return;
   activeEmblaCount -= 1;
-  if (activeEmblaCount === 0) {
-    document.body?.classList.remove('embla-scrolling');
-  }
+  if (activeEmblaCount === 0) setEmblaScrollingClass(false);
 };

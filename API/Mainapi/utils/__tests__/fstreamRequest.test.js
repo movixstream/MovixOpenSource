@@ -56,3 +56,31 @@ test('FStream clears its deadline and in-flight entry after completion', async (
   assert.equal(await request('key', scrape), 2);
   assert.equal(timers.size, 0);
 });
+
+test('les POST FrenchStream hérités ciblent directement le domaine canonique sans perdre leur formulaire', async () => {
+  const filename = path.join(__dirname, '..', 'axiosHelpers.js');
+  const source = fs.readFileSync(filename, 'utf8');
+  const section = source.slice(source.indexOf('function withOptionalFStreamCookies('), source.indexOf('function isAnimeSamaRetriableError('));
+  const { canonicalFStreamUrl, FSTREAM_BASE_URL } = require('../../config/fstream');
+  const sent = [];
+  const context = {
+    canonicalFStreamUrl, URL, ENABLE_FSTREAM_PROXY: false,
+    deps: { FSTREAM_BASE_URL, fstreamCookies: {}, ensureFStreamSession: async () => {},
+      incrementFstreamRequestCounter() {}, axiosFStream: async config => { sent.push(config); return { status: 200 }; } },
+  };
+  vm.runInNewContext(`${section}\nthis.request = axiosFStreamRequest;`, context, { filename });
+  const data = new URLSearchParams({ query: 'Chicago Fire', page: '1' });
+  const legacy = { method: 'post', url: 'https://french-stream.one/engine/ajax/search.php', data,
+    headers: { Origin: 'https://french-stream.one', Referer: 'https://french-stream.one/s-tv/', 'Content-Type': 'application/x-www-form-urlencoded' } };
+  await context.request(legacy);
+  assert.equal(sent[0].url, `${FSTREAM_BASE_URL}/engine/ajax/search.php`);
+  assert.equal(sent[0].method, 'post');
+  assert.equal(sent[0].data.toString(), 'query=Chicago+Fire&page=1');
+  assert.equal(sent[0].headers.Referer, `${FSTREAM_BASE_URL}/s-tv/`);
+  assert.equal(sent[0].headers.Origin, FSTREAM_BASE_URL);
+  assert.equal(legacy.url, 'https://french-stream.one/engine/ajax/search.php', 'ne pas modifier la configuration partagée de l’appelant');
+  await context.request({ url: '/films/', baseURL: 'https://french-stream.one/' });
+  assert.equal(sent[1].baseURL, `${FSTREAM_BASE_URL}/`);
+  await context.request({ url: 'https://player.test/embed/video' });
+  assert.equal(sent[2].url, 'https://player.test/embed/video');
+});

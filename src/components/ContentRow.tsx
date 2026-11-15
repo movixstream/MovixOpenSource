@@ -30,7 +30,7 @@ interface ContentRowProps {
 export const ContentRow: React.FC<ContentRowProps> = ({ title, items, mediaType: _mediaType, onLoadMore, isLoading }) => {
   const { items: allowedItems } = useAgeRestrictedContent(items);
   if (isLoading) {
-    return <ContentRowSkeleton />;
+    return <ContentRowSkeleton title={title} variant="posters" />;
   }
 
   // Filter out items without poster

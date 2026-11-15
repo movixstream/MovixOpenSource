@@ -1,27 +1,61 @@
-/* Développé avec ❤️ par @mysticsaba, projet commencé à 14 ans */
+/* Développé avec ❤️ par @mysticsaba, projet commencé à 14 ans. */
 
-/* Shiny text effect for "Entièrement vibe codé" */
-@keyframes shiny-text {
-    0% {
-        background-position: -200% center;
-    }
-
-    100% {
-        background-position: 200% center;
-    }
+.footer-navigation-icon {
+  /* Les tracés restent opaques ; seule l'icône composée est atténuée. */
+  color: #e5e7eb;
+  opacity: 0.7;
+  transition: opacity 160ms ease;
 }
 
-.shiny-text {
-    background: linear-gradient(90deg,
-            #a855f7 0%,
-            #ec4899 25%,
-            #f472b6 50%,
-            #ec4899 75%,
-            #a855f7 100%);
-    background-size: 200% auto;
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    animation: shiny-text 3s linear infinite;
-    font-weight: 600;
+.footer-navigation-link:hover .footer-navigation-icon,
+.footer-navigation-link:focus-visible .footer-navigation-icon {
+  opacity: 1;
+}
+
+.footer-mask-icon {
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+}
+
+.footer-technology-logo {
+  display: block;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.footer-technology-logo[data-wide='true'] {
+  width: 2rem;
+}
+
+.footer-vibe-text {
+  color: #f472b6;
+  background: linear-gradient(90deg, #a855f7 0%, #ec4899 25%, #f472b6 50%, #ec4899 75%, #a855f7 100%);
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.footer-vibe-text[data-animated='true'] {
+  animation: footer-vibe-shine 3s linear infinite;
+}
+
+@keyframes footer-vibe-shine {
+  from { background-position: -200% center; }
+  to { background-position: 200% center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .footer-navigation-icon { transition: none; }
+  .footer-vibe-text[data-animated='true'] { animation: none; }
 }

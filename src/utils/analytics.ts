@@ -84,16 +84,52 @@ const observeRouteChanges = (onChange: () => void): void => {
 
   const patch = (method: 'pushState' | 'replaceState') => {
     const original = history[method];
-    history[method] = function patched(
+    if (typeof original !== 'function') return;
+    const patched = function patched(
       this: History,
       ...args: Parameters<History['pushState']>
     ) {
-      const result = original.apply(this, args);
+      let result: void;
+      try {
+        result = original.apply(this, args);
+      } catch (error) {
+        // Le script de challenge Cloudflare enveloppe aussi l'History API et
+        // glisse parfois une fonction dans l'état : le navigateur refuse alors
+        // de le cloner et la navigation plantait (GlitchTip 6E, 6F, 6G, 6H,
+        // 6L, 6M). L'état de React Router est du JSON : le rejouer sans ce
+        // qui n'est pas clonable garde la navigation.
+        //
+        // Toute autre erreur (SecurityError : quota de pushState d'iOS,
+        // refus de Firefox — GlitchTip G4, F5) repart telle quelle : c'est
+        // l'appelant qui sait s'en remettre (React Router se replie sur
+        // location.assign pour un push) et l'enveloppe doit rester
+        // transparente.
+        if ((error as { name?: unknown })?.name !== 'DataCloneError') throw error;
+        let cloneable: unknown = null;
+        try {
+          cloneable = args[0] === undefined ? null : JSON.parse(JSON.stringify(args[0]));
+        } catch {
+          // État circulaire : naviguer sans état plutôt que planter.
+        }
+        try {
+          result = original.apply(this, [cloneable, args[1], args[2]]);
+        } catch {
+          // Le second essai échoue aussi : remonter l'erreur d'origine, pas
+          // une erreur née de notre rattrapage.
+          throw error;
+        }
+      }
       // Micro-tâche : laisse React Router monter la nouvelle route (et donc
       // mettre à jour document.title) avant l'envoi.
       window.setTimeout(notifyIfChanged, 0);
       return result;
     } as History[typeof method];
+    try {
+      history[method] = patched;
+    } catch {
+      // History API figée (extension, WebView) : la mesure des vues de page
+      // ne doit pas empêcher l'application de démarrer.
+    }
   };
 
   patch('pushState');
@@ -101,6 +137,28 @@ const observeRouteChanges = (onChange: () => void): void => {
   window.addEventListener('popstate', () => {
     window.setTimeout(notifyIfChanged, 0);
   });
+};
+
+/**
+ * Safari 15 lève « TypeError: Unable to deserialize data. » à la simple
+ * lecture de history.state quand l'entrée restaurée (session rouverte,
+ * Safari mis à jour) contient un état qu'il ne sait plus relire. BrowserRouter
+ * lit cet état dès sa création : la page entière tombait au démarrage
+ * (GlitchTip GB). Repartir d'un état vide garde l'URL et ne perd que
+ * l'index de navigation de React Router, qu'il recrée aussitôt.
+ */
+export const repairUnreadableHistoryState = (): void => {
+  try {
+    void window.history.state;
+    return;
+  } catch {
+    // État illisible : on tente de le remplacer ci-dessous.
+  }
+  try {
+    window.history.replaceState(null, '');
+  } catch {
+    // Le navigateur refuse aussi l'écriture : rien de plus à tenter ici.
+  }
 };
 
 const startGoogleAnalytics = (measurementId: string): void => {
@@ -188,6 +246,11 @@ const startPlausible = (
  */
 export const initAnalytics = (): void => {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  // Appelé par main.tsx avant le premier rendu, donc avant que BrowserRouter
+  // ne lise history.state : c'est le dernier moment pour réparer un état
+  // illisible, quel que soit le fournisseur choisi.
+  repairUnreadableHistoryState();
 
   const globalWindow = window as GtagWindow;
   if (globalWindow.__movixAnalyticsStarted) return;

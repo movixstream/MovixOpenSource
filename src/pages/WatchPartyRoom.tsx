@@ -17,6 +17,8 @@ import { useWrappedTracker } from '../hooks/useWrappedTracker';
 import { WATCHPARTY_API } from '../config/runtime';
 import WatchPartySyncInfoModal from '../components/WatchPartySyncInfoModal';
 import { CLASSIC_HOST_INTERVAL_MS, LocalPlayerSnapshot, SYNC_PRO_HOST_INTERVAL_MS, WatchPartySyncWorkerInput, WatchPartySyncWorkerOutput } from '../utils/watchpartySync';
+import { enterPlayerFullscreen, exitPlayerFullscreen, getFullscreenElement } from '../utils/playerFullscreenPersistence';
+import { copyText } from '../utils/clipboard';
 
 const MAIN_API = WATCHPARTY_API;
 const SYNC_WORKER_STARTUP_TIMEOUT_MS = 5000;
@@ -1229,7 +1231,8 @@ const WatchPartyRoom: React.FC = () => {
   const handleCopyInviteLink = () => {
     if (!roomInfo?.code) return;
     const shareLink = getShareLink(roomInfo.code);
-    navigator.clipboard.writeText(shareLink).then(() => {
+    void copyText(shareLink).then((copied) => {
+      if (!copied) return;
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 3000);
     });
@@ -1241,26 +1244,21 @@ const WatchPartyRoom: React.FC = () => {
   };
 
   // Fullscreen functionality
-  const togglePageFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().then(() => {
-        setIsPageFullscreen(true);
-      }).catch(err => {
-        console.error('Erreur lors de l\'activation du plein écran:', err);
-      });
-    } else {
-      document.exitFullscreen().then(() => {
-        setIsPageFullscreen(false);
-      }).catch(err => {
-        console.error('Erreur lors de la sortie du plein écran:', err);
-      });
+  const togglePageFullscreen = async () => {
+    if (!getFullscreenElement()) {
+      await enterPlayerFullscreen({ container: document.documentElement });
+      setIsPageFullscreen(!!getFullscreenElement());
+      return;
     }
+
+    await exitPlayerFullscreen();
+    setIsPageFullscreen(!!getFullscreenElement());
   };
 
   // Listen for fullscreen changes
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsPageFullscreen(!!document.fullscreenElement);
+      setIsPageFullscreen(!!getFullscreenElement());
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -2051,7 +2049,7 @@ const WatchPartyRoom: React.FC = () => {
                       : 'bg-white/5 text-white/20 cursor-not-allowed'
                       }`}
                   >
-                    <Send size={18} />
+                    <Send className={(newMessage.trim() && socketState === SocketState.CONNECTED ? "" : "text-white opacity-20")} size={18} />
                   </button>
                 </form>
                 <EmojiAutocomplete textareaRef={chatInputRef} value={newMessage} onChange={setNewMessage} maxLength={500} />
@@ -2076,8 +2074,8 @@ const WatchPartyRoom: React.FC = () => {
               >
                 <div className="flex items-center justify-between mb-5">
                   <h3 className="text-lg font-semibold">{t('watchParty.participants')} ({participants.length}/{roomInfo.maxParticipants})</h3>
-                  <button onClick={() => setShowParticipantsPanel(false)} className="p-1.5 hover:bg-white/10 rounded-full text-white/50 hover:text-white">
-                    <X size={20} />
+                  <button onClick={() => setShowParticipantsPanel(false)} className="p-1.5 hover:bg-white/10 rounded-full text-white/50 hover:text-white group/icon">
+                    <X className="text-white opacity-50 group-hover/icon:opacity-100" size={20} />
                   </button>
                 </div>
                 <div className="mb-6">
@@ -2353,9 +2351,9 @@ const WatchPartyRoom: React.FC = () => {
                     </div>
                     <button
                       onClick={() => setShowSyncInfoModal(true)}
-                      className="inline-flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                      className="inline-flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white group/icon"
                     >
-                      <Info size={14} />
+                      <Info className="text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" size={14} />
                       {t('watchParty.helpLabel')}
                     </button>
                   </div>

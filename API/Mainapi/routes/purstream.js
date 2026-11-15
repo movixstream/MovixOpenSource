@@ -15,6 +15,9 @@ const { generateCacheKey, CACHE_DIR } = require('../utils/cacheManager');
 const { fetchTmdbDetails, fetchTmdbImages } = require('../utils/tmdbCache');
 const { pickRandomProxy, getProxyAgent } = require('../utils/proxyManager');
 const { buildSignedProxyUrl, signingConfigured } = require('../utils/mediaSigning');
+const { createWiflixRefreshState } = require('../utils/wiflixRefreshState');
+const { reportRefreshFailure } = require('../utils/sourceRefreshTelemetry');
+const { redis } = require('../config/redis');
 
 // Repli statique si `/api/status` est injoignable. `api.purstream.cc` est mort
 // (404) : le repli ne servait plus qu'à masquer la panne.
@@ -23,6 +26,8 @@ const PURSTREAM_STATUS_URL = 'https://purstream.wiki/api/status';
 const PURSTREAM_CACHE_DIR = CACHE_DIR.PURSTREAM;
 const PURSTREAM_STATUS_TTL_MS = 5 * 60 * 1000;
 const PURSTREAM_CACHE_REFRESH_MS = 6 * 60 * 60 * 1000;
+const refreshState = createWiflixRefreshState({ successRefreshMs: PURSTREAM_CACHE_REFRESH_MS,
+  isNegative: data => Boolean(data?.__not_found) });
 
 // ---------------------------------------------------------------------------
 // Dependencies injected via configure()
@@ -33,7 +38,6 @@ let PROXY_SERVER_URL;
 let verifyAccessKey;
 let getFromCacheNoExpiration;
 let saveToCache;
-let shouldUpdateCache;
 
 let purstreamApiBase = PURSTREAM_BASE;
 let purstreamApiBaseCheckedAt = 0;
@@ -46,7 +50,6 @@ function configure(deps) {
   if (deps.verifyAccessKey) verifyAccessKey = deps.verifyAccessKey;
   if (deps.getFromCacheNoExpiration) getFromCacheNoExpiration = deps.getFromCacheNoExpiration;
   if (deps.saveToCache) saveToCache = deps.saveToCache;
-  if (deps.shouldUpdateCache) shouldUpdateCache = deps.shouldUpdateCache;
 }
 
 /** Appel interne PurStream status endpoint */
@@ -166,13 +169,22 @@ function refreshCache(cacheKey, update) {
 // ---------------------------------------------------------------------------
 // Résolution TMDB ID → PurStream ID
 // ---------------------------------------------------------------------------
-async function resolvePurstreamId(tmdbId, type, { waitForRefresh = false } = {}) {
+async function resolvePurstreamId(tmdbId, type, { waitForRefresh = false, forceRefresh = false } = {}) {
   const cacheKey = generateCacheKey(`purstream_map_${type}_${tmdbId}`);
 
   const cached = await getFromCacheNoExpiration(PURSTREAM_CACHE_DIR, cacheKey);
 
-  if (cached) {
-    const stale = await shouldUpdateCache(PURSTREAM_CACHE_DIR, cacheKey, PURSTREAM_CACHE_REFRESH_MS);
+  if (forceRefresh) {
+    // Plusieurs épisodes absents ne doivent pas relancer la même recherche en boucle.
+    const checkKey = `${cacheKey}.revalidation`;
+    if (await refreshState.remaining(PURSTREAM_CACHE_DIR, checkKey, null) > 0) {
+      return cached?.purstream_id ? cached : null;
+    }
+    await refreshState.defer(PURSTREAM_CACHE_DIR, checkKey);
+  }
+
+  if (cached && !forceRefresh) {
+    const stale = await refreshState.remaining(PURSTREAM_CACHE_DIR, cacheKey, cached) <= 0;
     if (cached.__not_found) {
       if (stale) {
         const refresh = refreshCache(cacheKey, () => backgroundUpdateMapping(tmdbId, type, cacheKey));
@@ -182,28 +194,29 @@ async function resolvePurstreamId(tmdbId, type, { waitForRefresh = false } = {})
       return null;
     }
     if (stale) {
-      refreshCache(cacheKey, () => backgroundUpdateMapping(tmdbId, type, cacheKey)).catch(() => {});
+      const refresh = refreshCache(cacheKey, () => backgroundUpdateMapping(tmdbId, type, cacheKey));
+      if (waitForRefresh) return await refresh;
+      refresh.catch(() => {});
     }
     return cached;
   }
 
-  return await refreshCache(cacheKey, () => fetchAndCacheMapping(tmdbId, type, cacheKey));
+  if (!forceRefresh && await refreshState.remaining(PURSTREAM_CACHE_DIR, cacheKey, null) > 0) return null;
+  return await refreshCache(cacheKey, () => backgroundUpdateMapping(tmdbId, type, cacheKey));
 }
 
 /** Recherche et cache le mapping TMDB → PurStream */
 async function fetchAndCacheMapping(tmdbId, type, cacheKey) {
   const tmdbData = await fetchTmdbDetails(TMDB_API_URL, TMDB_API_KEY, tmdbId, type, 'fr-FR');
   if (!tmdbData) {
-    console.warn(`[PURSTREAM] TMDB ${type}:${tmdbId} introuvable`);
-    await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, NOT_FOUND_MARKER);
-    return null;
+    throw new Error(`Métadonnées TMDB indisponibles pour ${type}:${tmdbId}`);
   }
 
   const tmdbTitle = type === 'movie' ? tmdbData.title : tmdbData.name;
   const tmdbOriginalTitle = type === 'movie' ? tmdbData.original_title : tmdbData.original_name;
   if (!tmdbTitle) {
     console.warn(`[PURSTREAM] TMDB ${type}:${tmdbId} n'a pas de titre`);
-    await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, NOT_FOUND_MARKER);
+    await saveMapping(cacheKey, NOT_FOUND_MARKER);
     return null;
   }
 
@@ -228,10 +241,12 @@ async function fetchAndCacheMapping(tmdbId, type, cacheKey) {
   if (tmdbOriginalTitle && tmdbOriginalTitle !== tmdbTitle) {
     searchQueries.push(tmdbOriginalTitle);
   }
+  // Le serveur amont rejette le slash même encodé (%2F) dans ce segment.
+  const queries = [...new Set(searchQueries.map(query => query.replace(/[\\/]+/g, ' ').replace(/\s+/g, ' ').trim()))];
 
   let allItems = [];
   let searchError = false;
-  for (const query of searchQueries) {
+  for (const query of queries) {
     try {
       const response = await purstreamRequest(`/search-bar/search/${encodeURIComponent(query)}`);
       if (response.data?.type === 'success') {
@@ -269,16 +284,16 @@ async function fetchAndCacheMapping(tmdbId, type, cacheKey) {
 
   if (allItems.length === 0) {
     console.warn(
-      `[PURSTREAM] Aucun résultat de recherche pour ${type}:${tmdbId} (requêtes: ${searchQueries.join(' | ')})`
+      `[PURSTREAM] Aucun résultat de recherche pour ${type}:${tmdbId} (requêtes: ${queries.join(' | ')})`
     );
-    await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, NOT_FOUND_MARKER);
+    await saveMapping(cacheKey, NOT_FOUND_MARKER);
     return null;
   }
 
   // Extraire posters PurStream
   const extractPosterPath = (url) => {
     if (!url) return '';
-    const m = url.match(/\/([^/]+\.jpg)$/);
+    const m = url.match(/\/([^/?]+\.(?:jpg|png|webp))(?:\?.*)?$/i);
     return m ? `/${m[1]}` : '';
   };
 
@@ -307,13 +322,19 @@ async function fetchAndCacheMapping(tmdbId, type, cacheKey) {
 
   if (!best) {
     console.warn(`[PURSTREAM] Aucun match pour ${type}:${tmdbId} "${tmdbTitle}"`);
-    await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, NOT_FOUND_MARKER);
+    await saveMapping(cacheKey, NOT_FOUND_MARKER);
     return null;
   }
 
   const result = { purstream_id: best.id, title: best.title, type: best.type };
-  await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, result);
+  await saveMapping(cacheKey, result);
   return result;
+}
+
+async function saveMapping(cacheKey, result) {
+  const previous = await getFromCacheNoExpiration(PURSTREAM_CACHE_DIR, cacheKey);
+  if (result.__not_found && previous?.purstream_id) return;
+  await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, result);
 }
 
 /** Revalidation background du mapping — ne jamais écraser un mapping valide par un échec */
@@ -322,30 +343,48 @@ async function backgroundUpdateMapping(tmdbId, type, cacheKey) {
   const hasValidMapping = existing && !existing.__not_found && existing.purstream_id;
 
   try {
+    await refreshState.defer(PURSTREAM_CACHE_DIR, cacheKey);
     const result = await fetchAndCacheMapping(tmdbId, type, cacheKey);
-    if (!result && hasValidMapping) {
-      await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, existing);
-    }
+    if (result) await refreshState.clear(PURSTREAM_CACHE_DIR, cacheKey);
     return result || (hasValidMapping ? existing : null);
   } catch (err) {
     console.warn(`[PURSTREAM] BG mapping ${type}:${tmdbId} erreur: ${err.message}`);
-    if (hasValidMapping) {
-      await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, existing);
-    }
+    reportRefreshFailure('mapping_refresh_failed', err, { source: 'PurStream', type, id: tmdbId,
+      cachePresent: Boolean(existing), cacheUsable: Boolean(hasValidMapping) }, redis);
     return hasValidMapping ? existing : null;
   }
 }
 
 /** Fetch stream depuis PurStream, retourne les sources ou marqueur erreur */
-async function fetchStream(purstreamId, urlPath) {
+async function fetchStream(purstreamId, urlPath, context = {}) {
   try {
     const response = await purstreamRequest(urlPath);
     if (response.data?.type !== 'success') return null;
     return response.data.data?.items || null;
   } catch (err) {
-    console.warn(`[PURSTREAM] Erreur fetch stream purstream:${purstreamId}: ${err.response?.status || err.message}`);
+    if (err.response?.status !== 404) reportRefreshFailure('upstream_error', err, {
+      source: 'PurStream', ...context, purstreamId, path: urlPath,
+    }, redis);
     return { __error: true, status: err.response?.status || 0 };
   }
+}
+
+async function fetchMappedStream(tmdbId, type, mapping, season, episode) {
+  const fetch = id => fetchStream(id, type === 'movie' ? `/stream/${id}`
+    : `/stream/${id}/episode?season=${Number(season)}&episode=${Number(episode)}`,
+  { id: tmdbId, type, season, episode });
+  let streamData = await fetch(mapping.purstream_id);
+  if (streamData?.__error && streamData.status === 404) {
+    const updated = await resolvePurstreamId(tmdbId, type, { waitForRefresh: true, forceRefresh: true });
+    if (updated && updated.purstream_id !== mapping.purstream_id) {
+      mapping = updated;
+      streamData = await fetch(mapping.purstream_id);
+    }
+  }
+  if (streamData?.__error && streamData.status === 404) reportRefreshFailure('stream_not_found',
+    { message: 'Stream absent après revalidation du mapping', response: { status: 404 } },
+    { source: 'PurStream', id: tmdbId, type, season, episode, purstreamId: mapping.purstream_id }, redis);
+  return { mapping, streamData };
 }
 
 // ---------------------------------------------------------------------------
@@ -365,7 +404,7 @@ router.get('/movie/:tmdbId/stream', async (req, res) => {
     const cached = await getFromCacheNoExpiration(PURSTREAM_CACHE_DIR, cacheKey);
 
     if (cached) {
-      const stale = await shouldUpdateCache(PURSTREAM_CACHE_DIR, cacheKey, PURSTREAM_CACHE_REFRESH_MS);
+      const stale = await refreshState.remaining(PURSTREAM_CACHE_DIR, cacheKey, cached) <= 0;
       if (stale) refreshCache(cacheKey, () => backgroundUpdateStreamMovie(tmdbId, cacheKey)).catch(() => {});
       if (cached.__not_found) {
         return res.status(404).json({ error: 'Film non trouvé sur PurStream' });
@@ -375,12 +414,12 @@ router.get('/movie/:tmdbId/stream', async (req, res) => {
       return res.json(response);
     }
 
-    const mapping = await resolvePurstreamId(tmdbId, 'movie');
-    if (!mapping) {
+    const initialMapping = await resolvePurstreamId(tmdbId, 'movie');
+    if (!initialMapping) {
       return res.status(404).json({ error: 'Film non trouvé sur PurStream' });
     }
 
-    const streamData = await fetchStream(mapping.purstream_id, `/stream/${mapping.purstream_id}`);
+    const { mapping, streamData } = await fetchMappedStream(tmdbId, 'movie', initialMapping);
 
     if (streamData?.__error) {
       if (streamData.status === 404) {
@@ -436,7 +475,7 @@ router.get('/tv/:tmdbId/stream', async (req, res) => {
     const cached = await getFromCacheNoExpiration(PURSTREAM_CACHE_DIR, cacheKey);
 
     if (cached) {
-      const stale = await shouldUpdateCache(PURSTREAM_CACHE_DIR, cacheKey, PURSTREAM_CACHE_REFRESH_MS);
+      const stale = await refreshState.remaining(PURSTREAM_CACHE_DIR, cacheKey, cached) <= 0;
       if (stale) refreshCache(cacheKey, () => backgroundUpdateStreamTv(tmdbId, season, episode, cacheKey)).catch(() => {});
       if (cached.__not_found) {
         return res.status(404).json({ error: 'Épisode non trouvé sur PurStream' });
@@ -445,12 +484,12 @@ router.get('/tv/:tmdbId/stream', async (req, res) => {
       return res.json(response);
     }
 
-    const mapping = await resolvePurstreamId(tmdbId, 'tv');
-    if (!mapping) {
+    const initialMapping = await resolvePurstreamId(tmdbId, 'tv');
+    if (!initialMapping) {
       return res.status(404).json({ error: 'Série non trouvée sur PurStream' });
     }
 
-    const streamData = await fetchStream(mapping.purstream_id, `/stream/${mapping.purstream_id}/episode?season=${Number(season)}&episode=${Number(episode)}`);
+    const { mapping, streamData } = await fetchMappedStream(tmdbId, 'tv', initialMapping, season, episode);
 
     if (streamData?.__error) {
       if (streamData.status === 404) {
@@ -494,20 +533,21 @@ async function backgroundUpdateStreamMovie(tmdbId, cacheKey) {
   const hasValidCache = existing && !existing.__not_found && existing.sources?.length > 0;
 
   try {
-    const mapping = await resolvePurstreamId(tmdbId, 'movie', { waitForRefresh: true });
-    if (!mapping) return;
+    await refreshState.defer(PURSTREAM_CACHE_DIR, cacheKey);
+    const initialMapping = await resolvePurstreamId(tmdbId, 'movie', { waitForRefresh: true });
+    if (!initialMapping) return;
 
-    const streamData = await fetchStream(mapping.purstream_id, `/stream/${mapping.purstream_id}`);
+    const { mapping, streamData } = await fetchMappedStream(tmdbId, 'movie', initialMapping);
 
     if (streamData?.__error && streamData.status === 404) {
       // Espacer les nouvelles tentatives sans perdre les derniers liens utilisables.
-      await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, hasValidCache ? existing : NOT_FOUND_MARKER);
+      if (!hasValidCache) await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, NOT_FOUND_MARKER);
     }
     if (!streamData || streamData.__error) return;
 
     const sources = streamData.sources || [];
     if (sources.length === 0) {
-      await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, hasValidCache ? existing : NOT_FOUND_MARKER);
+      if (!hasValidCache) await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, NOT_FOUND_MARKER);
       return;
     }
 
@@ -516,8 +556,10 @@ async function backgroundUpdateStreamMovie(tmdbId, cacheKey) {
       sources: sources.map(s => ({ url: s.stream_url, name: s.source_name, format: s.format }))
     };
     await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, result);
+    await refreshState.clear(PURSTREAM_CACHE_DIR, cacheKey);
   } catch (err) {
-    // Silent fail — cache existant reste intact
+    reportRefreshFailure('refresh_exception', err, { source: 'PurStream', type: 'movie', id: tmdbId,
+      cachePresent: Boolean(existing), cacheUsable: Boolean(hasValidCache) }, redis);
   }
 }
 
@@ -526,20 +568,21 @@ async function backgroundUpdateStreamTv(tmdbId, season, episode, cacheKey) {
   const hasValidCache = existing && !existing.__not_found && existing.sources?.length > 0;
 
   try {
-    const mapping = await resolvePurstreamId(tmdbId, 'tv', { waitForRefresh: true });
-    if (!mapping) return;
+    await refreshState.defer(PURSTREAM_CACHE_DIR, cacheKey);
+    const initialMapping = await resolvePurstreamId(tmdbId, 'tv', { waitForRefresh: true });
+    if (!initialMapping) return;
 
-    const streamData = await fetchStream(mapping.purstream_id, `/stream/${mapping.purstream_id}/episode?season=${Number(season)}&episode=${Number(episode)}`);
+    const { mapping, streamData } = await fetchMappedStream(tmdbId, 'tv', initialMapping, season, episode);
 
     if (streamData?.__error && streamData.status === 404) {
       // Espacer les nouvelles tentatives sans perdre les derniers liens utilisables.
-      await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, hasValidCache ? existing : NOT_FOUND_MARKER);
+      if (!hasValidCache) await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, NOT_FOUND_MARKER);
     }
     if (!streamData || streamData.__error) return;
 
     const sources = streamData.sources || [];
     if (sources.length === 0) {
-      await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, hasValidCache ? existing : NOT_FOUND_MARKER);
+      if (!hasValidCache) await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, NOT_FOUND_MARKER);
       return;
     }
 
@@ -550,8 +593,10 @@ async function backgroundUpdateStreamTv(tmdbId, season, episode, cacheKey) {
       sources: sources.map(s => ({ url: s.stream_url, name: s.source_name, format: s.format }))
     };
     await saveToCache(PURSTREAM_CACHE_DIR, cacheKey, result);
+    await refreshState.clear(PURSTREAM_CACHE_DIR, cacheKey);
   } catch (err) {
-    // Silent fail — cache existant reste intact
+    reportRefreshFailure('refresh_exception', err, { source: 'PurStream', type: 'tv', id: tmdbId, season, episode,
+      cachePresent: Boolean(existing), cacheUsable: Boolean(hasValidCache) }, redis);
   }
 }
 

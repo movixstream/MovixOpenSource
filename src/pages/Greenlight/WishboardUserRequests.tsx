@@ -326,9 +326,9 @@ const WishboardUserRequests: React.FC = () => {
                             whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
                             onClick={() => setActiveTab('mine')}
-                            className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
+                            className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white group/icon"
                         >
-                            <Film className="h-4 w-4" />
+                            <Film className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" />
                             {t('greenlight.myProjectsTab')}
                             <Badge variant="default" className="ml-1">{myRequests.length}</Badge>
                         </motion.button>
@@ -362,9 +362,9 @@ const WishboardUserRequests: React.FC = () => {
                             whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.98 }}
                             onClick={() => setActiveTab('upvoted')}
-                            className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
+                            className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200 bg-white/10 text-white/70 hover:bg-white/20 hover:text-white group/icon"
                         >
-                            <ArrowBigUp className="h-4 w-4" />
+                            <ArrowBigUp className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" />
                             {t('greenlight.supportedProjects')}
                             <Badge variant="default" className="ml-1">{upvotedRequests.length}</Badge>
                         </motion.button>
@@ -465,7 +465,7 @@ const WishboardUserRequests: React.FC = () => {
 
                                             <div className="flex items-center gap-4 mt-3 text-sm text-white/60">
                                                 <span className="flex items-center gap-1">
-                                                    <ArrowBigUp className="h-4 w-4" />
+                                                    <ArrowBigUp className="h-4 w-4 text-white opacity-60" />
                                                     <div className="relative overflow-hidden flex items-center justify-center" style={{ minWidth: '1ch' }}>
                                                         <Counter
                                                             value={request.vote_count}

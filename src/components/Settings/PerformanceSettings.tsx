@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, Gauge, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLightMode } from '@/context/LightModeContext';
+import { setImageQuality, useImageQuality } from '@/hooks/useImageQuality';
 import { isLowLatencyEnabled, setLowLatencyEnabled, LOW_LATENCY_CHANGED_EVENT, type LowLatencyScope } from '@/utils/lowLatencyPref';
 
 const ANIMATION_ROWS = [
@@ -16,6 +17,12 @@ const MODE_OPTIONS = [
   { value: 'auto', title: 'lightModeAuto', description: 'lightModeAutoDesc' },
   { value: 'on', title: 'lightModeOn', description: 'lightModeOnDesc' },
   { value: 'off', title: 'lightModeOff', description: 'lightModeOffDesc' },
+] as const;
+
+const IMAGE_QUALITY_OPTIONS = [
+  { value: 'auto', title: 'imageQualityAuto', description: 'imageQualityAutoDesc' },
+  { value: 'economy', title: 'imageQualityEconomy', description: 'imageQualityEconomyDesc' },
+  { value: 'high', title: 'imageQualityHigh', description: 'imageQualityHighDesc' },
 ] as const;
 
 function readHidden(key: string) {
@@ -61,6 +68,7 @@ function PerformanceToggle({ id, title, description, checked, disabled = false, 
 export function PerformanceSettings() {
   const { t } = useTranslation();
   const { lightModeSetting, setLightModeSetting, isLightMode, autoReason, systemReducedMotion, storageUnavailable, prefs, effectivePrefs, setPref, resetPrefs } = useLightMode();
+  const { imageQuality } = useImageQuality();
   const [heroHidden, setHeroHidden] = useState(() => readHidden('settings_hide_hero'));
   const [platformsHidden, setPlatformsHidden] = useState(() => readHidden('settings_hide_streaming_platforms'));
   const [lowLatency, setLowLatency] = useState(() => ({ movies: isLowLatencyEnabled('movies'), livetv: isLowLatencyEnabled('livetv') }));
@@ -134,6 +142,31 @@ export function PerformanceSettings() {
         {isLightMode && <p className="mt-2 text-sm leading-relaxed text-emerald-200">{t('settings.lightModeSavings')}</p>}
         <p className="mt-2 text-xs leading-relaxed text-gray-400">{t('settings.lightModeAutoHint')}</p>
         {storageUnavailable && <p role="status" className="mt-3 text-sm text-amber-200">{t('settings.performanceSessionOnly')}</p>}
+      </div>
+
+      <div className="mt-6 rounded-xl border border-gray-700/50 bg-gray-800/20 p-4 sm:p-5">
+        <div data-settings-search-title>
+          <h3 id="image-quality-title" className="text-base font-semibold text-white">{t('settings.imageQualityTitle')}</h3>
+          <p id="image-quality-description" className="mt-2 max-w-prose text-sm leading-relaxed text-gray-400">{t('settings.imageQualityDesc')}</p>
+        </div>
+        <fieldset aria-labelledby="image-quality-title" aria-describedby="image-quality-description image-quality-hint" className="mt-4 grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+          <legend className="sr-only">{t('settings.imageQualityTitle')}</legend>
+          {IMAGE_QUALITY_OPTIONS.map((option) => (
+            <label key={option.value} className="relative cursor-pointer">
+              <input type="radio" name="performance-image-quality" value={option.value} checked={imageQuality === option.value} onChange={() => setNotice(setImageQuality(option.value) ? '' : 'performanceStorageError')} aria-labelledby={`image-quality-${option.value}`} aria-describedby={`image-quality-${option.value}-description`} className="peer sr-only" />
+              <span className="flex h-full items-start justify-between gap-2 rounded-lg border border-gray-600 bg-gray-900/40 p-3 transition-colors hover:border-gray-400 peer-checked:border-emerald-400 peer-checked:bg-emerald-500/10 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-emerald-300">
+                <span>
+                  <span id={`image-quality-${option.value}`} className="block text-sm font-medium text-white">{t(`settings.${option.title}`)}</span>
+                  <span id={`image-quality-${option.value}-description`} className="mt-1 block text-xs leading-relaxed text-gray-300">{t(`settings.${option.description}`)}</span>
+                </span>
+                <span aria-hidden="true" className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${imageQuality === option.value ? 'border-emerald-300 bg-emerald-400 text-gray-950' : 'border-gray-500'}`}>
+                  {imageQuality === option.value && <Check className="h-3 w-3" strokeWidth={3} />}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <p id="image-quality-hint" className="mt-3 text-xs leading-relaxed text-gray-400">{t('settings.imageQualityHint')}</p>
       </div>
 
       <div className="mt-6">

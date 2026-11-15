@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import TutoLayout, { TutoSection } from '../../components/TutoLayout';
 import TutoLink from '../../components/TutoLink';
+import { copyText } from '../../utils/clipboard';
 
 /** Seule URL à retenir : identique pour tous les clients IA. */
 const MCP_URL = 'https://mcp.movix.online/mcp';
@@ -100,14 +101,13 @@ const McpPage: React.FC = () => {
   }, [t]);
 
   const copy = async (value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
+    if (await copyText(value)) {
       setCopied(value);
       window.setTimeout(
         () => setCopied((current) => (current === value ? null : current)),
         2000
       );
-    } catch {
+    } else {
       // Clipboard indisponible (contexte non sécurisé) — l'utilisateur
       // peut toujours sélectionner le texte à la main.
     }

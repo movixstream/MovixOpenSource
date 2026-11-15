@@ -14,7 +14,7 @@ const { ipKeyGenerator } = require('express-rate-limit');
 const { isAdmin, isUploaderOrAdmin } = require('../middleware/auth');
 const { getPool } = require('../mysqlPool');
 const { verifyAccessKey, invalidateVipCache } = require('../checkVip');
-const { buildM3u8Map } = require('../utils/embedExtraction');
+const { buildResolvedMaps } = require('../utils/embedExtraction');
 const { ANIME_SAMA_CACHE_DIR } = require('../utils/cacheManager');
 const { createRedisRateLimitStore } = require('../utils/redisRateLimitStore');
 const { logDownloadLinkAction } = require('../utils/downloadLinksHistory');
@@ -188,7 +188,10 @@ router.get('/links/:type/:id', async (req, res) => {
             (Array.isArray(row.links) ? row.links : [])
               .map(lien => (typeof lien === 'string' ? lien : lien?.url))
           );
-          payload.m3u8ByPlayer = await buildM3u8Map(urls, { accessKey });
+          const { m3u8ByPlayer, subtitlesByPlayer } = await buildResolvedMaps(urls, { accessKey });
+          payload.m3u8ByPlayer = m3u8ByPlayer;
+          // Sous-titres du lecteur Uqload, par lien (table parallèle).
+          if (Object.keys(subtitlesByPlayer).length) payload.subtitlesByPlayer = subtitlesByPlayer;
         }
       } catch (extractionError) {
         // Bonus : les liens restent servis si la résolution échoue.

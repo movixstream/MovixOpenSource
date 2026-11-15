@@ -358,9 +358,9 @@ const WatchPartyCreate: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-2 text-sm text-white/60">
                     <Badge variant="default" className="border border-white/20 text-white/80 bg-white/5 hover:bg-white/10">
                       {mediaInfo.mediaType === 'movie' ? (
-                        <><Film className="h-3 w-3 mr-1.5" /> {t('watchParty.movieLabel')}</>
+                        <><Film className="h-3 w-3 mr-1.5 text-white opacity-80" /> {t('watchParty.movieLabel')}</>
                       ) : (
-                        <><Tv className="h-3 w-3 mr-1.5" /> {t('watchParty.seriesLabel')}</>
+                        <><Tv className="h-3 w-3 mr-1.5 text-white opacity-80" /> {t('watchParty.seriesLabel')}</>
                       )}
                     </Badge>
 
@@ -440,22 +440,22 @@ const WatchPartyCreate: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => setIsPublic(false)}
-                          className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${!isPublic
+                          className={`group/icon flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${!isPublic
                             ? 'bg-red-600 text-white shadow-lg shadow-red-500/20'
                             : 'text-white/50 hover:text-white hover:bg-white/5'
                             }`}
                         >
-                          <Lock className="h-3 w-3" /> {t('watchParty.private')}
+                          <Lock className={`h-3 w-3 transition-[color,opacity] ${(!isPublic ? "text-white opacity-100" : "text-white opacity-50 group-hover/icon:opacity-100")}`} /> {t('watchParty.private')}
                         </button>
                         <button
                           type="button"
                           onClick={() => setIsPublic(true)}
-                          className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${isPublic
+                          className={`group/icon flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-md text-sm font-medium transition-colors ${isPublic
                             ? 'bg-red-600 text-white shadow-lg shadow-red-500/20'
                             : 'text-white/50 hover:text-white hover:bg-white/5'
                             }`}
                         >
-                          <Globe className="h-3 w-3" /> {t('watchParty.public')}
+                          <Globe className={`h-3 w-3 transition-[color,opacity] ${(isPublic ? "text-white opacity-100" : "text-white opacity-50 group-hover/icon:opacity-100")}`} /> {t('watchParty.public')}
                         </button>
                       </div>
                     </div>
@@ -470,9 +470,9 @@ const WatchPartyCreate: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setShowSyncInfoModal(true)}
-                        className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/75 transition-colors hover:bg-white/10 hover:text-white"
+                        className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/75 transition-colors hover:bg-white/10 hover:text-white group/icon"
                       >
-                        <Info className="h-3.5 w-3.5" />
+                        <Info className="h-3.5 w-3.5 text-white opacity-75 group-hover/icon:opacity-100 transition-[color,opacity]" />
                         {t('watchParty.helpLabel')}
                       </button>
                     </div>

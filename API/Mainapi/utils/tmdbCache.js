@@ -9,6 +9,7 @@
 const axios = require('axios');
 const { redis } = require('../config/redis');
 const { createSingleFlight } = require('./singleFlight');
+const { refreshStep } = require('./sourceRefreshTelemetry');
 
 // TTL par type de requête
 const TTL_DETAILS = 24 * 60 * 60;  // 24h — les détails d'un film/série changent rarement
@@ -85,11 +86,16 @@ async function fetchTmdbDetails(tmdbApiUrl, tmdbApiKey, id, type, language = 'fr
   if (signal?.aborted) return null;
 
   const work = getOrFetch(redisKey, TTL_DETAILS, async () => {
-    const response = await axios.get(`${tmdbApiUrl}/${type}/${id}`, {
-      params: { api_key: tmdbApiKey, language },
-      timeout: 10000,
-    });
-    return response.data;
+    try {
+      const response = await axios.get(`${tmdbApiUrl}/${type}/${id}`, {
+        params: { api_key: tmdbApiKey, language },
+        timeout: 10000,
+      });
+      return response.data;
+    } catch (error) {
+      refreshStep('tmdb_http_error', { id, type, language }, error);
+      throw error;
+    }
   });
   return waitForCaller(work, signal);
 }
@@ -215,6 +221,16 @@ async function fetchTmdbImages(tmdbApiUrl, tmdbApiKey, id, type) {
   });
 }
 
+async function fetchTmdbCredits(tmdbApiUrl, tmdbApiKey, id, type) {
+  const endpoint = type === 'tv' ? 'aggregate_credits' : 'credits';
+  return getOrFetch(`tmdb:${endpoint}:${type}:${id}`, TTL_DETAILS, async () => {
+    const response = await axios.get(`${tmdbApiUrl}/${type}/${id}/${endpoint}`, {
+      params: { api_key: tmdbApiKey, language: 'fr-FR' }, timeout: 10000,
+    });
+    return response.data;
+  });
+}
+
 module.exports = {
   fetchTmdbDetails,
   searchTmdb,
@@ -222,6 +238,7 @@ module.exports = {
   fetchTmdbAlternativeTitles,
   fetchTmdbFrenchReleaseYear,
   fetchTmdbImages,
+  fetchTmdbCredits,
   TTL_DETAILS,
   TTL_SEARCH
 };

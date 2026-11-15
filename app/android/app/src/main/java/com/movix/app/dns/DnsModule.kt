@@ -3,6 +3,9 @@ package com.movix.app.dns
 import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import com.facebook.react.bridge.*
 
 /**
@@ -13,6 +16,7 @@ class DnsModule(private val reactContext: ReactApplicationContext) :
 
     companion object {
         private const val VPN_REQUEST_CODE = 1001
+        private const val START_TIMEOUT_MS = 5_000L
     }
 
     private var vpnPromise: Promise? = null
@@ -42,8 +46,27 @@ class DnsModule(private val reactContext: ReactApplicationContext) :
         } else {
             // Permission déjà accordée
             startVpnService(primaryDns, secondaryDns)
-            promise.resolve(true)
+            resolveWhenActive(promise)
         }
+    }
+
+    /**
+     * Ne répond qu'une fois le tunnel monté : l'app attend ce moment pour
+     * charger Movix, sinon le changement de réseau coupe ses premières requêtes.
+     */
+    private fun resolveWhenActive(promise: Promise) {
+        val handler = Handler(Looper.getMainLooper())
+        val deadline = SystemClock.uptimeMillis() + START_TIMEOUT_MS
+        handler.post(object : Runnable {
+            override fun run() {
+                when {
+                    DnsVpnService.isActive -> promise.resolve(true)
+                    SystemClock.uptimeMillis() >= deadline ->
+                        promise.reject("VPN_START_FAILED", "Le VPN DNS n'a pas démarré")
+                    else -> handler.postDelayed(this, 100)
+                }
+            }
+        })
     }
 
     @ReactMethod
@@ -79,7 +102,7 @@ class DnsModule(private val reactContext: ReactApplicationContext) :
         if (requestCode == VPN_REQUEST_CODE) {
             if (resultCode == Activity.RESULT_OK) {
                 startVpnService(DnsVpnService.primaryDns, DnsVpnService.secondaryDns)
-                vpnPromise?.resolve(true)
+                vpnPromise?.let { resolveWhenActive(it) }
             } else {
                 vpnPromise?.reject("VPN_DENIED", "L'utilisateur a refusé la connexion VPN")
             }

@@ -629,12 +629,12 @@ final class MediaProxyServer: @unchecked Sendable {
 
       if upstreamResponse.statusCode == 200,
          Self.isSubRip(upstreamResponse.finalURL, headers: upstreamResponse.headers) {
-        guard Self.header(named: "content-encoding", in: upstreamResponse.headers)
-          .map({ $0.caseInsensitiveCompare("identity") == .orderedSame }) ?? true else {
-          throw MediaProxyServerError.invalidUpstreamBody
-        }
-        let sourceData = try await readBounded(
-          upstreamResponse.body,
+        let sourceData = try Self.decodedBody(
+          try await readBounded(
+            upstreamResponse.body,
+            maximumBytes: Self.maximumSubtitleBytes
+          ),
+          contentEncoding: Self.header(named: "content-encoding", in: upstreamResponse.headers),
           maximumBytes: Self.maximumSubtitleBytes
         )
         guard let source = String(data: sourceData, encoding: .utf8),
@@ -658,12 +658,12 @@ final class MediaProxyServer: @unchecked Sendable {
 
       if upstreamResponse.statusCode == 200,
          Self.isHLS(upstreamResponse.finalURL, headers: upstreamResponse.headers) {
-        guard Self.header(named: "content-encoding", in: upstreamResponse.headers)
-          .map({ $0.caseInsensitiveCompare("identity") == .orderedSame }) ?? true else {
-          throw MediaProxyServerError.invalidUpstreamBody
-        }
-        let sourceData = try await readBounded(
-          upstreamResponse.body,
+        let sourceData = try Self.decodedBody(
+          try await readBounded(
+            upstreamResponse.body,
+            maximumBytes: Self.maximumPlaylistBytes
+          ),
+          contentEncoding: Self.header(named: "content-encoding", in: upstreamResponse.headers),
           maximumBytes: Self.maximumPlaylistBytes
         )
         guard let source = String(data: sourceData, encoding: .utf8) else {
@@ -983,6 +983,60 @@ final class MediaProxyServer: @unchecked Sendable {
       output.append(chunk)
     }
     return output
+  }
+
+  /// Corps texte (playlist, sous-titres) décompressé. Fsvid/Vidzy exigent
+  /// l'Accept-Encoding de Chrome et répondent alors en gzip, que le transport
+  /// épinglé ne décode pas. Tout autre encodage reste refusé.
+  static func decodedBody(
+    _ data: Data,
+    contentEncoding: String?,
+    maximumBytes: Int
+  ) throws -> Data {
+    let encoding = contentEncoding?
+      .trimmingCharacters(in: .whitespaces)
+      .lowercased() ?? "identity"
+    switch encoding {
+    case "", "identity":
+      return data
+    case "gzip", "x-gzip":
+      let decoded = try gunzip(data)
+      guard decoded.count <= maximumBytes else {
+        throw MediaProxyServerError.responseTooLarge
+      }
+      return decoded
+    default:
+      throw MediaProxyServerError.invalidUpstreamBody
+    }
+  }
+
+  /// En-tête gzip (RFC 1952) sauté à la main, puis DEFLATE brut : c'est ce
+  /// que `NSData.CompressionAlgorithm.zlib` sait décompresser.
+  private static func gunzip(_ data: Data) throws -> Data {
+    let bytes = [UInt8](data)
+    guard bytes.count >= 18, bytes[0] == 0x1f, bytes[1] == 0x8b, bytes[2] == 8 else {
+      throw MediaProxyServerError.invalidUpstreamBody
+    }
+    let flags = bytes[3]
+    var offset = 10
+    if flags & 0x04 != 0 {
+      guard offset + 2 <= bytes.count else { throw MediaProxyServerError.invalidUpstreamBody }
+      offset += 2 + Int(bytes[offset]) + (Int(bytes[offset + 1]) << 8)
+    }
+    for flag in [UInt8(0x08), UInt8(0x10)] where flags & flag != 0 {
+      while offset < bytes.count, bytes[offset] != 0 { offset += 1 }
+      offset += 1
+    }
+    if flags & 0x02 != 0 { offset += 2 }
+    guard offset < bytes.count - 8 else {
+      throw MediaProxyServerError.invalidUpstreamBody
+    }
+    let deflated = Data(bytes[offset..<(bytes.count - 8)])
+    do {
+      return try (deflated as NSData).decompressed(using: .zlib) as Data
+    } catch {
+      throw MediaProxyServerError.invalidUpstreamBody
+    }
   }
 
   private func sendLocalRedirect(_ location: URL, to client: MediaProxyClientConnection) async {

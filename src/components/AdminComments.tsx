@@ -19,6 +19,7 @@ import {
 } from './ui/select';
 import ReusableModal from './ui/reusable-modal';
 import { getTmdbLanguage } from '../i18n';
+import { copyText } from '../utils/clipboard';
 
 interface Comment {
     id: number;
@@ -982,25 +983,25 @@ const AdminComments: React.FC = () => {
             <div className="flex items-center gap-4 bg-white/5 p-1 rounded-lg w-fit border border-white/10">
                 <button
                     onClick={() => setActiveTab('live')}
-                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'live'
+                    className={`group/icon px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'live'
                         ? 'bg-blue-600 text-white shadow-lg'
                         : 'text-white/60 hover:text-white hover:bg-white/5'
                         }`}
                 >
                     <div className="flex items-center gap-2">
-                        <MessageSquare className="h-4 w-4" />
+                        <MessageSquare className={`h-4 w-4 transition-[color,opacity] ${(activeTab === 'live' ? "text-white opacity-100" : "text-white opacity-60 group-hover/icon:opacity-100")}`} />
                         Commentaires
                     </div>
                 </button>
                 <button
                     onClick={() => setActiveTab('moderated')}
-                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'moderated'
+                    className={`group/icon px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'moderated'
                         ? 'bg-amber-600 text-white shadow-lg'
                         : 'text-white/60 hover:text-white hover:bg-white/5'
                         }`}
                 >
                     <div className="flex items-center gap-2">
-                        <Sparkles className="h-4 w-4" />
+                        <Sparkles className={`h-4 w-4 transition-[color,opacity] ${(activeTab === 'moderated' ? "text-white opacity-100" : "text-white opacity-60 group-hover/icon:opacity-100")}`} />
                         {t('admin.geminiModeration')}
                         {(stats?.moderated ?? 0) > 0 && (
                             <span className="bg-white/20 text-white px-1.5 py-0.5 rounded-full text-[10px]">
@@ -1011,13 +1012,13 @@ const AdminComments: React.FC = () => {
                 </button>
                 <button
                     onClick={() => setActiveTab('bans')}
-                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'bans'
+                    className={`group/icon px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'bans'
                         ? 'bg-red-600 text-white shadow-lg'
                         : 'text-white/60 hover:text-white hover:bg-white/5'
                         }`}
                 >
                     <div className="flex items-center gap-2">
-                        <Ban className="h-4 w-4" />
+                        <Ban className={`h-4 w-4 transition-[color,opacity] ${(activeTab === 'bans' ? "text-white opacity-100" : "text-white opacity-60 group-hover/icon:opacity-100")}`} />
                         {t('admin.bans')}
                     </div>
                 </button>
@@ -1417,7 +1418,7 @@ const AdminComments: React.FC = () => {
 
                     {renderLegacyCommentRows && hasMore && (
                         <div className="p-4 flex justify-center border-t border-white/10">
-                            <Button
+                            <Button className="group/icon"
                                 variant="ghost"
                                 onClick={() => {
                                     setPage(prev => prev + 1);
@@ -1425,7 +1426,7 @@ const AdminComments: React.FC = () => {
                                 }}
                                 disabled={loading}
                             >
-                                {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                                {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" /> : null}
                                 {t('admin.loadMoreComments')}
                             </Button>
                         </div>
@@ -1500,25 +1501,25 @@ const AdminComments: React.FC = () => {
                         <div className="flex gap-2">
                             <button
                                 onClick={() => setBanType('user')}
-                                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border ${banType === 'user'
+                                className={`group/icon flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border ${banType === 'user'
                                     ? 'bg-red-500/20 border-red-500/30 text-red-300'
                                     : 'bg-white/5 border-white/10 text-white/50 hover:text-white hover:bg-white/10'
                                     }`}
                             >
-                                <UserX className="h-4 w-4 inline mr-2" />
+                                <UserX className={`h-4 w-4 inline mr-2 transition-[color,opacity] ${(banType === 'user' ? "text-red-300 opacity-100" : "text-white opacity-50 group-hover/icon:opacity-100")}`} />
                                 {t('admin.banByUser')}
                             </button>
                             <button
                                 onClick={() => setBanType('ip')}
                                 disabled={!banTarget?.ip_address}
-                                className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border ${banType === 'ip'
+                                className={`group/icon flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-all border ${banType === 'ip'
                                     ? 'bg-red-500/20 border-red-500/30 text-red-300'
                                     : !banTarget?.ip_address
                                         ? 'bg-white/5 border-white/10 text-white/20 cursor-not-allowed'
                                         : 'bg-white/5 border-white/10 text-white/50 hover:text-white hover:bg-white/10'
                                     }`}
                             >
-                                <Shield className="h-4 w-4 inline mr-2" />
+                                <Shield className={`h-4 w-4 inline mr-2 transition-[color,opacity] ${(banType === 'ip' ? "text-red-300 opacity-100" : (!banTarget?.ip_address ? "text-white opacity-20" : "text-white opacity-50 group-hover/icon:opacity-100"))}`} />
                                 {t('admin.banByIp')}
                                 {!banTarget?.ip_address && <span className="text-[9px] block text-white/20 mt-0.5">{t('admin.ipUnavailable')}</span>}
                             </button>
@@ -1539,12 +1540,12 @@ const AdminComments: React.FC = () => {
                                 <button
                                     key={value}
                                     onClick={() => setBanDuration(value)}
-                                    className={`px-3 py-2 rounded-lg text-xs font-medium transition-all border ${banDuration === value
+                                    className={`group/icon px-3 py-2 rounded-lg text-xs font-medium transition-all border ${banDuration === value
                                         ? value === 'permanent' ? 'bg-red-500/30 border-red-500/40 text-red-300' : 'bg-amber-500/20 border-amber-500/30 text-amber-300'
                                         : 'bg-white/5 border-white/10 text-white/50 hover:text-white hover:bg-white/10'
                                         }`}
                                 >
-                                    <Clock className="h-3 w-3 inline mr-1" />
+                                    <Clock className={`h-3 w-3 inline mr-1 transition-[color,opacity] ${(banDuration === value ? (value === 'permanent' ? "text-red-300 opacity-100" : "text-amber-300 opacity-100") : "text-white opacity-50 group-hover/icon:opacity-100")}`} />
                                     {label}
                                 </button>
                             ))}
@@ -1786,8 +1787,9 @@ const AdminComments: React.FC = () => {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => {
-                                    navigator.clipboard.writeText(viewComment.content);
-                                    toast.success(t('admin.copied'));
+                                    void copyText(viewComment.content).then((copied) => {
+                                        if (copied) toast.success(t('admin.copied'));
+                                    });
                                 }}
                             >
                                 <Copy className="h-3.5 w-3.5 mr-1.5" />

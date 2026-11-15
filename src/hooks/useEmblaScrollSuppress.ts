@@ -36,13 +36,20 @@ export const useEmblaScrollSuppress = (
 
     let suppressed = false;
     let lastLocation = 0;
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined;
 
     const suppress = () => {
+      clearTimeout(releaseTimer);
+      // A wheel at a boundary, a jump without transitions or a reInit may
+      // produce no settle event. Never leave every carousel unclickable.
+      releaseTimer = setTimeout(release, 180);
       if (suppressed) return;
       suppressed = true;
       beginEmblaScroll();
     };
     const release = () => {
+      clearTimeout(releaseTimer);
+      releaseTimer = undefined;
       if (!suppressed) return;
       suppressed = false;
       endEmblaScroll();
@@ -65,7 +72,7 @@ export const useEmblaScrollSuppress = (
       const loc = readLocation();
       const delta = Math.abs(loc - lastLocation);
       lastLocation = loc;
-      if (!suppressed && delta > DELTA_SUPPRESS) {
+      if (delta > DELTA_SUPPRESS) {
         suppress();
       } else if (suppressed && delta < DELTA_RELEASE) {
         release();
@@ -82,6 +89,7 @@ export const useEmblaScrollSuppress = (
     const rootNode = emblaApi.rootNode();
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 1) {
+        if (e.deltaX > 0 ? !emblaApi.canScrollNext() : !emblaApi.canScrollPrev()) return;
         suppress();
         // refresh lastLocation pour que le delta du premier scroll suivant
         // soit calculé correctement (sinon delta = abs(loc - stale_value)).
@@ -99,10 +107,7 @@ export const useEmblaScrollSuppress = (
       rootNode?.removeEventListener('wheel', onWheel);
       emblaApi.off('scroll', onScroll);
       emblaApi.off('settle', onSettle);
-      if (suppressed) {
-        suppressed = false;
-        endEmblaScroll();
-      }
+      release();
     };
   }, [emblaApi]);
 };

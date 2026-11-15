@@ -30,6 +30,7 @@ import {
   getVipPaymentLabel,
   getVipStatusMeta
 } from '../utils/vipDonationsUi';
+import { copyText } from '../utils/clipboard';
 import ReusableModal from './ui/reusable-modal';
 import AnimatedBorderCard from './ui/animated-border-card';
 import BlurText from './ui/blur-text';
@@ -154,10 +155,9 @@ const VipInvoicesManager: React.FC = () => {
   };
 
   const handleCopy = async (value: string, successMessage: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
+    if (await copyText(value)) {
       toast.success(successMessage);
-    } catch {
+    } else {
       toast.error(t('vipDonations.common.copyFailed'));
     }
   };
@@ -538,9 +538,9 @@ const VipInvoicesManager: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => void handleCopy(selectedInvoice.trackingAddress || selectedInvoice.paymentAddress || '', t('vipDonations.common.copyAddressSuccess'))}
-                        className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white"
+                        className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white group/icon"
                       >
-                        <Copy className="h-4 w-4" />
+                        <Copy className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                       </button>
                     </div>
                   </div>
@@ -556,9 +556,9 @@ const VipInvoicesManager: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => void handleCopy(selectedInvoice.vipKey || '', t('vipDonations.common.copyVipKeySuccess'))}
-                          className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white"
+                          className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white group/icon"
                         >
-                          <Copy className="h-4 w-4" />
+                          <Copy className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                         </button>
                       </div>
                     </div>
@@ -577,17 +577,17 @@ const VipInvoicesManager: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => void handleCopy(selectedInvoice.invoiceUrl, t('vipDonations.common.copyInvoiceUrlSuccess'))}
-                          className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white"
+                          className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white group/icon"
                         >
-                          <Copy className="h-4 w-4" />
+                          <Copy className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                         </button>
                         <a
                           href={selectedInvoice.invoiceUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white"
+                          className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white group/icon"
                         >
-                          <ExternalLink className="h-4 w-4" />
+                          <ExternalLink className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                         </a>
                       </div>
                     </div>
@@ -600,17 +600,17 @@ const VipInvoicesManager: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => void handleCopy(selectedInvoice.checkoutUrl || '', t('vipDonations.common.copyInvoiceUrlSuccess'))}
-                            className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white"
+                            className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white group/icon"
                           >
-                            <Copy className="h-4 w-4" />
+                            <Copy className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                           </button>
                           <a
                             href={selectedInvoice.checkoutUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white"
+                            className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white group/icon"
                           >
-                            <ExternalLink className="h-4 w-4" />
+                            <ExternalLink className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                           </a>
                         </div>
                       </div>
@@ -624,17 +624,17 @@ const VipInvoicesManager: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => void handleCopy(selectedInvoice.giftUrl || '', t('vipDonations.common.copyGiftUrlSuccess'))}
-                            className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white"
+                            className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white group/icon"
                           >
-                            <Copy className="h-4 w-4" />
+                            <Copy className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                           </button>
                           <a
                             href={selectedInvoice.giftUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white"
+                            className="rounded-2xl border border-white/10 p-2 text-white/50 transition-colors hover:border-white/20 hover:text-white group/icon"
                           >
-                            <ExternalLink className="h-4 w-4" />
+                            <ExternalLink className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                           </a>
                         </div>
                       </div>

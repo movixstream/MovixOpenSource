@@ -892,6 +892,20 @@ export const platformAvatars: AllPlatformAvatars = {
       '/avatars/netflix/arcane/vi.png',
       '/avatars/netflix/arcane/viktor.png'
     ],
+    'Avatar : Le Dernier Maître De L\'Air': [
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/aang.png',
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/avatar_aang.png',
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/toph.png',
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/katara.png',
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/zuko.png',
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/sokka.png',
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/appa.png',
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/ozai.png',
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/momo.png',
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/iroh.png',
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/suki.png',
+      '/avatars/netflix/avatar_le_dernier_maitre_de_l_air/azula.png'
+    ],
     'Beauty In Black': [
       '/avatars/netflix/beauty_in_black/alex.png',
       '/avatars/netflix/beauty_in_black/angel.png',
@@ -933,6 +947,40 @@ export const platformAvatars: AllPlatformAvatars = {
       '/avatars/netflix/bojack_horseman/m_peanutbutter.png',
       '/avatars/netflix/bojack_horseman/princesse_carolyn.png',
       '/avatars/netflix/bojack_horseman/todd.png'
+    ],
+    'Chasseurs De Trolls': [
+      '/avatars/netflix/chasseurs_de_trolls/jim.png',
+      '/avatars/netflix/chasseurs_de_trolls/claire.png',
+      '/avatars/netflix/chasseurs_de_trolls/toby.png',
+      '/avatars/netflix/chasseurs_de_trolls/blinky.png',
+      '/avatars/netflix/chasseurs_de_trolls/argh.png',
+      '/avatars/netflix/chasseurs_de_trolls/draal.png',
+      '/avatars/netflix/chasseurs_de_trolls/nain_chompsky.png',
+      '/avatars/netflix/chasseurs_de_trolls/amulette.png'
+    ],
+    'Classiques': [
+      '/avatars/netflix/classiques/scarlet_chilleez.png',
+      '/avatars/netflix/classiques/sunny_chilleez.png',
+      '/avatars/netflix/classiques/robin_chilleez.png',
+      '/avatars/netflix/classiques/dusty_chilleez.png',
+      '/avatars/netflix/classiques/superheros_violet.png',
+      '/avatars/netflix/classiques/moustache.png',
+      '/avatars/netflix/classiques/chien.png',
+      '/avatars/netflix/classiques/superheros_rouge.png',
+      '/avatars/netflix/classiques/pingouin_violet.png',
+      '/avatars/netflix/classiques/rire_rose.png',
+      '/avatars/netflix/classiques/poulet.png',
+      '/avatars/netflix/classiques/bandeau_de_pirate.png',
+      '/avatars/netflix/classiques/extraterrestre.png',
+      '/avatars/netflix/classiques/robot.png',
+      '/avatars/netflix/classiques/momie.png',
+      '/avatars/netflix/classiques/casque.png',
+      '/avatars/netflix/classiques/sourire_rouge.png',
+      '/avatars/netflix/classiques/sourire_gris_fonce.png',
+      '/avatars/netflix/classiques/sourire_jaune.png',
+      '/avatars/netflix/classiques/sourire_vert.png',
+      '/avatars/netflix/classiques/sourire_violet.png',
+      '/avatars/netflix/classiques/sourire_rose.png'
     ],
     'Cobra Kai': [
       '/avatars/netflix/cobra_kai/amanda.png',
@@ -979,6 +1027,19 @@ export const platformAvatars: AllPlatformAvatars = {
       '/avatars/netflix/désenchantée/stan_le_bourreau.png',
       '/avatars/netflix/désenchantée/zog.png'
     ],
+    'Élite': [
+      '/avatars/netflix/elite/carla.png',
+      '/avatars/netflix/elite/samuel.png',
+      '/avatars/netflix/elite/lu.png',
+      '/avatars/netflix/elite/guzman.png',
+      '/avatars/netflix/elite/nadia.png',
+      '/avatars/netflix/elite/polo.png',
+      '/avatars/netflix/elite/rebeka.png',
+      '/avatars/netflix/elite/ander.png',
+      '/avatars/netflix/elite/cayetana.png',
+      '/avatars/netflix/elite/valerio.png',
+      '/avatars/netflix/elite/omar.png'
+    ],
     'Kpop Demon Hunters': [
       '/avatars/netflix/kpop_demon_hunters/abby_saja.png',
       '/avatars/netflix/kpop_demon_hunters/baby_saja.png',
@@ -1021,6 +1082,19 @@ export const platformAvatars: AllPlatformAvatars = {
       '/avatars/netflix/la_chronique_des_bridgerton/chronique-des-bridgerton_marina_thompson.png',
       '/avatars/netflix/la_chronique_des_bridgerton/chronique-des-bridgerton_pnlope_feangton.png',
       '/avatars/netflix/la_chronique_des_bridgerton/chronique-des-bridgerton_simon_basset.png'
+    ],
+    'Les Affaires Organisées': [
+      '/avatars/netflix/les_affaires_organisees/asim.png',
+      '/avatars/netflix/les_affaires_organisees/saruhan.png',
+      '/avatars/netflix/les_affaires_organisees/nefise.png',
+      '/avatars/netflix/les_affaires_organisees/lerzan.png',
+      '/avatars/netflix/les_affaires_organisees/sado.png',
+      '/avatars/netflix/les_affaires_organisees/riza.png',
+      '/avatars/netflix/les_affaires_organisees/sahbaz.png',
+      '/avatars/netflix/les_affaires_organisees/ziya.png',
+      '/avatars/netflix/les_affaires_organisees/nazli.png',
+      '/avatars/netflix/les_affaires_organisees/bahadir.png',
+      '/avatars/netflix/les_affaires_organisees/champion.png'
     ],
     'Love, Death & Robots': [
       '/avatars/netflix/love,_death_&_robots/death-&-robots_femme_dore.png',
@@ -1093,7 +1167,17 @@ export const platformAvatars: AllPlatformAvatars = {
       '/avatars/netflix/one_piece/sanji.png',
       '/avatars/netflix/one_piece/shanks.png',
       '/avatars/netflix/one_piece/usopp.png',
-      '/avatars/netflix/one_piece/zoro.png'
+      '/avatars/netflix/one_piece/zoro.png',
+      '/avatars/netflix/one_piece/luffy_v2.png',
+      '/avatars/netflix/one_piece/nami_v2.png',
+      '/avatars/netflix/one_piece/zoro_v2.png',
+      '/avatars/netflix/one_piece/usopp_v2.png',
+      '/avatars/netflix/one_piece/sanji_v2.png',
+      '/avatars/netflix/one_piece/miss_wednesday.png',
+      '/avatars/netflix/one_piece/chopper.png',
+      '/avatars/netflix/one_piece/miss_allsunday.png',
+      '/avatars/netflix/one_piece/le_vogue_merry_v2.png',
+      '/avatars/netflix/one_piece/pavillon_des_chapeaux_de_paille.png'
     ],
     'Orange Is The New Black': [
       '/avatars/netflix/orange_is_the_new_black/is-the-new-black_black_cindy.png',
@@ -1116,6 +1200,14 @@ export const platformAvatars: AllPlatformAvatars = {
       '/avatars/netflix/outer_banks/rafe.png',
       '/avatars/netflix/outer_banks/sarah.png'
     ],
+    'Peaky Blinders : L\'Immortel': [
+      '/avatars/netflix/peaky_blinders_l_immortel/tommy.png',
+      '/avatars/netflix/peaky_blinders_l_immortel/duke.png',
+      '/avatars/netflix/peaky_blinders_l_immortel/kaulo.png',
+      '/avatars/netflix/peaky_blinders_l_immortel/hayden.png',
+      '/avatars/netflix/peaky_blinders_l_immortel/ada.png',
+      '/avatars/netflix/peaky_blinders_l_immortel/beckett.png'
+    ],
     'Perdus Dans L\'Espace': [
       '/avatars/netflix/perdus_dans_l\'espace/dans-l\'espace_don_west.png',
       '/avatars/netflix/perdus_dans_l\'espace/dans-l\'espace_dr_smith.png',
@@ -1126,6 +1218,18 @@ export const platformAvatars: AllPlatformAvatars = {
       '/avatars/netflix/perdus_dans_l\'espace/dans-l\'espace_poulet_lis.png',
       '/avatars/netflix/perdus_dans_l\'espace/dans-l\'espace_robot.png',
       '/avatars/netflix/perdus_dans_l\'espace/dans-l\'espace_will.png'
+    ],
+    'Raw': [
+      '/avatars/netflix/raw/roman.png',
+      '/avatars/netflix/raw/cody.png',
+      '/avatars/netflix/raw/rhea.png',
+      '/avatars/netflix/raw/oba.png',
+      '/avatars/netflix/raw/penta.png',
+      '/avatars/netflix/raw/stephanie.png',
+      '/avatars/netflix/raw/cm_punk.png',
+      '/avatars/netflix/raw/liv.png',
+      '/avatars/netflix/raw/john_cena.png',
+      '/avatars/netflix/raw/rey.png'
     ],
     'Sandman': [
       '/avatars/netflix/sandman/dsir.png',
@@ -1174,7 +1278,8 @@ export const platformAvatars: AllPlatformAvatars = {
       '/avatars/netflix/squid_game/soldat_masqu.png',
       '/avatars/netflix/squid_game/thanos.png',
       '/avatars/netflix/squid_game/tirelire.png',
-      '/avatars/netflix/squid_game/young-hee.png'
+      '/avatars/netflix/squid_game/young-hee.png',
+      '/avatars/netflix/squid_game/squid_game_1.png'
     ],
     'Stranger Things': [
       '/avatars/netflix/stranger_things/avatar_de_profil.png',
@@ -1187,7 +1292,40 @@ export const platformAvatars: AllPlatformAvatars = {
       '/avatars/netflix/stranger_things/nancy.png',
       '/avatars/netflix/stranger_things/onze.png',
       '/avatars/netflix/stranger_things/steve.png',
-      '/avatars/netflix/stranger_things/will.png'
+      '/avatars/netflix/stranger_things/will.png',
+      '/avatars/netflix/stranger_things/onze_v2.png',
+      '/avatars/netflix/stranger_things/mike_v2.png',
+      '/avatars/netflix/stranger_things/will_v2.png',
+      '/avatars/netflix/stranger_things/lucas_v2.png',
+      '/avatars/netflix/stranger_things/max.png',
+      '/avatars/netflix/stranger_things/dustin_v2.png',
+      '/avatars/netflix/stranger_things/steve_v2.png',
+      '/avatars/netflix/stranger_things/nancy_v2.png',
+      '/avatars/netflix/stranger_things/jonathan_v2.png',
+      '/avatars/netflix/stranger_things/robin.png',
+      '/avatars/netflix/stranger_things/hopper.png',
+      '/avatars/netflix/stranger_things/joyce_v2.png',
+      '/avatars/netflix/stranger_things/holly.png',
+      '/avatars/netflix/stranger_things/derek.png',
+      '/avatars/netflix/stranger_things/erica.png',
+      '/avatars/netflix/stranger_things/henry.png',
+      '/avatars/netflix/stranger_things/murray.png',
+      '/avatars/netflix/stranger_things/karen.png',
+      '/avatars/netflix/stranger_things/dr_kay.png',
+      '/avatars/netflix/stranger_things/demogorgon.png',
+      '/avatars/netflix/stranger_things/vecna.png'
+    ],
+    'The Gentlemen': [
+      '/avatars/netflix/the_gentlemen/eddie_horniman.png',
+      '/avatars/netflix/the_gentlemen/susie_glass.png',
+      '/avatars/netflix/the_gentlemen/geoff.png',
+      '/avatars/netflix/the_gentlemen/bobby_glass.png',
+      '/avatars/netflix/the_gentlemen/jack_glass.png',
+      '/avatars/netflix/the_gentlemen/lady_sabrina.png',
+      '/avatars/netflix/the_gentlemen/jimmy.png',
+      '/avatars/netflix/the_gentlemen/stanley_johnston.png',
+      '/avatars/netflix/the_gentlemen/freddie_horniman.png',
+      '/avatars/netflix/the_gentlemen/charlotte_horniman.png'
     ],
     'The Witcher': [
       '/avatars/netflix/the_witcher/ablette.png',

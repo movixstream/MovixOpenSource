@@ -19,6 +19,7 @@ import { Button } from './ui/button';
 import ConfirmDialog from './ui/confirm-dialog';
 import { Input } from './ui/input';
 import ReusableModal from './ui/reusable-modal';
+import { copyText } from '../utils/clipboard';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -391,10 +392,9 @@ const MemberCard: React.FC<MemberCardProps> = ({ member, onHistory, onRemove }) 
   const { t } = useTranslation();
 
   const handleCopyUserId = async () => {
-    try {
-      await navigator.clipboard.writeText(member.userId);
+    if (await copyText(member.userId)) {
       toast.success(t('admin.team.copied', 'Copié'));
-    } catch {
+    } else {
       toast.error(t('common.error', 'Erreur'));
     }
   };
@@ -452,10 +452,10 @@ const MemberCard: React.FC<MemberCardProps> = ({ member, onHistory, onRemove }) 
             <button
               type="button"
               onClick={handleCopyUserId}
-              className="text-white/40 transition-colors hover:text-white"
+              className="text-white/40 transition-colors hover:text-white group/icon"
               aria-label={t('common.copy', 'Copier')}
             >
-              <Copy className="h-3.5 w-3.5" />
+              <Copy className="h-3.5 w-3.5 text-white opacity-40 group-hover/icon:opacity-100 transition-[color,opacity]" />
             </button>
           </div>
 

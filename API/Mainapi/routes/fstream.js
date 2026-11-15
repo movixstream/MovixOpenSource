@@ -8,12 +8,15 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const cheerio = require('cheerio');
-const { fetchTmdbDetails } = require('../utils/tmdbCache');
+const { fetchTmdbDetails, fetchTmdbSeason } = require('../utils/tmdbCache');
+const { baseTitle, yearOf, titleSimilarity, searchTitles, parseSourceIdentity, createIdentityVerifier } = require('../utils/sourceIdentity');
 const { uncachedFStreamResponse } = require('../utils/fstreamCache');
+const { withRefreshDiagnostics, refreshStep } = require('../utils/sourceRefreshTelemetry');
 const {
   generateFStreamCacheKey,
   getFStreamRefreshInfo,
   refreshFStreamCache,
+  invalidateFStreamCache,
   ongoingFStreamRequests,
   getOrCreateFStreamRequest
 } = require('../utils/cacheManager');
@@ -40,7 +43,7 @@ const { PROXIES, DARKINO_PROXIES, withFStreamProxy } = require('../utils/proxyMa
 // === FStream Configuration ===
 const TMDB_API_KEY = process.env.TMDB_API_KEY || '';
 const TMDB_API_URL = 'https://api.themoviedb.org/3';
-const FSTREAM_BASE_URL = 'https://french-stream.one';
+const { FSTREAM_BASE_URL, canonicalFStreamUrl } = require('../config/fstream');
 const FSTREAM_SEARCH_URL = `${FSTREAM_BASE_URL}/engine/ajax/search.php`;
 
 // === FStream Authentication (disabled) ===
@@ -210,13 +213,19 @@ axiosHelpers.configure({
 
 // === TMDB Helper (cached via Redis) ===
 async function getFStreamTMDBDetails(id, type) {
+  if (!/^[1-9]\d*$/.test(String(id))) return null;
+  refreshStep('tmdb', { id, type, validTmdbId: /^\d+$/.test(String(id)) });
   try {
     const [frData, enData] = await Promise.all([
       fetchTmdbDetails(TMDB_API_URL, TMDB_API_KEY, id, type, 'fr-FR'),
       fetchTmdbDetails(TMDB_API_URL, TMDB_API_KEY, id, type, 'en-US')
     ]);
 
-    if (!frData) return null;
+    if (!frData) {
+      refreshStep('tmdb_missing', { reason: /^\d+$/.test(String(id)) ? 'Fiche absente ou requête TMDB échouée' : 'Identifiant non numérique : ce contenu ne vient pas de TMDB' });
+      return null;
+    }
+    refreshStep('tmdb_result', { title: frData.title || frData.name, originalTitle: frData.original_title || frData.original_name, alternateTitle: enData?.title || enData?.name });
 
     return {
       id: frData.id,
@@ -224,9 +233,14 @@ async function getFStreamTMDBDetails(id, type) {
       original_title: type === 'movie' ? frData.original_title : frData.original_name,
       name_no_lang: enData ? (type === 'movie' ? enData.title : enData.name) : null,
       release_date: type === 'movie' ? frData.release_date : frData.first_air_date,
-      overview: frData.overview
+      overview: frData.overview,
+      overview_en: enData?.overview,
+      poster_path: frData.poster_path,
+      backdrop_path: frData.backdrop_path,
+      created_by: frData.created_by,
     };
   } catch (error) {
+    refreshStep('tmdb_error', {}, error);
     console.error(`Erreur lors de la recuperation des details TMDB pour ${id} (${type}):`, error);
     return null;
   }
@@ -289,6 +303,9 @@ function isFStreamCachedSelectionValid(cachedData, requestedSeason) {
   );
   const tmdbTokens = normalizedTmdbTitle.split(' ').filter(Boolean);
 
+  if (cachedData.metadata?.identity?.accepted === true
+      && String(cachedData.metadata.identity.tmdbId) === String(cachedData.tmdb.id)) return true;
+
   if (tmdbTokens.length === 1) {
     // La recherche peut retenir le titre original/anglais (Mentalist -> The
     // Mentalist, Chacal -> The Day of the Jackal). Garder une égalité stricte
@@ -303,8 +320,9 @@ function isFStreamCachedSelectionValid(cachedData, requestedSeason) {
 
 // === Search Functions ===
 async function searchFStream(query, page = 1) {
+  refreshStep('search', { query, page, url: FSTREAM_SEARCH_URL });
   try {
-    return await searchCache.load(FSTREAM_SEARCH_URL, query, page, async (normalizedQuery) => {
+    const result = await searchCache.load(FSTREAM_SEARCH_URL, query, page, async (normalizedQuery) => {
       const formData = new URLSearchParams({ query: normalizedQuery, page: page.toString() });
       const response = await axiosFStreamRequest({
         method: 'post',
@@ -312,10 +330,16 @@ async function searchFStream(query, page = 1) {
         data: formData,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
-      if (response.status !== 200) throw new Error(`Erreur HTTP: ${response.status}`);
+      if (response.status !== 200) throw Object.assign(new Error(`Erreur HTTP: ${response.status}`), { response: { status: response.status } });
+      if (typeof response.data !== 'string' || /cf-chl-|just a moment|bot shield|<title>[^<]*verification/i.test(response.data)) {
+        throw Object.assign(new Error('Recherche FStream bloquée ou réponse inattendue'), { code: 'UPSTREAM_INVALID_RESPONSE' });
+      }
       return response.data;
     });
+    refreshStep('search_response', { query, html: typeof result === 'string', challenge: typeof result === 'string' && /verification|cf-chl-|just a moment|bot shield/i.test(result) });
+    return result;
   } catch (error) {
+    refreshStep('search_error', { query, url: FSTREAM_SEARCH_URL }, error);
     if (error.response) {
       const status = error.response.status;
       if (status === 429 || status === 403 || status === 503 || status === 502) throw error;
@@ -329,11 +353,19 @@ async function searchFStreamDirect(query, page = 1) {
   return searchFStream(query, page);
 }
 
+// FStream renvoie certains titres échappés à la PHP (« L\'Arène - Saison 1 »).
+// Normalisé, « l arene » ne correspond plus à « larene » (TMDB « L'Arène ») et
+// la fiche est écartée dès le score de titre.
+function repairFStreamSearchHtml(html) {
+  return String(html || '').replace(/\\'/g, "'");
+}
+
 // Fallback "fuzzy" : search.php avec titre nu + filtre permissif (pas de filtre annee).
 // Remplace l'ancien get_seasons.php (mort cote upstream depuis ~2026-05) qui prenait
 // un TMDB id ; on simule le meme role en listant toutes les saisons matchant le titre.
 async function fetchFStreamSeasonSearchResults(tmdbId, serieTitle) {
   if (!serieTitle) return [];
+  refreshStep('season_search', { query: serieTitle });
   try {
     // Ce parcours conserve sa requête AJAX sans pagination. Ne pas confondre
     // sa réponse avec celle d'une recherche paginée, même pour le même titre.
@@ -354,7 +386,7 @@ async function fetchFStreamSeasonSearchResults(tmdbId, serieTitle) {
     const html = typeof result === 'string' ? result : '';
     if (!html.trim()) return [];
 
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(repairFStreamSearchHtml(html));
     const normalize = (s) => (s || '').toLowerCase().normalize('NFD')
       .replace(/[̀-ͯ]/g, '').replace(/[''`´]/g, '')
       .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -404,8 +436,11 @@ async function fetchFStreamSeasonSearchResults(tmdbId, serieTitle) {
       });
     });
 
-    return exactResults.length > 0 ? exactResults : results;
+    const matches = exactResults.length > 0 ? exactResults : results;
+    refreshStep('season_search_result', { query: serieTitle, results: matches.length });
+    return matches;
   } catch (error) {
+    refreshStep('season_search_error', { query: serieTitle }, error);
     console.error(`[FSTREAM TV] Erreur lors de la recuperation des saisons pour ${tmdbId}: ${error.message}`);
     return [];
   }
@@ -423,6 +458,7 @@ async function fetchFStreamSeasonsAjax(tmdbId, newsId, baseUrl) {
 
   const proxies = getShuffledAllProxies();
   const maxAttempts = Math.min(proxies.length, 3);
+  refreshStep('related_seasons', { url: apiUrl, proxyCount: proxies.length });
 
   for (let i = 0; i < maxAttempts; i++) {
     const entry = proxies[i];
@@ -441,13 +477,14 @@ async function fetchFStreamSeasonsAjax(tmdbId, newsId, baseUrl) {
         httpAgent: agents.httpAgent, httpsAgent: agents.httpsAgent, proxy: false
       }));
 
+      refreshStep('related_seasons_response', { httpStatus: response.status, proxyType: entry.type, attempt: i + 1 });
       if (response.status === 429) continue;
       if (response.status !== 200 || !response.data) return [];
 
       const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
       if (!Array.isArray(data)) return [];
 
-      return data.map(item => {
+      const seasons = data.map(item => {
         const seasonMatch = (item.title || '').match(/Saison\s+(\d+)/i);
         const seasonNumber = seasonMatch ? parseInt(seasonMatch[1], 10) : null;
         const rawUrl = item.full_url || '';
@@ -456,7 +493,10 @@ async function fetchFStreamSeasonsAjax(tmdbId, newsId, baseUrl) {
           : `${baseUrl}/${rawUrl.replace(/^\//, '')}`;
         return { title: item.title || `Saison ${seasonNumber}`, originalTitle: item.title || '', link, seasonNumber, year: null };
       }).filter(r => r.link && r.seasonNumber);
+      refreshStep('related_seasons_result', { seasons: seasons.map(item => item.seasonNumber) });
+      return seasons;
     } catch (error) {
+      refreshStep('related_seasons_error', { proxyType: entry.type, attempt: i + 1 }, error);
       if (error.response?.status === 429) continue;
       console.error(`[FStream] Erreur get_seasons.php (proxy ${entry.type} #${i}): ${error.message}`);
       continue;
@@ -468,6 +508,7 @@ async function fetchFStreamSeasonsAjax(tmdbId, newsId, baseUrl) {
 
 // === Scraping Functions ===
 async function scrapeFStreamRecentMovies() {
+  refreshStep('recent_movies', { url: `${FSTREAM_BASE_URL}/films/` });
   try {
     const response = await axiosFStreamRequest({
       method: 'get',
@@ -570,12 +611,14 @@ async function scrapeFStreamRecentMovies() {
 
     return movies;
   } catch (error) {
+    refreshStep('recent_movies_error', {}, error);
     console.error(`[FSTREAM RECENT] Erreur lors du scraping: ${error.message}`);
     return [];
   }
 }
 
 async function scrapeFStreamRecentSeries() {
+  refreshStep('recent_series', { url: `${FSTREAM_BASE_URL}/s-tv/` });
   try {
     const response = await axiosFStreamRequest({
       method: 'get',
@@ -618,6 +661,7 @@ async function scrapeFStreamRecentSeries() {
 
     return series;
   } catch (error) {
+    refreshStep('recent_series_error', {}, error);
     console.error(`[FSTREAM RECENT SERIES] Erreur lors du scraping: ${error.message}`);
     return [];
   }
@@ -728,7 +772,7 @@ function extractPageIdFromUrl(url) {
 
 function extractBaseUrlFromLink(url) {
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(canonicalFStreamUrl(url));
     return `${parsed.protocol}//${parsed.host}`;
   } catch {
     return FSTREAM_BASE_URL;
@@ -756,6 +800,15 @@ function getShuffledAllProxies() {
 
 // Parse le payload episodes FStream (shape commune {vf,vostfr,vo,info}) en map normalisee.
 // Partage entre la source statique (<base>/static/series) et l'API dynamique (episodes_p.php).
+function normalizeFStreamPlayerUrl(provider, value) {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  if (/^https?:\/\//i.test(raw)) return raw;
+  // Les anciennes fiches Uqload stockent un code, pas une URL d'embed.
+  if (provider === 'uqload' && /^[a-z0-9]{12}$/i.test(raw)) return `https://uqload.is/embed-${raw.toLowerCase()}.html`;
+  return null;
+}
+
 function parseEpisodesPayload(data) {
   if (!data || typeof data !== 'object') return null;
 
@@ -778,8 +831,9 @@ function parseEpisodesPayload(data) {
         };
       }
 
-      for (const [provider, url] of Object.entries(providers)) {
-        if (!url || typeof url !== 'string' || !url.startsWith('http')) continue;
+      for (const [provider, rawUrl] of Object.entries(providers || {})) {
+        const url = normalizeFStreamPlayerUrl(provider, rawUrl);
+        if (!url) continue;
         let displayName = provider;
         if (provider === 'premium') displayName = 'Premium';
         else if (provider === 'vidzy') displayName = 'Vidzy';
@@ -813,6 +867,7 @@ function parseEpisodesPayload(data) {
 // Source statique prioritaire: <base>/static/series/<id>.js (JSON fige, frais, inclut premium).
 // Meme domaine que le lien de recherche (base url), pas un host distinct.
 async function fetchEpisodesFromStaticJs(pageUrl) {
+  pageUrl = canonicalFStreamUrl(pageUrl);
   const pageId = extractPageIdFromUrl(pageUrl);
   if (!pageId) return null;
 
@@ -822,6 +877,7 @@ async function fetchEpisodesFromStaticJs(pageUrl) {
   const proxies = getShuffledAllProxies();
   const maxAttempts = Math.min(proxies.length, 3);
   let lastError = null;
+  refreshStep('static_series', { url: apiUrl, proxyCount: proxies.length });
 
   for (let i = 0; i < maxAttempts; i++) {
     const entry = proxies[i];
@@ -839,6 +895,7 @@ async function fetchEpisodesFromStaticJs(pageUrl) {
         httpAgent: agents.httpAgent, httpsAgent: agents.httpsAgent, proxy: false
       }));
 
+      refreshStep('static_series_response', { httpStatus: response.status, proxyType: entry.type, attempt: i + 1 });
       if (response.status === 429) {
         console.log(`[FStream] static series.js: 429 avec proxy ${entry.type} #${i}, retry...`);
         continue;
@@ -846,9 +903,12 @@ async function fetchEpisodesFromStaticJs(pageUrl) {
       if (response.status !== 200 || !response.data) return null;
 
       const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-      return parseEpisodesPayload(data);
+      const episodes = parseEpisodesPayload(data);
+      refreshStep('static_series_result', { episodes: Object.keys(episodes || {}) });
+      return episodes;
     } catch (error) {
       lastError = error;
+      refreshStep('static_series_error', { proxyType: entry.type, attempt: i + 1 }, error);
       if (error.response?.status === 429) {
         console.log(`[FStream] static series.js: 429 avec proxy ${entry.type} #${i}, retry...`);
         continue;
@@ -863,6 +923,7 @@ async function fetchEpisodesFromStaticJs(pageUrl) {
 }
 
 async function fetchEpisodesFromApi(pageUrl) {
+  pageUrl = canonicalFStreamUrl(pageUrl);
   const pageId = extractPageIdFromUrl(pageUrl);
   if (!pageId) return null;
 
@@ -872,6 +933,7 @@ async function fetchEpisodesFromApi(pageUrl) {
   const proxies = getShuffledAllProxies();
   const maxAttempts = Math.min(proxies.length, 3);
   let lastError = null;
+  refreshStep('episodes_api', { url: apiUrl, proxyCount: proxies.length });
 
   for (let i = 0; i < maxAttempts; i++) {
     const entry = proxies[i];
@@ -889,6 +951,7 @@ async function fetchEpisodesFromApi(pageUrl) {
         httpAgent: agents.httpAgent, httpsAgent: agents.httpsAgent, proxy: false
       }));
 
+      refreshStep('episodes_api_response', { httpStatus: response.status, proxyType: entry.type, attempt: i + 1 });
       if (response.status === 429) {
         console.log(`[FStream] API episodes_p: 429 avec proxy ${entry.type} #${i}, retry...`);
         continue;
@@ -896,9 +959,12 @@ async function fetchEpisodesFromApi(pageUrl) {
       if (response.status !== 200 || !response.data) return null;
 
       const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-      return parseEpisodesPayload(data);
+      const episodes = parseEpisodesPayload(data);
+      refreshStep('episodes_api_result', { episodes: Object.keys(episodes || {}) });
+      return episodes;
     } catch (error) {
       lastError = error;
+      refreshStep('episodes_api_error', { proxyType: entry.type, attempt: i + 1 }, error);
       if (error.response?.status === 429) {
         console.log(`[FStream] API episodes_p: 429 avec proxy ${entry.type} #${i}, retry...`);
         continue;
@@ -913,6 +979,7 @@ async function fetchEpisodesFromApi(pageUrl) {
 }
 
 async function fetchMoviePlayersFromApi(pageUrl) {
+  pageUrl = canonicalFStreamUrl(pageUrl);
   const pageId = extractPageIdFromUrl(pageUrl);
   if (!pageId) return null;
 
@@ -922,6 +989,7 @@ async function fetchMoviePlayersFromApi(pageUrl) {
   const proxies = getShuffledAllProxies();
   const maxAttempts = Math.min(proxies.length, 3);
   let lastError = null;
+  refreshStep('movie_api', { url: apiUrl, proxyCount: proxies.length });
 
   for (let i = 0; i < maxAttempts; i++) {
     const entry = proxies[i];
@@ -939,6 +1007,7 @@ async function fetchMoviePlayersFromApi(pageUrl) {
         httpAgent: agents.httpAgent, httpsAgent: agents.httpsAgent, proxy: false
       }));
 
+      refreshStep('movie_api_response', { httpStatus: response.status, proxyType: entry.type, attempt: i + 1 });
       if (response.status === 429) {
         console.log(`[FStream] API film_api: 429 avec proxy ${entry.type} #${i}, retry...`);
         continue;
@@ -977,12 +1046,14 @@ async function fetchMoviePlayersFromApi(pageUrl) {
         }
       }
 
+      refreshStep('movie_api_result', { total: players.length });
       if (players.length > 0) {
         return players;
       }
       return null;
     } catch (error) {
       lastError = error;
+      refreshStep('movie_api_error', { proxyType: entry.type, attempt: i + 1 }, error);
       if (error.response?.status === 429) {
         console.log(`[FStream] API film_api: 429 avec proxy ${entry.type} #${i}, retry...`);
         continue;
@@ -999,15 +1070,18 @@ async function fetchMoviePlayersFromApi(pageUrl) {
 // === High-level wrappers: API-first, HTML fallback ===
 // Bypass le fetch HTML (souvent 429) en appelant l'API directe d'abord
 async function getSeriesPlayersForUrl(pageUrl) {
+  refreshStep('series_players', { url: pageUrl });
   // 1. Source statique <base>/static/series/<id>.js (prioritaire: fraiche, premium, inclut tous les eps)
   let apiEpisodes = await fetchEpisodesFromStaticJs(pageUrl);
 
   // 2. Fallback: API dynamique episodes_p.php (si la statique 404/echoue ou host a tourne)
-  if (!apiEpisodes || Object.keys(apiEpisodes).length === 0) {
+  const hasPlayers = episodes => Object.values(episodes || {}).some(episode =>
+    Object.values(episode.languages || {}).some(players => players.length > 0));
+  if (!hasPlayers(apiEpisodes)) {
     apiEpisodes = await fetchEpisodesFromApi(pageUrl);
   }
 
-  if (apiEpisodes && Object.keys(apiEpisodes).length > 0) {
+  if (hasPlayers(apiEpisodes)) {
     const organizedPlayers = { VF: [], VOSTFR: [], VOENG: [], Default: [] };
     let totalPlayers = 0;
     Object.values(apiEpisodes).forEach(episode => {
@@ -1021,14 +1095,17 @@ async function getSeriesPlayersForUrl(pageUrl) {
     return { organized: organizedPlayers, episodes: apiEpisodes, total: totalPlayers, fstreamReleaseDate: null, fromApi: true };
   }
 
-  // 3. Fallback: fetch HTML (scrape direct de la page french-stream.one)
+  // 3. Fallback: fetch HTML de la fiche.
   console.log(`[FStream] getSeriesPlayersForUrl: sources JSON echouees, fallback HTML pour ${pageUrl}`);
+  refreshStep('series_html', { url: pageUrl });
   const contentResponse = await axiosFStreamRequest({ method: 'get', url: pageUrl });
+  refreshStep('series_html_response', { httpStatus: contentResponse.status });
   if (contentResponse.status !== 200) return { organized: { VF: [], VOSTFR: [], VOENG: [], Default: [] }, episodes: {}, total: 0, fstreamReleaseDate: null };
   return await extractFStreamPlayers(contentResponse.data, true, pageUrl);
 }
 
 async function getMoviePlayersForUrl(pageUrl) {
+  refreshStep('movie_players', { url: pageUrl });
   // 1. API directe
   const apiPlayers = await fetchMoviePlayersFromApi(pageUrl);
   if (apiPlayers && apiPlayers.length > 0) {
@@ -1047,9 +1124,82 @@ async function getMoviePlayersForUrl(pageUrl) {
 
   // 2. Fallback: fetch HTML
   console.log(`[FStream] getMoviePlayersForUrl: API echouee, fallback HTML pour ${pageUrl}`);
+  refreshStep('movie_html', { url: pageUrl });
   const contentResponse = await axiosFStreamRequest({ method: 'get', url: pageUrl });
+  refreshStep('movie_html_response', { httpStatus: contentResponse.status });
   if (contentResponse.status !== 200) return { organized: { VFQ: [], VFF: [], VOSTFR: [], Default: [] }, total: 0 };
   return await extractFStreamPlayers(contentResponse.data, false, pageUrl);
+}
+
+// Une fiche déjà validée permet de rafraîchir les épisodes même si le titre
+// TMDB change et que la recherche FStream ne reconnaît plus ce nouveau nom.
+async function refreshCachedFStreamSeries(cachedData, id, season, episode) {
+  const bestMatch = cachedData?.search?.bestMatch;
+  if (cachedData?.success !== true || !(Number(cachedData.total) > 0)
+      || String(cachedData.tmdb?.id) !== String(id)
+      || Number(bestMatch?.seasonNumber) !== Number(season)
+      || !isFStreamCachedSelectionValid(cachedData, season)) return null;
+
+  let pageUrl;
+  try {
+    const url = new URL(canonicalFStreamUrl(bestMatch.link));
+    if (url.origin !== FSTREAM_BASE_URL || url.username || url.password
+        || !extractPageIdFromUrl(url.href)) return null;
+    pageUrl = url.href;
+  } catch { return null; }
+
+  refreshStep('cached_series_page', { url: pageUrl, title: bestMatch.title, season });
+  try {
+    let identity = cachedData.metadata?.identity;
+    let tmdb = cachedData.tmdb;
+    let seasonYear = cachedData.metadata?.seasonYear;
+    if (!identity?.accepted) {
+      const [details, seasonData, page] = await Promise.all([
+        getFStreamTMDBDetails(id, 'tv'), fetchTmdbSeason(TMDB_API_URL, TMDB_API_KEY, id, season),
+        axiosFStreamRequest({ method: 'get', url: pageUrl, timeout: 10000 }),
+      ]);
+      if (!details || page.status !== 200) return null;
+      const verifier = createIdentityVerifier({ apiUrl: TMDB_API_URL, apiKey: TMDB_API_KEY,
+        type: 'tv', details, seasonData });
+      identity = await verifier.verify(parseSourceIdentity(page.data), { season });
+      refreshStep('cached_series_identity', identity);
+      if (!identity.accepted) return null;
+      identity = { ...identity, tmdbId: details.id };
+      tmdb = details;
+      seasonYear = yearOf(seasonData?.air_date);
+    }
+    const players = await getSeriesPlayersForUrl(pageUrl);
+    if (players.total === 0) {
+      refreshStep('cached_series_page_empty', { url: pageUrl });
+      return null;
+    }
+    const tmdbYear = tmdb.release_date?.split('-')[0];
+    const sourceYear = players.fromApi ? bestMatch.year : players.fstreamReleaseDate;
+    const acceptedYears = [Number(tmdbYear), Number(seasonYear)].filter(Boolean);
+    if (!identity?.accepted && sourceYear && acceptedYears.length
+        && !acceptedYears.includes(Number(sourceYear))) {
+      refreshStep('cached_series_page_year_mismatch', { tmdbYear, sourceYear });
+      return null;
+    }
+
+    return {
+      ...cachedData,
+      tmdb,
+      search: { ...cachedData.search, bestMatch: { ...bestMatch, link: pageUrl } },
+      episodes: players.episodes, total: players.total,
+      metadata: {
+        ...cachedData.metadata,
+        identity, seasonYear,
+        season: parseInt(season, 10), episode: episode ? parseInt(episode, 10) : null,
+        extractedAt: new Date().toISOString(), backgroundUpdate: true,
+        refreshMethod: 'cached_page', fstreamReleaseDate: players.fstreamReleaseDate,
+        dateValidation: { fstreamYear: players.fstreamReleaseDate, tmdbYear, isAvailable: true },
+      },
+    };
+  } catch (error) {
+    refreshStep('cached_series_page_error', { url: pageUrl }, error);
+    return null;
+  }
 }
 
 // === Player Extraction ===
@@ -1177,6 +1327,7 @@ async function extractFStreamPlayers(htmlContent, isSeries = false, pageUrl = nu
 
     return { organized: organizedPlayers, total: uniquePlayers.length };
   } catch (error) {
+    refreshStep('movie_parse_error', { url: pageUrl }, error);
     console.error(`Erreur lors de l'extraction des lecteurs FStream: ${error.message}`);
     return { organized: { VFQ: [], VFF: [], VOSTFR: [], Default: [] }, total: 0 };
   }
@@ -1407,613 +1558,219 @@ async function extractFStreamSeriesPlayers(htmlContent, pageUrl = null) {
 
     return { organized: organizedPlayers, episodes, total: totalPlayers, fstreamReleaseDate };
   } catch (error) {
+    refreshStep('series_parse_error', { url: pageUrl }, error);
     console.error(`Erreur lors de l'extraction des lecteurs serie FStream: ${error.message}`);
     return { organized: { VF: [], VOSTFR: [], VOENG: [], Default: [] }, episodes: {}, total: 0, fstreamReleaseDate: null };
   }
 }
 
 // === Filtering ===
-function filterFStreamResults(results, originalTitle, releaseYear) {
+function parseFStreamCandidates(html) {
+  const $ = cheerio.load(repairFStreamSearchHtml(html));
+  const candidates = [];
+  $('div.search-item').each((_, node) => {
+    const row = $(node), title = row.find('.search-title').text().trim();
+    const path = row.attr('onclick')?.match(/location\.href=['"]([^'"]+)['"]/)?.[1];
+    if (!title || !path) return;
+    let link;
+    try {
+      const url = new URL(canonicalFStreamUrl(new URL(path, FSTREAM_BASE_URL).href));
+      if (url.origin !== FSTREAM_BASE_URL || url.username || url.password) return;
+      link = url.href;
+    } catch { return; }
+    const seasonMatch = title.match(/saison\s+(\d+)/i);
+    const seasonNumber = seasonMatch ? Number(seasonMatch[1]) : null;
+    const year = yearOf(title.match(/\((\d{4})\)/)?.[1] || link.match(/-(\d{4})\.html/)?.[1]);
+    candidates.push({ title: baseTitle(title), originalTitle: title, link, seasonNumber, year,
+      poster: row.find('img').first().attr('src') });
+  });
+  return candidates;
+}
+
+async function findValidatedFStream(tmdb, type, season, seasonData) {
+  const verifier = createIdentityVerifier({ apiUrl: TMDB_API_URL, apiKey: TMDB_API_KEY, type,
+    details: tmdb, english: { title: tmdb.name_no_lang, overview: tmdb.overview_en }, seasonData });
+  const queried = new Set(), visited = new Set(), rejected = new Set(), related = [];
+  let candidateCount = 0, pageChecks = 0, lastError = null, confirmedWithoutPlayers = false;
+  let titles = verifier.titles;
+  const inspect = async candidate => {
+    if (!candidate?.link || visited.has(candidate.link)) return null;
+    try {
+      const url = new URL(canonicalFStreamUrl(candidate.link));
+      if (url.origin !== FSTREAM_BASE_URL || url.username || url.password) return null;
+      candidate = { ...candidate, link: url.href };
+    } catch { return null; }
+    if (type === 'tv' && (candidate.seasonNumber == null || Number(candidate.seasonNumber) !== Number(season))) return null;
+    if (type === 'movie' && candidate.seasonNumber != null) return null;
+    visited.add(candidate.link);
+    const source = { titles: [candidate.title, candidate.originalTitle], type,
+      season: candidate.seasonNumber, year: candidate.year, posters: [candidate.poster].filter(Boolean) };
+    let identity = await verifier.verify(source, { enrich: false, season });
+    if (!identity.accepted) {
+      if (pageChecks >= 8) return null;
+      pageChecks++;
+      try {
+        const page = await axiosFStreamRequest({ method: 'get', url: candidate.link, timeout: 10000 });
+        if (page.status !== 200) throw Object.assign(new Error('Fiche FStream indisponible'), { response: { status: page.status } });
+        const metadata = parseSourceIdentity(page.data);
+        identity = await verifier.verify({ ...metadata,
+          posters: [...metadata.posters, ...source.posters],
+          season: metadata.season ?? source.season, year: metadata.year ?? source.year,
+        }, { season });
+      } catch (error) {
+        lastError = error;
+        refreshStep('candidate_fetch_error', { url: candidate.link }, error);
+        return null;
+      }
+    }
+    refreshStep('candidate_identity', { title: candidate.title, url: candidate.link, ...identity });
+    if (!identity.accepted) {
+      rejected.add(candidate.link);
+      return null;
+    }
+    const players = type === 'tv' ? await getSeriesPlayersForUrl(candidate.link) : await getMoviePlayersForUrl(candidate.link);
+    if (!(players.total > 0)) {
+      confirmedWithoutPlayers = true;
+      refreshStep('candidate_empty', { url: candidate.link });
+      return null;
+    }
+    return { candidate, players, identity: { ...identity, tmdbId: tmdb.id }, candidateCount };
+  };
+  for (let pass = 0; pass < 2; pass++) {
+    if (pass) titles = await verifier.aliases();
+    const queries = searchTitles(titles).flatMap(title => type === 'tv' ? [`${title} - Saison ${season}`, title] : [title]);
+    for (const query of queries) {
+      if (queried.has(query) || queried.size >= 14) continue;
+      queried.add(query);
+      for (let page = 1; page <= 2; page++) {
+        let candidates;
+        try { candidates = parseFStreamCandidates(await searchFStreamDirect(query, page)); }
+        catch (error) { lastError = error; refreshStep('search_error', { query, page }, error); break; }
+        candidateCount += candidates.length;
+        const score = item => Math.max(...titles.map(title => titleSimilarity(title, item.title)));
+        candidates.sort((a, b) => score(b) - score(a));
+        refreshStep('search_filter', { query, page, results: candidates.length,
+          titleCandidates: candidates.filter(item => score(item) >= 0.3).length });
+        for (const candidate of candidates) {
+          if (score(candidate) < 0.3) continue;
+          if (type === 'tv' && (candidate.seasonNumber == null || Number(candidate.seasonNumber) !== Number(season))) {
+            if (score(candidate) >= 0.7 && !related.some(item => item.link === candidate.link)) related.push(candidate);
+            continue;
+          }
+          const found = await inspect(candidate);
+          if (found) return { ...found, query };
+        }
+        if (candidates.length < 15) break;
+      }
+    }
+  }
+  if (type === 'tv') {
+    for (const candidate of related.slice(0, 2)) {
+      const seasons = await fetchFStreamSeasonsAjax(tmdb.id, extractPageIdFromUrl(candidate.link), FSTREAM_BASE_URL);
+      for (const item of seasons.filter(item => item.seasonNumber === Number(season))) {
+        const found = await inspect(item);
+        if (found) return { ...found, query: tmdb.title };
+      }
+    }
+    const releaseAgeMs = Date.now() - Date.parse(seasonData?.air_date || tmdb.release_date);
+    if (releaseAgeMs >= 0 && releaseAgeMs <= 2 * 24 * 60 * 60 * 1000) {
+      const recent = await findSeriesInRecentFStream(tmdb.title, tmdb.release_date?.split('-')[0]);
+      if (recent) {
+        const recentSeason = recent.title.match(/saison\s+(\d+)/i);
+        const found = await inspect({ ...recent, originalTitle: recent.title,
+          seasonNumber: recentSeason ? Number(recentSeason[1]) : null, year: null });
+        if (found) return { ...found, query: tmdb.title };
+      }
+    }
+  } else {
+    const recent = await findMovieInRecentFStream(tmdb.title, tmdb.release_date?.split('-')[0]);
+    if (recent) {
+      const found = await inspect({ ...recent, originalTitle: recent.title, year: yearOf(recent.year), seasonNumber: null });
+      if (found) return { ...found, query: tmdb.title };
+    }
+  }
+  if (lastError) throw lastError;
+  return { failureCode: confirmedWithoutPlayers ? 'extraction_empty' : 'content_not_found', rejected };
+}
+
+async function loadFStreamContent(type, id, season, cachedData) {
+  if (type === 'tv') {
+    const refreshed = await refreshCachedFStreamSeries(cachedData, id, season, null);
+    if (refreshed) return refreshed;
+  }
+  const [tmdb, seasonData] = await Promise.all([
+    getFStreamTMDBDetails(id, type),
+    type === 'tv' ? fetchTmdbSeason(TMDB_API_URL, TMDB_API_KEY, id, season) : null,
+  ]);
+  // fetchTmdbDetails renvoie aussi null lors d'une panne : ne pas en faire un négatif durable.
+  if (!tmdb) throw Object.assign(new Error('Métadonnées TMDB indisponibles'), { code: 'TMDB_UNAVAILABLE' });
+  const found = await findValidatedFStream(tmdb, type, season, seasonData);
+  const cachedLink = cachedData?.search?.bestMatch?.link;
+  if (!found.candidate && cachedLink && found.rejected?.has(canonicalFStreamUrl(cachedLink))) {
+    // La fiche en cache vient d'être réfutée (homonyme : « Kraken » norvégien
+    // servi pour le film français) : le cache ne doit plus la servir.
+    refreshStep('cached_selection_refuted', { url: cachedLink });
+    await invalidateFStreamCache(generateFStreamCacheKey(type, id, season ?? null));
+  }
+  if (!found.candidate) return uncachedFStreamResponse(404, {
+    success: false, source: 'FStream', type, code: found.failureCode,
+    error: 'Aucune fiche FStream utilisable après recherche et vérification',
+    tmdb, ...(type === 'tv' ? { episodes: {}, metadata: { season: Number(season) } } : {}), total: 0,
+  });
+  const { candidate, players, identity } = found;
+  return {
+    success: true, source: 'FStream', type, tmdb,
+    search: { query: found.query, results: found.candidateCount, bestMatch: candidate },
+    ...(type === 'tv' ? { episodes: players.episodes } : { players: players.organized }), total: players.total,
+    metadata: { extractedAt: new Date().toISOString(), backgroundUpdate: Boolean(cachedData), identity,
+      ...(type === 'tv' ? { season: Number(season), episode: null, seasonYear: yearOf(seasonData?.air_date) } : {}),
+      dateValidation: { tmdbYear: yearOf(tmdb.release_date), fstreamYear: candidate.year, isAvailable: true },
+    },
+  };
+}
+
+async function serveFStream(req, res, type) {
+  const { id, season } = req.params;
+  const episode = req.query.episode;
+  if (!/^[1-9]\d*$/.test(id) || type === 'tv' && (!/^\d+$/.test(season)
+      || episode != null && (typeof episode !== 'string' || !/^[1-9]\d*$/.test(episode)))) {
+    return res.status(400).json({ success: false, code: 'invalid_tmdb_request', error: 'Identifiant TMDB, saison ou épisode invalide' });
+  }
+  // Une seule récupération des liens bruts par saison. La résolution vidéo reste par épisode.
+  const cacheKey = generateFStreamCacheKey(type, id, season ?? null);
+  const valid = data => type !== 'tv' || isFStreamCachedSelectionValid(data, season);
+  const respond = data => {
+    const payload = type === 'tv' ? { ...data, metadata: { ...data.metadata, episode: episode ? Number(episode) : null } } : data;
+    return type === 'tv' ? respondWithEpisodeSources(req, res, payload) : respondWithMovieSources(req, res, payload);
+  };
   try {
-    const $ = cheerio.load(results);
-    const filteredResults = [];
-
-    $('div.search-item').each((_, element) => {
-      const $el = $(element);
-      const titleElement = $el.find('.search-title');
-      const title = titleElement.text().trim();
-      const onclickAttr = $el.attr('onclick');
-      let link = null;
-      if (onclickAttr) {
-        const linkMatch = onclickAttr.match(/location\.href=['"]([^'\"]+)['"]/);
-        if (linkMatch) link = linkMatch[1];
-      }
-      if (!title || !link) return;
-
-      let cleanTitle = title;
-      let seasonNumber = null;
-      let year = null;
-
-      const yearMatch = title.match(/\((\d{4})\)/);
-      if (yearMatch) {
-        year = parseInt(yearMatch[1]);
-        cleanTitle = title.replace(/\s*\(\d{4}\)/, '').trim();
-      }
-
-      // Fallback: extraire l'annee de l'URL (ex: magnum-saison-5-1980.html)
-      if (!year && link) {
-        const urlYearMatch = link.match(/-(\d{4})\.html/);
-        if (urlYearMatch) year = parseInt(urlYearMatch[1]);
-      }
-
-      const seasonMatch = cleanTitle.match(/Saison\s+(\d+)/i);
-      if (seasonMatch) {
-        seasonNumber = parseInt(seasonMatch[1]);
-        cleanTitle = cleanTitle.replace(/\s*-\s*Saison\s+\d+$/i, '').trim();
-      } else {
-        const originalSeasonMatch = title.match(/Saison\s+(\d+)/i);
-        if (originalSeasonMatch) seasonNumber = parseInt(originalSeasonMatch[1]);
-      }
-
-      const normalize = (str) => (str || '').toLowerCase().normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '').replace(/[''`\u00b4]/g, '')
-        .replace(/[^a-z0-9\s-]/g, '').replace(/\s+-\s+/g, ' ')
-        .replace(/\s+/g, ' ').trim();
-
-      const normalizedOriginal = normalize(originalTitle);
-      const normalizedClean = normalize(cleanTitle);
-      const tokenize = (str) => (str || '').split(' ').filter(Boolean);
-
-      const originalTokens = new Set(tokenize(normalizedOriginal));
-      const cleanTokens = new Set(tokenize(normalizedClean));
-
-      let intersectionSize = 0;
-      for (const token of cleanTokens) { if (originalTokens.has(token)) intersectionSize += 1; }
-
-      const largerSetSize = Math.max(1, Math.max(originalTokens.size, cleanTokens.size));
-      const overlapScore = intersectionSize / largerSetSize;
-
-      const hasBothYears = Boolean(releaseYear && year);
-      const yearMatches = hasBothYears ? parseInt(releaseYear) === year : true;
-      const exactTitleMatch = normalizedClean === normalizedOriginal;
-      const threshold = 0.7;
-      const partialLengthOk = cleanTokens.size <= originalTokens.size + 1;
-      const subsetCoverage = cleanTokens.size / Math.max(1, originalTokens.size);
-      const resultIsSubsetOfOriginal = Array.from(cleanTokens).every(t => originalTokens.has(t)) && subsetCoverage >= 0.75;
-      const shouldInclude = yearMatches && (
-        exactTitleMatch || resultIsSubsetOfOriginal || (overlapScore >= threshold && partialLengthOk)
-      );
-
-      if (shouldInclude) {
-        filteredResults.push({
-          title: cleanTitle, originalTitle: title,
-          link: link.startsWith('http') ? link : `${FSTREAM_BASE_URL}${link}`,
-          seasonNumber, year
-        });
-      }
-    });
-
-    return filteredResults;
+    const state = await getFStreamRefreshInfo(cacheKey);
+    let cachedData = state.entry?.data;
+    if (!cachedData && type === 'tv' && episode) {
+      // Migration progressive des anciens caches par épisode, sans supprimer de liens.
+      cachedData = (await getFStreamRefreshInfo(generateFStreamCacheKey(type, id, season, episode))).entry?.data;
+    }
+    if (!(cachedData?.success && cachedData.total > 0 && valid(cachedData))) cachedData = null;
+    const refresh = () => getOrCreateFStreamRequest(cacheKey, () => withRefreshDiagnostics({
+      source: 'FStream', cacheKey, type, id, season, episode, background: Boolean(cachedData),
+    }, redis, () => refreshFStreamCache(cacheKey, () => loadFStreamContent(type, id, season, cachedData), valid)));
+    if (cachedData) {
+      await respond(cachedData);
+      if (!state.isFresh || !state.entry) setImmediate(() => { void refresh().catch(() => {}); });
+      return;
+    }
+    const result = await refresh();
+    if (result?.__fstreamResponse) return res.status(result.status).json(result.body);
+    if (!result) return res.status(503).json({ success: false, code: 'source_temporarily_unavailable', error: 'FStream temporairement indisponible' });
+    await respond(result);
   } catch (error) {
-    console.error(`Erreur lors du filtrage des resultats FStream: ${error.message}`);
-    return [];
+    console.error(`[FSTREAM ${type.toUpperCase()}] Erreur pour ${id}: ${error.message}`);
+    res.status(503).json({ success: false, code: 'source_temporarily_unavailable', error: 'Sources FStream temporairement indisponibles' });
   }
 }
 
-// === Routes ===
-
-// GET /movie/:id
-router.get('/movie/:id', async (req, res) => {
-  const { id } = req.params;
-  const cacheKey = generateFStreamCacheKey('movie', id);
-
-  try {
-    const cacheState = await getFStreamRefreshInfo(cacheKey);
-    const cachedData = cacheState.entry?.data || null;
-    if (cachedData) {
-      await respondWithMovieSources(req, res, cachedData);
-
-      // Une entrée fraîche ne déclenche aucun scrape. Les entrées périmées sont
-      // rafraîchies en arrière-plan, avec un verrou partagé entre workers.
-      if (!cacheState.isFresh) setImmediate(async () => {
-        try {
-          await getOrCreateFStreamRequest(`${cacheKey}_background`, async () => refreshFStreamCache(cacheKey, async () => {
-            const tmdbDetails = await getFStreamTMDBDetails(id, 'movie');
-            if (!tmdbDetails) return;
-
-            const searchQuery = tmdbDetails.title;
-            let searchResults = await searchFStreamDirect(searchQuery);
-            let filteredResults = filterFStreamResults(searchResults, tmdbDetails.title, tmdbDetails.release_date?.split('-')[0]);
-
-            if (filteredResults.length === 0) {
-              try {
-                const recentMovie = await findMovieInRecentFStream(tmdbDetails.title, tmdbDetails.release_date?.split('-')[0]);
-                if (recentMovie) {
-                  const players = await getMoviePlayersForUrl(recentMovie.link);
-                  if (players.total > 0) {
-                    const response = {
-                      success: true, source: 'FStream', type: 'movie', tmdb: tmdbDetails,
-                      search: { query: tmdbDetails.title, results: 1, bestMatch: { title: recentMovie.title, originalTitle: `${recentMovie.title} (${tmdbDetails.release_date?.split('-')[0]})`, link: recentMovie.link, seasonNumber: null, year: parseInt(tmdbDetails.release_date?.split('-')[0]) } },
-                      players: players.organized, total: players.total,
-                      metadata: { extractedAt: new Date().toISOString(), backgroundUpdate: true, foundInRecent: true }
-                    };
-                    return response;
-                  }
-                }
-              } catch (recentError) {
-                console.error(`[FSTREAM BACKGROUND] Erreur lors de la recherche dans les recents: ${recentError.message}`);
-              }
-
-              return null;
-            }
-
-            let bestResult = null;
-            const tmdbYear = tmdbDetails.release_date?.split('-')[0];
-
-            if (tmdbYear) {
-              const yearMatches = filteredResults.filter(result => result.year === parseInt(tmdbYear));
-              if (yearMatches.length > 0) {
-                bestResult = yearMatches[0];
-              } else {
-                try {
-                  const recentMovie = await findMovieInRecentFStream(tmdbDetails.title, tmdbDetails.release_date?.split('-')[0]);
-                  if (recentMovie) {
-                    const players = await getMoviePlayersForUrl(recentMovie.link);
-                    if (players.total > 0) {
-                      const response = {
-                        success: true, source: 'FStream', type: 'movie', tmdb: tmdbDetails,
-                        search: { query: tmdbDetails.title, results: 1, bestMatch: { title: recentMovie.title, originalTitle: `${recentMovie.title} (${tmdbDetails.release_date?.split('-')[0]})`, link: recentMovie.link, seasonNumber: null, year: parseInt(tmdbDetails.release_date?.split('-')[0]) } },
-                        players: players.organized, total: players.total,
-                        metadata: { extractedAt: new Date().toISOString(), backgroundUpdate: true, foundInRecent: true }
-                      };
-                      return response;
-                    }
-                  }
-                } catch (recentError) {
-                  console.error(`[FSTREAM BACKGROUND] Erreur lors de la recherche dans les recents: ${recentError.message}`);
-                }
-                return null;
-              }
-            } else {
-              bestResult = filteredResults[0];
-            }
-
-            if (!bestResult) {
-              return null;
-            }
-
-            const players = await getMoviePlayersForUrl(bestResult.link);
-            if (players.total === 0) return;
-
-            const response = {
-              success: true, source: 'FStream', type: 'movie', tmdb: tmdbDetails,
-              search: { query: searchQuery, results: filteredResults.length, bestMatch: bestResult },
-              players: players.organized, total: players.total,
-              metadata: { extractedAt: new Date().toISOString(), backgroundUpdate: true }
-            };
-            return response;
-          }));
-        } catch (error) { /* background error, ignore */ }
-      });
-
-      return;
-    }
-
-    // No cache - make request with deduplication
-    const result = await getOrCreateFStreamRequest(cacheKey, async () => refreshFStreamCache(cacheKey, async () => {
-      const tmdbDetails = await getFStreamTMDBDetails(id, 'movie');
-      if (!tmdbDetails) throw new Error('Contenu TMDB non trouve');
-
-      const searchQuery = tmdbDetails.title;
-      let searchResults = await searchFStreamDirect(searchQuery);
-      let filteredResults = filterFStreamResults(searchResults, tmdbDetails.title, tmdbDetails.release_date?.split('-')[0]);
-
-      let bestResult = null;
-      const tmdbYear = tmdbDetails.release_date?.split('-')[0];
-
-      if (tmdbYear) {
-        const yearMatches = filteredResults.filter(result => result.year === parseInt(tmdbYear));
-        if (yearMatches.length > 0) {
-          bestResult = yearMatches[0];
-        } else {
-          const recentMovie = await findMovieInRecentFStream(tmdbDetails.title, tmdbYear);
-          if (recentMovie) {
-            bestResult = { title: recentMovie.title, originalTitle: `${recentMovie.title} (${tmdbYear})`, link: recentMovie.link, seasonNumber: null, year: parseInt(tmdbYear) };
-          } else {
-            throw new Error(`Aucun resultat trouve avec l'annee ${tmdbYear} sur FStream`);
-          }
-        }
-      } else {
-        if (filteredResults.length > 0) bestResult = filteredResults[0];
-      }
-
-      if (filteredResults.length === 0 && !bestResult) {
-        const recentMovie = await findMovieInRecentFStream(tmdbDetails.title, tmdbYear);
-        if (recentMovie) {
-          bestResult = { title: recentMovie.title, originalTitle: `${recentMovie.title}${tmdbYear ? ` (${tmdbYear})` : ''}`, link: recentMovie.link, seasonNumber: null, year: tmdbYear ? parseInt(tmdbYear) : null };
-        } else {
-          throw new Error('Aucun resultat trouve sur FStream');
-        }
-      }
-
-      if (!bestResult) throw new Error('Aucun resultat valide trouve sur FStream');
-
-      const players = await getMoviePlayersForUrl(bestResult.link);
-      if (players.total === 0) {
-        return uncachedFStreamResponse(404, { error: 'Aucun lecteur video trouve', searchQuery, bestResult: bestResult.title });
-      }
-
-      return {
-        success: true, source: 'FStream', type: 'movie', tmdb: tmdbDetails,
-        search: { query: searchQuery, results: filteredResults.length, bestMatch: bestResult },
-        players: players.organized, total: players.total,
-        metadata: { extractedAt: new Date().toISOString() }
-      };
-    }));
-
-    if (!result) throw new Error('Aucune source FStream utilisable');
-    if (result.__fstreamResponse) return res.status(result.status).json(result.body);
-    await respondWithMovieSources(req, res, result);
-
-  } catch (error) {
-    console.error(`[FSTREAM MOVIE] Erreur pour ${id}: ${error.message}`);
-    const errorResult = { success: false, error: 'Erreur lors de la recuperation des sources FStream', message: error.message, timestamp: new Date().toISOString() };
-    res.status(500).json(errorResult);
-  }
-});
-
-// GET /tv/:id/season/:season
-router.get('/tv/:id/season/:season', async (req, res) => {
-  const { id, season } = req.params;
-  const { episode } = req.query;
-  const cacheKey = generateFStreamCacheKey('tv', id, season, episode);
-
-  try {
-    const cacheState = await getFStreamRefreshInfo(cacheKey);
-    const cachedData = cacheState.entry?.data || null;
-    const cachedSelectionIsValid = isFStreamCachedSelectionValid(cachedData, season);
-    if (cachedData && cachedSelectionIsValid) {
-      await respondWithEpisodeSources(req, res, cachedData);
-
-      // Pas de scrape tant que le cache partagé est frais.
-      if (!cacheState.isFresh) setImmediate(async () => {
-        try {
-          await getOrCreateFStreamRequest(`${cacheKey}_background`, async () => refreshFStreamCache(cacheKey, async () => {
-            const tmdbDetails = await getFStreamTMDBDetails(id, 'tv');
-            if (!tmdbDetails) return;
-
-            let searchQuery;
-            if (id === '259909') { searchQuery = 'Dexter : Resurrection - Saison 1'; }
-            else { searchQuery = `${tmdbDetails.title} - Saison ${season}`; }
-
-            let searchResults = await searchFStreamDirect(searchQuery);
-            let filteredResults = filterFStreamResults(searchResults, tmdbDetails.title, tmdbDetails.release_date?.split('-')[0]);
-
-            if (filteredResults.length === 0) {
-              const directSeasonsEarly = await fetchFStreamSeasonSearchResults(id, tmdbDetails.title);
-              if (directSeasonsEarly.length > 0) filteredResults = directSeasonsEarly;
-
-              if (tmdbDetails.release_date) {
-                const year = tmdbDetails.release_date.split('-')[0];
-                const fallbackQuery = `${tmdbDetails.title} (${year}) - Saison ${season}`;
-                try {
-                  let fallbackSearchResults = await searchFStreamDirect(fallbackQuery);
-                  let fallbackFilteredResults = filterFStreamResults(fallbackSearchResults, tmdbDetails.title, year);
-                  if (fallbackFilteredResults.length > 0) filteredResults = fallbackFilteredResults;
-                } catch (fallbackError) {
-                  console.log(`[FSTREAM TV BACKGROUND] Erreur lors de la recherche de fallback avec annee: ${fallbackError.message}`);
-                }
-              }
-
-              if (filteredResults.length === 0 && tmdbDetails.name_no_lang && tmdbDetails.name_no_lang !== tmdbDetails.title) {
-                const noLangFallbackQuery = `${tmdbDetails.name_no_lang} - Saison ${season}`;
-                try {
-                  let noLangSearchResults = await searchFStreamDirect(noLangFallbackQuery);
-                  let noLangFilteredResults = filterFStreamResults(noLangSearchResults, tmdbDetails.name_no_lang, tmdbDetails.release_date?.split('-')[0]);
-                  if (noLangFilteredResults.length > 0) {
-                    filteredResults = noLangFilteredResults;
-                    console.log(`[FSTREAM TV BACKGROUND] Fallback avec nom sans langue reussi: "${noLangFallbackQuery}"`);
-                  }
-                } catch (noLangFallbackError) {
-                  console.log(`[FSTREAM TV BACKGROUND] Erreur lors de la recherche de fallback avec nom sans langue: ${noLangFallbackError.message}`);
-                }
-              }
-
-              if (filteredResults.length === 0) {
-                const directSeasons = await fetchFStreamSeasonSearchResults(id, tmdbDetails.title);
-                if (directSeasons.length > 0) filteredResults = directSeasons;
-
-                if (filteredResults.length === 0) {
-                  const releaseDate = tmdbDetails.release_date;
-                  let shouldCheckRecent = false;
-                  if (releaseDate) {
-                    const releaseDateTime = new Date(releaseDate);
-                    const now = new Date();
-                    const diffInDays = (now - releaseDateTime) / (1000 * 60 * 60 * 24);
-                    if (diffInDays <= 2) shouldCheckRecent = true;
-                  }
-
-                  if (shouldCheckRecent) {
-                    try {
-                      const recentSeries = await findSeriesInRecentFStream(tmdbDetails.title, tmdbDetails.release_date?.split('-')[0]);
-                      if (recentSeries) {
-                        const players = await getSeriesPlayersForUrl(recentSeries.link);
-                        if (players.total > 0) {
-                          const response = {
-                            success: true, source: 'FStream', type: 'tv', tmdb: tmdbDetails,
-                            search: { query: `${tmdbDetails.title} - Saison ${season}`, results: 1, bestMatch: { title: recentSeries.title, originalTitle: `${recentSeries.title} (${tmdbDetails.release_date?.split('-')[0]})`, link: recentSeries.link, seasonNumber: parseInt(season), year: parseInt(tmdbDetails.release_date?.split('-')[0]) } },
-                            episodes: players.episodes, total: players.total,
-                            metadata: { season: parseInt(season), episode: episode ? parseInt(episode) : null, extractedAt: new Date().toISOString(), backgroundUpdate: true, foundInRecent: true }
-                          };
-                          return response;
-                        }
-                      }
-                    } catch (recentError) {
-                      console.error(`[FSTREAM TV BACKGROUND] Erreur lors de la recherche dans les recents: ${recentError.message}`);
-                    }
-                  }
-
-                  // Background update: ne pas écraser le cache avec une erreur
-                  return;
-                }
-              }
-            }
-
-            const requestedSeason = parseInt(season);
-            const bgTmdbYear = tmdbDetails.release_date ? parseInt(tmdbDetails.release_date.split('-')[0]) : null;
-
-            // Trouver tous les resultats correspondant a la saison demandee
-            const seasonMatches = filteredResults.filter(result => result.seasonNumber && result.seasonNumber === requestedSeason);
-            let bestResult = null;
-            if (seasonMatches.length > 1 && bgTmdbYear) {
-              bestResult = seasonMatches.find(r => r.year === bgTmdbYear) || seasonMatches[0];
-            } else if (seasonMatches.length === 1) {
-              bestResult = seasonMatches[0];
-            }
-
-            if (!bestResult) {
-              const titleSeasonMatches = filteredResults.filter(result => {
-                if (result.originalTitle) {
-                  const seasonInTitle = result.originalTitle.match(/Saison\s+(\d+)/i);
-                  if (seasonInTitle) return parseInt(seasonInTitle[1]) === requestedSeason;
-                }
-                return false;
-              });
-              if (titleSeasonMatches.length > 1 && bgTmdbYear) {
-                bestResult = titleSeasonMatches.find(r => r.year === bgTmdbYear) || titleSeasonMatches[0];
-              } else if (titleSeasonMatches.length === 1) {
-                bestResult = titleSeasonMatches[0];
-              }
-            }
-
-            // Fallback: rechercher sans le numero de saison (FStream retourne parfois des resultats differents)
-            if (!bestResult) {
-              try {
-                const noNumQuery = `${tmdbDetails.title} - Saison`;
-                const noNumResults = await searchFStreamDirect(noNumQuery);
-                const noNumFiltered = filterFStreamResults(noNumResults, tmdbDetails.title, tmdbDetails.release_date?.split('-')[0]);
-                const noNumSeasonMatches = noNumFiltered.filter(r => r.seasonNumber === requestedSeason);
-                if (noNumSeasonMatches.length > 0) {
-                  bestResult = noNumSeasonMatches.length > 1 && bgTmdbYear ? (noNumSeasonMatches.find(r => r.year === bgTmdbYear) || noNumSeasonMatches[0]) : noNumSeasonMatches[0];
-                  filteredResults = noNumFiltered;
-                  console.log(`[FSTREAM TV BACKGROUND] Fallback sans numero de saison reussi pour "${tmdbDetails.title}" saison ${requestedSeason}`);
-                }
-              } catch (e) {
-                console.log(`[FSTREAM TV BACKGROUND] Erreur fallback sans numero de saison: ${e.message}`);
-              }
-            }
-
-            // Fallback get_seasons.php: search ne liste pas toujours toutes les saisons.
-            if (!bestResult) {
-              const newsIdSource = filteredResults.find(r => extractPageIdFromUrl(r.link));
-              if (newsIdSource) {
-                const ajaxSeasons = await fetchFStreamSeasonsAjax(id, extractPageIdFromUrl(newsIdSource.link), extractBaseUrlFromLink(newsIdSource.link));
-                const ajaxMatch = ajaxSeasons.find(r => r.seasonNumber === requestedSeason);
-                if (ajaxMatch) bestResult = ajaxMatch;
-              }
-            }
-
-            if (!bestResult) {
-              // Background update: ne pas écraser le cache avec une erreur
-              return;
-            }
-
-            const players = await getSeriesPlayersForUrl(bestResult.link);
-            if (players.total === 0) return;
-
-            let isAvailable = true;
-            if (tmdbDetails.release_date) {
-              const tmdbYearStr = tmdbDetails.release_date.split('-')[0];
-              if (players.fromApi) {
-                if (bestResult.year && bestResult.year !== parseInt(tmdbYearStr)) {
-                  isAvailable = false;
-                }
-              } else {
-                if (players.fstreamReleaseDate) {
-                  if (players.fstreamReleaseDate !== tmdbYearStr) isAvailable = false;
-                } else { isAvailable = false; }
-              }
-            }
-
-            const response = {
-              success: isAvailable, source: 'FStream', type: 'tv', tmdb: tmdbDetails,
-              search: { query: searchQuery, results: filteredResults.length, bestMatch: bestResult },
-              episodes: isAvailable ? players.episodes : {}, total: isAvailable ? players.total : 0,
-              metadata: { season: parseInt(season), episode: episode ? parseInt(episode) : null, extractedAt: new Date().toISOString(), backgroundUpdate: true, fstreamReleaseDate: players.fstreamReleaseDate, dateValidation: { fstreamYear: players.fstreamReleaseDate, tmdbYear: tmdbDetails.release_date?.split('-')[0], isAvailable } }
-            };
-            return response;
-          }, (data) => isFStreamCachedSelectionValid(data, season)));
-        } catch (error) { /* background error, ignore */ }
-      });
-
-      return;
-    }
-    if (cachedData && !cachedSelectionIsValid) {
-      console.warn(`[FSTREAM TV] Cache ignore: fiche incompatible avec le titre TMDB pour ${id} S${season}`);
-    }
-
-    // No cache
-    const result = await getOrCreateFStreamRequest(cacheKey, async () => refreshFStreamCache(cacheKey, async () => {
-      const tmdbDetails = await getFStreamTMDBDetails(id, 'tv');
-      if (!tmdbDetails) throw new Error('Contenu TMDB non trouve');
-
-      let searchQuery;
-      if (id === '259909') { searchQuery = 'Dexter : Resurrection - Saison 1'; }
-      else { searchQuery = `${tmdbDetails.title} - Saison ${season}`; }
-
-      let searchResults = await searchFStreamDirect(searchQuery);
-      let filteredResults = filterFStreamResults(searchResults, tmdbDetails.title, tmdbDetails.release_date?.split('-')[0]);
-
-      if (filteredResults.length === 0) {
-        const directSeasonsEarly = await fetchFStreamSeasonSearchResults(id, tmdbDetails.title);
-        if (directSeasonsEarly.length > 0) { filteredResults = directSeasonsEarly; console.log(`[FSTREAM TV] Requete directe des saisons reussie (ajax - precoce)`); }
-
-        if (tmdbDetails.release_date) {
-          const year = tmdbDetails.release_date.split('-')[0];
-          const fallbackQuery = `${tmdbDetails.title} (${year}) - Saison ${season}`;
-          try {
-            let fallbackSearchResults = await searchFStreamDirect(fallbackQuery);
-            let fallbackFilteredResults = filterFStreamResults(fallbackSearchResults, tmdbDetails.title, year);
-            if (fallbackFilteredResults.length > 0) filteredResults = fallbackFilteredResults;
-          } catch (fallbackError) {
-            console.log(`[FSTREAM TV] Erreur lors de la recherche de fallback avec annee: ${fallbackError.message}`);
-          }
-        }
-
-        if (filteredResults.length === 0 && tmdbDetails.name_no_lang && tmdbDetails.name_no_lang !== tmdbDetails.title) {
-          const noLangFallbackQuery = `${tmdbDetails.name_no_lang} - Saison ${season}`;
-          try {
-            let noLangSearchResults = await searchFStreamDirect(noLangFallbackQuery);
-            let noLangFilteredResults = filterFStreamResults(noLangSearchResults, tmdbDetails.name_no_lang, tmdbDetails.release_date?.split('-')[0]);
-            if (noLangFilteredResults.length > 0) { filteredResults = noLangFilteredResults; console.log(`[FSTREAM TV] Fallback avec nom sans langue reussi: "${noLangFallbackQuery}"`); }
-          } catch (noLangFallbackError) {
-            console.log(`[FSTREAM TV] Erreur lors de la recherche de fallback avec nom sans langue: ${noLangFallbackError.message}`);
-          }
-        }
-
-        if (filteredResults.length === 0) {
-          const directSeasons = await fetchFStreamSeasonSearchResults(id, tmdbDetails.title);
-          if (directSeasons.length > 0) { filteredResults = directSeasons; console.log(`[FSTREAM TV] Requete directe des saisons reussie (ajax)`); }
-        }
-
-        if (filteredResults.length === 0) throw new Error('Aucun resultat trouve sur FStream');
-      }
-
-      const requestedSeason = parseInt(season);
-      const tmdbYear = tmdbDetails.release_date ? parseInt(tmdbDetails.release_date.split('-')[0]) : null;
-
-      // Trouver tous les resultats correspondant a la saison demandee
-      const seasonMatches = filteredResults.filter(result => result.seasonNumber && result.seasonNumber === requestedSeason);
-
-      let bestResult = null;
-      if (seasonMatches.length > 1 && tmdbYear) {
-        // Prioriser le resultat dont l'annee correspond a l'annee TMDB
-        bestResult = seasonMatches.find(r => r.year === tmdbYear) || seasonMatches[0];
-      } else if (seasonMatches.length === 1) {
-        bestResult = seasonMatches[0];
-      }
-
-      if (!bestResult) {
-        // Fallback: chercher dans le titre original
-        const titleSeasonMatches = filteredResults.filter(result => {
-          if (result.originalTitle) {
-            const seasonInTitle = result.originalTitle.match(/Saison\s+(\d+)/i);
-            if (seasonInTitle) return parseInt(seasonInTitle[1]) === requestedSeason;
-          }
-          return false;
-        });
-        if (titleSeasonMatches.length > 1 && tmdbYear) {
-          bestResult = titleSeasonMatches.find(r => r.year === tmdbYear) || titleSeasonMatches[0];
-        } else if (titleSeasonMatches.length === 1) {
-          bestResult = titleSeasonMatches[0];
-        }
-      }
-
-      // Fallback: rechercher sans le numero de saison (FStream retourne parfois des resultats differents)
-      if (!bestResult) {
-        try {
-          const noNumQuery = `${tmdbDetails.title} - Saison`;
-          const noNumResults = await searchFStreamDirect(noNumQuery);
-          const noNumFiltered = filterFStreamResults(noNumResults, tmdbDetails.title, tmdbDetails.release_date?.split('-')[0]);
-          const noNumSeasonMatches = noNumFiltered.filter(r => r.seasonNumber === requestedSeason);
-          if (noNumSeasonMatches.length > 0) {
-            bestResult = noNumSeasonMatches.length > 1 && tmdbYear ? (noNumSeasonMatches.find(r => r.year === tmdbYear) || noNumSeasonMatches[0]) : noNumSeasonMatches[0];
-            filteredResults = noNumFiltered;
-            console.log(`[FSTREAM TV] Fallback sans numero de saison reussi pour "${tmdbDetails.title}" saison ${requestedSeason}`);
-          }
-        } catch (e) {
-          console.log(`[FSTREAM TV] Erreur fallback sans numero de saison: ${e.message}`);
-        }
-      }
-
-      // Fallback get_seasons.php: search.php ne liste pas toujours toutes les saisons.
-      // On a au moins une saison trouvee -> son page id sert de news_id, serie_tag = s-<tmdbId>.
-      if (!bestResult) {
-        const newsIdSource = filteredResults.find(r => extractPageIdFromUrl(r.link));
-        if (newsIdSource) {
-          const ajaxSeasons = await fetchFStreamSeasonsAjax(id, extractPageIdFromUrl(newsIdSource.link), extractBaseUrlFromLink(newsIdSource.link));
-          const ajaxMatch = ajaxSeasons.find(r => r.seasonNumber === requestedSeason);
-          if (ajaxMatch) {
-            bestResult = ajaxMatch;
-            console.log(`[FSTREAM TV] Fallback get_seasons.php reussi: saison ${requestedSeason} pour "${tmdbDetails.title}"`);
-          }
-        }
-      }
-
-      if (!bestResult) {
-        const availableSeasons = filteredResults
-          .filter(r => r.seasonNumber && r.title.toLowerCase().includes(tmdbDetails.title.toLowerCase().split(/[:\-]/)[0].trim().toLowerCase()))
-          .map(r => r.seasonNumber)
-          .filter((s, i, arr) => arr.indexOf(s) === i)
-          .sort((a, b) => a - b);
-        const seasonText = availableSeasons.length > 0
-          ? `Saisons disponibles pour "${tmdbDetails.title}": ${availableSeasons.join(', ')}`
-          : `Aucune saison trouvee pour "${tmdbDetails.title}"`;
-        throw new Error(`Saison ${requestedSeason} non trouvee. ${seasonText}`);
-      }
-
-      // Verifier la correspondance d'annee meme quand l'API est utilisee
-      if (tmdbYear && bestResult.year && bestResult.year !== tmdbYear) {
-        console.log(`[FSTREAM TV] Annee non correspondante: TMDB=${tmdbYear}, FStream=${bestResult.year} pour "${bestResult.title}"`);
-      }
-
-      const players = await getSeriesPlayersForUrl(bestResult.link);
-      if (players.total === 0) throw new Error('Aucun lecteur video trouve');
-
-      let isAvailable = true;
-      if (tmdbDetails.release_date) {
-        const tmdbYearStr = tmdbDetails.release_date.split('-')[0];
-        if (players.fromApi) {
-          // Quand l'API est utilisee, valider via l'annee du resultat de recherche
-          if (bestResult.year && bestResult.year !== parseInt(tmdbYearStr)) {
-            isAvailable = false;
-          }
-        } else {
-          if (players.fstreamReleaseDate) {
-            if (players.fstreamReleaseDate !== tmdbYearStr) isAvailable = false;
-          } else { isAvailable = false; }
-        }
-      }
-
-      const response = {
-        success: isAvailable, source: 'FStream', type: 'tv', tmdb: tmdbDetails,
-        search: { query: searchQuery, results: filteredResults.length, bestMatch: bestResult },
-        episodes: isAvailable ? players.episodes : {}, total: isAvailable ? players.total : 0,
-        metadata: { season: parseInt(season), episode: episode ? parseInt(episode) : null, extractedAt: new Date().toISOString(), fstreamReleaseDate: players.fstreamReleaseDate, dateValidation: { fstreamYear: players.fstreamReleaseDate, tmdbYear: tmdbDetails.release_date?.split('-')[0], isAvailable } }
-      };
-      return isAvailable ? response : uncachedFStreamResponse(200, response);
-    }, (data) => isFStreamCachedSelectionValid(data, season)));
-
-    if (!result) throw new Error('Aucune source FStream utilisable');
-    if (result.__fstreamResponse) return res.status(result.status).json(result.body);
-    await respondWithEpisodeSources(req, res, result);
-
-  } catch (error) {
-    console.error(`[FSTREAM TV] Erreur pour ${id} S${season}: ${error.message}`);
-    const errorResult = { success: false, error: 'Erreur lors de la recuperation des sources FStream', message: error.message, timestamp: new Date().toISOString() };
-    res.status(500).json(errorResult);
-  }
-});
+router.get('/movie/:id', (req, res) => serveFStream(req, res, 'movie'));
+router.get('/tv/:id/season/:season', (req, res) => serveFStream(req, res, 'tv'));
 
 // GET /test/recent
 router.get('/test/recent', async (req, res) => {

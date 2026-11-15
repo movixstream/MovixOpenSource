@@ -408,17 +408,17 @@ const WishboardNewRequest: React.FC = () => {
                                 {step === 1 ? (
                                     <Link
                                         to="/wishboard"
-                                        className="inline-flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors pointer-events-auto"
+                                        className="inline-flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors pointer-events-auto group/icon"
                                     >
-                                        <ArrowLeft className="h-4 w-4" />
+                                        <ArrowLeft className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                                         <span>{t('common.back')}</span>
                                     </Link>
                                 ) : (
                                     <button
                                         onClick={handleBack}
-                                        className="inline-flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors pointer-events-auto"
+                                        className="inline-flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors pointer-events-auto group/icon"
                                     >
-                                        <ArrowLeft className="h-4 w-4" />
+                                        <ArrowLeft className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                                         <span>{t('greenlight.backToStep', { step: step - 1 })}</span>
                                     </button>
                                 )}
@@ -871,7 +871,7 @@ const WishboardNewRequest: React.FC = () => {
                                                             />
                                                             <div className="flex-1 pt-2">
                                                                 <span className="whitespace-nowrap inline-flex items-center text-[10px] uppercase font-bold tracking-wider bg-white/10 text-white/90 rounded-md px-2 py-1 mb-2 border border-white/10">
-                                                                    {contentType === 'movie' ? <Film className="h-3 w-3 mr-1" /> : <Tv className="h-3 w-3 mr-1" />}
+                                                                    {contentType === 'movie' ? <Film className="h-3 w-3 mr-1 text-white opacity-90" /> : <Tv className="h-3 w-3 mr-1 text-white opacity-90" />}
                                                                     {contentType === 'movie' ? t('greenlight.movieType') : t('greenlight.seriesType')}
                                                                 </span>
                                                                 <h3 className="text-xl font-bold text-white leading-tight mb-1">{getTitle(selectedContent)}</h3>
@@ -1053,9 +1053,9 @@ const WishboardNewRequest: React.FC = () => {
                                             {step > 1 && (
                                                 <button
                                                     onClick={handleBack}
-                                                    className="w-full flex items-center justify-center gap-2 py-2 text-sm text-white/70 transition-colors hover:text-white"
+                                                    className="w-full flex items-center justify-center gap-2 py-2 text-sm text-white/70 transition-colors hover:text-white group/icon"
                                                 >
-                                                    <ArrowLeft className="h-4 w-4" />
+                                                    <ArrowLeft className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" />
                                                     {t('greenlight.previousStep')}
                                                 </button>
                                             )}
@@ -1097,9 +1097,9 @@ const WishboardNewRequest: React.FC = () => {
                     {step > 1 && (
                         <button
                             onClick={handleBack}
-                            className="flex items-center justify-center gap-2 py-2 text-sm text-white/70 transition-colors hover:text-white"
+                            className="flex items-center justify-center gap-2 py-2 text-sm text-white/70 transition-colors hover:text-white group/icon"
                         >
-                            <ArrowLeft className="h-4 w-4" />
+                            <ArrowLeft className="h-4 w-4 text-white opacity-70 group-hover/icon:opacity-100 transition-[color,opacity]" />
                             {t('greenlight.previousStep')}
                         </button>
                     )}

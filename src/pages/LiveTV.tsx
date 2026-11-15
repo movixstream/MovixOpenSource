@@ -16,6 +16,7 @@ import LiveTVPlayer from '../components/LiveTVPlayer';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
+import { Skeleton } from '../components/ui/Skeleton';
 import { useWrappedTracker } from '../hooks/useWrappedTracker';
 import AdFreePlayerAds from '../components/AdFreePlayerAds';
 import { isUserVip } from '../utils/authUtils';
@@ -295,7 +296,7 @@ const FavoriteInlineButton: React.FC<FavoriteInlineButtonProps> = ({
         onClick={onToggle}
         whileTap={{ scale: 0.72 }}
         className={cn(
-          'flex items-center justify-center rounded-full transition-all duration-200',
+          'group/icon flex items-center justify-center rounded-full transition-all duration-200',
           active
             ? 'bg-yellow-500/15 text-yellow-400'
             : 'bg-white/[0.04] text-white/35 hover:bg-white/[0.08] hover:text-white/70',
@@ -309,7 +310,11 @@ const FavoriteInlineButton: React.FC<FavoriteInlineButtonProps> = ({
           transition={{ type: 'spring', stiffness: 500, damping: 15 }}
         >
           <Star
-            className={cn('w-3.5 h-3.5 transition-colors duration-150', iconClassName)}
+            className={cn(
+              'w-3.5 h-3.5 transition-[color,opacity] duration-150',
+              active ? 'text-yellow-400' : 'text-white opacity-35 group-hover/icon:opacity-70',
+              iconClassName,
+            )}
             fill={active ? 'currentColor' : 'none'}
           />
         </motion.div>
@@ -478,6 +483,9 @@ const LiveTVPlayback = React.forwardRef<LiveTVPlaybackHandle>(
     const [pendingChannel, setPendingChannel] = useState<Channel | null>(null);
     const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
     const closingPlayerRef = useRef(false);
+    // Vrai seulement si le lecteur a bien ajouté son entrée d'historique :
+    // sans elle, un history.back() à la fermeture quitterait la page.
+    const playerHistoryPushedRef = useRef(false);
 
     React.useImperativeHandle(ref, () => ({
       openPlayer: setSelectedChannel,
@@ -487,8 +495,22 @@ const LiveTVPlayback = React.forwardRef<LiveTVPlaybackHandle>(
     useEffect(() => {
       if (!selectedChannel) return;
       closingPlayerRef.current = false;
-      window.history.pushState({ ...window.history.state, playerOpen: true }, '');
+      // Changer de chaîne lecteur ouvert relance l'effet : réutiliser l'entrée
+      // déjà poussée au lieu d'en empiler une par chaîne.
+      if (!playerHistoryPushedRef.current) {
+        try {
+          window.history.pushState({ ...window.history.state, playerOpen: true }, '');
+          playerHistoryPushedRef.current = true;
+        } catch (error) {
+          // iOS refuse plus de 100 pushState en 10 s, tous scripts confondus :
+          // les scripts publicitaires de la page en consomment beaucoup et
+          // l'ouverture de la chaîne faisait tomber toute la page (GlitchTip
+          // G4). Le lecteur s'ouvre quand même, sans entrée d'historique.
+          console.warn('[LiveTV] history.pushState refusé :', String(error));
+        }
+      }
       const handlePopState = () => {
+        playerHistoryPushedRef.current = false;
         closingPlayerRef.current = true;
         setSelectedChannel(null);
       };
@@ -501,7 +523,10 @@ const LiveTVPlayback = React.forwardRef<LiveTVPlaybackHandle>(
       closingPlayerRef.current = true;
       // Démarrer la sortie dès le clic, sans attendre le popstate asynchrone.
       setSelectedChannel(null);
-      window.history.back();
+      if (playerHistoryPushedRef.current) {
+        playerHistoryPushedRef.current = false;
+        window.history.back();
+      }
     }, []);
 
     useWrappedTracker({
@@ -1308,7 +1333,7 @@ const LiveTV: React.FC = () => {
   };
 
   // Catalog icon: vavoo country groups render a flag via react-country-flag.
-  const getCatalogIcon = (catalog: Catalog): React.ReactNode => {
+  const getCatalogIcon = (catalog: Catalog, active = false): React.ReactNode => {
     if (catalog.id.startsWith('vavoo_')) {
       const code = vavooGroupCountry[catalog.id];
       if (code) {
@@ -1321,14 +1346,42 @@ const LiveTV: React.FC = () => {
           />
         );
       }
-      return <Globe className="w-3.5 h-3.5" />; // All, Balkans — no single country
+      // Couleur pleine + opacity : un currentColor translucide hérité du
+      // bouton ferait ressortir les croisements des tracés de l'icône.
+      return (
+        <Globe
+          className={cn(
+            'w-3.5 h-3.5 text-white transition-opacity duration-200',
+            active ? 'opacity-100' : 'opacity-50 group-hover/icon:opacity-70',
+          )}
+        />
+      ); // All, Balkans — no single country
     }
     return <span className="text-base">{getCatalogEmoji(catalog)}</span>;
   };
 
   // Source icons mapping
+  // L'icône Radio reçoit sa propre couleur pleine + opacity au lieu d'hériter
+  // du texte translucide de la pastille (croisements des tracés plus clairs).
+  const getSourceIcon = (source: string, isActive: boolean, isLocked: boolean): React.ReactNode => {
+    if (source === 'vavoo') {
+      return (
+        <Radio
+          className={cn(
+            'w-3.5 h-3.5 transition-[color,opacity] duration-200',
+            isActive
+              ? 'text-red-400'
+              : isLocked
+                ? 'text-white opacity-25'
+                : 'text-white opacity-60 group-hover/icon:opacity-90',
+          )}
+        />
+      );
+    }
+    return sourceIcons[source];
+  };
+
   const sourceIcons: Record<string, React.ReactNode> = {
-    'vavoo': <Radio className="w-3.5 h-3.5" />,
     'fctv': <span className="text-sm leading-none">⚽</span>,
     'streamed': <span className="text-sm leading-none">🏟️</span>,
     'iptv': <i className="bi bi-globe text-sm" />,
@@ -1355,16 +1408,32 @@ const LiveTV: React.FC = () => {
   };
 
   // Skeleton loader component
-  const ChannelSkeleton = () => (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-      {Array.from({ length: 18 }).map((_, i) => (
-        <div key={i} className="animate-pulse">
-          <div className="media-aspect-video rounded-xl bg-white/5" />
-          <div className="mt-2 h-3 w-3/4 rounded bg-white/5" />
-        </div>
-      ))}
-    </div>
-  );
+  const ChannelSkeleton = () => {
+    const isEvent = selectedCatalog.startsWith('matches_') || selectedCatalog.startsWith('streamed_');
+    const isNameOnly = isEvent || selectedCatalog.startsWith('northlive_');
+    const landscape = selectedSource === 'iptv' || isNameOnly;
+    return (
+      <div className={channelGridClassName} aria-hidden="true">
+        {Array.from({ length: 18 }, (_, index) => (
+          <div key={index} className={cn('relative rounded-xl overflow-hidden border border-white/[0.04] bg-white/[0.02]', landscape ? 'media-aspect-video' : 'media-aspect-poster')}>
+            <div className="absolute inset-0"><Skeleton height="100%" className="!rounded-none" /></div>
+            <div className="absolute top-2 left-2"><Skeleton width={42} height={18} baseColor="#2a2a2a" /></div>
+            <div className="absolute top-2 right-2"><Skeleton variant="circle" width={28} height={28} baseColor="#2a2a2a" /></div>
+            {isNameOnly ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-3">
+                <Skeleton width={28} height={28} baseColor="#2a2a2a" />
+                <Skeleton width="80%" height={16} containerClassName="w-full flex justify-center" baseColor="#2a2a2a" />
+              </div>
+            ) : (
+              <div className={cn('absolute inset-x-0 bottom-0', selectedSource === 'iptv' ? 'p-2 pt-6' : 'p-2.5 pt-8')}>
+                <Skeleton width="75%" height={16} baseColor="#2a2a2a" />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   // Filtered IPTV streams for search
   const filteredIptvStreams = useMemo(
@@ -1625,7 +1694,7 @@ const LiveTV: React.FC = () => {
                    <h3 className="text-xs font-medium text-white/60 line-clamp-2 leading-tight">{channel.name}</h3>
                    {isVavoo && channel._vavooVariants && channel._vavooVariants.length > 1 && vavooServers.length > 0 && (
                      <div className="mt-1.5 flex max-w-full items-center gap-1 rounded-full border border-white/[0.06] bg-white/[0.03] px-2 py-1 text-[9px] font-medium text-white/35">
-                       <Wifi className="h-3 w-3 shrink-0" />
+                       <Wifi className="h-3 w-3 shrink-0 text-white opacity-35" />
                        <span className="truncate">
                          {t('liveTV.vavooServers')}: {vavooServers.join(' · ')}
                        </span>
@@ -1722,7 +1791,7 @@ const LiveTV: React.FC = () => {
                       whileTap={{ scale: 0.96 }}
                       onClick={() => !isLocked && handleSourceChange(source)}
                       className={cn(
-                        'relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 border shrink-0',
+                        'group/icon relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 border shrink-0',
                         isActive
                           ? 'bg-red-500/15 text-red-400 border-red-500/30 shadow-sm shadow-red-500/10'
                           : isLocked
@@ -1730,7 +1799,7 @@ const LiveTV: React.FC = () => {
                             : 'bg-white/[0.03] text-white/60 border-white/[0.06] hover:bg-white/[0.06] hover:text-white/90 hover:border-white/10'
                       )}
                     >
-                      {sourceIcons[source]}
+                      {getSourceIcon(source, isActive, isLocked)}
                       {label}
                       {isLocked && <Lock className="w-3 h-3 ml-0.5 text-white opacity-20" />}
                       {source === 'iptv' && !isLocked && (
@@ -1768,7 +1837,7 @@ const LiveTV: React.FC = () => {
                   </Link>
                   <Link to="/app">
                     <Button size="sm" variant="outline" className="h-7 gap-1.5 border-white/15 px-3 text-xs text-white/70 hover:bg-white/5">
-                      <Smartphone className="w-3.5 h-3.5" />
+                      <Smartphone className="w-3.5 h-3.5 text-white opacity-70" />
                       {t('liveTV.mobileApp')}
                     </Button>
                   </Link>
@@ -1840,7 +1909,7 @@ const LiveTV: React.FC = () => {
                 <div className="relative w-full sm:w-96" ref={iptvDropdownRef}>
                   {loadingIptvCategories ? (
                     <div className="flex items-center gap-3 h-10 px-4 bg-white/[0.03] border border-white/[0.06] rounded-lg text-white/40 text-sm">
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="w-4 h-4 animate-spin text-white opacity-40" />
                       {t('common.loading')}
                     </div>
                   ) : (
@@ -1931,13 +2000,13 @@ const LiveTV: React.FC = () => {
                       key={catalog.id}
                       onClick={() => setSelectedCatalog(catalog.id)}
                       className={cn(
-                        'flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm whitespace-nowrap transition-all duration-200 border shrink-0',
+                        'group/icon flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm whitespace-nowrap transition-all duration-200 border shrink-0',
                         active
                           ? 'bg-white/10 text-white border-white/15 font-medium'
                           : 'bg-white/[0.02] text-white/50 border-transparent hover:bg-white/[0.05] hover:text-white/70'
                       )}
                     >
-                      {getCatalogIcon(catalog)}
+                      {getCatalogIcon(catalog, active)}
                       {formatCatalogName(catalog)}
                     </button>
                   );

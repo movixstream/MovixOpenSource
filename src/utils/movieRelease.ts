@@ -53,9 +53,30 @@ export const needsMovieReleaseWarning = (releases: MovieReleaseCatalog, now = Da
 
 export const formatMovieReleaseDate = (value: string | null | undefined, language: string): string | null => {
   const date = dateOnly(value);
-  return date ? new Intl.DateTimeFormat(language, {
-    year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
-  }).format(Date.parse(`${date}T00:00:00Z`)) : null;
+  if (!date) return null;
+  // Une langue vide ou inconnue, ou l'Intl incomplet d'une TV (GlitchTip CO),
+  // fait jeter le formateur : retomber sur la locale par défaut, puis sur l'ISO.
+  for (const locale of [language || undefined, undefined]) {
+    try {
+      return new Intl.DateTimeFormat(locale, {
+        year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
+      }).format(Date.parse(`${date}T00:00:00Z`));
+    } catch {
+      // Essayer la locale suivante.
+    }
+  }
+  return date;
+};
+
+// Intl.DisplayNames manque sur les moteurs anciens et jette sur une langue
+// vide : l'Intl partiel d'une TV LG l'a fait planter (GlitchTip CO). Le code
+// pays brut reste lisible.
+const countryLabel = (country: string, language: string): string => {
+  try {
+    return new Intl.DisplayNames([language || 'en'], { type: 'region' }).of(country) || country;
+  } catch {
+    return country;
+  }
 };
 
 export const getMovieReleaseLabel = (
@@ -70,7 +91,7 @@ export const getMovieReleaseLabel = (
       : kind === 'digital' ? 'details.movieRelease.unknownDigital' : 'details.movieRelease.unknownTheatrical';
     return t(key);
   }
-  const region = release.country ? new Intl.DisplayNames([language], { type: 'region' }).of(release.country) : null;
+  const region = release.country ? countryLabel(release.country, language) : null;
   const country = region ? t('details.movieRelease.country', { country: region }) : '';
   const date = formatMovieReleaseDate(release.date, language);
   const format = kind === 'homeVideo' && release.type === 5 ? 'physical'

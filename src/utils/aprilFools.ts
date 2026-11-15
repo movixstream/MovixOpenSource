@@ -1,3 +1,6 @@
+import { readSessionStorage } from './browserStorage';
+import { getNumericDateParts } from './dateParts';
+
 const APRIL_FOOLS_TIMEZONE = 'Europe/Paris';
 const APRIL_FOOLS_PREVIEW_QUERY = 'apriladmin';
 const APRIL_FOOLS_PREVIEW_STORAGE_KEY = 'movix_april_admin_preview';
@@ -11,9 +14,7 @@ const aprilFoolsFormatter = new Intl.DateTimeFormat('en-GB', {
 export const APRIL_FOOLS_ADMIN_PATH = '/admin-control-center';
 
 const getMonthDay = (date: Date) => {
-  const parts = aprilFoolsFormatter.formatToParts(date);
-  const day = parts.find((part) => part.type === 'day')?.value ?? '';
-  const month = parts.find((part) => part.type === 'month')?.value ?? '';
+  const { day = '', month = '' } = getNumericDateParts(aprilFoolsFormatter, date);
 
   return { day, month };
 };
@@ -32,16 +33,16 @@ const readPreviewFlag = (search: string) => {
   const previewValue = params.get(APRIL_FOOLS_PREVIEW_QUERY);
 
   if (previewValue === '1') {
-    sessionStorage.setItem(APRIL_FOOLS_PREVIEW_STORAGE_KEY, 'true');
+    try { sessionStorage.setItem(APRIL_FOOLS_PREVIEW_STORAGE_KEY, 'true'); } catch { /* Prévisualisation limitée à cette URL. */ }
     return true;
   }
 
   if (previewValue === '0') {
-    sessionStorage.removeItem(APRIL_FOOLS_PREVIEW_STORAGE_KEY);
+    try { sessionStorage.removeItem(APRIL_FOOLS_PREVIEW_STORAGE_KEY); } catch { /* Le paramètre reste prioritaire. */ }
     return false;
   }
 
-  return sessionStorage.getItem(APRIL_FOOLS_PREVIEW_STORAGE_KEY) === 'true';
+  return readSessionStorage(APRIL_FOOLS_PREVIEW_STORAGE_KEY) === 'true';
 };
 
 export const isAprilFoolsAdminEnabled = (search = '') => {

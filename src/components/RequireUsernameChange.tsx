@@ -54,7 +54,12 @@ const RequireUsernameChange: React.FC = () => {
   // Lecture initiale + écoute des changements du flag (login/logout).
   useEffect(() => {
     const refresh = () => {
-      const flag = localStorage.getItem(STORAGE_KEY) === '1';
+      let flag: boolean;
+      try {
+        flag = localStorage.getItem(STORAGE_KEY) === '1';
+      } catch {
+        return;
+      }
       if (flag) {
         const stored = readStoredAuthUsername();
         setOriginalUsername(stored);

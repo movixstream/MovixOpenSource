@@ -215,17 +215,17 @@ const PatternRow: React.FC<PatternRowProps> = ({ pattern, canDelete, onSave, onD
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 rounded"
+          className="h-6 w-6 rounded group/icon"
           onClick={() => setEditing(true)}
           aria-label={t('settings.sourcePriority.editPattern', { pattern })}
           title={t('settings.sourcePriority.editPatternTitle')}
         >
-          <Pencil size={12} />
+          <Pencil className="text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" size={12} />
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 rounded"
+          className="h-6 w-6 rounded group/icon"
           onClick={onDelete}
           disabled={!canDelete}
           aria-label={t('settings.sourcePriority.removePattern', { pattern })}
@@ -233,7 +233,7 @@ const PatternRow: React.FC<PatternRowProps> = ({ pattern, canDelete, onSave, onD
             ? t('settings.sourcePriority.removePatternTitle')
             : t('settings.sourcePriority.removePatternDisabledHint')}
         >
-          <X size={12} />
+          <X className="text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" size={12} />
         </Button>
       </div>
     </div>
@@ -582,7 +582,7 @@ export const HosterRegexEditor: React.FC = () => {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-xs text-white/60 hover:text-white"
+                  className="text-xs text-white/60 hover:text-white group/icon"
                   // Empêche le toggle du collapsible parent.
                   onClick={(e) => {
                     e.preventDefault();
@@ -591,7 +591,7 @@ export const HosterRegexEditor: React.FC = () => {
                   }}
                   title={t('settings.sourcePriority.resetCustomTitle')}
                 >
-                  <RotateCcw size={12} className="mr-1" /> {t('settings.sourcePriority.resetSectionShort')}
+                  <RotateCcw size={12} className="mr-1 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" /> {t('settings.sourcePriority.resetSectionShort')}
                 </Button>
               )}
               <AnimatedChevron open={open} />
@@ -624,7 +624,7 @@ export const HosterRegexEditor: React.FC = () => {
                     summary={(open) => (
                       <>
                         <div className="flex items-center gap-2 min-w-0">
-                          <AnimatedChevron open={open} size={14} className="text-white/50 shrink-0" />
+                          <AnimatedChevron open={open} size={14} className="text-white opacity-50 shrink-0" />
                           <span className="text-sm text-white truncate">{HOSTER_LABELS[id]}</span>
                           {customized && (
                             <span
@@ -640,7 +640,7 @@ export const HosterRegexEditor: React.FC = () => {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-6 text-xs text-white/60 hover:text-white"
+                              className="h-6 text-xs text-white/60 hover:text-white group/icon"
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -648,7 +648,7 @@ export const HosterRegexEditor: React.FC = () => {
                               }}
                               title={t('settings.sourcePriority.resetHosterTitle')}
                             >
-                              <RotateCcw size={11} className="mr-1" />
+                              <RotateCcw size={11} className="mr-1 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" />
                               {t('settings.sourcePriority.resetHoster')}
                             </Button>
                           )}
@@ -705,7 +705,7 @@ export const HosterRegexEditor: React.FC = () => {
                           )}
                         </div>
                       ) : (
-                        <Button
+                        <Button className="group/icon"
                           size="sm"
                           variant="ghost"
                           onClick={() => {
@@ -714,7 +714,7 @@ export const HosterRegexEditor: React.FC = () => {
                             setNewPatternError(null);
                           }}
                         >
-                          <Plus size={12} className="mr-1" /> {t('settings.sourcePriority.addPattern')}
+                          <Plus size={12} className="mr-1 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" /> {t('settings.sourcePriority.addPattern')}
                         </Button>
                       )}
                     </div>
@@ -748,7 +748,7 @@ export const HosterRegexEditor: React.FC = () => {
                     summary={(open) => (
                       <>
                         <div className="flex items-center gap-2 min-w-0">
-                          <AnimatedChevron open={open} size={14} className="text-white/50 shrink-0" />
+                          <AnimatedChevron open={open} size={14} className="text-white opacity-50 shrink-0" />
                           <span className="text-sm text-white truncate">{c.name}</span>
                           <span
                             className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 shrink-0"
@@ -764,7 +764,7 @@ export const HosterRegexEditor: React.FC = () => {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-6 w-6 rounded"
+                            className="h-6 w-6 rounded group/icon"
                             onClick={(e) => {
                               // Empêche le toggle du collapsible parent quand on clique sur Trash.
                               e.preventDefault();
@@ -773,7 +773,7 @@ export const HosterRegexEditor: React.FC = () => {
                             }}
                             aria-label={t('settings.sourcePriority.customHosterRemoveAria', { name: c.name })}
                           >
-                            <Trash2 size={14} />
+                            <Trash2 className="text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" size={14} />
                           </Button>
                         </div>
                       </>
@@ -825,7 +825,7 @@ export const HosterRegexEditor: React.FC = () => {
                           )}
                         </div>
                       ) : (
-                        <Button
+                        <Button className="group/icon"
                           size="sm"
                           variant="ghost"
                           onClick={() => {
@@ -834,7 +834,7 @@ export const HosterRegexEditor: React.FC = () => {
                             setNewPatternError(null);
                           }}
                         >
-                          <Plus size={12} className="mr-1" /> {t('settings.sourcePriority.addPattern')}
+                          <Plus size={12} className="mr-1 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" /> {t('settings.sourcePriority.addPattern')}
                         </Button>
                       )}
                     </div>

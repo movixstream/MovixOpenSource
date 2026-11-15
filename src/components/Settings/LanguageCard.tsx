@@ -126,9 +126,9 @@ export const LanguageCard: React.FC<LanguageCardProps> = ({
             size="icon"
             onClick={onOpenOverride}
             aria-label={t('settings.sourcePriority.customizeLanguageHosters')}
-            className="h-8 w-8"
+            className="h-8 w-8 group/icon"
           >
-            <Settings size={14} />
+            <Settings className="text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" size={14} />
           </Button>
         )}
       </div>

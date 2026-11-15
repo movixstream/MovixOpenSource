@@ -522,6 +522,55 @@ class CastMediaPreparerTest {
     }
 
     @Test
+    fun detectsPlainMpegTsSegmentsDisguisedAsJpeg() {
+        val requests = mutableListOf<MediaProxyTarget>()
+        val tsSegment = ByteArray(188 * 4).also { bytes ->
+            for (packet in 0 until 4) bytes[packet * 188] = 0x47
+        }
+        val upstream = object : MediaProxyUpstream {
+            override fun execute(
+                target: MediaProxyTarget,
+                localRequestHeaders: Map<String, String>,
+            ): MediaProxyUpstreamResponse {
+                requests += target
+                val path = URI(target.upstreamUrl).path
+                val (contentType, body) = when {
+                    path.endsWith("master.m3u8") ->
+                        "application/vnd.apple.mpegurl" to
+                            "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1500000\nvideo.m3u8\n"
+                                .toByteArray()
+                    path.endsWith("video.m3u8") ->
+                        "application/vnd.apple.mpegurl" to
+                            "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nseg-1.jpg\n#EXT-X-ENDLIST\n"
+                                .toByteArray()
+                    else -> "image/jpeg" to tsSegment
+                }
+                return MediaProxyUpstreamResponse(
+                    200,
+                    "OK",
+                    mapOf("Content-Type" to contentType),
+                    ByteArrayInputStream(body),
+                    target.upstreamUrl,
+                )
+            }
+        }
+        val preparer = CastMediaPreparer(
+            upstream,
+            MediaProxySessionStore(),
+            access,
+            28127,
+            validateUrl = { URI(it) },
+        )
+
+        val prepared = preparer.prepare(
+            CastPreparedSource("https://cdn.example/master.m3u8", emptyMap()),
+        )
+
+        assertEquals(CastMediaProfile.hlsTs(), prepared.profile)
+        assertEquals(3, requests.size)
+    }
+
+    @Test
     fun probesDirectMediaWithoutBufferingTheFullBody() {
         val methods = mutableListOf<String>()
         val upstream = object : MediaProxyUpstream {

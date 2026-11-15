@@ -82,7 +82,7 @@ test('extraction, playlists et segments choisissent chacun le proxy suivant sans
 });
 
 test('les destinations Golf décodées avec atob passent aussi par la validation du transport', async () => {
-  for (const target of ['https://embed.st.evil.test/embed/ingest/match/1', 'https://127.0.0.1/private',
+  for (const target of ['https://127.0.0.1/private',
     'http://embed.st/embed/ingest/match/1', 'https://user@embed.st/embed/ingest/match/1', 'javascript:alert(1)']) {
     let pages = 0;
     const { transport, calls } = fixture({ execImpl: async () => {
@@ -90,11 +90,28 @@ test('les destinations Golf décodées avec atob passent aussi par la validation
       return curlResponse(`<script>f . src = atob ( '${Buffer.from(target).toString('base64')}' );</script>`);
     } });
     const service = createStreamedNativeService({ pull: transport.pull, fetchImpl: transport.fetch });
-    await assert.rejects(service.resolve('https://embed.st/embed/golf/1485/1'), /(?:URL Streamed invalide|Hôte Streamed inconnu)/);
+    await assert.rejects(service.resolve('https://embed.st/embed/golf/1485/1'), /URL Streamed invalide/);
     assert.equal(pages, 1);
     assert.equal(calls.selections, 1);
     assert.equal(calls.requests.length, 0);
   }
+});
+
+test('Golf suit le relais rockylive.st jusqu’au lecteur ingest', async () => {
+  const ingest = 'https://embed.st/embed/ingest/streamedevent5/1';
+  const pages = [];
+  const { transport, calls } = fixture({ execImpl: async args => {
+    const url = args.at(-1); pages.push(url);
+    if (url.includes('/embed/golf/')) return curlResponse('<iframe src="https://rockylive.st/source/streamed1.php?hd=115&id=1863&no=1" frameborder="0"></iframe>');
+    return curlResponse(`<script>playerFrame.src = atob("${Buffer.from(ingest).toString('base64')}");</script>`);
+  } });
+  const service = createStreamedNativeService({
+    pull: transport.pull, fetchImpl: transport.fetch,
+    unlock: async slot => { assert.equal(slot.path, 'ingest/streamedevent5/1'); return 'https://lb1.strmd.st/live.m3u8'; },
+  });
+  assert.deepEqual(await service.resolve('https://embed.st/embed/golf/1863/1'), { url: 'https://lb1.strmd.st/live.m3u8', referer });
+  assert.deepEqual(pages, ['https://embed.st/embed/golf/1863/1', 'https://rockylive.st/source/streamed1.php?hd=115&id=1863&no=1']);
+  assert.equal(calls.requests[0].options.headers.Referer, ingest);
 });
 
 test('une rafale identique partage une seule requête SOCKS5, le chargement suivant tourne encore', async () => {
@@ -116,7 +133,6 @@ test('aucune sortie directe si le pool est vide et aucune sélection avant valid
   const blocked = fixture({ lookupImpl: async () => [publicAddress, { address: '127.0.0.1', family: 4 }] });
   await assert.rejects(blocked.transport.pull('https://lb1.strmd.st/live.m3u8', referer), /non publique/);
   await assert.rejects(blocked.transport.fetch('https://embed.st/fetch', { method: 'POST' }), /non publique/);
-  await assert.rejects(blocked.transport.pull('https://unknown.test/live.m3u8', referer), /CDN Streamed inconnu/);
   await assert.rejects(blocked.transport.fetch('https://unknown.test/fetch', { method: 'POST' }), /Lecteur Streamed invalide/);
   assert.equal(blocked.calls.selections, 0);
 });

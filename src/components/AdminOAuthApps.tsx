@@ -27,6 +27,7 @@ import { Input } from './ui/input';
 import ReusableModal from './ui/reusable-modal';
 import { Switch } from './ui/switch';
 import { Textarea } from './ui/textarea';
+import { copyText } from '../utils/clipboard';
 
 interface OAuthAppRow {
   id: number;
@@ -404,7 +405,10 @@ const AppCard: React.FC<AppCardProps> = ({ app, onEdit, onStats, onDelete, onTog
       );
       const newSecret = res.data?.clientSecret;
       if (newSecret) {
-        await navigator.clipboard.writeText(newSecret);
+        if (!(await copyText(newSecret))) {
+          toast.error(t('common.error'));
+          return;
+        }
         toast.success(t('adminOauthApps.secretCopied'));
       }
       setRegenOpen(false);
@@ -567,13 +571,14 @@ const AppCard: React.FC<AppCardProps> = ({ app, onEdit, onStats, onDelete, onTog
             <button
               type="button"
               onClick={() => {
-                navigator.clipboard.writeText(app.clientId);
-                toast.success(t('common.copied'));
+                void copyText(app.clientId).then((copied) => {
+                  if (copied) toast.success(t('common.copied'));
+                });
               }}
-              className="text-white/40 hover:text-white"
+              className="text-white/40 hover:text-white group/icon"
               aria-label={t('common.copy')}
             >
-              <Copy className="h-3 w-3" />
+              <Copy className="h-3 w-3 text-white opacity-40 group-hover/icon:opacity-100" />
             </button>
           </div>
           {app.description && (
@@ -585,14 +590,14 @@ const AppCard: React.FC<AppCardProps> = ({ app, onEdit, onStats, onDelete, onTog
       <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
         <div className="rounded-lg border border-white/10 bg-black/20 p-2.5">
           <div className="flex items-center gap-1.5 text-white/40">
-            <BarChart3 className="h-3 w-3" />
+            <BarChart3 className="h-3 w-3 text-white opacity-40" />
             {t('adminOauthApps.callsLast30d')}
           </div>
           <div className="mt-1 text-base font-semibold text-white">{totalCalls30d}</div>
         </div>
         <div className="rounded-lg border border-white/10 bg-black/20 p-2.5">
           <div className="flex items-center gap-1.5 text-white/40">
-            <Coins className="h-3 w-3" />
+            <Coins className="h-3 w-3 text-white opacity-40" />
             {t('adminOauthApps.vipBalance')}
           </div>
           <div className="mt-1 text-base font-semibold text-yellow-300">{app.vipDaysBalance}</div>
@@ -740,7 +745,7 @@ const CreateAppModal: React.FC<CreateAppModalProps> = ({ scopes, onClose, onCrea
             <Button
               variant="default"
               size="icon"
-              onClick={() => { navigator.clipboard.writeText(createdSecret); toast.success(t('common.copied')); }}
+              onClick={() => { void copyText(createdSecret).then((copied) => { if (copied) toast.success(t('common.copied')); }); }}
               title={t('common.copy')}
             >
               <Copy className="h-4 w-4" />

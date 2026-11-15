@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import axios, { CancelTokenSource } from 'axios';
+import React, { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
+import axios from 'axios';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
-import { Info, Star, Loader2 } from 'lucide-react';
+import { Info, Star, Loader2, History, Flame, Users, Sparkles, Target, Tv } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import HeroSkeleton from '../components/skeletons/HeroSkeleton';
-import ContentRowSkeleton from '../components/skeletons/ContentRowSkeleton';
+import CatalogSkeleton from '../components/skeletons/CatalogSkeleton';
 
 import TelegramPromotion from '../components/TelegramPromotion';
 import HeroSlider from '../components/HeroSlider';
@@ -18,11 +17,29 @@ import { SITE_URL } from '../config/runtime';
 import { getTmdbLanguage } from '../i18n';
 import { encodeId } from '../utils/idEncoder';
 import { getPersonalizedRecommendations, isRecommendationsEnabled, PersonalizedRecommendations } from '../services/recommendationService';
+import { fetchContinueWatching, hideAllContinueWatching, hideContinueWatching, toHomeItem, type HomeContinueItem } from '../services/historyService';
 import CarouselTitle from '../components/CarouselTitle';
 import ConfirmDialog from '../components/ui/confirm-dialog';
+import ContentRowSkeleton from '../components/skeletons/ContentRowSkeleton';
+import { readLocalStorage } from '../utils/browserStorage';
+import { isHalloweenSeason } from '../hooks/useHalloweenTheme';
+
+// Rangée « Spécial Halloween » : téléchargée seulement quand elle s'affiche
+// (en octobre, ou thème actif). Un échec réseau laisse simplement l'accueil
+// sans elle.
+const HalloweenSpecialRow = lazy(async () => {
+  try {
+    return await import('../components/halloween/HalloweenSpecialRow');
+  } catch {
+    return { default: (_props: { language: string }) => null };
+  }
+});
 
 // Nombre de sections à charger immédiatement (les premières sont prioritaires)
 const IMMEDIATE_LOAD_COUNT = 3;
+
+// Rechargement de « Reprendre » après une synchro : au plus une fois par 30 s.
+const CONTINUE_WATCHING_RELOAD_MS = 30 * 1000;
 
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
 
@@ -34,6 +51,18 @@ const TMDB_DETAILS_STORAGE_KEY = 'movix_tmdb_details_cache_v1';
 const TMDB_DETAILS_MAX_ENTRIES = 300;
 let tmdbCacheHydrated = false;
 let tmdbCachePersistTimer: ReturnType<typeof setTimeout> | null = null;
+
+const setTmdbDetailsCacheEntry = (key: string, value: { data: unknown; ts: number }) => {
+  // Map sert de LRU : une fiche relue ou réécrite repasse en fin. La limite
+  // doit s'appliquer au heap, pas uniquement au JSON persisté.
+  tmdbDetailsCache.delete(key);
+  tmdbDetailsCache.set(key, value);
+  while (tmdbDetailsCache.size > TMDB_DETAILS_MAX_ENTRIES) {
+    const oldestKey = tmdbDetailsCache.keys().next().value as string | undefined;
+    if (oldestKey === undefined) break;
+    tmdbDetailsCache.delete(oldestKey);
+  }
+};
 
 const getHomeCacheKeys = (language: string) => {
   const suffix = language.toLowerCase();
@@ -51,9 +80,9 @@ const hydrateTmdbDetailsCache = () => {
     if (!raw) return;
     const entries: [string, { data: unknown; ts: number }][] = JSON.parse(raw);
     const now = Date.now();
-    entries.forEach(([key, value]) => {
+    entries.slice(-TMDB_DETAILS_MAX_ENTRIES).forEach(([key, value]) => {
       if (value && now - value.ts < TMDB_CACHE_TTL) {
-        tmdbDetailsCache.set(key, value);
+        setTmdbDetailsCacheEntry(key, value);
       }
     });
   } catch {
@@ -85,13 +114,14 @@ const fetchTMDBDetails = async (
   const key = `${language}_${mediaType}_${id}`;
   const cached = tmdbDetailsCache.get(key);
   if (cached && Date.now() - cached.ts < TMDB_CACHE_TTL) {
+    setTmdbDetailsCacheEntry(key, cached);
     return cached.data;
   }
   const endpoint = `https://api.themoviedb.org/3/${mediaType}/${id}`;
   const response = await axios.get(endpoint, {
     params: { api_key: TMDB_API_KEY, language, ...params }
   });
-  tmdbDetailsCache.set(key, { data: response.data, ts: Date.now() });
+  setTmdbDetailsCacheEntry(key, { data: response.data, ts: Date.now() });
   scheduleTmdbCachePersist();
   return response.data;
 };
@@ -212,10 +242,9 @@ const homeStyles = `
 }
 
 .section-title:hover::after {
-  /* Borné. \`width: 100%\` se rapportait à la largeur du titre : sur
-     « PARCE QUE VOUS AVEZ REGARDÉ … » en capitales, le trait devenait une
-     barre rouge démesurée. */
-  width: 72px;
+  /* Le trait court jusqu'au bout du titre, comme sur les pages Films,
+     Séries et Animes. */
+  width: 100%;
   background: linear-gradient(90deg, #ff3333, #ff9999);
 }
 
@@ -343,6 +372,9 @@ const normalizePersonalizedReco = (reco: PersonalizedRecommendations | null): Pe
 const Home: React.FC = () => {
   const { t } = useTranslation();
   const tmdbLanguage = getTmdbLanguage();
+  // « Spécial Halloween » : en octobre seulement, pour tout le monde, thème
+  // allumé ou non.
+  const showHalloweenRow = isHalloweenSeason();
   const [loading, setLoading] = useState(true);
   const [heroItems, setHeroItems] = useState<Media[]>([]);
   const [trending, setTrending] = useState<Media[]>([]);
@@ -352,14 +384,14 @@ const Home: React.FC = () => {
   const [sagaCollections, setSagaCollections] = useState<any[]>([]);
   const [featuredSeries, setFeaturedSeries] = useState<any>(null);
   const [streamingPlatformsHidden, setStreamingPlatformsHidden] = useState(() => {
-    return localStorage.getItem('settings_hide_streaming_platforms') === 'true';
+    return readLocalStorage('settings_hide_streaming_platforms') === 'true';
   });
 
   const [continueWatching, setContinueWatching] = useState<ContinueWatching[]>([]);
   const [continueWatchingRemoval, setContinueWatchingRemoval] = useState<ContinueWatchingRemoval | null>(null);
   const [recommendations, setRecommendations] = useState<Media[]>([]);
   const [personalizedReco, setPersonalizedReco] = useState<PersonalizedRecommendations | null>(null);
-  const cancelTokenSourceRef = useRef<CancelTokenSource | null>(null);
+  const fetchControllerRef = useRef<AbortController | null>(null);
 
   // Track page visit for Movix Wrapped
   useWrappedTracker({
@@ -369,7 +401,7 @@ const Home: React.FC = () => {
 
   useEffect(() => {
     const syncStreamingPlatformsVisibility = () => {
-      setStreamingPlatformsHidden(localStorage.getItem('settings_hide_streaming_platforms') === 'true');
+      setStreamingPlatformsHidden(readLocalStorage('settings_hide_streaming_platforms') === 'true');
     };
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === 'settings_hide_streaming_platforms' || event.key === null) {
@@ -398,8 +430,8 @@ const Home: React.FC = () => {
       return;
     }
 
-    const token = localStorage.getItem('auth_token');
-    const profileData = localStorage.getItem('auth');
+    const token = readLocalStorage('auth_token');
+    const profileData = readLocalStorage('auth');
     let profileId: string | null = null;
     if (profileData) {
       try {
@@ -421,19 +453,17 @@ const Home: React.FC = () => {
   };
 
   const fetchData = async () => {
-    if (cancelTokenSourceRef.current) {
-      cancelTokenSourceRef.current.cancel("Operation canceled due to new request.");
-    }
-    cancelTokenSourceRef.current = axios.CancelToken.source();
-    const cancelToken = cancelTokenSourceRef.current.token;
+    fetchControllerRef.current?.abort();
+    const controller = new AbortController();
+    fetchControllerRef.current = controller;
 
     try {
       setLoading(true);
 
       // Check for cached data first — localStorage pour survivre aux F5/nouveaux onglets (perf)
       const homeCacheKeys = getHomeCacheKeys(tmdbLanguage);
-      const cachedData = localStorage.getItem(homeCacheKeys.data);
-      const cacheTimestamp = localStorage.getItem(homeCacheKeys.timestamp);
+      const cachedData = readLocalStorage(homeCacheKeys.data);
+      const cacheTimestamp = readLocalStorage(homeCacheKeys.timestamp);
 
       // Use cache if it exists and is less than 15 minutes old
       if (cachedData && cacheTimestamp) {
@@ -494,11 +524,11 @@ const Home: React.FC = () => {
       // Helper function to process batch
       const processBatch = async (batch: { url: string; params: any }[]) => {
         try {
-          if (cancelTokenSourceRef.current === null) return []; // If cancelled during processing
+          if (controller.signal.aborted) return [];
 
           const responses = await Promise.all(
             batch.map(req =>
-              axios.get(req.url, { params: req.params, cancelToken })
+              axios.get(req.url, { params: req.params, signal: controller.signal })
                 .catch(error => {
                   if (axios.isCancel(error)) {
                     console.log('Request canceled:', error.message);
@@ -528,6 +558,7 @@ const Home: React.FC = () => {
       ]);
 
       const batch1Responses = await batch1Promise;
+      if (controller.signal.aborted) return;
       if (batch1Responses.length === 0) {
         setLoading(false);
         return;
@@ -563,6 +594,7 @@ const Home: React.FC = () => {
 
       // Les batches restants ont été lancés en même temps que batch1
       const [batch2Responses, batch3Responses, batch4Responses, batch5Responses] = await remainingBatchesPromise;
+      if (controller.signal.aborted) return;
 
       // Process all responses
       const upcomingMovies = batch2Responses[0] ? processTMDBResponses([batch2Responses[0]], 'movie') : [];
@@ -665,7 +697,7 @@ const Home: React.FC = () => {
         console.error('Error fetching data:', error);
       }
     } finally {
-      setLoading(false);
+      if (fetchControllerRef.current === controller) setLoading(false);
     }
   };
 
@@ -676,8 +708,8 @@ const Home: React.FC = () => {
     try {
       const cacheKey = `movix_sagas_data_${tmdbLanguage.toLowerCase()}`;
       const cacheTsKey = `movix_sagas_data_${tmdbLanguage.toLowerCase()}_ts`;
-      const cached = localStorage.getItem(cacheKey);
-      const cachedTs = localStorage.getItem(cacheTsKey);
+      const cached = readLocalStorage(cacheKey);
+      const cachedTs = readLocalStorage(cacheTsKey);
       const oneDayMs = 24 * 60 * 60 * 1000;
       if (cached && cachedTs && (Date.now() - parseInt(cachedTs)) < oneDayMs) {
         setSagaCollections(JSON.parse(cached));
@@ -754,10 +786,8 @@ const Home: React.FC = () => {
 
     // Cleanup function to cancel request on component unmount
     return () => {
-      if (cancelTokenSourceRef.current) {
-        cancelTokenSourceRef.current.cancel("Operation canceled due to component unmount.");
-        cancelTokenSourceRef.current = null;
-      }
+      fetchControllerRef.current?.abort();
+      fetchControllerRef.current = null;
     };
   }, [tmdbLanguage]);
 
@@ -791,9 +821,22 @@ const Home: React.FC = () => {
   }, [tmdbLanguage]);
 
   useEffect(() => {
-    const loadContinueWatching = async () => {
+    let cancelled = false;
+
+    // Rangée lue sur le serveur ; null (invité, import pas fini, API
+    // injoignable ou pas encore déployée) → ancienne logique localStorage.
+    const loadServerContinueWatching = async (): Promise<ContinueWatching[] | null> => {
+      const serverItems = await fetchContinueWatching(tmdbLanguage);
+      if (!serverItems) return null;
+      return serverItems
+        .map(toHomeItem)
+        .filter((item): item is HomeContinueItem => item !== null)
+        .filter((item) => item.poster_path.trim() !== '');
+    };
+
+    const loadLocalContinueWatching = async (): Promise<ContinueWatching[]> => {
       try {
-        const savedItems = localStorage.getItem('continueWatching');
+        const savedItems = readLocalStorage('continueWatching');
         if (savedItems) {
           // Check if we need to migrate from old format to new format
           let migratedData: { movies: any[], tv: any[] };
@@ -893,24 +936,52 @@ const Home: React.FC = () => {
           );
 
           // Filter out failed items and items without poster_path
-          const validItems = enrichedItems
+          return enrichedItems
             .filter((item): item is ContinueWatching => item !== null)
             .filter((item) => item.poster_path && typeof item.poster_path === 'string' && item.poster_path.trim() !== '');
-          setContinueWatching((validItems || []).map(normalizeHomeItem) as any);
-
-          if (validItems.length > 0) {
-            await fetchRecommendations(validItems);
-          }
-        } else {
-          setContinueWatching([]);
         }
+        return [];
       } catch (error) {
         console.error('Error loading continue watching items:', error);
-        setContinueWatching([]);
+        return [];
       }
     };
 
-    loadContinueWatching();
+    // Les recommandations ne sont demandées qu'au premier chargement : une
+    // simple synchro ne doit pas les redemander.
+    const loadContinueWatching = async (withRecommendations: boolean) => {
+      const validItems = (await loadServerContinueWatching()) ?? (await loadLocalContinueWatching());
+      if (cancelled) return;
+      setContinueWatching(validItems.map(normalizeHomeItem) as any);
+
+      if (withRecommendations && validItems.length > 0) {
+        await fetchRecommendations(validItems);
+      }
+    };
+
+    loadContinueWatching(true);
+
+    // Une synchro (autre appareil, changement de profil) peut changer la
+    // rangée : rechargement au plus une fois toutes les 30 s, le dernier
+    // évènement reçu pendant l'attente n'est pas perdu.
+    let lastReloadAt = Date.now();
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleSyncStorageUpdated = () => {
+      if (reloadTimer) return;
+      const wait = Math.max(0, CONTINUE_WATCHING_RELOAD_MS - (Date.now() - lastReloadAt));
+      reloadTimer = setTimeout(() => {
+        reloadTimer = null;
+        lastReloadAt = Date.now();
+        void loadContinueWatching(false);
+      }, wait);
+    };
+    window.addEventListener('sync_storage_updated', handleSyncStorageUpdated);
+
+    return () => {
+      cancelled = true;
+      if (reloadTimer) clearTimeout(reloadTimer);
+      window.removeEventListener('sync_storage_updated', handleSyncStorageUpdated);
+    };
     // Home n'est monté que sur "/" : un changement de route le démonte de toute façon,
     // donc dépendre de location.pathname ne faisait que risquer des relances inutiles (perf)
   }, [tmdbLanguage]);
@@ -1021,6 +1092,8 @@ const Home: React.FC = () => {
 
     localStorage.setItem('continueWatching', JSON.stringify(storedContinueWatching));
     setContinueWatching(prev => prev.filter(item => !(item.id === itemId && item.media_type === mediaType)));
+    // Retrait aussi côté serveur, au mieux : un échec laisse le retrait local.
+    void hideContinueWatching(mediaType, itemId);
   }, []);
 
   const removeFromContinueWatching = useCallback((itemId: number, mediaType: string) => {
@@ -1037,13 +1110,17 @@ const Home: React.FC = () => {
 
     if (continueWatchingRemoval.type === 'all') {
       localStorage.setItem('continueWatching', JSON.stringify({ movies: [], tv: [] }));
+      // Vidage côté serveur en une seule requête, au mieux (un échec laisse
+      // le vidage local) ; les cartes affichées restent filtrées des
+      // lectures suivantes de la session.
+      void hideAllContinueWatching(continueWatching.map((item) => ({ mediaType: item.media_type, id: item.id })));
       setContinueWatching([]);
     } else {
       deleteContinueWatchingItem(continueWatchingRemoval.itemId, continueWatchingRemoval.mediaType);
     }
 
     setContinueWatchingRemoval(null);
-  }, [continueWatchingRemoval, deleteContinueWatchingItem]);
+  }, [continueWatching, continueWatchingRemoval, deleteContinueWatchingItem]);
 
   useEffect(() => {
     // Simple title for homepage
@@ -1086,30 +1163,30 @@ const Home: React.FC = () => {
 
   // Memoized carousel titles — must be before any early return (Rules of Hooks)
   const yourHistoryTitle = useMemo(
-    () => <CarouselTitle icon="⏯️" iconClass="text-blue-500" label={t('home.yourHistory')} />,
+    () => <CarouselTitle icon={History} iconClass="text-blue-500" label={t('home.yourHistory')} />,
     [t]
   );
 
   const trendingTodayTitle = useMemo(
-    () => <CarouselTitle icon="🔥" iconClass="text-red-600" label={t('home.trendingToday')} />,
+    () => <CarouselTitle icon={Flame} iconClass="text-red-600" label={t('home.trendingToday')} />,
     [t]
   );
 
   const usersAlsoWatchedTitle = useMemo(
-    () => <CarouselTitle icon="👥" iconClass="text-green-500" label={t('home.usersAlsoWatched')} />,
+    () => <CarouselTitle icon={Users} iconClass="text-green-500" label={t('home.usersAlsoWatched')} />,
     [t]
   );
 
   const becauseYouWatchedTitles = useMemo(
     () => (personalizedReco?.becauseYouWatched || []).map((group) =>
-      <CarouselTitle icon="✨" iconClass="text-purple-500" label={t('home.becauseYouWatched', { title: group.title })} />
+      <CarouselTitle icon={Sparkles} iconClass="text-purple-500" label={t('home.becauseYouWatched', { title: group.title })} />
     ),
     [personalizedReco?.becauseYouWatched, t]
   );
 
   const topGenresTitles = useMemo(
     () => (personalizedReco?.topGenres || []).map((group) =>
-      <CarouselTitle icon="🎯" iconClass="text-yellow-500" label={t('home.popularInGenre', { genre: group.genreName })} />
+      <CarouselTitle icon={Target} iconClass="text-yellow-500" label={t('home.popularInGenre', { genre: group.genreName })} />
     ),
     [personalizedReco?.topGenres, t]
   );
@@ -1120,7 +1197,7 @@ const Home: React.FC = () => {
   );
 
   const platformsTitle = useMemo(
-    () => <CarouselTitle icon="🎬" iconClass="text-white" label={t('home.streamingPlatforms')} />,
+    () => <CarouselTitle icon={Tv} iconClass="text-white" label={t('home.streamingPlatforms')} />,
     [t]
   );
 
@@ -1138,12 +1215,8 @@ const Home: React.FC = () => {
   if (loading) {
     return (
       <SquareBackground squareSize={48} borderColor="rgba(239, 68, 68, 0.10)" className="w-full min-h-screen bg-black text-white">
-        <HeroSkeleton />
-        <div className="container mx-auto px-4 py-8 space-y-8">
-          <ContentRowSkeleton />
-          <ContentRowSkeleton />
-          <ContentRowSkeleton />
-        </div>
+        <style dangerouslySetInnerHTML={{ __html: homeStyles }} />
+        <CatalogSkeleton variant="home" showPlatforms={!streamingPlatformsHidden} />
       </SquareBackground>
     );
   }
@@ -1202,6 +1275,17 @@ const Home: React.FC = () => {
                       onRemoveItem={removeFromContinueWatching}
                       onRemoveAll={removeAllContinueWatching}
                     />
+                  </LazySection>
+                </div>
+              )}
+
+              {/* Spécial Halloween, juste après la reprise. */}
+              {showHalloweenRow && (
+                <div className="home-section content-row-container px-4 md:px-8">
+                  <LazySection index={1} immediateLoadCount={IMMEDIATE_LOAD_COUNT}>
+                    <Suspense fallback={<ContentRowSkeleton />}>
+                      <HalloweenSpecialRow language={tmdbLanguage} />
+                    </Suspense>
                   </LazySection>
                 </div>
               )}

@@ -61,7 +61,7 @@ function Fixture(){{
  window.hideLazy=()=>setShowLazy(false);
  window.navigate=()=>setRoute(v=>v+1);window.suspend=()=>setPending(true);
  return <><IdleRoutePrefetch/><TopProgressBar/><main>
-  <div id="skeletons"><HeroSkeleton/><ContentRowSkeleton/><GridSkeleton/><GenreSkeleton/><DetailsSkeleton/></div>
+  <div id="skeletons" className="overflow-hidden px-3 md:px-4"><HeroSkeleton/><ContentRowSkeleton/><GridSkeleton/><GenreSkeleton/><DetailsSkeleton/></div>
   <div id="dimensions" style={{{{width:200}}}}><Skeleton variant="poster" width="100%"/><Skeleton variant="circle" width={{24}} height={{24}}/><Skeleton count={{2.5}} height={{10}}/></div>
   <div id="route-progress"><RouteProgressBar/></div>
   <div id="page"><motion.div key={{route}} data-route={{route}} initial={{{{opacity:0,y:80}}}} animate={{{{opacity:1,y:0}}}} transition={{{{duration:1,delay:1}}}}>Page {{route}}</motion.div></div>
@@ -126,9 +126,15 @@ window.flushIdle=()=>{const callbacks=[...window.idleQueue.values()];window.idle
             await page.goto('https://loading.test')
             await page.wait_for_function('window.settings?.isLightMode')
             light_nodes = await page.locator('#skeletons *').count()
+            light_static_skeletons = await page.locator('#skeletons [data-static-skeleton]').count()
+            light_animated_skeletons = await page.locator('#skeletons .react-loading-skeleton').count()
+            light_skeleton_height = await page.locator('#skeletons').evaluate('e=>e.getBoundingClientRect().height')
             await page.evaluate("window.settings.setLightModeSetting('off')")
             await page.wait_for_function('!window.settings.isLightMode')
             normal_nodes = await page.locator('#skeletons *').count()
+            normal_static_skeletons = await page.locator('#skeletons [data-static-skeleton]').count()
+            normal_animated_skeletons = await page.locator('#skeletons .react-loading-skeleton').count()
+            normal_skeleton_height = await page.locator('#skeletons').evaluate('e=>e.getBoundingClientRect().height')
             await page.evaluate("window.settings.setLightModeSetting('on')")
             await page.wait_for_function('window.settings.isLightMode')
             await page.wait_for_timeout(400)
@@ -141,12 +147,24 @@ window.flushIdle=()=>{const callbacks=[...window.idleQueue.values()];window.idle
             prefetches = await page.evaluate('window.prefetchCount')
             await page.locator('#platform a').hover()
             videos = await page.locator('#platform video').count()
-            measures = {'light_skeleton_nodes': light_nodes, 'normal_skeleton_nodes': normal_nodes, 'loading_raf_requests': raf_calls, 'running_animations': running, 'speculative_prefetches': prefetches, 'decorative_videos': videos}
+            measures = {
+                'light_skeleton_nodes': light_nodes, 'normal_skeleton_nodes': normal_nodes,
+                'light_static_skeletons': light_static_skeletons, 'normal_static_skeletons': normal_static_skeletons,
+                'light_animated_skeletons': light_animated_skeletons, 'normal_animated_skeletons': normal_animated_skeletons,
+                'light_skeleton_height': light_skeleton_height, 'normal_skeleton_height': normal_skeleton_height,
+                'loading_raf_requests': raf_calls, 'running_animations': running,
+                'speculative_prefetches': prefetches, 'decorative_videos': videos,
+            }
             print(json.dumps(measures))
             if baseline:
                 await browser.close()
                 return
-            assert light_nodes < normal_nodes / 3, measures
+            # Les placeholders détaillés conservent la géométrie du contenu,
+            # mais chaque Skeleton devient un bloc statique sans shimmer.
+            assert light_nodes <= normal_nodes, measures
+            assert light_static_skeletons > 0 and light_animated_skeletons == 0, measures
+            assert normal_static_skeletons == 0 and normal_animated_skeletons > 0, measures
+            assert abs(light_skeleton_height - normal_skeleton_height) <= 1, measures
             assert raf_calls == 0, measures
             assert running == 0, measures
             assert prefetches == 0, measures
@@ -181,6 +199,8 @@ const style=getComputedStyle(element);window.cssProbe={name:style.animationName,
             assert await page.locator('#dimensions > :first-child').evaluate('e=>Math.round(e.getBoundingClientRect().height)') == 300
             assert await page.evaluate('window.sectionLoads') == 0
             await page.locator('#lazy-target').scroll_into_view_if_needed()
+            await page.wait_for_function('window.idleQueue.size > 0')
+            await page.evaluate('window.flushIdle()')
             await expect(page.locator('#section-ready')).to_be_visible()
             assert await page.evaluate('window.sectionLoads') == 1
             await page.evaluate("window.settings.setLightModeSetting('off')")
@@ -210,7 +230,15 @@ const style=getComputedStyle(element);window.cssProbe={name:style.animationName,
                 await page.set_viewport_size({'width': width, 'height': 900})
                 await page.evaluate("window.settings.setLightModeSetting('on')")
                 await page.wait_for_function('window.settings.isLightMode')
-                assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth'), width
+                layout = await page.evaluate("""() => ({
+                    documentWidth: document.documentElement.scrollWidth,
+                    viewportWidth: innerWidth,
+                    overflowing: Array.from(document.querySelectorAll('body *')).map(element => {
+                        const rect = element.getBoundingClientRect();
+                        return { tag: element.tagName, id: element.id, className: String(element.className), left: rect.left, right: rect.right };
+                    }).filter(item => item.left < -1 || item.right > innerWidth + 1).slice(0, 10),
+                })""")
+                assert layout['documentWidth'] <= layout['viewportWidth'], (width, layout)
             assert errors == [], errors
             await browser.close()
             print('Light mode loading and navigation checks passed.')

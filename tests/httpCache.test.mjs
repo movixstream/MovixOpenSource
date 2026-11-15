@@ -24,13 +24,16 @@ const axios = require('axios');
 
 const MAIN_API = 'https://api.movix.test';
 
-const makeStorage = () => {
+const makeStorage = ({ failWrites = false } = {}) => {
   const store = new Map();
   return {
     get length() { return store.size; },
     key: (i) => Array.from(store.keys())[i] ?? null,
     getItem: (k) => (store.has(k) ? store.get(k) : null),
-    setItem: (k, v) => { store.set(k, String(v)); },
+    setItem: (k, v) => {
+      if (failWrites) throw new Error('stockage indisponible');
+      store.set(k, String(v));
+    },
     removeItem: (k) => { store.delete(k); },
     _size: () => store.size,
   };
@@ -54,8 +57,8 @@ const loadModule = () => {
   return mod.exports;
 };
 
-const setupGlobals = () => {
-  const session = makeStorage();
+const setupGlobals = (options) => {
+  const session = makeStorage(options);
   globalThis.sessionStorage = session;
   globalThis.localStorage = forbiddenStorage;
   return session;
@@ -80,6 +83,7 @@ const makeInstance = (installHttpCache, respond) => {
 const TMDB = 'https://api.themoviedb.org/3/discover/movie';
 const CONTENT = `${MAIN_API}/api/content/home`;
 const PRIVATE = `${MAIN_API}/api/account/me`;
+const TMDB_IMAGES = 'https://api.themoviedb.org/3/movie/42/images';
 
 test('une réponse déjà vue est resservie sans réseau', async () => {
   setupGlobals();
@@ -135,6 +139,44 @@ test('une URL hors catalogue n\'est jamais mise en cache', async () => {
   await instance.get(PRIVATE);
 
   assert.equal(state.calls, 2);
+});
+
+test('les réponses TMDB images restent dans leur cache dérivé dédié', async () => {
+  const session = setupGlobals();
+  const { installHttpCache } = loadModule();
+  const { instance, state } = makeInstance(installHttpCache);
+
+  await instance.get(TMDB_IMAGES, { params: { include_image_language: 'fr,en,null' } });
+  await instance.get(TMDB_IMAGES, { params: { include_image_language: 'fr,en,null' } });
+
+  assert.equal(state.calls, 2, 'le JSON complet de /images a été conservé');
+  assert.equal(session._size(), 0, 'la réponse /images a été persistée');
+});
+
+test('le cache mémoire évince les anciennes entrées au-delà de sa limite', async () => {
+  setupGlobals({ failWrites: true });
+  const { installHttpCache } = loadModule();
+  const { instance, state } = makeInstance(installHttpCache);
+
+  for (let page = 0; page <= 80; page++) {
+    await instance.get(TMDB, { params: { page } });
+  }
+  await instance.get(TMDB, { params: { page: 0 } });
+
+  assert.equal(state.calls, 82, 'la plus ancienne des 81 entrées est restée en mémoire');
+});
+
+test('le cache mémoire respecte aussi une limite en octets', async () => {
+  setupGlobals({ failWrites: true });
+  const { installHttpCache } = loadModule();
+  const largePayload = 'x'.repeat(1_100_000);
+  const { instance, state } = makeInstance(installHttpCache, () => ({ largePayload }));
+
+  await instance.get(TMDB, { params: { page: 1 } });
+  await instance.get(TMDB, { params: { page: 2 } });
+  await instance.get(TMDB, { params: { page: 1 } });
+
+  assert.equal(state.calls, 3, 'la limite en octets n\'a pas évincé la première grosse réponse');
 });
 
 test('une requête authentifiée n\'est jamais mise en cache', async () => {

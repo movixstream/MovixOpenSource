@@ -37,7 +37,7 @@ export function iframeUrl(html, base) {
   if (!value) return null;
   const url = new URL(value.replace(/&amp;/g, '&'), base);
   if (url.protocol !== 'https:' || url.username || url.password || url.port ||
-      !['embed.st', 'rockystream.st'].includes(url.hostname)) return null;
+      !['embed.st', 'rockystream.st', 'rockylive.st'].includes(url.hostname)) return null;
   return url.href;
 }
 

@@ -315,6 +315,7 @@ const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, cont
       <motion.button
         onClick={() => handleVote('like')}
         disabled={isLoading || verifying}
+        data-halloween-frame="orange"
         className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-300 ${userVote === 'like'
           ? 'bg-green-500/30 text-green-300 shadow-lg shadow-green-500/20'
           : 'bg-white/10 text-gray-300 hover:bg-white/20 hover:text-white'
@@ -372,6 +373,7 @@ const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, cont
       <motion.button
         onClick={() => handleVote('dislike')}
         disabled={isLoading || verifying}
+        data-halloween-frame="red"
         className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-300 ${userVote === 'dislike'
           ? 'bg-red-500/30 text-red-300 shadow-lg shadow-red-500/20'
           : 'bg-white/10 text-gray-300 hover:bg-white/20 hover:text-white'

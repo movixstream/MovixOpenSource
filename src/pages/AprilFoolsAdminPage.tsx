@@ -593,10 +593,10 @@ const AprilFoolsAdminPage: React.FC = () => {
                       whileTap={{ scale: 0.95 }}
                       type="button"
                       onClick={closeRickroll}
-                      className="rounded-lg p-2 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+                      className="rounded-lg p-2 text-white/50 transition-colors hover:bg-white/10 hover:text-white group/icon"
                       aria-label={t('common.close')}
                     >
-                      <X className="h-4 w-4" />
+                      <X className="h-4 w-4 text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" />
                     </motion.button>
                   </div>
                   <div className="p-4 md:p-6">

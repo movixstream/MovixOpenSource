@@ -3,8 +3,7 @@ import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import HeroSlider from '../components/HeroSlider';
 import EmblaCarousel from '../components/EmblaCarousel';
-import HeroSkeleton from '../components/skeletons/HeroSkeleton';
-import ContentRowSkeleton from '../components/skeletons/ContentRowSkeleton';
+import CatalogSkeleton from '../components/skeletons/CatalogSkeleton';
 import EmblaCarouselGenres from '../components/EmblaCarouselGenres';
 import LazySection from '../components/LazySection';
 import TelegramPromotion from '../components/TelegramPromotion';
@@ -503,16 +502,7 @@ const Anime: React.FC = () => {
 
   if (loading && animeShows.length === 0) {
     return (
-      <div className="min-h-screen bg-black text-white">
-        <div className="relative w-full pt-16 md:pt-20 lg:pt-24">
-          <HeroSkeleton />
-        </div>
-        <div className="container mx-auto px-4 py-8 space-y-8">
-          <ContentRowSkeleton />
-          <ContentRowSkeleton />
-          <ContentRowSkeleton />
-        </div>
-      </div>
+      <CatalogSkeleton variant="anime" />
     );
   }
 

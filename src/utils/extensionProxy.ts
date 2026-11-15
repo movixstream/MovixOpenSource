@@ -54,13 +54,19 @@ export const fetchFromExtension = <T = unknown>(
         };
 
         window.addEventListener("message", handler);
-        window.postMessage({
-            source: "MOVIX_WEB",
-            type: "EXTENSION_REQUEST",
-            action,
-            payload: enrichedPayload,
-            messageId
-        }, "*");
+        try {
+            window.postMessage({
+                source: "MOVIX_WEB",
+                type: "EXTENSION_REQUEST",
+                action,
+                payload: enrichedPayload,
+                messageId
+            }, "*");
+        } catch (error) {
+            window.removeEventListener("message", handler);
+            reject(error);
+            return;
+        }
 
         // Timeout after 10 seconds
         setTimeout(() => {

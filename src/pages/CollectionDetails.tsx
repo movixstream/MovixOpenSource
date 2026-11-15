@@ -535,9 +535,9 @@ const CollectionDetails: React.FC = () => {
             <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="mb-8">
               <Link
                 to="/collections"
-                className="inline-flex items-center gap-2 text-white/50 hover:text-white transition-colors"
+                className="inline-flex items-center gap-2 text-white/50 hover:text-white transition-colors group/icon"
               >
-                <ArrowLeft size={20} />
+                <ArrowLeft className="text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" size={20} />
                 {t('collections.backToCollections')}
               </Link>
             </motion.div>

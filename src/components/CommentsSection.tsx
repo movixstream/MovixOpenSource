@@ -1,8 +1,10 @@
+import { IX_MATRIX_URL } from '@/config/community';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, MessageCircle, Trash2, Send, X, AlertTriangle, Info, ExternalLink, Popcorn, Flag } from 'lucide-react';
+import { Heart, MessageCircle, Trash2, Send, X, AlertTriangle, Info, ExternalLink, Popcorn, Flag, Bell, BellOff } from 'lucide-react';
+import { isPushSupported, isSubscribed as isPushSubscribed, subscribeToPush, getPushPermission } from '../services/pushNotificationService';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -14,9 +16,10 @@ import MarkdownToolbar from './MarkdownToolbar';
 import { useTurnstileBypass } from '../hooks/useTurnstileBypass';
 import { ADMIN_BYPASS_TOKEN } from '../utils/turnstileBypass';
 import { getOverlayPortalRoot } from '@/utils/overlayPortal';
+import { Skeleton } from './ui/Skeleton';
+import { TURNSTILE_SITE_KEY } from '../utils/turnstileKeys';
 
 const MAIN_API = import.meta.env.VITE_MAIN_API;
-const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY;
 
 const mdComponents = {
   p: ({ children }: any) => <p className="mb-1 last:mb-0">{children}</p>,
@@ -99,29 +102,28 @@ const SpoilerToggle: React.FC<SpoilerToggleProps> = ({ checked, onChange, size =
 // Composant Skeleton pour les commentaires
 const CommentSkeleton: React.FC = () => {
   return (
-    <div className="bg-gray-800/70 rounded-xl p-3 sm:p-4 md:p-6 animate-pulse">
+    <div className="bg-gray-800/70 rounded-xl p-3 sm:p-4 md:p-6 relative overflow-hidden" aria-hidden="true">
       <div className="flex items-start gap-2 sm:gap-3 md:gap-4">
         <div className="flex-shrink-0">
-          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-gray-700"></div>
+          <div className="w-8 h-8 sm:w-10 sm:h-10"><Skeleton variant="circle" height="100%" baseColor="#374151" /></div>
         </div>
-        <div className="flex-1 space-y-2 sm:space-y-3">
+        <div className="flex-1 min-w-0">
           {/* En-tête */}
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-            <div className="h-3 sm:h-4 w-20 sm:w-24 bg-gray-700 rounded"></div>
-            <div className="h-3 sm:h-4 w-12 sm:w-16 bg-gray-700 rounded"></div>
-            <div className="h-2.5 sm:h-3 w-16 sm:w-20 bg-gray-700 rounded"></div>
+            <div className="w-20 sm:w-24"><Skeleton className="h-5 sm:h-6" baseColor="#374151" /></div>
+            <Skeleton width={64} className="h-[15px] sm:h-4" baseColor="#374151" />
           </div>
           {/* Contenu */}
-          <div className="space-y-2">
-            <div className="h-3 sm:h-4 w-full bg-gray-700 rounded"></div>
-            <div className="h-3 sm:h-4 w-5/6 bg-gray-700 rounded"></div>
-            <div className="h-3 sm:h-4 w-4/6 bg-gray-700 rounded"></div>
+          <div className="mt-2">
+            {[100, 85, 65].map(width => (
+              <div key={width} className="h-5 sm:h-6 flex items-center">
+                <Skeleton width={`${width}%`} className="h-3.5 sm:h-4" containerClassName="w-full" baseColor="#374151" />
+              </div>
+            ))}
           </div>
           {/* Actions */}
-          <div className="flex items-center gap-2 sm:gap-4 mt-3 sm:mt-4">
-            <div className="h-3 sm:h-4 w-10 sm:w-12 bg-gray-700 rounded"></div>
-            <div className="h-3 sm:h-4 w-10 sm:w-12 bg-gray-700 rounded"></div>
-            <div className="h-3 sm:h-4 w-12 sm:w-16 bg-gray-700 rounded"></div>
+          <div className="flex items-center gap-2 sm:gap-3 md:gap-4 mt-3 sm:mt-4 flex-wrap">
+            {[32, 32, 64].map((width, index) => <Skeleton key={index} width={width} className="h-4 sm:h-5" baseColor="#374151" />)}
           </div>
         </div>
       </div>
@@ -500,7 +502,7 @@ const CommentItem = React.memo<CommentItemProps>((props) => {
             )}
             {reportedIds.has(`comment-${comment.id}`) && (
               <span className="text-xs sm:text-sm text-orange-400/60 flex items-center gap-1">
-                <Flag className="w-3 h-3" />
+                <Flag className="w-3 h-3 text-orange-400 opacity-60" />
                 <span className="hidden sm:inline">{t('comments.reported', 'Signalé')}</span>
               </span>
             )}
@@ -813,7 +815,7 @@ const CommentItem = React.memo<CommentItemProps>((props) => {
                             )}
                             {reportedIds.has(`reply-${reply.id}`) && (
                               <span className="text-[10px] sm:text-xs text-orange-400/60 flex items-center gap-1">
-                                <Flag className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                                <Flag className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-orange-400 opacity-60" />
                                 <span className="hidden sm:inline">{t('comments.reported', 'Signalé')}</span>
                               </span>
                             )}
@@ -1019,6 +1021,10 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentI
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportedIds, setReportedIds] = useState<Set<string>>(new Set());
 
+  // Suivi des nouveaux commentaires
+  const [followingComments, setFollowingComments] = useState(false);
+  const [followingBusy, setFollowingBusy] = useState(false);
+
   // Turnstile
   const [turnstileToken, setTurnstileToken] = useState('');
   const turnstileRef = useRef<HTMLDivElement>(null);
@@ -1181,6 +1187,50 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentI
     loadComments(1);
     fetchLimits();
   }, [loadComments]);
+
+  // Abonnement aux nouveaux commentaires de ce contenu (par profil)
+  useEffect(() => {
+    const token = localStorage.getItem('auth_token');
+    if (!token || !profileId) {
+      setFollowingComments(false);
+      return;
+    }
+    let cancelled = false;
+    axios.get(`${MAIN_API}/api/comments/subscriptions/${contentType}/${contentId}`, {
+      params: { profileId },
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(({ data }) => { if (!cancelled) setFollowingComments(data?.subscribed === true); })
+      .catch(() => { if (!cancelled) setFollowingComments(false); });
+    return () => { cancelled = true; };
+  }, [contentType, contentId, profileId]);
+
+  const handleToggleFollowComments = async () => {
+    const token = localStorage.getItem('auth_token');
+    if (!token || !profileId || followingBusy) return;
+    const next = !followingComments;
+    setFollowingBusy(true);
+    try {
+      await axios.put(
+        `${MAIN_API}/api/comments/subscriptions/${contentType}/${contentId}`,
+        { profileId, subscribed: next },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setFollowingComments(next);
+      toast.success(next ? t('comments.followEnabled') : t('comments.followDisabled'));
+
+      // Proposer aussi les notifications push du navigateur quand c'est possible.
+      if (next && isPushSupported() && getPushPermission() !== 'denied') {
+        const alreadyPush = await isPushSubscribed();
+        if (!alreadyPush) await subscribeToPush();
+      }
+    } catch (error) {
+      console.error('Erreur lors du suivi des commentaires:', error);
+      toast.error(t('comments.followError'));
+    } finally {
+      setFollowingBusy(false);
+    }
+  };
 
   // Charger les limites de commentaires
   const fetchLimits = async () => {
@@ -1878,12 +1928,12 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentI
                 {t('comments.requestPage')}
               </Link>
               <a
-                href="https://t.me/movix_site"
+                href={IX_MATRIX_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
               >
-                Telegram
+                Matrix
                 <ExternalLink className="w-4 h-4" />
               </a>
             </div>
@@ -1988,6 +2038,26 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentI
         </div>
       )
       }
+
+      {/* Bouton pour être prévenu des nouveaux commentaires */}
+      {isAuthenticated && profileId && (
+        <div className="mb-4 sm:mb-6 flex justify-end">
+          <button
+            type="button"
+            onClick={handleToggleFollowComments}
+            disabled={followingBusy}
+            aria-pressed={followingComments}
+            title={followingComments ? t('comments.unfollowHint') : t('comments.followHint')}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${followingComments
+              ? 'bg-blue-500/20 border-blue-500/40 text-blue-300 hover:bg-blue-500/30'
+              : 'bg-gray-800/60 border-gray-700/60 text-gray-300 hover:bg-gray-700/60 hover:text-white'
+              }`}
+          >
+            {followingComments ? <BellOff className="w-4 h-4" /> : <Bell className="w-4 h-4" />}
+            <span>{followingComments ? t('comments.unfollow') : t('comments.follow')}</span>
+          </button>
+        </div>
+      )}
 
       {/* Liste des commentaires */}
       <div className="space-y-4 sm:space-y-6">

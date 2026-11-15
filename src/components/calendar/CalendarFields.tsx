@@ -167,14 +167,14 @@ export const CalendarDateField: React.FC<DateFieldProps> = ({ value, onChange, m
         className={`${TRIGGER_CLASS} ${invalid ? 'border-red-500/60' : ''}`}
       >
         <span className="flex items-center gap-2 truncate">
-          <CalendarDays className="h-4 w-4 shrink-0 text-white/40" />
+          <CalendarDays className="h-4 w-4 shrink-0 text-white opacity-40" />
           <span className={selected ? '' : 'text-white/40'}>
             {selected
               ? new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric' }).format(selected)
               : t('calendar.pickDate')}
           </span>
         </span>
-        <ChevronDown className={`h-4 w-4 shrink-0 text-white/40 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`h-4 w-4 shrink-0 text-white opacity-40 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} width={288}>
@@ -182,14 +182,14 @@ export const CalendarDateField: React.FC<DateFieldProps> = ({ value, onChange, m
           <div className="mb-2 flex items-center justify-between">
             <button type="button" aria-label={t('calendar.previousMonth')}
               onClick={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() - 1, 1))}
-              className="rounded-lg p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white">
-              <ChevronLeft className="h-4 w-4" />
+              className="rounded-lg p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white group/icon">
+              <ChevronLeft className="h-4 w-4 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity]" />
             </button>
             <span className="text-sm font-semibold capitalize text-white">{monthLabel}</span>
             <button type="button" aria-label={t('calendar.nextMonth')}
               onClick={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() + 1, 1))}
-              className="rounded-lg p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white">
-              <ChevronRight className="h-4 w-4" />
+              className="rounded-lg p-1.5 text-white/60 transition-colors hover:bg-white/10 hover:text-white group/icon">
+              <ChevronRight className="h-4 w-4 text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity]" />
             </button>
           </div>
 
@@ -271,7 +271,7 @@ export const CalendarTimeField: React.FC<TimeFieldProps> = ({ value, onChange, i
         className={TRIGGER_CLASS}
       >
         <span className="flex items-center gap-2 truncate">
-          <Clock className="h-4 w-4 shrink-0 text-white/40" />
+          <Clock className="h-4 w-4 shrink-0 text-white opacity-40" />
           <span className={value ? '' : 'text-white/40'}>{value || t('calendar.allDay')}</span>
         </span>
         {value ? (
@@ -280,12 +280,12 @@ export const CalendarTimeField: React.FC<TimeFieldProps> = ({ value, onChange, i
             tabIndex={-1}
             aria-label={t('calendar.clearTime')}
             onClick={(event) => { event.stopPropagation(); onChange(''); }}
-            className="rounded p-0.5 text-white/40 transition-colors hover:text-white"
+            className="rounded p-0.5 text-white/40 transition-colors hover:text-white group/icon"
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="h-3.5 w-3.5 text-white opacity-40 group-hover/icon:opacity-100 transition-[color,opacity]" />
           </span>
         ) : (
-          <ChevronDown className={`h-4 w-4 shrink-0 text-white/40 transition-transform ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`h-4 w-4 shrink-0 text-white opacity-40 transition-transform ${open ? 'rotate-180' : ''}`} />
         )}
       </button>
 
@@ -343,10 +343,10 @@ export const CalendarRecurrenceField: React.FC<RecurrenceFieldProps> = ({ value,
         className={TRIGGER_CLASS}
       >
         <span className="flex items-center gap-2 truncate">
-          <Repeat className="h-4 w-4 shrink-0 text-white/40" />
+          <Repeat className="h-4 w-4 shrink-0 text-white opacity-40" />
           {t(`calendar.recurrence.${value}`)}
         </span>
-        <ChevronDown className={`h-4 w-4 shrink-0 text-white/40 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`h-4 w-4 shrink-0 text-white opacity-40 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor}>

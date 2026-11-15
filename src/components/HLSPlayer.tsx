@@ -40,11 +40,12 @@ import type {
 } from '../utils/skipSegmentPrefs';
 import axios from 'axios';
 import type pakoType from 'pako';
+import { loadHlsModule } from '../utils/loadHlsModule';
 
 let HlsLib: typeof HlsType | null = null;
 const loadHls = async (): Promise<typeof HlsType> => {
   if (HlsLib) return HlsLib;
-  const mod = await import('hls.js');
+  const mod = await loadHlsModule();
   HlsLib = mod.default;
   return HlsLib;
 };
@@ -58,10 +59,12 @@ const loadPako = async (): Promise<typeof pakoType> => {
 };
 import HLSPlayerSettingsPanel from './HLSPlayerSettingsPanel';
 import { toast } from 'sonner';
+import { markVideoUndecodable } from '../utils/videoCodecSupport';
 import { isUserVip } from '../utils/authUtils';
 import { isExtensionAvailable } from '../utils/extensionProxy';
 import { isDnsLikeError, notifyDnsBlocked } from '../utils/dnsErrorDetection';
 import { isPlayerControlInteractionTarget } from '../utils/playerControlInteraction';
+import { focusPlayerControl, getPlayerNavigationKey } from '../utils/playerKeyboardNavigation';
 import { isLowLatencyEnabled } from '../utils/lowLatencyPref';
 import {
   createHlsAutoFallbackGuard,
@@ -71,20 +74,19 @@ import {
   initializeCastApi,
   requestCastSession,
   loadMediaOnCastWithFallback,
-  parseM3u8Manifest,
-  selectBestStream,
-  preferFrenchAudioVariant,
   initializeAirPlay,
   requestAirPlay,
   isAirPlaySupported,
   isRemotePlaybackSupported,
+  getCastUnavailableReason,
+  isWebCastSupported,
 } from '../utils/castUtils';
 import {
   getLocalPlaybackInitPolicy,
   getLocalPlaybackSeekTime,
   normalizeLocalMediaDuration,
 } from '../utils/castLocalPlaybackRecovery';
-import { prepareCastSourceWithFallback } from '../utils/castSourcePreparation';
+import { observeNativeAudioTracks, selectNativeAudioTrack } from '../utils/nativeAudioTracks';
 import { useAntiSpoilerSettings } from '../hooks/useAntiSpoilerSettings';
 import { useTranslation } from 'react-i18next';
 import { encodeId } from '../utils/idEncoder';
@@ -92,6 +94,7 @@ import { PROXIES_EMBED_API } from '../config/runtime';
 import { getTmdbLanguage } from '../i18n';
 import { getCoflixPreferredUrl } from '../utils/coflix';
 import { safePlay } from '../utils/safePlay';
+import { copyText } from '../utils/clipboard';
 import {
   createLocalPlaybackAwakeLease,
   shouldKeepLocalPlaybackAwake,
@@ -189,11 +192,18 @@ import {
 } from '../utils/subtitleDelivery';
 import { useExternalSubtitles } from '../hooks/useExternalSubtitles.ts';
 import type { SubtitleTrack } from '../services/subtitles/index.ts';
+import { getEmbeddedSubtitleContent, getEmbeddedSubtitleTracks } from '../utils/embeddedSubtitles.ts';
+import { isHiddenOnTv } from '@/routing/registry';
+import { releaseTvSpatialNav, suppressTvSpatialNav } from '@/utils/tvSpatialNav';
 import type {
   KisskhFallbackTransport,
   KisskhSource,
   KisskhSubtitleTrack,
 } from '../types/kisskh';
+import { readLocalStorage, removeLocalStorage, writeLocalStorage } from '../utils/browserStorage';
+import { getTvmazeSeasonsOverride } from '../services/tvmazeEpisodeList';
+import { useHalloweenTheme } from '../hooks/useHalloweenTheme';
+import { HalloweenProgressPumpkin } from './halloween/HalloweenIcons';
 
 const EMPTY_KISSKH_SOURCES: KisskhSource[] = [];
 const EMPTY_KISSKH_SUBTITLES: KisskhSubtitleTrack[] = [];
@@ -241,11 +251,7 @@ function normalizeSubtitleLanguageCode(code?: string, label?: string): string {
 const PAUSE_GRAYSCALE_KEY = 'playerPauseGrayscaleEnabled';
 
 function getPauseGrayscaleEnabled(): boolean {
-  try {
-    return localStorage.getItem(PAUSE_GRAYSCALE_KEY) !== 'false';
-  } catch {
-    return true;
-  }
+  return readLocalStorage(PAUSE_GRAYSCALE_KEY) !== 'false';
 }
 
 // Milestone 4 — mapping des `source.type` (top-level row) vers `TopLevelSourceId`.
@@ -331,6 +337,35 @@ function selectExactHlsFallbackLevel(
   targetHeight: number,
 ): number {
   return options.find(option => option.height === targetHeight)?.index ?? -1;
+}
+
+/**
+ * Déplace la tête de lecture sans jamais lever d'exception.
+ *
+ * Dans la WKWebView de l'app iOS, écrire `video.currentTime` peut lever
+ * « TypeError: Attempted to assign to readonly property. » dans certains états
+ * du média (constaté sur la barre de progression et le double-tap, juste
+ * après l'échec de la playlist de l'aperçu). Dans un gestionnaire de clic ou de
+ * double-tap, l'exception remontait jusqu'à GlitchTip et coupait le reste du
+ * gestionnaire. Une valeur non finie lèverait aussi une TypeError : on l'ignore.
+ * Renvoie `true` si le déplacement a été accepté.
+ */
+function seekVideoSafely(video: HTMLVideoElement | null | undefined, time: number): boolean {
+  if (!video || !Number.isFinite(time)) return false;
+  try {
+    video.currentTime = time;
+    return true;
+  } catch (error) {
+    const fastSeek = (video as HTMLVideoElement & { fastSeek?: (t: number) => void }).fastSeek;
+    if (typeof fastSeek === 'function') {
+      try {
+        fastSeek.call(video, time);
+        return true;
+      } catch { /* repli refusé aussi */ }
+    }
+    console.warn('[HLSPlayer] déplacement de la lecture refusé par le navigateur', error);
+    return false;
+  }
 }
 
 function decideHlsVideoFallback({
@@ -588,6 +623,13 @@ const isMP4Source = (url: string): boolean => {
 
   // Check for sibnet
   if (lowerUrl.includes('sibnet.ru') && lowerUrl.includes('.mp4')) {
+    return true;
+  }
+
+  // SwiftFlux `hr_media.php?id=hrm_…` : MP4 sans extension, derrière une 302
+  // cross-origin. Hls.js (XHR) et la sonde Content-Type (fetch) ne peuvent pas
+  // suivre cette redirection sans CORS ; seule la balise <video> le peut.
+  if (/\/hr_media\.php(?:[?#]|$)/.test(lowerUrl)) {
     return true;
   }
 
@@ -851,12 +893,12 @@ const handle429Error = (
 
       // Repositionner la vidéo sur la position cible
       if (videoRef.current.readyState >= 1) {
-        videoRef.current.currentTime = targetTime;
+        seekVideoSafely(videoRef.current, targetTime);
       } else {
         // Si la vidéo n'est pas prête, attendre qu'elle le soit
         const onLoadedMetadata = () => {
           if (videoRef.current) {
-            videoRef.current.currentTime = targetTime;
+            seekVideoSafely(videoRef.current, targetTime);
             videoRef.current.removeEventListener('loadedmetadata', onLoadedMetadata);
           }
         };
@@ -1164,12 +1206,8 @@ export interface HLSPlayerRef {
 }
 
 // Convert HLSPlayer to use forwardRef
-/**
- * Délai d'escamotage de la barre de lecture en plein écran quand *rien* ne l'a
- * programmé — c'est-à-dire quand il n'y a ni souris ni clic pour le faire :
- * télé, box, télécommande.
- */
-const FULLSCREEN_IDLE_HIDE_MS = 1_500;
+/** Délai de repos commun à la souris, au tactile et à la télécommande. */
+const CONTROLS_IDLE_HIDE_MS = 5_000;
 
 /**
  * Fenêtre morte après l'entrée en plein écran. Le basculement déplace toute la
@@ -1376,11 +1414,16 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   // "Class constructor e cannot be invoked without 'new'" on every remount
   // (e.g. when the parent's `key` changes after a source switch).
   const [Hls, setHls] = useState<typeof HlsType | null>(() => HlsLib);
+  const [hlsLoadError, setHlsLoadError] = useState<Error | null>(null);
   useEffect(() => {
     if (Hls) return;
     let cancelled = false;
     void loadHls().then((lib) => {
       if (!cancelled) setHls(() => lib);
+    }).catch((error: unknown) => {
+      if (!cancelled) {
+        setHlsLoadError(error instanceof Error ? error : new Error(String(error)));
+      }
     });
     return () => { cancelled = true; };
   }, [Hls]);
@@ -1389,11 +1432,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
   const handlePauseGrayscaleChange = (enabled: boolean) => {
     setPauseGrayscaleEnabled(enabled);
-    try {
-      localStorage.setItem(PAUSE_GRAYSCALE_KEY, String(enabled));
-    } catch {
-      // Si le stockage est indisponible, le choix reste actif pour ce lecteur.
-    }
+    // Si le stockage est indisponible, le choix reste actif pour ce lecteur.
+    writeLocalStorage(PAUSE_GRAYSCALE_KEY, String(enabled));
   };
 
   useEffect(() => {
@@ -1418,7 +1458,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   }
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
   const [volume, setVolume] = useState(() => {
-    const savedVolume = localStorage.getItem('playerVolume');
+    const savedVolume = readLocalStorage('playerVolume');
     return savedVolume ? parseFloat(savedVolume) : 1;
   });
 
@@ -1429,10 +1469,11 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   
   // Volume booster state (up to 300%)
   const [volumeBoost, setVolumeBoost] = useState(() => {
-    const savedBoost = localStorage.getItem('playerVolumeBoost');
+    const savedBoost = readLocalStorage('playerVolumeBoost');
     return savedBoost ? parseFloat(savedBoost) : 1;
   });
   const audioContextRef = useRef<AudioContext | null>(null);
+  const audioContextCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
 
@@ -1444,29 +1485,35 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
   // Audio Enhancer state
   const [audioEnhancerMode, setAudioEnhancerMode] = useState<'off' | 'cinema' | 'music' | 'dialogue' | 'custom'>(() => {
-    return (localStorage.getItem('playerAudioEnhancer') as any) || 'off';
+    return (readLocalStorage('playerAudioEnhancer') as any) || 'off';
   });
 
   // Custom audio enhancer values
   const [customAudio, setCustomAudio] = useState(() => {
-    const saved = localStorage.getItem('playerCustomAudio');
-    return saved ? JSON.parse(saved) : {
+    const defaults = {
       bassGain: 0, bassFreq: 200,
       midGain: 0, midFreq: 2000, midQ: 1,
       trebleGain: 0, trebleFreq: 6000,
       compThreshold: 0, compRatio: 1, compKnee: 40, compAttack: 0, compRelease: 0.25
     };
+    const saved = readLocalStorage('playerCustomAudio');
+    if (!saved) return defaults;
+    try {
+      return { ...defaults, ...JSON.parse(saved) };
+    } catch {
+      return defaults;
+    }
   });
 
   // Video OLED smoothing state
   const [videoOledMode, setVideoOledMode] = useState<'off' | 'natural' | 'cinema' | 'vivid' | 'custom'>(() => {
-    return (localStorage.getItem('playerVideoOled') as any) || 'off';
+    return (readLocalStorage('playerVideoOled') as any) || 'off';
   });
 
   // Custom video OLED values
   const [customOled, setCustomOled] = useState(() => {
     const defaults = { contrast: 1, saturate: 1, brightness: 1, sepia: 0 };
-    const saved = localStorage.getItem('playerCustomOled');
+    const saved = readLocalStorage('playerCustomOled');
     if (!saved) return defaults;
     try {
       const parsed = JSON.parse(saved);
@@ -1485,6 +1532,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   /** Plein écran porté par le conteneur racine de l'app : le lecteur doit alors occuper l'écran lui-même. */
   const [isPageFullscreen, setIsPageFullscreen] = useState(() => isHostFullscreenActive());
   const [showControls, setShowControls] = useState(true);
+  const [keyboardControlsActive, setKeyboardControlsActive] = useState(false);
+  const focusControlsOnRevealRef = useRef(false);
   const [buffered, setBuffered] = useState<TimeRanges | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [show403Error, setShow403Error] = useState(false);
@@ -1697,6 +1746,13 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     loading: externalLoading,
     providerErrors: externalProviderErrors,
   } = useExternalSubtitles(externalQuery, preferredSubtitleLang);
+  // Pistes fournies par le lecteur de l'hébergeur (Uqload) : ajoutées plus
+  // bas comme sous-titres intégrés, et aussi listées en tête des externes.
+  const embeddedSubtitleTracks = useMemo(() => getEmbeddedSubtitleTracks(src), [src]);
+  const subtitleTracks = useMemo(
+    () => (embeddedSubtitleTracks.length ? [...embeddedSubtitleTracks, ...externalTracks] : externalTracks),
+    [embeddedSubtitleTracks, externalTracks],
+  );
 
   const [selectedExternalSub, setSelectedExternalSub] = useState<SubtitleTrack | null>(null);
   const [loadingSubtitle, setLoadingSubtitle] = useState(false);
@@ -1727,10 +1783,17 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     if (!focusableTarget) return;
 
     window.requestAnimationFrame(() => {
-      focusableTarget.scrollIntoView({
-        block: 'nearest',
-        inline: 'nearest'
-      });
+      try {
+        focusableTarget.scrollIntoView({
+          block: 'nearest',
+          inline: 'nearest'
+        });
+      } catch {
+        // Firefox < 58 refuse la valeur 'nearest' de ScrollLogicalPosition
+        // et lève une TypeError : on retombe sur la forme booléenne, comprise
+        // partout (false = aligner le bas de l'élément sur le bas visible).
+        try { focusableTarget.scrollIntoView(false); } catch { /* sans défilement */ }
+      }
     });
   }, []);
 
@@ -2000,7 +2063,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   const [, setIsLandscape] = useState(window.innerWidth > window.innerHeight);
   // Ajout d'un nouveau state pour la vitesse de lecture
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(() => {
-    const savedSpeed = localStorage.getItem('playerPlaybackSpeed');
+    const savedSpeed = readLocalStorage('playerPlaybackSpeed');
     return savedSpeed ? parseFloat(savedSpeed) : 1;
   });
 
@@ -2231,10 +2294,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   // CAST_STATE_CHANGED listener effect as soon as the framework is ready,
   // without waiting for the user to start playback.
   const [castSdkReady, setCastSdkReady] = useState(false);
-  // True if the Cast SDK didn't load within 5s of mount — strong hint that an
-  // adblocker, ISP or shielded-browser policy is blocking gstatic.com. Lets us
-  // show a specific error instead of the generic "no devices found" message.
-  const [castSdkBlocked, setCastSdkBlocked] = useState(false);
+  // Un délai de chargement ne permet pas d'en déduire la cause.
+  const [castSdkUnavailable, setCastSdkUnavailable] = useState(false);
   const [showCastMenu, setShowCastMenu] = useState(false);
   const [castError, setCastError] = useState<string | null>(null);
   const [isCastLoading, setIsCastLoading] = useState(false);
@@ -2246,6 +2307,13 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   // AirPlay states
   const [isAirPlaying, setIsAirPlaying] = useState(false);
   const [airPlayAvailable, setAirPlayAvailable] = useState(false);
+  const [airPlaySupported] = useState(isAirPlaySupported);
+  // ManagedMediaSource peut masquer les récepteurs jusqu'au clic explicite.
+  const canRequestAirPlay = airPlaySupported || airPlayAvailable;
+  const [nativeAirPlay, setNativeAirPlay] = useState(false);
+  const nativeAirPlayRef = useRef(false);
+  const [playbackRevision, setPlaybackRevision] = useState(0);
+  const playbackRestoreRef = useRef<{ contentKey: string; time: number; playing: boolean } | null>(null);
   const [airPlayError, setAirPlayError] = useState<string | null>(null);
   const [isAirPlayLoading, setIsAirPlayLoading] = useState(false);
   const castButtonRef = useRef<HTMLElement | null>(null);
@@ -2334,6 +2402,22 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   // movie/episode identity changes.
   const lastKnownTimeRef = useRef<number>(0);
   const lastEpisodeKeyRef = useRef<string>('');
+
+  const restoreLocalPlayback = useCallback(() => {
+    const video = videoRef.current;
+    if (video) {
+      playbackRestoreRef.current = {
+        contentKey: contentQualityKeyRef.current,
+        time: video.currentTime || playbackRestoreRef.current?.time || lastKnownTimeRef.current,
+        playing: playbackRestoreRef.current?.playing ?? !video.paused,
+      };
+    }
+    nativeAirPlayRef.current = false;
+    setNativeAirPlay(false);
+    // Relancer aussi après un échec du sélecteur avant le changement de mode.
+    setPlaybackRevision(revision => revision + 1);
+    setIsAirPlayLoading(false);
+  }, []);
 
   // Lock mode: blocks all interactions with the player. Unlocked by triple
   // click/tap, Escape (desktop) or the browser back button (mobile).
@@ -2616,8 +2700,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       return;
     }
 
-    try {
-      await navigator.clipboard.writeText(sourceUrl);
+    if (await copyText(sourceUrl)) {
       setCopiedSourceUrl(sourceUrl);
 
       if (copiedSourceTimeoutRef.current) {
@@ -2629,8 +2712,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       }, 1800);
 
       toast.success(t('common.copied'));
-    } catch (error) {
-      console.error('Erreur lors de la copie du flux:', error);
+    } else {
+      console.error('Erreur lors de la copie du flux');
       toast.error(t('common.error'));
     }
   }, [t]);
@@ -2687,6 +2770,12 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
     setLoadingEpisodes(true);
     try {
+      // Même liste que la fiche série quand le découpage TVmaze est actif.
+      const tvmazeSeasons = await getTvmazeSeasonsOverride(tvShowId);
+      if (tvmazeSeasons?.[seasonNum]) {
+        setEpisodesBySeasons(prev => ({ ...prev, [seasonNum]: tvmazeSeasons[seasonNum] }));
+        return;
+      }
       const response = await axios.get(`https://api.themoviedb.org/3/tv/${tvShowId}/season/${seasonNum}`, {
         params: { api_key: TMDB_API_KEY, language: getTmdbLanguage() }
       });
@@ -3218,8 +3307,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     // Définir les lecteurs VO/VOSTFR à conserver (enlever 6, 4 et 2)
     if (showVostfrMenu) {
       const vostfrSources = [
+        { id: 'vidy', label: 'Vidy', url: '' }, // vidy.st (interface FR, accent Movix)
         { id: '111movies', label: '111Movies', url: '' },
-        { id: 'peachify', label: 'Peachify', url: '' }, // Peachify (priorité, FR subs + accent Movix)
         { id: 'vostfr', label: 'Videasy', url: '' }, // Videasy
         { id: 'vidlink', label: 'Vidlink', url: '' }, // vidlink
         { id: 'vidsrccc', label: 'Vidsrc.io', url: '' }, // vidsrc.io
@@ -3235,16 +3324,16 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         // boutons Sources/Open dupliqués (rendus dans le parent ET dans l'iframe imbriqué).
         if (tvShowId != null && seasonNumber != null && episodeNumber != null) {
           // TV Show URLs
-          if (source.id === '111movies') finalUrl = `https://111movies.net/tv/${tvShowId}/${seasonNumber}/${episodeNumber}`;
-          else if (source.id === 'peachify') finalUrl = `https://peachify.top/embed/tv/${tvShowId}/${seasonNumber}/${episodeNumber}?sub=French&accent=dc2626`;
+          if (source.id === 'vidy') finalUrl = `https://www.vidy.st/fr/tv/${tvShowId}/${seasonNumber}/${episodeNumber}?color=DC2626`;
+          else if (source.id === '111movies') finalUrl = `https://111movies.net/tv/${tvShowId}/${seasonNumber}/${episodeNumber}`;
           else if (source.id === 'vidlink') finalUrl = `https://vidlink.pro/tv/${tvShowId}/${seasonNumber}/${episodeNumber}`; // vidlink.pro
           else if (source.id === 'vidsrccc') finalUrl = `https://vidsrc.io/embed/tv?tmdb=${tvShowId}&season=${seasonNumber}&episode=${episodeNumber}`;
           else if (source.id === 'vostfr') finalUrl = `https://player.videasy.net/tv/${tvShowId}/${seasonNumber}/${episodeNumber}`; // Videasy
           else if (source.id === 'vidsrcwtf1') finalUrl = `https://vidsrc.wtf/api/1/tv/?id=${tvShowId}&s=${seasonNumber}&e=${episodeNumber}`; // Assumed pattern
         } else if (movieId) {
           // Movie URLs (existing logic)
-          if (source.id === '111movies') finalUrl = `https://111movies.net/movie/${movieId}`;
-          else if (source.id === 'peachify') finalUrl = `https://peachify.top/embed/movie/${movieId}?sub=French&accent=dc2626`;
+          if (source.id === 'vidy') finalUrl = `https://www.vidy.st/fr/movie/${movieId}?color=DC2626`;
+          else if (source.id === '111movies') finalUrl = `https://111movies.net/movie/${movieId}`;
           else if (source.id === 'vidlink') finalUrl = `https://vidlink.pro/movie/${movieId}`; // vidlink.pro
           else if (source.id === 'vidsrccc') finalUrl = `https://vidsrc.io/embed/movie?tmdb=${movieId}`;
           else if (source.id === 'vostfr') finalUrl = `https://player.videasy.net/movie/${movieId}`;
@@ -3474,7 +3563,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   useEffect(() => {
     const video = videoRef.current;
     if (video) {
-      let initialVolume = parseFloat(localStorage.getItem('playerVolume') || '1');
+      let initialVolume = parseFloat(readLocalStorage('playerVolume') || '1');
       initialVolume = clampVolume(initialVolume);
       video.volume = initialVolume;
       setVolume(initialVolume);
@@ -3559,6 +3648,10 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   useEffect(() => {
     if (isCasting) {
       postCastPlaybackSuppressedRef.current = true;
+      nativeAirPlayRef.current = false;
+      setNativeAirPlay(false);
+      setIsAirPlayLoading(false);
+      playbackRestoreRef.current = null;
       return;
     }
 
@@ -3574,6 +3667,12 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       isCasting,
     });
     if (!playbackPolicy.shouldInitialize) return;
+    if (playbackRestoreRef.current && playbackRestoreRef.current.contentKey !== contentQualityKey) {
+      playbackRestoreRef.current = null;
+      lastKnownTimeRef.current = 0;
+    }
+    const playbackRestore = playbackRestoreRef.current;
+    const shouldAutoplay = playbackPolicy.shouldAutoplay && (playbackRestore?.playing ?? autoPlay);
 
     // Clear any existing timeouts when src changes or component unmounts
     const clearBufferingTimeout = () => {
@@ -3632,10 +3731,6 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         (window as any).error502RetryCount = {};
         console.log('✅ Cleared 502 error retry counters');
       }
-      if ((window as any).bufferStalledRetryCount) {
-        (window as any).bufferStalledRetryCount = {};
-        console.log('✅ Cleared buffer stalled error retry counters');
-      }
       if ((window as any).fragParsingLateRetries) {
         delete (window as any).fragParsingLateRetries;
         console.log('✅ Cleared fragment parsing late retry counters');
@@ -3667,25 +3762,97 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     )) || isMP4Source(normalizedSrc)
       || contentTypeMp4Urls.has(normalizedSrc);
     // Bravo/Purstream fournit des liens mp4 compatibles avec cette logique
-    if (isMP4) {
+    if (nativeAirPlay || (!isMP4 && !Hls.isSupported())) {
+      // Le même cycle gère AirPlay, les changements de source sans MSE et
+      // le retour local sur les Safari qui ne prennent pas Hls.js en charge.
+      let failed = false;
+      let ready = false;
+      const resumeTime = playbackRestore?.time ?? lastKnownTimeRef.current;
+      let startupTimeout: ReturnType<typeof setTimeout> | undefined;
+      const clearStartupTimeout = () => {
+        if (startupTimeout !== undefined) clearTimeout(startupTimeout);
+      };
+      const handleNativeError = () => {
+        if (failed) return;
+        failed = true;
+        clearStartupTimeout();
+        clearSourceTimeout();
+        if (nativeAirPlay) {
+          setAirPlayError(t('watch.airplayError'));
+          setShowCastMenu(true);
+          restoreLocalPlayback();
+        } else {
+          requestHlsFallback();
+        }
+      };
+      const handleNativeReady = () => {
+        if (failed) return;
+        ready = true;
+        clearStartupTimeout();
+        if (playbackPolicy.shouldRestorePosition && resumeTime > 0) {
+          try { video.currentTime = resumeTime; } catch { /* média non seekable */ }
+        }
+        video.playbackRate = playbackSpeed;
+        if (playbackRestoreRef.current === playbackRestore) playbackRestoreRef.current = null;
+        setIsAirPlayLoading(false);
+        if (shouldAutoplay) safePlay(video).catch(error => console.warn('Native playback:', error));
+      };
+      video.addEventListener('loadedmetadata', handleNativeReady, { once: true });
+      video.addEventListener('error', handleNativeError);
+      const cleanupAudio = observeNativeAudioTracks(
+        video,
+        () => hlsAudioPreferences.get(contentQualityKey) ?? null,
+        (tracks, selectedIndex) => {
+          setAudioTracks(tracks);
+          setCurrentAudioTrack(selectedIndex);
+        },
+      );
+      qualitiesRef.current = [];
+      setQualities([]);
+      if (nativeAirPlay) {
+        video.setAttribute('x-webkit-airplay', 'allow');
+        (video as HTMLVideoElementWithWebkit).webkitWirelessVideoPlaybackDisabled = false;
+        video.disableRemotePlayback = false;
+        setIsAirPlayLoading(true);
+        startupTimeout = setTimeout(handleNativeError, 15000);
+      }
+      video.src = normalizedSrc;
+      video.load();
+
+      return () => {
+        clearStartupTimeout();
+        clearBufferingTimeout();
+        clearSourceTimeout();
+        cleanupAudio();
+        video.removeEventListener('loadedmetadata', handleNativeReady);
+        video.removeEventListener('error', handleNativeError);
+        video.removeEventListener('loadstart', handleLoadStart);
+        video.removeEventListener('canplay', handleCanPlay);
+        video.removeEventListener('waiting', handleWaiting);
+        video.removeEventListener('playing', handlePlaying);
+        video.removeEventListener('progress', handleProgress);
+        if (ready && !playbackRestoreRef.current) {
+          playbackRestoreRef.current = { contentKey: contentQualityKey, time: video.currentTime, playing: !video.paused };
+        }
+        // En AirPlay, remplacer directement l'URL suivante conserve la cible
+        // distante. Vider src entre deux sources peut la déconnecter.
+        if (!nativeAirPlayRef.current || !video.isConnected) video.removeAttribute('src');
+      };
+    } else if (isMP4) {
       // For MP4, directly set the source on the video element
       videoRef.current.src = normalizedSrc;
 
       // Restore position across source switches (e.g. anime player change).
-      const mp4ResumeTime = lastKnownTimeRef.current;
-      if (playbackPolicy.shouldRestorePosition && mp4ResumeTime > 0.5) {
-        const restoreMp4Position = () => {
-          const v = videoRef.current;
-          if (!v) return;
-          try {
-            v.currentTime = mp4ResumeTime;
-          } catch {}
-          v.removeEventListener('loadedmetadata', restoreMp4Position);
-        };
-        videoRef.current.addEventListener('loadedmetadata', restoreMp4Position);
-      }
+      const mp4ResumeTime = playbackRestore?.time ?? lastKnownTimeRef.current;
+      const restoreMp4Position = () => {
+        if (playbackPolicy.shouldRestorePosition && mp4ResumeTime > 0.5) {
+          try { video.currentTime = mp4ResumeTime; } catch { /* média non seekable */ }
+        }
+        if (playbackRestoreRef.current === playbackRestore) playbackRestoreRef.current = null;
+      };
+      video.addEventListener('loadedmetadata', restoreMp4Position, { once: true });
 
-      if (autoPlay && playbackPolicy.shouldAutoplay) {
+      if (shouldAutoplay) {
         safePlay(videoRef.current).catch(e => console.error('Error autoplay:', e));
       }
 
@@ -3752,12 +3919,14 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       return () => {
         mp4MetadataCancelled = true;
         clearBufferingTimeout();
+        clearSourceTimeout();
         video.removeEventListener('loadstart', handleLoadStart);
         video.removeEventListener('canplay', handleCanPlay);
         video.removeEventListener('waiting', handleWaiting);
         video.removeEventListener('playing', handlePlaying);
         video.removeEventListener('progress', handleProgress);
         video.removeEventListener('loadedmetadata', handleMp4LoadedMetadata);
+        video.removeEventListener('loadedmetadata', restoreMp4Position);
 
         // Clear video source
         video.src = '';
@@ -3779,6 +3948,13 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       // Compteurs propres à cette source et à chaque piste : un fragment audio
       // reçu ne répare pas un segment vidéo inaccessible (et inversement).
       const noResponseFailures = new Map<string, number>();
+      const restoreHlsPosition = () => {
+        const resumeTime = playbackRestore?.time ?? lastKnownTimeRef.current;
+        if (playbackPolicy.shouldRestorePosition && resumeTime > 0.5) {
+          try { video.currentTime = resumeTime; } catch { /* média non seekable */ }
+        }
+        if (playbackRestoreRef.current === playbackRestore) playbackRestoreRef.current = null;
+      };
 
       hlsRef.current = hls;
       // Le proxy sera automatiquement appliqué par xhrSetup si nécessaire
@@ -3864,24 +4040,10 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         }
 
         // Restore position across source switches (e.g. anime player change).
-        const hlsResumeTime = lastKnownTimeRef.current;
-        if (playbackPolicy.shouldRestorePosition && hlsResumeTime > 0.5 && videoRef.current) {
-          const seekTarget = hlsResumeTime;
-          const trySeek = () => {
-            const v = videoRef.current;
-            if (!v) return;
-            if (v.readyState >= 1) {
-              try {
-                v.currentTime = seekTarget;
-              } catch {}
-            } else {
-              setTimeout(trySeek, 80);
-            }
-          };
-          trySeek();
-        }
+        if (video.readyState >= 1) restoreHlsPosition();
+        else video.addEventListener('loadedmetadata', restoreHlsPosition, { once: true });
 
-        if (autoPlay && playbackPolicy.shouldAutoplay) {
+        if (shouldAutoplay) {
           safePlay(video).catch(e => console.error('Erreur de lecture automatique:', e));
         }
 
@@ -3981,20 +4143,69 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
       // Surveillance des niveaux de buffer
       hls.on(Hls.Events.BUFFER_APPENDED, (_event, data) => {
-        if (data.type === 'video' || data.type === 'audio') {
+        if ((data.type === 'video' || data.type === 'audio') && !video.paused && !video.seeking) {
+          // Mesurer la plage qui contient la tête de lecture : après un saut,
+          // la dernière plage peut se trouver avant elle (valeurs négatives).
           const buffered = video.buffered;
-          if (buffered.length > 0) {
-            const bufferEnd = buffered.end(buffered.length - 1);
-            const currentTime = video.currentTime;
-            const bufferAhead = bufferEnd - currentTime;
-
-            // Si le buffer devient trop faible, préparer une récupération préventive
-            if (bufferAhead < 2 && !video.paused) {
-              console.log(`📊 Low buffer detected: ${bufferAhead.toFixed(2)}s ahead`);
+          const currentTime = video.currentTime;
+          let bufferAhead = 0;
+          for (let i = 0; i < buffered.length; i++) {
+            if (currentTime >= buffered.start(i) && currentTime <= buffered.end(i)) {
+              bufferAhead = buffered.end(i) - currentTime;
+              break;
             }
+          }
+
+          if (bufferAhead < 2) {
+            console.log(`📊 Low buffer detected: ${bufferAhead.toFixed(2)}s ahead`);
           }
         }
       });
+
+      // Un blocage signalé par HLS.js est le plus souvent une attente réseau :
+      // juste après un saut, le fragment visé n'est pas encore arrivé. Arrêter
+      // le chargement à chaque signalement annulait justement ce fragment, et
+      // l'événement `playing` provoqué par les petites poussées de HLS.js
+      // remettait le compteur à zéro : la lecture tournait en boucle sur place.
+      // On laisse donc HLS.js charger et on n'intervient que si la tête de
+      // lecture reste vraiment figée : relance du chargement, puis repli.
+      let stallWatchdog: ReturnType<typeof setInterval> | null = null;
+      const clearStallWatchdog = () => {
+        if (stallWatchdog) {
+          clearInterval(stallWatchdog);
+          stallWatchdog = null;
+        }
+      };
+      const watchStalledPlayback = () => {
+        if (stallWatchdog) return;
+        const stalledAt = video.currentTime;
+        let lastPosition = stalledAt;
+        let stalledSeconds = 0;
+        stallWatchdog = setInterval(() => {
+          const position = video.currentTime;
+          const advanced = position - lastPosition;
+          lastPosition = position;
+          // Pause, saut de l'utilisateur ou lecture repartie depuis quelques
+          // secondes : la surveillance s'arrête.
+          if (hlsRef.current !== hls || video.paused || Math.abs(position - stalledAt) >= 3) {
+            clearStallWatchdog();
+            return;
+          }
+          // Une seconde de lecture avec des données d'avance (HAVE_FUTURE_DATA)
+          // ne compte pas. Les poussées de HLS.js se font sans données
+          // d'avance et ne déplacent la tête de lecture que de quelques dixièmes.
+          if (advanced > 0 && video.readyState >= 3) return;
+          stalledSeconds += 1;
+          if (stalledSeconds === 8) {
+            console.warn(`🔁 Lecture figée depuis 8 s à ${video.currentTime.toFixed(1)}s : relance du chargement`);
+            hls.startLoad(video.currentTime);
+          } else if (stalledSeconds >= 16) {
+            clearStallWatchdog();
+            console.error('❌ Lecture toujours figée après 16 s : changement de source');
+            requestHlsFallback(undefined, src);
+          }
+        }, 1000);
+      };
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
         // A broken/unsupported subtitle must never kill video playback — drop
@@ -4127,41 +4338,10 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
           console.warn('🔊 Audio/Video Error detected:', data.details);
 
-          // Gestion spécifique des erreurs de buffer stalled
-          if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
-            console.error('🚨 Buffer stalled error detected - attempting recovery...');
-
-            // Vérifier si on a trop d'erreurs bufferStalled consécutives
-            const retryKey = `bufferStalled_general`;
-            if (!(window as any).bufferStalledRetryCount) {
-              (window as any).bufferStalledRetryCount = {};
-            }
-            (window as any).bufferStalledRetryCount[retryKey] = ((window as any).bufferStalledRetryCount[retryKey] || 0) + 1;
-
-            // Si trop d'erreurs bufferStalled, déclencher un changement de source
-            if ((window as any).bufferStalledRetryCount[retryKey] > 2) {
-              console.error(`❌ Too many buffer stalled errors (${(window as any).bufferStalledRetryCount[retryKey]}), switching source...`);
-              (window as any).bufferStalledRetryCount[retryKey] = 0; // Reset le compteur
-              setTimeout(() => {
-                requestHlsFallback(undefined, src);
-              }, 1000);
-              return;
-            }
-
-            // Essayer de récupérer sans changer la position
-            if (videoRef.current && hlsRef.current) {
-              const currentTime = videoRef.current.currentTime;
-
-              console.log(`🎯 Attempting recovery from buffer stalled error at ${currentTime}s`);
-
-              hlsRef.current.stopLoad();
-              setTimeout(() => {
-                if (hlsRef.current && videoRef.current) {
-                  hlsRef.current.startLoad(currentTime);
-                  console.log(`▶️ Restarted HLS loading from: ${currentTime}s after buffer stalled error`);
-                }
-              }, 2000);
-            }
+          // Blocage non fatal : surveillé sans toucher au chargement. Le cas
+          // fatal (poussées de HLS.js épuisées) suit la récupération générique.
+          if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR && !data.fatal) {
+            watchStalledPlayback();
             return;
           }
 
@@ -4206,7 +4386,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
                   const onCanPlay = () => {
                     if (hlsRef.current === hls && videoRef.current === video) {
-                      video.currentTime = skipTime;
+                      seekVideoSafely(video, skipTime);
                       if (shouldResumeFragRecovery) {
                         safePlay(video).catch(e => console.error('Error resuming playback:', e));
                       }
@@ -4273,7 +4453,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
                     // Vérifier que le saut ne dépasse pas la durée totale
                     if (video.duration && skipTime < video.duration) {
-                      video.currentTime = skipTime;
+                      seekVideoSafely(video, skipTime);
                       console.log(`🎯 Jumped to ${skipTime}s to skip corrupted fragment (duration: ${fragmentDuration}s)`);
                     } else {
                       console.log(`⚠️ Cannot skip beyond video duration (${video.duration}s), staying at current position`);
@@ -4398,6 +4578,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       return () => {
         clearBufferingTimeout(); // Clear timeout on cleanup
         clearSourceTimeout(); // Clear source timeout on cleanup
+        clearStallWatchdog();
         // Nettoyer les tentatives de récupération
         if ((window as any).hlsRecoveryAttempts) {
           delete (window as any).hlsRecoveryAttempts;
@@ -4413,49 +4594,28 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         video.removeEventListener('waiting', handleWaiting);
         video.removeEventListener('playing', handlePlaying);
         video.removeEventListener('progress', handleProgress);
+        video.removeEventListener('loadedmetadata', restoreHlsPosition);
         hls.destroy();
         if (hlsRef.current === hls) {
           hlsRef.current = null;
         }
       };
-    } else {
-      // For browsers that don't support HLS.js (like Safari)
-      video.src = normalizedSrc;
-      if (autoPlay && playbackPolicy.shouldAutoplay) {
-        safePlay(video).catch(e => console.error('Error autoplay in fallback mode:', e));
-      }
-
-      return () => {
-        clearBufferingTimeout();
-        clearSourceTimeout(); // Clear source timeout on cleanup
-        // Nettoyer les tentatives de récupération
-        if ((window as any).hlsRecoveryAttempts) {
-          delete (window as any).hlsRecoveryAttempts;
-        }
-        if ((window as any).fragParsingGlobalRetry) {
-          delete (window as any).fragParsingGlobalRetry;
-        }
-        if ((window as any).fragParsingLateRetries) {
-          delete (window as any).fragParsingLateRetries;
-        }
-        video.removeEventListener('loadstart', handleLoadStart);
-        video.removeEventListener('canplay', handleCanPlay);
-        video.removeEventListener('waiting', handleWaiting);
-        video.removeEventListener('playing', handlePlaying);
-        video.removeEventListener('progress', handleProgress);
-        video.src = '';
-      };
     }
-  }, [src, autoPlay, subtitleUrl, Hls, requestHlsFallback, isCasting, kisskhSources, contentTypeMp4Urls]); // REMOVED playbackSpeed
+  }, [src, autoPlay, subtitleUrl, Hls, requestHlsFallback, isCasting, kisskhSources, contentTypeMp4Urls, nativeAirPlay, playbackRevision, restoreLocalPlayback]); // REMOVED playbackSpeed
 
   // Auto next episode preference (must be declared before useEffect that references it)
   const [autoNextEpisodeEnabled, setAutoNextEpisodeEnabled] = useState(() => {
-    const savedPref = localStorage.getItem('playerAutoNextEpisodePref');
-    return savedPref !== null ? JSON.parse(savedPref) : true; // Default to true
+    const savedPref = readLocalStorage('playerAutoNextEpisodePref');
+    if (savedPref === null) return true;
+    try {
+      return JSON.parse(savedPref);
+    } catch {
+      return true;
+    }
   });
 
   useEffect(() => {
-    localStorage.setItem('playerAutoNextEpisodePref', JSON.stringify(autoNextEpisodeEnabled));
+    writeLocalStorage('playerAutoNextEpisodePref', JSON.stringify(autoNextEpisodeEnabled));
   }, [autoNextEpisodeEnabled]);
 
   /**
@@ -4568,7 +4728,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
       // Si la lecture en boucle est activée, remettre la vidéo au début
       if (isLooping && videoRef.current) {
-        videoRef.current.currentTime = 0;
+        seekVideoSafely(videoRef.current, 0);
         safePlay(videoRef.current).catch(e => console.error('Error replaying video:', e));
         // Appeler onEnded et onPlayerEnded même en mode boucle
         if (onEnded) onEnded();
@@ -4886,6 +5046,21 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   // Load selected external subtitle into the video by creating a <track> element
   const loadExternalSubtitle = async (sub: SubtitleTrack) => {
     if (!videoRef.current || !sub) return;
+    // Piste Uqload déjà présente dans les sous-titres intégrés : on la
+    // sélectionne au lieu d'en ajouter un doublon.
+    const embeddedIndex = embeddedSubtitleTracks.findIndex((track) => track.id === sub.id);
+    if (embeddedIndex >= 0) {
+      const embeddedEls = Array.from(
+        videoRef.current.querySelectorAll('track[data-embedded="1"]'),
+      ) as HTMLTrackElement[];
+      const textTrack = embeddedEls[embeddedIndex]?.track;
+      const index = textTrack ? Array.from(videoRef.current.textTracks).indexOf(textTrack) : -1;
+      if (index >= 0) {
+        handleSubtitleChange(`internal:${index}`);
+        setSelectedExternalSub(sub);
+        return;
+      }
+    }
     setLoadingSubtitle(true);
     try {
       const video = videoRef.current;
@@ -4905,16 +5080,23 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       trackEl.srclang = sub.lang || 'und';
       trackEl.setAttribute('data-external', '1');
 
+      // Piste du lecteur hébergeur (Uqload) : l'extension a déjà fourni le texte.
+      const embeddedContent = getEmbeddedSubtitleContent(sub.id);
       // Le registre de providers garantit une URL non vide sur chaque piste.
       const downloadLink = sub.url;
-      if (downloadLink) {
+      if (embeddedContent) {
+        trackEl.src = URL.createObjectURL(
+          new Blob([subtitleTextToWebVtt(embeddedContent)], { type: 'text/vtt' }),
+        );
+      } else if (downloadLink) {
         try {
           // Download and extract the .gz file locally using PAKO
-          const response = await fetch(downloadLink, {
-            headers: {
-              'User-Agent': 'Movix/1.0'
-            }
-          });
+          // Uqload sert ses VTT en CORS simple : un en-tête ajouté forcerait
+          // une requête OPTIONS que son serveur ne gère pas.
+          const response = await fetch(
+            downloadLink,
+            sub.provider === 'uqload' ? undefined : { headers: { 'User-Agent': 'Movix/1.0' } },
+          );
 
           if (!response.ok) {
             throw new Error(`Download failed: ${response.status}`);
@@ -5056,6 +5238,73 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       setLoadingSubtitle(false);
     }
   };
+
+  // Pistes du lecteur Uqload : toutes ajoutées comme sous-titres intégrés,
+  // comme sur Uqload. La piste « default » (souvent le français) s'active
+  // seule, sans écraser un choix déjà fait.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const removeEmbedded = () => {
+      video.querySelectorAll('track[data-embedded="1"]').forEach((node) => {
+        const trackEl = node as HTMLTrackElement;
+        if (trackEl.src.startsWith('blob:')) URL.revokeObjectURL(trackEl.src);
+        trackEl.remove();
+      });
+    };
+    removeEmbedded();
+    if (!embeddedSubtitleTracks.length) return;
+
+    let cancelled = false;
+    const loadText = async (sub: SubtitleTrack): Promise<string | null> => {
+      const content = getEmbeddedSubtitleContent(sub.id);
+      if (content) return content;
+      try {
+        // Sans en-tête ajouté : Uqload répond 405 aux requêtes OPTIONS.
+        const response = await fetch(sub.url);
+        return response.ok ? await response.text() : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const attach = async () => {
+      const texts = await Promise.all(embeddedSubtitleTracks.map(loadText));
+      if (cancelled) return;
+      let defaultTrack: TextTrack | null = null;
+      embeddedSubtitleTracks.forEach((sub, index) => {
+        const trackEl = document.createElement('track');
+        trackEl.kind = 'subtitles';
+        trackEl.label = `${sub.lang} - ${sub.label}`;
+        trackEl.srclang = sub.lang || 'und';
+        trackEl.setAttribute('data-embedded', '1');
+        const text = texts[index];
+        trackEl.src = text
+          ? URL.createObjectURL(new Blob([subtitleTextToWebVtt(text)], { type: 'text/vtt' }))
+          : sub.url;
+        video.appendChild(trackEl);
+        trackEl.track.mode = 'disabled';
+        if (sub.isDefault && !defaultTrack) defaultTrack = trackEl.track;
+      });
+      const tracks = Array.from(video.textTracks);
+      setSubtitles(tracks);
+      if (defaultTrack && currentSubtitleRef.current === 'off') {
+        const index = tracks.indexOf(defaultTrack);
+        if (index >= 0) handleSubtitleChange(`internal:${index}`);
+      }
+    };
+
+    const start = () => { void attach(); };
+    if (video.readyState >= 1) start();
+    else video.addEventListener('loadedmetadata', start, { once: true });
+    return () => {
+      cancelled = true;
+      video.removeEventListener('loadedmetadata', start);
+      removeEmbedded();
+    };
+  // handleSubtitleChange est recréée à chaque rendu ; seule la source compte.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embeddedSubtitleTracks]);
 
   // Helper function to detect text encoding from byte array (exact same logic as server.js)
   const detectEncoding = (buffer: Uint8Array): string => {
@@ -5409,6 +5658,55 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     }
   }, [activeTranslatedSubtitleId]);
 
+  const clearControlsTimeout = useCallback(() => {
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = undefined;
+  }, []);
+
+  const canAutoHideControls = isPlaying && !isLocked && !isDragging
+    && !showSettings && !showCastMenu && !showInternalEpisodesMenu
+    && !showStreamInfo && !showShortcutsHelp
+    && !showForwardAnimation && !showRewindAnimation
+    && !showLeftTapAnimation && !showRightTapAnimation;
+
+  const scheduleControlsHide = useCallback(() => {
+    clearControlsTimeout();
+    if (!canAutoHideControls || touchActiveRef.current) return;
+    controlsTimeoutRef.current = setTimeout(() => {
+      controlsTimeoutRef.current = undefined;
+      setShowControls(false);
+      setShowVolumeSlider(false);
+    }, CONTROLS_IDLE_HIDE_MS);
+  }, [canAutoHideControls, clearControlsTimeout]);
+
+  const keepControlsVisibleAfterInteraction = useCallback(() => {
+    if (isLocked) return;
+    setShowControls(true);
+    scheduleControlsHide();
+  }, [isLocked, scheduleControlsHide]);
+
+  // L'autoplay et la reprise doivent aussi armer le délai, même sans souris
+  // et sans API Fullscreen (notamment dans une WebView pilotée à la télécommande).
+  useEffect(() => {
+    if (showControls) scheduleControlsHide();
+    else clearControlsTimeout();
+    return clearControlsTimeout;
+  }, [showControls, scheduleControlsHide, clearControlsTimeout]);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (showControls && focusControlsOnRevealRef.current) {
+      focusControlsOnRevealRef.current = false;
+      focusPlayerControl(container);
+    } else if (!showControls && document.activeElement instanceof HTMLElement
+      && container.contains(document.activeElement)
+      && document.activeElement.closest('[data-player-chrome]')) {
+      // OK ne doit jamais activer un ancien bouton devenu invisible.
+      container.focus({ preventScroll: true });
+    }
+  }, [showControls]);
+
   const handleMouseMove = useCallback((e?: Event | React.MouseEvent | PointerEvent) => {
     // Rien à faire pour un `mousemove` synthétisé par un tap, ni pendant un
     // geste tactile en cours. On se fie au pointeur employé, pas à la dalle :
@@ -5421,20 +5719,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     // l'utilisateur : voir `FULLSCREEN_SETTLE_MS`.
     if (Date.now() < fullscreenSettleUntilRef.current) return;
 
-    setShowControls(true);
-    if (controlsTimeoutRef.current) {
-      clearTimeout(controlsTimeoutRef.current);
-    }
-    if (isPlaying && !showCastMenu) {
-      controlsTimeoutRef.current = setTimeout(() => {
-        // Vérifier si des animations +10/-10 sont en cours avant de cacher
-        if (!showCastMenu && !showForwardAnimation && !showRewindAnimation && !showLeftTapAnimation && !showRightTapAnimation) {
-          setShowControls(false);
-          setShowVolumeSlider(false);
-        }
-      }, 5000);
-    }
-  }, [isMousePointer, isPlaying, showCastMenu, showForwardAnimation, showRewindAnimation, showLeftTapAnimation, showRightTapAnimation]);
+    keepControlsVisibleAfterInteraction();
+  }, [isMousePointer, keepControlsVisibleAfterInteraction]);
 
   /**
    * Écouteurs natifs de mouvement de pointeur, en plus des gestionnaires React.
@@ -5518,7 +5804,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       video.muted = false;
       video.volume = restoreVolume;
       setVolume(restoreVolume);
-      localStorage.setItem('playerVolume', restoreVolume.toString());
+      writeLocalStorage('playerVolume', restoreVolume.toString());
     } else {
       setPreviousVolume(volume); // Store current volume before muting
       video.muted = true;
@@ -5536,7 +5822,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     newVolume = clampVolume(newVolume);
     video.volume = newVolume;
     setVolume(newVolume);
-    localStorage.setItem('playerVolume', newVolume.toString());
+    writeLocalStorage('playerVolume', newVolume.toString());
 
     if (newVolume > 0 && video.muted) {
       video.muted = false;
@@ -5724,7 +6010,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   // Handle audio enhancer mode change
   const handleAudioEnhancerChange = useCallback((mode: 'off' | 'cinema' | 'music' | 'dialogue' | 'custom') => {
     setAudioEnhancerMode(mode);
-    localStorage.setItem('playerAudioEnhancer', mode);
+    writeLocalStorage('playerAudioEnhancer', mode);
 
     if (bassFilterRef.current) {
       applyAudioEnhancerPreset(mode);
@@ -5737,7 +6023,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   const handleCustomAudioChange = useCallback((key: string, value: number) => {
     setCustomAudio((prev: typeof customAudio) => {
       const updated = { ...prev, [key]: value };
-      localStorage.setItem('playerCustomAudio', JSON.stringify(updated));
+      writeLocalStorage('playerCustomAudio', JSON.stringify(updated));
       // Apply in real-time if custom mode is active
       if (audioEnhancerMode === 'custom') {
         applyAudioEnhancerPreset('custom', updated);
@@ -5749,14 +6035,14 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   // Handle video OLED mode change
   const handleVideoOledChange = useCallback((mode: 'off' | 'natural' | 'cinema' | 'vivid' | 'custom') => {
     setVideoOledMode(mode);
-    localStorage.setItem('playerVideoOled', mode);
+    writeLocalStorage('playerVideoOled', mode);
   }, []);
 
   // Handle custom OLED parameter change
   const handleCustomOledChange = useCallback((key: string, value: number) => {
     setCustomOled((prev: typeof customOled) => {
       const updated = { ...prev, [key]: value };
-      localStorage.setItem('playerCustomOled', JSON.stringify(updated));
+      writeLocalStorage('playerCustomOled', JSON.stringify(updated));
       return updated;
     });
   }, []);
@@ -5782,7 +6068,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   const handleVolumeBoostChange = useCallback((newBoost: number) => {
     const clampedBoost = Math.max(1, Math.min(3, newBoost)); // 100% to 300%
     setVolumeBoost(clampedBoost);
-    localStorage.setItem('playerVolumeBoost', clampedBoost.toString());
+    writeLocalStorage('playerVolumeBoost', clampedBoost.toString());
 
     if (gainNodeRef.current && gainNodeRef.current.gain) {
       gainNodeRef.current.gain.value = clampedBoost;
@@ -5840,18 +6126,32 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     };
   }, [src]);
 
-  // Cleanup audio context on unmount
+  // Cleanup audio context on unmount.
+  // Un élément <video> ne se relie qu'une seule fois à un
+  // MediaElementSourceNode. Le StrictMode démonte puis remonte aussitôt les
+  // effets sur le même élément : fermer le contexte tout de suite faisait
+  // échouer createMediaElementSource au remontage, et la vidéo restait reliée
+  // à un contexte fermé, donc muette. La fermeture attend la fin du cycle et
+  // un remontage l'annule.
   useEffect(() => {
+    if (audioContextCloseTimerRef.current) {
+      clearTimeout(audioContextCloseTimerRef.current);
+      audioContextCloseTimerRef.current = null;
+    }
     return () => {
-      if (audioContextRef.current) {
-        audioContextRef.current.close().catch(console.error);
-      }
+      audioContextCloseTimerRef.current = setTimeout(() => {
+        audioContextCloseTimerRef.current = null;
+        const ctx = audioContextRef.current;
+        if (ctx && ctx.state !== 'closed') {
+          ctx.close().catch(console.error);
+        }
+      }, 0);
     };
   }, []);
 
   const skipTime = (seconds: number) => {
     if (videoRef.current) {
-      videoRef.current.currentTime += seconds;
+      seekVideoSafely(videoRef.current, videoRef.current.currentTime + seconds);
 
       if (seconds > 0) {
         // Gérer les clics multiples pour forward
@@ -5901,10 +6201,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
    */
   const hidePlayerChrome = useCallback(() => {
     setShowControls(false);
-    if (controlsTimeoutRef.current) {
-      clearTimeout(controlsTimeoutRef.current);
-      controlsTimeoutRef.current = undefined;
-    }
+    clearControlsTimeout();
     setShowSettings(false);
     setShowVolumeSlider(false);
     setShowCastMenu(false);
@@ -5912,7 +6209,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     setShowSeasonDropdown(false);
     setShowStreamInfo(false);
     setShowShortcutsHelp(false);
-  }, []);
+  }, [clearControlsTimeout]);
 
   const toggleFullscreen = async () => {
     const playerElement = containerRef.current;
@@ -5980,47 +6277,6 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       document.removeEventListener('webkitfullscreenchange', syncFullscreenState);
     };
   }, [fullscreenTarget, hidePlayerChrome]);
-
-  // L'escamotage automatique de la barre n'est armé que par un mouvement de
-  // souris ou un clic sur la vidéo. Sans l'un ni l'autre — télé, box,
-  // télécommande — il ne l'est jamais, et la barre reste posée sur le film. En
-  // plein écran on l'arme donc nous-mêmes dès que rien d'autre ne l'a fait, ce
-  // qui rattrape aussi tout ce qui rallumerait l'interface juste après le
-  // basculement.
-  useEffect(() => {
-    if (!isFullscreen || !showControls || !isPlaying || isLocked) return;
-    // Un panneau ouvert, c'est une lecture en cours : on ne le referme pas au
-    // nez de l'utilisateur.
-    if (
-      showSettings || showCastMenu || showVolumeSlider
-      || showInternalEpisodesMenu || showStreamInfo || showShortcutsHelp
-    ) return;
-    // Les animations +10/-10 doivent rester visibles jusqu'au bout.
-    if (
-      showForwardAnimation || showRewindAnimation
-      || showLeftTapAnimation || showRightTapAnimation
-    ) return;
-    // Un escamotage est déjà programmé (souris, clic) : il fait le travail.
-    if (controlsTimeoutRef.current) return;
-
-    controlsTimeoutRef.current = setTimeout(() => {
-      controlsTimeoutRef.current = undefined;
-      setShowControls(false);
-      setShowVolumeSlider(false);
-    }, FULLSCREEN_IDLE_HIDE_MS);
-
-    const armed = controlsTimeoutRef.current;
-    return () => {
-      clearTimeout(armed);
-      // Ne pas effacer la référence si un autre minuteur a pris la place.
-      if (controlsTimeoutRef.current === armed) controlsTimeoutRef.current = undefined;
-    };
-  }, [
-    isFullscreen, showControls, isPlaying, isLocked,
-    showSettings, showCastMenu, showVolumeSlider,
-    showInternalEpisodesMenu, showStreamInfo, showShortcutsHelp,
-    showForwardAnimation, showRewindAnimation, showLeftTapAnimation, showRightTapAnimation,
-  ]);
 
   // Add state for PiP error message display
   const [pipError, setPipError] = useState<string | null>(null);
@@ -6238,27 +6494,12 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     } else {
       // Start casting immediately without showing menu
       setShowControls(true);
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-        controlsTimeoutRef.current = undefined;
-      }
+      clearControlsTimeout();
       setShowCastMenu(false);
       // Fire and forget; internal loading states are handled within startCasting
       void startCasting();
     }
   };
-
-  const keepControlsVisibleAfterInteraction = useCallback(() => {
-    setShowControls(true);
-    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    controlsTimeoutRef.current = undefined;
-    if (!isPlaying || showCastMenu) return;
-    controlsTimeoutRef.current = setTimeout(() => {
-      setShowControls(false);
-      setShowVolumeSlider(false);
-      controlsTimeoutRef.current = undefined;
-    }, 5_000);
-  }, [isPlaying, showCastMenu]);
 
   const handlePlayerControlInteractionCapture = useCallback(
     (event: React.SyntheticEvent) => {
@@ -6269,168 +6510,38 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     [keepControlsVisibleAfterInteraction],
   );
 
-  // Function to ensure video element is properly configured for AirPlay
-  /**
-   * Toggle AirPlay connection
-   * 
-   * IMPORTANT: AirPlay requires Safari's native HLS playback.
-   * When AirPlay is activated, we must:
-   * 1. Destroy HLS.js instance (MSE is incompatible with AirPlay)
-   * 2. Use Safari's native HLS support
-   * 3. Show the AirPlay device picker
-   */
+  // AirPlay utilise la source native ; ouvrir son sélecteur avant tout await.
   const toggleAirPlay = () => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    if (isAirPlaying) {
-      // Disconnect from AirPlay
-      try {
-        console.log('[AirPlay] Disconnecting...');
-        // Reconnect with HLS.js for normal playback
-        loadSource();
-      } catch (error) {
-        console.error('[AirPlay] Error disconnecting:', error);
-      }
-    } else {
-      // Hide cast menu and show controls
-      setShowControls(true);
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-        controlsTimeoutRef.current = undefined;
-      }
-      setShowCastMenu(false);
-
-      // Start AirPlay
-      startAirPlay();
-    }
+    setShowControls(true);
+    clearControlsTimeout();
+    setShowCastMenu(false);
+    // Le sélecteur système permet aussi de revenir à l'iPhone. On attend
+    // l'événement de déconnexion avant de réattacher le moteur local.
+    void startAirPlay();
   };
 
-  /**
-   * Start AirPlay session
-   * This will switch from HLS.js to native playback and show the device picker
-   * (Safari path), or fall back to the W3C Remote Playback API picker for
-   * browsers without WebKit AirPlay or chrome.cast (Firefox / shielded Brave).
-   */
   const startAirPlay = async () => {
+    const video = videoRef.current;
+    if (!video || isAirPlayLoading) return;
+    const useWebKitPath = isAirPlaySupported();
+    const switchingToNative = useWebKitPath && !nativeAirPlayRef.current;
+    setAirPlayError(null);
     setIsAirPlayLoading(true);
+    if (switchingToNative) {
+      playbackRestoreRef.current = { contentKey: contentQualityKey, time: video.currentTime, playing: !video.paused };
+      nativeAirPlayRef.current = true;
+      setNativeAirPlay(true);
+    }
     try {
-      const video = videoRef.current;
-      if (!video) throw new Error('No video element');
-
-      const useWebKitPath = isAirPlaySupported();
-      const useRemoteFallback = !useWebKitPath && isRemotePlaybackSupported(video);
-
-      if (!useWebKitPath && !useRemoteFallback) {
-        throw new Error('AirPlay/Remote Playback not supported on this device/browser');
-      }
-
-      console.log('[AirPlay] Starting session via', useWebKitPath ? 'WebKit' : 'Remote Playback API');
-
-      if (useWebKitPath) {
-        const currentTime = video.currentTime;
-        const wasPlaying = !video.paused;
-
-        // Step 1: Show the system picker FIRST, synchronously inside the user
-        // gesture. webkitShowPlaybackTargetPicker silently no-ops without
-        // transient activation — awaiting the source swap (manifest fetch)
-        // before showing it burns the gesture on slow networks. The user takes
-        // at least a second to pick a device, which gives the swap below time
-        // to finish in parallel.
-        await requestAirPlay(video);
-        console.log('[AirPlay] Device picker shown successfully');
-
-        // Step 2: Destroy HLS.js instance if it exists
-        // AirPlay is incompatible with MSE (Media Source Extensions)
-        if (hlsRef.current) {
-          console.log('[AirPlay] Destroying HLS.js instance for native playback...');
-          hlsRef.current.destroy();
-          hlsRef.current = null;
-        }
-
-        // Step 3: Switch to native Safari playback
-        // Safari has built-in HLS support that works with AirPlay
-        const airPlayUrl = src;
-
-        console.log('[AirPlay] Switching to native playback with URL:', airPlayUrl);
-
-        // Configure video element for AirPlay
-        video.setAttribute('x-webkit-airplay', 'allow');
-        const videoWithAirPlay = video as HTMLVideoElementWithWebkit;
-        if (typeof videoWithAirPlay.webkitWirelessVideoPlaybackDisabled !== 'undefined') {
-          videoWithAirPlay.webkitWirelessVideoPlaybackDisabled = false;
-        }
-        if ('disableRemotePlayback' in video) {
-          (video as any).disableRemotePlayback = false;
-        }
-
-        // Set the source directly (Safari will handle HLS natively)
-        video.src = airPlayUrl;
-
-        // Wait for video to be ready. Reject on media error and after 15s so
-        // a stream the native pipeline can't load (CORS, headers, dead host)
-        // doesn't leave the player stuck on the connecting spinner forever.
-        await new Promise<void>((resolve, reject) => {
-          const cleanupListeners = () => {
-            window.clearTimeout(timeoutId);
-            video.removeEventListener('loadedmetadata', onLoadedMetadata);
-            video.removeEventListener('error', onError);
-          };
-          const onLoadedMetadata = () => {
-            cleanupListeners();
-            resolve();
-          };
-          const onError = () => {
-            cleanupListeners();
-            const mediaError = video.error;
-            reject(new Error(`AirPlay: native stream failed to load${mediaError ? ` (code ${mediaError.code})` : ''}`));
-          };
-          const timeoutId = window.setTimeout(() => {
-            cleanupListeners();
-            reject(new Error('AirPlay: timed out loading native stream'));
-          }, 15000);
-          video.addEventListener('loadedmetadata', onLoadedMetadata);
-          video.addEventListener('error', onError);
-          video.load();
-        });
-
-        // Restore position only once metadata is ready — seeking before
-        // loadedmetadata gets discarded by Safari and playback restarts at 0.
-        video.currentTime = currentTime;
-
-        // Resume playback if it was playing
-        if (wasPlaying) {
-          await video.play();
-        }
-      } else {
-        // Remote Playback API fallback — DON'T destroy HLS.js. The picker is
-        // shown via `video.remote.prompt()` and the receiver gets whatever
-        // src is currently on the element (works for MP4 / native HLS, fails
-        // gracefully for HLS.js blob URLs — same caveat as Safari without
-        // native HLS).
-        if ('disableRemotePlayback' in video) {
-          (video as any).disableRemotePlayback = false;
-        }
-
-        // Show the Remote Playback picker — must run inside the user gesture.
-        await requestAirPlay(video);
-        console.log('[AirPlay] Device picker shown successfully');
-      }
-
+      // L'appel reste synchrone dans le geste utilisateur. L'effet du lecteur
+      // fera ensuite le remplacement de MSE par la source HLS native.
+      await requestAirPlay(video);
+      if (!switchingToNative) setIsAirPlayLoading(false);
     } catch (error) {
-      console.error('[AirPlay] Error starting AirPlay:', error);
-      setAirPlayError(error instanceof Error ? error.message : t('watch.airplayError'));
-      // Keep menu open so the user actually sees the error message.
+      console.error('[AirPlay] Device picker failed:', error);
+      setAirPlayError(t('watch.airplayError'));
       setShowCastMenu(true);
-
-      // If AirPlay failed, try to restore HLS.js playback
-      try {
-        await loadSource();
-      } catch (restoreError) {
-        console.error('[AirPlay] Failed to restore HLS.js playback:', restoreError);
-      }
-    } finally {
-      setIsAirPlayLoading(false);
+      restoreLocalPlayback();
     }
   };
 
@@ -6561,15 +6672,11 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   ]);
 
   const buildCurrentCastSource = useCallback(async (): Promise<CastSource> => {
-    const streams = src.includes('.m3u8')
-      ? await parseM3u8Manifest(src)
-      : [];
-    const bestStream = streams.length > 0 ? selectBestStream(streams) : null;
-    const streamUrl = bestStream?.url || src;
-    const preferredStreamUrl = await preferFrenchAudioVariant(streamUrl, src);
+    // Garder le master : ses variantes vidéo peuvent dépendre de groupes
+    // audio séparés (EXT-X-MEDIA) que perdrait une URL de qualité isolée.
     return {
-      url: preferredStreamUrl,
-      contentType: resolveCastContentType(preferredStreamUrl, isSelectedKisskhMp4),
+      url: src,
+      contentType: resolveCastContentType(src, isSelectedKisskhMp4 || isMP4Source(src)),
       title: title || tvShow?.name || 'Movix',
       poster: poster
         ? (poster.startsWith('http')
@@ -6671,31 +6778,12 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         setIsCastLoading(true);
         setCastError(null);
 
-        const finalUrl = await prepareCastSourceWithFallback({
-          fallbackUrl: src,
-          timeoutMs: 1_500,
-          prepare: async () => {
-            const streams = src.includes('.m3u8')
-              ? await parseM3u8Manifest(src)
-              : [];
-            const bestStream = streams.length > 0 ? selectBestStream(streams) : null;
-            const streamUrl = bestStream?.url || src;
-            return preferFrenchAudioVariant(streamUrl, src);
-          },
-        });
-
         const preparedCastSource = await buildCurrentCastSource();
 
         const controller =
           castController ?? createAndroidCastRemoteController(nativeCastBridge);
         if (!castController) setCastController(controller);
-        await controller.load({
-          ...preparedCastSource,
-          url: finalUrl,
-          contentType: resolveCastContentType(finalUrl, isSelectedKisskhMp4),
-          currentTimeSec: videoRef.current?.currentTime || 0,
-          tracks: preparedCastSource.tracks,
-        });
+        await controller.load(preparedCastSource);
         applyAuthoritativeCastStatus(await controller.getStatus());
         // Track what we loaded so the src-change effect doesn't reload on every render.
         lastLoadedCastSrcRef.current = nativeCastSrc;
@@ -6987,18 +7075,15 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     }
   }, [movieId]);
 
-  // Cast SDK load timeout — if `__onGCastApiAvailable` hasn't fired after 5s,
-  // gstatic.com is almost certainly blocked (adblocker, ISP filter, shielded
-  // browser). Surface this as a distinct state so the UI can guide the user
-  // instead of showing a generic "no devices found".
+  // Distinguer le chargement du SDK de la recherche de récepteurs, sans
+  // attribuer une panne réseau à un bloqueur ni attendre Cast sur iOS.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if ((window as any).chrome?.cast) return; // Already loaded — nothing to wait for.
+    if (!isWebCastSupported()) return;
+    if ((window as any).chrome?.cast?.isAvailable) return;
 
     const timeoutId = window.setTimeout(() => {
-      if (!(window as any).chrome?.cast) {
-        console.warn('[Cast] SDK did not load within 5s — likely blocked by adblock/ISP');
-        setCastSdkBlocked(true);
+      if (!(window as any).chrome?.cast?.isAvailable) {
+        setCastSdkUnavailable(true);
       }
     }, 5000);
 
@@ -7020,8 +7105,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         previousCallback(isAvailable);
       }
 
-      // SDK fired its callback — clear the "blocked" flag if it was set.
-      setCastSdkBlocked(false);
+      setCastSdkUnavailable(!isAvailable);
 
       if (isAvailable) {
         void initializeCast();
@@ -7185,14 +7269,24 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     // Either WebKit AirPlay (Safari) or W3C Remote Playback API (Firefox /
     // browsers without cast.framework). isRemotePlaybackSupported already
     // excludes Safari and Chrome-with-cast so the two checks don't overlap.
-    if (!video || (!isAirPlaySupported() && !isRemotePlaybackSupported(video))) {
+    if (isCasting || !video || (!isAirPlaySupported() && !isRemotePlaybackSupported(video))) {
       setAirPlayAvailable(false);
+      setIsAirPlaying(false);
       return;
     }
 
+    let wasConnected = false;
     const onStateChange = (state: { isAvailable: boolean; isConnected: boolean; isConnecting: boolean }) => {
+      const disconnected = wasConnected && !state.isConnected;
+      wasConnected = state.isConnected;
       setAirPlayAvailable(state.isAvailable);
       setIsAirPlaying(state.isConnected);
+      if (state.isConnected && isAirPlaySupported()) {
+        nativeAirPlayRef.current = true;
+        setNativeAirPlay(true);
+      } else if (disconnected && nativeAirPlayRef.current) {
+        restoreLocalPlayback();
+      }
     };
 
     const cleanup = initializeAirPlay(video, onStateChange);
@@ -7202,7 +7296,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         cleanup();
       }
     };
-  }, [videoRef]);
+  }, [isCasting, restoreLocalPlayback]);
 
   // Close cast menu when clicking outside
   useEffect(() => {
@@ -7297,25 +7391,26 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   };
 
   const handleAudioTrackChange = (trackId: number) => {
+    const track = audioTracks.find(item => item.id === trackId);
+    if (!track) return;
     if (hlsRef.current) {
-      const track = audioTracks.find(item => item.id === trackId);
-      if (track) {
-        hlsAudioPreferences.set(contentQualityKey, {
-          language: track.language,
-          name: track.name,
-        });
-      }
       hlsRef.current.audioTrack = trackId;
-      setCurrentAudioTrack(trackId);
-      setShowSettings(false);
+    } else if (!videoRef.current || !selectNativeAudioTrack(videoRef.current, trackId)) {
+      return;
     }
+    hlsAudioPreferences.set(contentQualityKey, {
+      language: track.language,
+      name: track.name,
+    });
+    setCurrentAudioTrack(trackId);
+    setShowSettings(false);
   };
 
   const handlePlaybackSpeedChange = (speed: number) => {
     if (videoRef.current) {
       videoRef.current.playbackRate = speed;
       setPlaybackSpeed(speed);
-      localStorage.setItem('playerPlaybackSpeed', speed.toString());
+      writeLocalStorage('playerPlaybackSpeed', speed.toString());
       // setShowSettings(false); // REMOVED: Don't close settings automatically
     }
   };
@@ -7398,8 +7493,10 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
   const handleReplay = () => {
     if (videoRef.current) {
-      videoRef.current.currentTime = 0;
-      videoRef.current.play();
+      seekVideoSafely(videoRef.current, 0);
+      safePlay(videoRef.current).catch(error => {
+        console.error('Erreur lors de la reprise de la lecture:', error);
+      });
       setShowNextMovie(false);
     }
   };
@@ -7418,7 +7515,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     });
     if (newTime === null) return;
 
-    videoRef.current.currentTime = newTime;
+    if (!seekVideoSafely(videoRef.current, newTime)) return;
     setCurrentTime(newTime);
   };
 
@@ -7434,13 +7531,18 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
   // State for saving progress preference
   const [saveProgressEnabled, setSaveProgressEnabled] = useState(() => {
-    const savedPref = localStorage.getItem('playerSaveProgressPref');
-    return savedPref !== null ? JSON.parse(savedPref) : true; // Default to true
+    const savedPref = readLocalStorage('playerSaveProgressPref');
+    if (savedPref === null) return true;
+    try {
+      return JSON.parse(savedPref);
+    } catch {
+      return true;
+    }
   });
 
   // Effect to save the preference to localStorage when it changes
   useEffect(() => {
-    localStorage.setItem('playerSaveProgressPref', JSON.stringify(saveProgressEnabled));
+    writeLocalStorage('playerSaveProgressPref', JSON.stringify(saveProgressEnabled));
   }, [saveProgressEnabled]);
 
   // Réglages de la proposition « À suivre » (déclencheur, forme, décompte).
@@ -7498,7 +7600,13 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       timestamp: new Date().toISOString(),
       duration: video.duration
     };
-    localStorage.setItem(key, JSON.stringify(progress));
+    try {
+      localStorage.setItem(key, JSON.stringify(progress));
+    } catch (error) {
+      // La progression est une amélioration facultative : un quota saturé ne
+      // doit pas interrompre la lecture ni les événements timeupdate suivants.
+      console.warn('[saveProgress] Impossible de sauvegarder la progression:', error);
+    }
   }, [getProgressKey, tvShowId, seasonNumber, episodeNumber, tvShow, saveProgressEnabled]);
 
   const loadProgress = useCallback(() => {
@@ -7519,16 +7627,19 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         // Use initialTime prop if provided and valid
         if (initialTime && initialTime > 0 && initialTime < video.duration - 30) {
           console.log(`[loadProgress] Seeking to initialTime prop: ${initialTime}`);
-          video.currentTime = initialTime;
+          seekVideoSafely(video, initialTime);
         } else {
           // Otherwise, use localStorage progress
-          const savedProgress = localStorage.getItem(key);
+          const savedProgress = readLocalStorage(key);
           if (savedProgress) {
             try {
               const progress: WatchProgress = JSON.parse(savedProgress);
-              if (progress.position < video.duration - 30) {
+              // Un épisode arrêté dans le générique est un épisode terminé : le
+              // reprendre à cet endroit relancerait chaque revisionnage dans les
+              // dernières secondes. Même seuil de 95 % que la fiche film.
+              if (progress.position < video.duration - 30 && progress.position < video.duration * 0.95) {
                 console.log(`[loadProgress] Seeking to saved localStorage position: ${progress.position}`);
-                video.currentTime = progress.position;
+                seekVideoSafely(video, progress.position);
               } else {
                 console.log(`[loadProgress] Not seeking: localStorage progress is too close to end.`);
               }
@@ -7685,41 +7796,9 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     if (showControls && !isSkipAnimationActive) {
       // Si les contrôles sont déjà affichés et pas d'animation en cours, on les cache
       setShowControls(false);
-      // On nettoie aussi le timeout existant si présent
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-        controlsTimeoutRef.current = undefined;
-      }
+      clearControlsTimeout();
     } else if (!showControls) {
-      // Si les contrôles sont cachés, on les affiche
-      setShowControls(true);
-      // On définit un timeout pour les cacher après un délai
-      if (controlsTimeoutRef.current) {
-        clearTimeout(controlsTimeoutRef.current);
-      }
-      if (isPlaying && !isSkipAnimationActive) {
-        // Détecter l'orientation mobile paysage et plein écran
-        const isLandscape = window.innerHeight < window.innerWidth;
-        const isMobileLandscape = isMobile && isLandscape;
-        const isFullscreenMode = document.fullscreenElement !== null;
-        const isMobileLandscapeFullscreen = isMobileLandscape && isFullscreenMode;
-
-        // En mode paysage mobile plein écran, timeout plus court
-        let timeout = 5000;
-        if (isMobileLandscapeFullscreen) {
-          timeout = 2000; // Très court en plein écran paysage
-        } else if (isMobileLandscape) {
-          timeout = 3000; // Court en paysage normal
-        }
-
-        controlsTimeoutRef.current = setTimeout(() => {
-          // Vérifier à nouveau si des animations sont en cours avant de cacher
-          if (!showForwardAnimation && !showRewindAnimation) {
-            setShowControls(false);
-            setShowVolumeSlider(false);
-          }
-        }, timeout);
-      }
+      keepControlsVisibleAfterInteraction();
     }
   };
 
@@ -7729,15 +7808,12 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
     // Tenter la lecture automatique seulement si autoPlay est true
     if (autoPlay) {
-      const playPromise = video.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => setIsPlaying(true))
-          .catch(() => {
-            // Si l'autoplay échoue, on ne fait rien et on attend l'interaction utilisateur
-            setIsPlaying(false);
-          });
-      }
+      safePlay(video)
+        .then(() => setIsPlaying(true))
+        .catch(() => {
+          // Si l'autoplay échoue, on ne fait rien et on attend l'interaction utilisateur
+          setIsPlaying(false);
+        });
     }
   }, [autoPlay]);
 
@@ -7763,6 +7839,11 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   // Préférences d'animation : mode léger, appareil modeste ou
   // `prefers-reduced-motion` coupent les transitions et le flou.
   const { effectivePrefs: animationPrefs } = useLightMode();
+
+  // Thème Halloween : une citrouille remplace la boule des barres de
+  // progression. C'est le réglage qui compte, la classe du thème étant
+  // retirée sur les lecteurs.
+  const halloweenTheme = useHalloweenTheme();
 
   // ==========================================================================
   // Saut d'intro / résumé / outro / crédits / aperçu
@@ -7904,8 +7985,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     if (!video || !Number.isFinite(seconds)) return;
     const limit = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : seconds;
     const target = Math.max(0, Math.min(seconds, limit));
-    video.currentTime = target;
-    setCurrentTime(target);
+    if (seekVideoSafely(video, target)) setCurrentTime(target);
   }, []);
 
   /**
@@ -8157,8 +8237,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       skipSeekTimerRef.current = null;
       // L'événement `seeked` natif déclenché ici est celui qu'écoute déjà la
       // synchro watch party : rien de spécifique à propager en plus.
-      video.currentTime = target;
-      setCurrentTime(target);
+      if (seekVideoSafely(video, target)) setCurrentTime(target);
     };
 
     if (skipSeekTimerRef.current !== null) window.clearTimeout(skipSeekTimerRef.current);
@@ -8411,18 +8490,33 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     confirmActivePromptRef.current = confirmActivePrompt;
   });
 
+  // Les flèches appartiennent au lecteur (seek / volume) tant qu'il est monté :
+  // la navigation D-pad du mode TV se met en retrait sur simple déclaration,
+  // sans avoir à sonder le DOM. Voir src/utils/tvSpatialNav.ts.
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
+    suppressTvSpatialNav();
+    return () => releaseTvSpatialNav();
+  }, []);
 
-    const handleKeyPress = (e: KeyboardEvent) => {
-      // Ignorer si l'utilisateur est en train de taper dans un champ texte
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
+  const handlePlayerKeyDownRef = useRef<(event: KeyboardEvent) => void>(() => {});
+
+  // Les commandes lisent le dernier état sans réabonner le document à chaque
+  // timeupdate, ni conserver un ancien showControls dans une fermeture.
+  useEffect(() => {
+    handlePlayerKeyDownRef.current = (e: KeyboardEvent) => {
+      const video = videoRef.current;
+      const container = containerRef.current;
+      if (!video || !container || e.defaultPrevented || onlyQualityMenu || isCasting) return;
 
       const keyboardTarget = e.target instanceof HTMLElement ? e.target : document.activeElement;
-      if (isSourceMenuTarget(keyboardTarget)) {
+      const dialog = keyboardTarget instanceof HTMLElement ? keyboardTarget.closest('[role="dialog"]') : null;
+      // Laisser les champs, dialogues et panneaux externes gérer leurs touches.
+      if (keyboardTarget instanceof HTMLElement && (
+        keyboardTarget.closest('input, textarea, select, [contenteditable="true"]')
+        || (dialog && container.contains(dialog))
+        || (keyboardTarget !== document.body && keyboardTarget !== document.documentElement
+          && !container.contains(keyboardTarget))
+      )) {
         return;
       }
 
@@ -8432,17 +8526,79 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         return;
       }
 
-      const key = e.key;
+      const key = getPlayerNavigationKey(e);
+      const isArrow = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key);
+      const isConfirm = key === 'Enter' || key === 'Select' || key === 'Accept';
+      const focusedControl = keyboardTarget instanceof HTMLElement
+        ? keyboardTarget.closest<HTMLButtonElement>('button')
+        : null;
+      const isChromeControl = showControls && focusedControl?.closest('[data-player-chrome]');
 
-      // Entrée — confirme la popup affichée (saut d'intro/outro, épisode
-      // suivant, film suivant). On ne consomme la touche que si une popup a
-      // répondu : sinon Entrée doit garder son comportement normal.
-      if (key === 'Enter') {
-        if (confirmActivePromptRef.current()) {
-          e.preventDefault();
+      if (!e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (key === 'Escape' || key === 'BrowserBack' || key === 'GoBack') {
+          if (showControls || showSettings || showCastMenu || showInternalEpisodesMenu
+            || showStreamInfo || showShortcutsHelp) {
+            e.preventDefault();
+            hidePlayerChrome();
+          } else if (key !== 'Escape' && getFullscreenElement()) {
+            e.preventDefault();
+            void exitPlayerFullscreen(video);
+          }
+          return;
         }
-        return;
+
+        // Les menus conservent leur navigation et leurs boutons natifs.
+        if (key !== '?' && (showSettings || showCastMenu || showInternalEpisodesMenu || showStreamInfo
+          || showShortcutsHelp || studioOpen)) return;
+
+        if (focusedControl && (isConfirm || key === ' ')) {
+          setKeyboardControlsActive(true);
+          keepControlsVisibleAfterInteraction();
+          if (e.repeat) {
+            e.preventDefault();
+            return;
+          }
+          if (key === 'Select' || key === 'Accept') {
+            e.preventDefault();
+            focusedControl.click();
+          }
+          // Entrée/Espace activent le bouton focalisé, y compris le plein écran.
+          return;
+        }
+
+        if (isConfirm && !e.repeat && confirmActivePromptRef.current()) {
+          e.preventDefault();
+          return;
+        }
+
+        if (controls && (isConfirm || (isArrow && (isChromeControl || keyboardControlsActive || !isMousePointer)))) {
+          e.preventDefault();
+          setKeyboardControlsActive(true);
+          if (showControls) focusPlayerControl(container, isArrow ? key : undefined);
+          else focusControlsOnRevealRef.current = true;
+          keepControlsVisibleAfterInteraction();
+          return;
+        }
+
+        if (key === 'MediaPlayPause' || key === 'MediaPlay' || key === 'MediaPause') {
+          e.preventDefault();
+          if (!isWatchPartyGuest && !e.repeat
+            && (key === 'MediaPlayPause' || (key === 'MediaPlay' ? video.paused : !video.paused))) {
+            void togglePlay();
+          }
+          keepControlsVisibleAfterInteraction();
+          return;
+        }
+        if (key === 'MediaFastForward' || key === 'MediaRewind') {
+          e.preventDefault();
+          if (!isWatchPartyGuest) skipTime(key === 'MediaFastForward' ? 10 : -10);
+          keepControlsVisibleAfterInteraction();
+          return;
+        }
+        if (isArrow) keepControlsVisibleAfterInteraction();
       }
+
+      if (isSourceMenuTarget(keyboardTarget)) return;
 
       // Ctrl+J — Infos du flux vidéo (style VLC)
       if (e.ctrlKey && key.toLowerCase() === 'j') {
@@ -8537,7 +8693,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             const fasterSpeed = Math.min(3, playbackSpeed + 0.25);
             video.playbackRate = fasterSpeed;
             setPlaybackSpeed(fasterSpeed);
-            localStorage.setItem('playerPlaybackSpeed', fasterSpeed.toString());
+            writeLocalStorage('playerPlaybackSpeed', fasterSpeed.toString());
           }
           return;
         case '<': // Shift+< = Ralentir
@@ -8546,7 +8702,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             const slowerSpeed = Math.max(0.25, playbackSpeed - 0.25);
             video.playbackRate = slowerSpeed;
             setPlaybackSpeed(slowerSpeed);
-            localStorage.setItem('playerPlaybackSpeed', slowerSpeed.toString());
+            writeLocalStorage('playerPlaybackSpeed', slowerSpeed.toString());
           }
           return;
         case '+': // Accélérer
@@ -8555,7 +8711,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             const fasterSpeed = Math.min(3, playbackSpeed + 0.25);
             video.playbackRate = fasterSpeed;
             setPlaybackSpeed(fasterSpeed);
-            localStorage.setItem('playerPlaybackSpeed', fasterSpeed.toString());
+            writeLocalStorage('playerPlaybackSpeed', fasterSpeed.toString());
           }
           return;
         case '-': // Ralentir
@@ -8564,26 +8720,26 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             const slowerSpeed = Math.max(0.25, playbackSpeed - 0.25);
             video.playbackRate = slowerSpeed;
             setPlaybackSpeed(slowerSpeed);
-            localStorage.setItem('playerPlaybackSpeed', slowerSpeed.toString());
+            writeLocalStorage('playerPlaybackSpeed', slowerSpeed.toString());
           }
           return;
         case '.': // Image suivante (en pause)
           if (video.paused && Number.isFinite(video.duration) && video.duration > 0) {
             e.preventDefault();
-            video.currentTime = Math.min(video.duration, video.currentTime + (1 / 30));
+            seekVideoSafely(video, Math.min(video.duration, video.currentTime + (1 / 30)));
           }
           return;
         case ',': // Image précédente (en pause)
           if (video.paused && Number.isFinite(video.duration) && video.duration > 0) {
             e.preventDefault();
-            video.currentTime = Math.max(0, video.currentTime - (1 / 30));
+            seekVideoSafely(video, Math.max(0, video.currentTime - (1 / 30)));
           }
           return;
         case '0': // Vitesse normale
           e.preventDefault();
           video.playbackRate = 1;
           setPlaybackSpeed(1);
-          localStorage.setItem('playerPlaybackSpeed', '1');
+          writeLocalStorage('playerPlaybackSpeed', '1');
           return;
         case '1': case '2': case '3':
         case '4': case '5': case '6':
@@ -8591,13 +8747,13 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
           e.preventDefault();
           if (Number.isFinite(video.duration) && video.duration > 0) {
             const percent = parseInt(key) / 10;
-            video.currentTime = video.duration * percent;
+            seekVideoSafely(video, video.duration * percent);
           }
           return;
       }
 
-      // === Raccourcis basés sur e.code (touches physiques sans caractère) ===
-      switch (e.code) {
+      // === Touches de navigation (e.code peut manquer dans une WebView) ===
+      switch (key) {
         case 'ArrowLeft':
           e.preventDefault();
           skipTime(-10);
@@ -8612,7 +8768,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             const newVolumeUp = clampVolume(video.volume + 0.05);
             video.volume = newVolumeUp;
             setVolume(newVolumeUp);
-            localStorage.setItem('playerVolume', newVolumeUp.toString());
+            writeLocalStorage('playerVolume', newVolumeUp.toString());
             setShowVolumeSlider(true);
           }
           break;
@@ -8622,37 +8778,30 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             const newVolumeDown = clampVolume(video.volume - 0.05);
             video.volume = newVolumeDown;
             setVolume(newVolumeDown);
-            localStorage.setItem('playerVolume', newVolumeDown.toString());
+            writeLocalStorage('playerVolume', newVolumeDown.toString());
             setShowVolumeSlider(true);
           }
           break;
         case 'Home':
           e.preventDefault();
-          if (Number.isFinite(video.duration) && video.duration > 0) video.currentTime = 0;
+          if (Number.isFinite(video.duration) && video.duration > 0) seekVideoSafely(video, 0);
           break;
         case 'End':
           e.preventDefault();
-          if (Number.isFinite(video.duration) && video.duration > 0) video.currentTime = video.duration;
-          break;
-        case 'Escape':
-          if (showStreamInfo) {
-            e.preventDefault();
-            setShowStreamInfo(false);
-          }
-          if (showShortcutsHelp) {
-            e.preventDefault();
-            setShowShortcutsHelp(false);
-          }
+          if (Number.isFinite(video.duration) && video.duration > 0) seekVideoSafely(video, video.duration);
           break;
       }
     };
+  });
 
+  useEffect(() => {
+    const handleKeyPress = (event: KeyboardEvent) => handlePlayerKeyDownRef.current(event);
     document.addEventListener('keydown', handleKeyPress);
 
     return () => {
       document.removeEventListener('keydown', handleKeyPress);
     };
-  }, [playbackSpeed, showStreamInfo, showShortcutsHelp, currentSubtitle, subtitles, showOsd, isSourceMenuTarget, isLocked]);
+  }, []);
 
   useEffect(() => {
     const fetchNextMovieDetails = async () => {
@@ -8822,118 +8971,6 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     return false;
   }, [currentDarkiIndex, darkinoSources, src]);
 
-  const loadSource = async () => {
-    if (!videoRef.current) return;
-
-    // Lazy-load HLS.js if we haven't yet — needed for non-MP4 sources
-    const Hls = await loadHls();
-    if (!videoRef.current) return;
-
-    // Save current position before switching source
-    const savedPosition = videoRef.current.currentTime > 0 ? videoRef.current.currentTime : initialTime || 0;
-    const wasPlaying = !videoRef.current.paused;
-
-    // Check if source is MP4
-    const isMP4 = kisskhSources.some(source => (
-      source.type === 'mp4' && source.url === src
-    )) || isMp4SourceResolved(src);
-
-    if (isMP4) {
-      // For MP4, directly set the source on the video element
-      videoRef.current.src = src;
-      setLoadingError(false);
-
-      // Add onloadedmetadata handler to restore position
-      const handleLoaded = () => {
-        if (videoRef.current) { // Null check
-          if (savedPosition > 0) {
-            console.log(`MP4: Restoring position to ${savedPosition}s`);
-            videoRef.current.currentTime = savedPosition;
-
-            if (wasPlaying && autoPlay) {
-              safePlay(videoRef.current).catch(e => console.error('Error playing MP4 after position restore:', e));
-            }
-          } else if (autoPlay) {
-            safePlay(videoRef.current).catch(e => console.error('Error playing MP4:', e));
-          }
-          videoRef.current.removeEventListener('loadedmetadata', handleLoaded);
-        }
-      };
-
-      videoRef.current.addEventListener('loadedmetadata', handleLoaded);
-
-    } else if (!src) { // Removed hlsRef.current check for now, will be handled by hls.on below
-      return;
-    } else {
-      // Ensure HLS instance exists or create new one if needed
-      if (!hlsRef.current) {
-        if (Hls.isSupported()) {
-          // Utiliser la configuration HLS optimisée selon le domaine
-          const hlsConfig = createHlsConfig(normalizeUqloadEmbedUrl(src));
-          hlsRef.current = new Hls(hlsConfig);
-        } else {
-          console.error("HLS not supported, and trying to play non-MP4 source.");
-          setLoadingError(true);
-          console.log("HLS not supported, requesting an automatic fallback");
-          requestHlsFallback();
-          return;
-        }
-      }
-
-      // Now hlsRef.current should exist if HLS is supported
-      const hls = hlsRef.current;
-      if (!hls) { // Should not happen if HLS is supported
-        setLoadingError(true);
-        console.log("HLS instance not available, requesting an automatic fallback");
-        requestHlsFallback();
-        return;
-      }
-
-      try {
-        // Le proxy sera automatiquement appliqué par xhrSetup si nécessaire
-        const normalizedSrc = normalizeUqloadEmbedUrl(src);
-        console.log(`📡 [HLSPlayer] Loading HLS source: ${normalizedSrc.substring(0, 100)}...`);
-        hls.loadSource(normalizedSrc);
-        hls.attachMedia(videoRef.current); // videoRef.current is already checked at the beginning
-        setLoadingError(false);
-
-        // Add event listener for when HLS manifest is parsed and ready
-        const handleManifestParsed = () => {
-          if (videoRef.current) { // Null check
-            if (savedPosition > 0) {
-              console.log(`HLS: Restoring position to ${savedPosition}s after manifest parsed`);
-
-              const checkAndSeek = () => {
-                if (videoRef.current && videoRef.current.readyState >= 3) {
-                  videoRef.current.currentTime = savedPosition;
-
-                  if (wasPlaying && autoPlay) {
-                    safePlay(videoRef.current).catch(e => console.error('Error playing HLS after position restore:', e));
-                  }
-                } else {
-                  // Try again in a short moment
-                  setTimeout(checkAndSeek, 100);
-                }
-              };
-
-              checkAndSeek();
-            } else if (autoPlay) {
-              safePlay(videoRef.current).catch(e => console.error('Error playing HLS:', e));
-            }
-          }
-
-          hls.off(Hls.Events.MANIFEST_PARSED, handleManifestParsed);
-        };
-
-        hls.on(Hls.Events.MANIFEST_PARSED, handleManifestParsed);
-      } catch (error) {
-        console.error('Error loading initial M3U8 with direct src:', error);
-        setLoadingError(true);
-        // Don't call onError immediately, let internal error handling try other sources first
-        // onError will be called by tryNextSource when all darkino sources are exhausted
-      }
-    }
-  };
 
 
   // Fonction pour essayer la prochaine source Nexus HLS
@@ -9149,7 +9186,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       // Restaurer la position sauvegardée après un délai
       setTimeout(() => {
         if (videoRef.current && savedPosition > 0) {
-          videoRef.current.currentTime = savedPosition;
+          seekVideoSafely(videoRef.current, savedPosition);
           console.log(`⏰ Restored position: ${savedPosition}s`);
         }
       }, 1000);
@@ -9249,6 +9286,48 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     }
   }, [src, disableCrossOrigin, requestHlsFallback, requestKisskhMediaFallback, omegaSources, coflixSources]);
 
+  // Son sans image : un MP4 dont le codec vidéo n'est pas décodable (HEVC sur
+  // un PC sans décodeur matériel, typiquement SwiftFlux) ne lève aucune
+  // erreur. Le navigateur abandonne la piste vidéo et joue le son seul : le
+  // temps avance, l'écran reste sur l'affiche. On le repère après quelques
+  // secondes de lecture réelle et on change de source comme pour une panne.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !src.trim() || isCasting || !isMp4SourceResolved(src)) return;
+
+    let playedFrom: number | null = null;
+    let reported = false;
+    const check = () => {
+      if (reported || video.paused || video.seeking) return;
+      if ((video as HTMLVideoElementWithWebkit).webkitCurrentPlaybackTargetIsWireless) return;
+      if (document.visibilityState !== 'visible') return;
+      if (playedFrom === null) {
+        playedFrom = video.currentTime;
+        return;
+      }
+      if (video.currentTime - playedFrom < 4) return;
+      const frames = video.getVideoPlaybackQuality?.().totalVideoFrames;
+      if (video.videoWidth > 0 && frames !== 0) return;
+      reported = true;
+      console.warn('🎞️ audio playing without decoded video frames — unsupported video codec', {
+        videoWidth: video.videoWidth,
+        totalVideoFrames: frames,
+      });
+      markVideoUndecodable();
+      toast.error(t('watch.videoCodecUnsupported'));
+      requestHlsFallback();
+    };
+    const resetBaseline = () => { playedFrom = null; };
+    video.addEventListener('timeupdate', check);
+    video.addEventListener('seeked', resetBaseline);
+    video.addEventListener('pause', resetBaseline);
+    return () => {
+      video.removeEventListener('timeupdate', check);
+      video.removeEventListener('seeked', resetBaseline);
+      video.removeEventListener('pause', resetBaseline);
+    };
+  }, [src, isCasting, isMp4SourceResolved, requestHlsFallback, t]);
+
   // Add event handler to restore position after source change
   useEffect(() => {
     const video = videoRef.current;
@@ -9258,7 +9337,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       // When a new source loads, check if we need to restore position
       if (initialTime && initialTime > 0) {
         console.log(`Setting initial time on source change: ${initialTime}`);
-        video.currentTime = initialTime;
+        seekVideoSafely(video, initialTime);
       }
     };
 
@@ -9437,8 +9516,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         width: progressBarRect.width,
         duration,
       });
-      if (seekTime !== null) {
-        videoRef.current.currentTime = seekTime;
+      if (seekTime !== null && seekVideoSafely(videoRef.current, seekTime)) {
         setCurrentTime(seekTime);
         setHoverState(prev => ({ ...prev, time: seekTime }));
       }
@@ -9792,7 +9870,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.playbackRate = playbackSpeed;
-      localStorage.setItem('playerPlaybackSpeed', playbackSpeed.toString());
+      writeLocalStorage('playerPlaybackSpeed', playbackSpeed.toString());
     }
   }, [playbackSpeed, videoRef]);
 
@@ -9803,11 +9881,11 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
     if (key) {
       console.log(`[resetCurrentProgress] Removing progress for key: ${key}`);
-      localStorage.removeItem(key);
+      removeLocalStorage(key);
       // Continue watching functionality removed
 
       if (video) {
-        video.currentTime = 0;
+        seekVideoSafely(video, 0);
         setCurrentTime(0);
         // Maybe add a toast notification here
       }
@@ -9816,6 +9894,29 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     } else {
       console.log("[resetCurrentProgress] No progress key found for current item.");
     }
+  };
+
+  // Efface la progression de tous les épisodes de la série en cours, pour la
+  // revoir depuis le début sans repasser épisode par épisode.
+  const resetSeriesProgress = () => {
+    if (!tvShowId) return;
+    const prefix = `progress_tv_${tvShowId}_s`;
+    const keys: string[] = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(prefix)) keys.push(k);
+      }
+    } catch {
+      return;
+    }
+    keys.forEach((k) => removeLocalStorage(k));
+    const video = videoRef.current;
+    if (video) {
+      seekVideoSafely(video, 0);
+      setCurrentTime(0);
+    }
+    toast.success(t('watch.resetSeriesProgressDone', { count: keys.length }));
   };
 
   const handleBackToInfo = (e: React.MouseEvent) => {
@@ -10306,8 +10407,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                                   className="ml-4 pl-2 border-l-2 border-gray-700 mb-2"
                                 >
                                   {[
+                                    { id: 'vidy', label: 'Vidy' },
                                     { id: '111movies', label: '111Movies' },
-                                    { id: 'peachify', label: 'Peachify' },
                                     { id: 'vostfr', label: 'Videasy' },
                                     { id: 'vidlink', label: 'Vidlink' },
                                     { id: 'vidsrccc', label: 'Vidsrc.io' },
@@ -10317,15 +10418,15 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                                     // (épisode spécial / Spéciaux TMDB) tombe dans le fallback '#' qui fait
                                     // charger la page courante en boucle dans l'iframe.
                                     const sourceUrl = movieId ?
+                                      vostfrSource.id === 'vidy' ? `https://www.vidy.st/fr/movie/${movieId}?color=DC2626` :
                                       vostfrSource.id === '111movies' ? `https://111movies.net/movie/${movieId}` :
-                                        vostfrSource.id === 'peachify' ? `https://peachify.top/embed/movie/${movieId}?sub=French&accent=dc2626` :
                                         vostfrSource.id === 'vidlink' ? `https://vidlink.pro/movie/${movieId}` :
                                           vostfrSource.id === 'vidsrccc' ? `https://vidsrc.io/embed/movie?tmdb=${movieId}` :
                                             vostfrSource.id === 'vostfr' ? `https://player.videasy.net/movie/${movieId}` :
                                               `https://vidsrc.wtf/api/1/movie/?id=${movieId}` :
                                       (tvShowId != null && seasonNumber != null && episodeNumber != null) ?
+                                        vostfrSource.id === 'vidy' ? `https://www.vidy.st/fr/tv/${tvShowId}/${seasonNumber}/${episodeNumber}?color=DC2626` :
                                         vostfrSource.id === '111movies' ? `https://111movies.net/tv/${tvShowId}/${seasonNumber}/${episodeNumber}` :
-                                          vostfrSource.id === 'peachify' ? `https://peachify.top/embed/tv/${tvShowId}/${seasonNumber}/${episodeNumber}?sub=French&accent=dc2626` :
                                           vostfrSource.id === 'vidlink' ? `https://vidlink.pro/tv/${tvShowId}/${seasonNumber}/${episodeNumber}` :
                                             vostfrSource.id === 'vidsrccc' ? `https://vidsrc.io/embed/tv?tmdb=${tvShowId}&season=${seasonNumber}&episode=${episodeNumber}` :
                                               vostfrSource.id === 'vostfr' ? `https://player.videasy.net/tv/${tvShowId}/${seasonNumber}/${episodeNumber}` :
@@ -10811,7 +10912,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     play: async () => {
       if (videoRef.current) {
         postCastPlaybackSuppressedRef.current = false;
-        return videoRef.current.play();
+        return safePlay(videoRef.current);
       }
       return Promise.reject('No video element available');
     },
@@ -10821,14 +10922,10 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       }
     },
     seek: (time: number) => {
-      if (videoRef.current) {
-        videoRef.current.currentTime = time;
-      }
+      seekVideoSafely(videoRef.current, time);
     },
     seekTo: (time: number) => {
-      if (videoRef.current) {
-        videoRef.current.currentTime = time;
-      }
+      seekVideoSafely(videoRef.current, time);
     },
     getDuration: () => {
       return videoRef.current ? videoRef.current.duration : 0;
@@ -10877,7 +10974,9 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
   };
 
   const handleVideoTouchStart = (e: React.TouchEvent) => {
+    setKeyboardControlsActive(false);
     touchActiveRef.current = true;
+    clearControlsTimeout();
     if (e.touches.length > 1) {
       // Ignorer les gestes à plusieurs doigts pour ne pas déclencher un tap.
       touchMovedRef.current = true;
@@ -10887,13 +10986,16 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       touchStartXRef.current = t.clientX;
       touchStartYRef.current = t.clientY;
       touchMovedRef.current = false;
-      if (isMobile) {
-        if (controlsTimeoutRef.current) {
-          clearTimeout(controlsTimeoutRef.current);
-          controlsTimeoutRef.current = undefined;
-        }
-      }
     }
+  };
+
+  const handleVideoTouchReleaseCapture = (e: React.TouchEvent) => {
+    // Les boutons peuvent arrêter touchend : libérer le geste en capture
+    // pour que leur utilisation ne suspende pas définitivement le masquage.
+    touchActiveRef.current = e.touches.length > 0;
+    if (showControls) scheduleControlsHide();
+    if (e.type === 'touchend') handlePlayerControlInteractionCapture(e);
+    else touchMovedRef.current = false;
   };
 
   const handleVideoTouchMove = (e: React.TouchEvent) => {
@@ -10923,30 +11025,22 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     const newState = !showControls;
     console.log('Setting controls to:', newState);
 
-    setShowControls(newState);
-
-    if (newState && isPlaying && !showCastMenu) {
-      // Auto-hide after same delay as mouse move path
-      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-      controlsTimeoutRef.current = setTimeout(() => {
-        // Do not hide if skip animations or tap overlays are showing
-        if (!showCastMenu && !showForwardAnimation && !showRewindAnimation && !showLeftTapAnimation && !showRightTapAnimation) {
-          console.log('Auto-hiding controls after 5s');
-          setShowControls(false);
-          setShowVolumeSlider(false);
-        }
-      }, 5000);
+    if (newState) keepControlsVisibleAfterInteraction();
+    else {
+      setShowControls(false);
+      clearControlsTimeout();
     }
 
     // Reset the flag after a short delay
     setTimeout(() => {
       controlsToggleInProgressRef.current = false;
     }, 100);
-  }, [showControls, isPlaying, showCastMenu, showForwardAnimation, showRewindAnimation, showLeftTapAnimation, showRightTapAnimation]);
+  }, [showControls, keepControlsVisibleAfterInteraction, clearControlsTimeout]);
 
   const handleVideoTouchEnd = (e: React.TouchEvent) => {
     touchActiveRef.current = e.touches.length > 0;
     if (touchActiveRef.current) return;
+    if (showControls) scheduleControlsHide();
 
     if (isPlayerControlInteractionTarget(e.target)) {
       touchActiveRef.current = false;
@@ -10990,7 +11084,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     if (side === 'right' && showRightTapAnimation) {
       console.log('Right side tap while animation showing: adding +10s');
       setRightTapCount(prev => prev + 1);
-      if (videoRef.current) videoRef.current.currentTime += 10;
+      if (videoRef.current) seekVideoSafely(videoRef.current, videoRef.current.currentTime + 10);
       // Reset the timeout to keep animation visible
       if (rightTapTimeoutRef.current) clearTimeout(rightTapTimeoutRef.current);
       rightTapTimeoutRef.current = setTimeout(() => {
@@ -11006,7 +11100,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     if (side === 'left' && showLeftTapAnimation) {
       console.log('Left side tap while animation showing: adding -10s');
       setLeftTapCount(prev => prev + 1);
-      if (videoRef.current) videoRef.current.currentTime -= 10;
+      if (videoRef.current) seekVideoSafely(videoRef.current, videoRef.current.currentTime - 10);
       // Reset the timeout to keep animation visible
       if (leftTapTimeoutRef.current) clearTimeout(leftTapTimeoutRef.current);
       leftTapTimeoutRef.current = setTimeout(() => {
@@ -11061,7 +11155,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         console.log('Right double-tap: seeking +10s');
         setRightTapCount(prev => prev + 1);
         setShowRightTapAnimation(true);
-        if (videoRef.current) videoRef.current.currentTime += 10;
+        if (videoRef.current) seekVideoSafely(videoRef.current, videoRef.current.currentTime + 10);
         if (rightTapTimeoutRef.current) clearTimeout(rightTapTimeoutRef.current);
         rightTapTimeoutRef.current = setTimeout(() => {
           setRightTapCount(0);
@@ -11072,7 +11166,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
         console.log('Left double-tap: seeking -10s');
         setLeftTapCount(prev => prev + 1);
         setShowLeftTapAnimation(true);
-        if (videoRef.current) videoRef.current.currentTime -= 10;
+        if (videoRef.current) seekVideoSafely(videoRef.current, videoRef.current.currentTime - 10);
         if (leftTapTimeoutRef.current) clearTimeout(leftTapTimeoutRef.current);
         leftTapTimeoutRef.current = setTimeout(() => {
           setLeftTapCount(0);
@@ -11153,22 +11247,31 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
     !showLeftTapAnimation &&
     !showRightTapAnimation;
 
+  // Lever après tous les hooks : l'ErrorBoundary recharge un chunk réellement
+  // absent et conserve les erreurs d'évaluation comme crashs observables.
+  if (hlsLoadError) throw hlsLoadError;
+
   // Return the JSX element
   return (
     <div
       ref={containerRef}
       {...{ [HLS_PLAYER_ROOT_ATTRIBUTE]: '' }}
+      tabIndex={-1}
+      data-keyboard-controls={keyboardControlsActive ? 'true' : undefined}
       className={`relative group w-full h-full bg-black rounded-xl overflow-hidden ${isLoading ? 'aspect-[16/9]' : ''} video-container ${className} ${isFullscreenAnimating ? 'fullscreen-animating' : ''} ${isPageFullscreen ? PLAYER_FULLSCREEN_FILL_CLASS : ''} select-none ${shouldHideCursor || isLocked ? 'cursor-none' : ''}`}
       onPointerMove={handleMouseMove}
       onMouseMove={handleMouseMove}
-      onMouseLeave={() => isPlaying && !showCastMenu && setShowControls(false)}
+      onMouseLeave={() => !keyboardControlsActive && canAutoHideControls && setShowControls(false)}
+      onPointerDownCapture={() => setKeyboardControlsActive(false)}
+      onFocusCapture={handlePlayerControlInteractionCapture}
       onClickCapture={handlePlayerControlInteractionCapture}
       onChangeCapture={handlePlayerControlInteractionCapture}
       onClick={handleVideoClick}
       onTouchStart={handleVideoTouchStart}
       onTouchMove={handleVideoTouchMove}
-      onTouchEndCapture={handlePlayerControlInteractionCapture}
+      onTouchEndCapture={handleVideoTouchReleaseCapture}
       onTouchEnd={handleVideoTouchEnd}
+      onTouchCancelCapture={handleVideoTouchReleaseCapture}
       onDoubleClick={handleDoubleTap}
     >
       <CastRelayDisclosure
@@ -11422,10 +11525,14 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                         className="absolute top-0 left-0 h-full bg-red-500 rounded-full"
                         style={{ width: 'var(--slider-fill)' }}
                       />
-                      <div
-                        className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/50 bg-white opacity-100 shadow-md transition-opacity duration-150 group-data-[dragging]:opacity-100 sm:h-4 sm:w-4"
-                        style={{ left: 'var(--slider-fill)' }}
-                      />
+                      {halloweenTheme ? (
+                        <HalloweenProgressPumpkin left="var(--slider-fill)" />
+                      ) : (
+                        <div
+                          className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/50 bg-white opacity-100 shadow-md transition-opacity duration-150 group-data-[dragging]:opacity-100 sm:h-4 sm:w-4"
+                          style={{ left: 'var(--slider-fill)' }}
+                        />
+                      )}
                       <div
                         className="absolute bottom-full mb-2.5 opacity-0 transition-opacity duration-200 group-data-[pointing]:opacity-100 pointer-events-none"
                         style={{
@@ -11916,10 +12023,12 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             className="absolute inset-0 flex items-center justify-center z-50 pointer-events-none"
           >
             <div
+              data-player-chrome=""
               className="flex items-center justify-center gap-8 pointer-events-auto"
               data-player-controls=""
             >
             <motion.button
+              disabled={isWatchPartyGuest}
               onClick={(e) => {
                 e.stopPropagation();
                 skipTime(-10);
@@ -11940,6 +12049,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
               <Rewind size={56} />
             </motion.button>
             <motion.button
+              disabled={isWatchPartyGuest}
               onClick={(e) => {
                 e.stopPropagation();
                 togglePlay();
@@ -11963,6 +12073,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
               {isPlaying ? <Pause size={64} /> : <Play size={64} />}
             </motion.button>
             <motion.button
+              disabled={isWatchPartyGuest}
               onClick={(e) => {
                 e.stopPropagation();
                 skipTime(10);
@@ -12037,6 +12148,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
 
       {/* Back to Info Button */}
       <motion.button
+        data-player-chrome=""
         onClick={handleBackToInfo}
         initial={{ opacity: 0, y: -20 }}
         animate={{
@@ -12060,6 +12172,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       {/* Next Episode Button */}
       {nextEpisode && onNextEpisode && (
         <motion.div
+          data-player-chrome=""
           className="absolute top-4 right-4 z-50 flex items-center gap-2"
           initial={{ opacity: 0, y: -20 }}
           animate={{
@@ -12156,6 +12269,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
       {/* Sources Button (Top Right, below navigation) */}
       {onShowSources && (
         <motion.button
+          data-player-chrome=""
           onClick={onShowSources}
           initial={{ opacity: 0, y: -20 }}
           animate={{
@@ -12219,6 +12333,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
           ref={controlBarRef}
           className="absolute bottom-0 left-0 right-0 z-40 p-4 control-bar"
           data-player-controls=""
+          data-player-chrome=""
           initial={{ opacity: 0, y: 20 }}
           animate={{
             opacity: showControls ? 1 : 0,
@@ -12293,16 +12408,22 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                   })}
                 />
               ))}
-            <div
-              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-red-600 rounded-full -ml-2"
-              style={{ left: `${(currentTime / duration) * 100}%` }}
-            />
+            {halloweenTheme ? (
+              <HalloweenProgressPumpkin left={`${(currentTime / duration) * 100}%`} />
+            ) : (
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-red-600 rounded-full -ml-2"
+                style={{ left: `${(currentTime / duration) * 100}%` }}
+              />
+            )}
           </div>
 
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2 md:gap-4 flex-1 min-w-0">
               <div className="flex items-center gap-1 md:gap-2">
                 <button
+                  data-player-primary-control=""
+                  aria-label={t(isPlaying ? 'watch.pause' : 'watch.play')}
                   onClick={!isWatchPartyGuest ? togglePlay : undefined}
                   onTouchEnd={!isWatchPartyGuest ? (e) => {
                     e.stopPropagation();
@@ -12403,6 +12524,8 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                   </button>
                 </div>
               )}
+              {/* Watch Party : hors périmètre V1 sur TV (/watchparty/create non monté). */}
+              {!isHiddenOnTv('/watchparty/create') && (
               <div className="relative flex items-center h-[24px]">
                 <button
                   onClick={toggleWatchParty}
@@ -12425,6 +12548,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                   </motion.div>
                 </button>
               </div>
+              )}
               <div className="relative flex items-center h-[24px]">
                 <button
                   onClick={togglePip}
@@ -12500,6 +12624,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
               </div>
               <button
                 onClick={toggleFullscreen}
+                aria-label={t(isFullscreen ? 'watch.exitFullscreen' : 'watch.fullscreen')}
                 className="text-white hover:text-red-600 transition-colors flex items-center justify-center h-[24px]"
               >
                 {isFullscreen ?
@@ -12509,7 +12634,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
               </button>
               {/* Smart Cast/AirPlay Button - Always visible */}
               <div className="relative flex items-center h-[24px]">
-                  {castAvailable && !isTouchDevice && !airPlayAvailable && !isCasting ? (
+                  {castAvailable && !isTouchDevice && !canRequestAirPlay && !isCasting ? (
                     <motion.div
                       animate={{ scale: 1, color: '#ffffff' }}
                       whileHover={{ scale: 1.1 }}
@@ -12566,14 +12691,14 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                         // Neither target detected — open the menu so the user
                         // gets feedback (status, tips, error) instead of a
                         // silent no-op.
-                        if (!castAvailable && !airPlayAvailable) {
+                        if (!castAvailable && !canRequestAirPlay) {
                           setCastError(null);
                           setAirPlayError(null);
                           setShowCastMenu(true);
                           return;
                         }
 
-                        if (airPlayAvailable && !castAvailable) {
+                        if (canRequestAirPlay && !castAvailable) {
                           toggleAirPlay();
                         } else {
                           toggleCast();
@@ -12582,7 +12707,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                         setShowCastMenu(false);
                       }}
                       className="text-white hover:text-red-600 transition-colors flex items-center justify-center"
-                      aria-label={airPlayAvailable && !castAvailable ? t('watch.airplay') : castAvailable && !airPlayAvailable ? t('watch.cast') : t('watch.streamTo')}
+                      aria-label={canRequestAirPlay && !castAvailable ? t('watch.airplay') : castAvailable && !canRequestAirPlay ? t('watch.cast') : t('watch.streamTo')}
                     >
                       <motion.div
                         animate={{
@@ -12597,7 +12722,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                         }}
                       >
                         {/* Show AirPlay icon if only AirPlay is available, Cast if only Cast is available, or Cast if both are available */}
-                        {airPlayAvailable && !castAvailable ? (
+                        {canRequestAirPlay && !castAvailable ? (
                           <Airplay size={isMobile ? 20 : 24} />
                         ) : (
                           <Cast size={isMobile ? 20 : 24} />
@@ -12616,24 +12741,24 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                       className="absolute bottom-full right-0 mb-2 bg-black/95 border border-gray-700 rounded-lg shadow-xl p-3 min-w-[250px] z-50 cast-menu"
                     >
                       <div className="text-white text-sm font-medium mb-2">
-                        {airPlayAvailable && !castAvailable ? t('watch.airplayTo') :
-                          castAvailable && !airPlayAvailable ? t('watch.castTo') :
+                        {canRequestAirPlay && !castAvailable ? t('watch.airplayTo') :
+                          castAvailable && !canRequestAirPlay ? t('watch.castTo') :
                             t('watch.streamTo')}
                       </div>
 
                       {/* Message préventif explicatif — masqué si rien n'est disponible,
                           l'encart jaune plus bas prend le relais avec un message clair. */}
-                      {(airPlayAvailable || castAvailable) && (
+                      {(canRequestAirPlay || castAvailable) && (
                         <div className="mb-3 p-2 bg-blue-900/30 border border-blue-700/50 rounded text-xs text-blue-200">
                           <div className="font-medium mb-1">⚠️ {t('watch.importantInfo')}</div>
-                          {airPlayAvailable && !castAvailable ? (
+                          {canRequestAirPlay && !castAvailable ? (
                             <>
-                              <div>• {t('watch.airplayAvailableApple')}</div>
+                              <div>• {t('watch.castUnavailableHelpAirPlay')}</div>
                               <div>• {t('watch.ensureSameWifi')}</div>
                             </>
-                          ) : castAvailable && !airPlayAvailable ? (
+                          ) : castAvailable && !canRequestAirPlay ? (
                             <>
-                              <div>• {t('watch.castAutoFrench')}</div>
+                              <div>• {t('watch.castAudioTracks')}</div>
                               <div>• {t('watch.featureInDevelopment')}</div>
                             </>
                           ) : (
@@ -12647,7 +12772,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                       )}
 
                       {/* Show appropriate options based on availability */}
-                      {airPlayAvailable && !castAvailable ? (
+                      {canRequestAirPlay && !castAvailable ? (
                         // AirPlay only
                         <div className="space-y-2">
                           <button
@@ -12669,7 +12794,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                             )}
                           </button>
                         </div>
-                      ) : castAvailable && !airPlayAvailable ? (
+                      ) : castAvailable && !canRequestAirPlay ? (
                         // Cast only
                         <div className="space-y-2">
                           <button
@@ -12691,20 +12816,9 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                             )}
                           </button>
                         </div>
-                      ) : !airPlayAvailable && !castAvailable ? (
-                        // Neither target detected — distinguish "browser doesn't support cast at all"
-                        // (Firefox / Edge non-Chromium / Safari without AirPlay element) from
-                        // "browser supports it but nothing on the LAN / SDK blocked by adblock".
+                      ) : !canRequestAirPlay && !castAvailable ? (
                         (() => {
-                          const browserSupportsCast = typeof (window as any).chrome?.cast !== 'undefined';
-                          const browserSupportsAirPlay = isAirPlaySupported();
-                          const browserSupportsAny = browserSupportsCast || browserSupportsAirPlay;
-                          // Priority: SDK blocked > no devices on Wi-Fi > browser doesn't support
-                          const reasonKey = castSdkBlocked
-                            ? 'watch.castUnavailableSdkBlocked'
-                            : browserSupportsAny
-                              ? 'watch.castUnavailableNoDevices'
-                              : 'watch.castUnavailableUnsupportedBrowser';
+                          const reasonKey = getCastUnavailableReason(castSdkUnavailable);
                           return (
                             <div className="p-2 bg-yellow-900/30 border border-yellow-700/50 rounded text-xs text-yellow-200 space-y-1">
                               <div className="font-medium">{t('watch.castUnavailable')}</div>
@@ -12727,7 +12841,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                       ) : (
                         // Both available - show choice
                         <div className="space-y-2">
-                          {airPlayAvailable && (
+                          {canRequestAirPlay && (
                             <button
                               onClick={() => toggleAirPlay()}
                               disabled={isAirPlayLoading}
@@ -12982,7 +13096,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             episodeNumber,
             seasonNumber,
             movieId,
-            externalTracks,
+            externalTracks: subtitleTracks,
             externalLoading,
             externalProviderErrors,
             preferredSubtitleLang,
@@ -13035,6 +13149,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             onOpenSegmentStudio: (tvShowId || movieId) ? openStudio : undefined,
             communitySubmissionCount: communitySubmissions.length,
             resetCurrentProgress,
+            resetSeriesProgress,
             audioEnhancerMode,
             handleAudioEnhancerChange,
             customAudio,

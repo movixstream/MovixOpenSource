@@ -5,3 +5,6 @@
 # Sans cette regle, un checkout Windows le rend illisible et npm ci echoue.
 *.patch text eol=lf
 *.diff text eol=lf
+
+# Le script est transféré depuis Windows puis exécuté sur l'hôte Linux Coolify.
+scripts/seed-frontend-assets.sh text eol=lf

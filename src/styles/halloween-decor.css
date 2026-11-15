@@ -1,0 +1,763 @@
+/* ─── Thème Halloween : décor plein écran ────────────────────────────────────
+   Chargé avec HalloweenDecor, seulement quand le thème est actif (et hors
+   mode léger). Règles de performance :
+   - seuls `transform` et `opacity` sont animés, sur des éléments HTML : la
+     carte graphique joue les animations seule, sans recalcul de style ni
+     repeinture côté page ;
+   - aucun filtre sur un élément animé (le liseré de l'araignée est dessiné
+     dans son SVG) ;
+   - les conteneurs sont isolés (`contain: strict`) : rien de ce qui s'y
+     passe ne relance la mise en page du site.
+
+   Hauteur fixe, celle de l'écran barre d'adresse cachée (`lvh`), plutôt
+   que `inset: 0`. Sur mobile, la barre se cache au défilement et l'écran
+   s'allonge par le bas : Chrome ne refait la mise en page des calques
+   fixes qu'à la fin du geste, et la brume restait une à deux secondes
+   au-dessus du nouveau bas de l'écran. Calés par le bas, ciel et brume
+   suivent la barre à chaque image : Chrome déplace lui-même les éléments
+   fixés en bas (`bottom` sans `top`) pendant qu'elle glisse, et rien n'est
+   à recalculer après. Le haut du calque passe sous la barre quand elle
+   est visible. Les toiles restent calées en haut. Sur ordinateur, `lvh`
+   vaut la hauteur de la fenêtre : rien ne change. */
+.halloween-backdrop,
+.halloween-atmosphere,
+.halloween-overhead {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 100vh;
+  height: 100lvh;
+  pointer-events: none;
+  overflow: hidden;
+  contain: strict;
+}
+.halloween-backdrop,
+.halloween-atmosphere { bottom: 0; }
+.halloween-overhead { top: 0; }
+/* Derrière tout le site : ciel de fumée (gris-vert à gauche, violet à
+   droite), arbres et deux nappes de brume. Le fond du site est rendu
+   transparent dans halloween-ui.css ; le HeroSlider et les affiches, eux,
+   restent opaques : la brume passe derrière. Rien n'y est repeint, seules
+   les nappes glissent. Comme sur la maquette, une brume plus claire,
+   gris-vert, éclaire le bord gauche à mi-hauteur : l'arbre de gauche s'y
+   découpe en sombre. */
+.halloween-backdrop {
+  z-index: -1;
+  background:
+    radial-gradient(14vh 26vh at 0% 47%, rgb(96 122 126 / 0.62), rgb(70 92 96 / 0.3) 55%, transparent),
+    #08090c url('../assets/halloween/sky.webp') no-repeat center / cover;
+}
+.halloween-atmosphere { z-index: 40; }
+/* Toiles, araignées et chauves-souris passent devant l'en-tête. */
+.halloween-overhead {
+  z-index: 11001;
+  --web-w: clamp(88px, 7.8vw, 160px);
+  --web-h: calc(var(--web-w) * 1.5);
+}
+
+/* ─── Arbres morts ───────────────────────────────────────────────────────────
+   Les deux arbres de la maquette, à la même échelle qu'elle : la maquette
+   fait 572 px de haut et chaque arbre en couvre les 422 du bas (73,8 vh),
+   pieds dans la brume. Celui de gauche reste derrière le site. Celui de
+   droite existe deux fois au même endroit : derrière le site, et devant sur
+   les pages à HeroSlider, où sa grosse branche basse passe au-dessus du
+   HeroSlider ; passé le haut de page, celui de devant s'efface
+   (HalloweenDecor) et l'arbre repasse derrière les rangées. */
+.halloween-tree {
+  position: absolute;
+  bottom: 0;
+  height: 73.78vh;
+  background: no-repeat bottom left / 100% 100%;
+}
+.halloween-tree-left {
+  left: 0;
+  aspect-ratio: 180 / 1266;
+  background-image: url('../assets/halloween/tree-left.webp');
+}
+.halloween-tree-right {
+  right: 0;
+  aspect-ratio: 612 / 1266;
+  background-image: url('../assets/halloween/tree-right.webp');
+}
+/* Araignée noire pendue à la branche basse de l'arbre de gauche, comme sur
+   la maquette : branche à (37 ; 350) des 572 px de haut, d'où les vh. */
+.halloween-spider-tree {
+  top: 61.2vh;
+  left: calc(6.47vh - 14px);
+}
+.halloween-tree-front {
+  transition: opacity 0.6s ease;
+}
+.halloween-tree-front.is-behind { opacity: 0; }
+
+/* ─── Brume ──────────────────────────────────────────────────────────────────
+   Fumée sombre en volutes. Bande deux fois plus large que l'écran, faite de
+   deux tuiles : un glissement de -50 % retombe exactement sur la tuile
+   suivante. Chaque nappe tient dans un seul canvas de 2048 px déjà teinté
+   (HalloweenDecor) : la carte graphique l'étire, la mémoire ne dépend pas de
+   la taille de l'écran, et le changement de teinte se fait dans le canvas,
+   sans second calque. Deux nappes derrière le site, une basse devant. */
+.halloween-fog {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 200%;
+  animation: halloween-fog-drift 90s linear infinite;
+  will-change: transform;
+}
+.halloween-fog-tint {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.halloween-fog-back {
+  height: 85vh;
+  opacity: 0.8;
+}
+.halloween-fog-mid {
+  bottom: 30vh;
+  height: 45vh;
+  opacity: 0.55;
+  animation-duration: 64s;
+  animation-direction: reverse;
+}
+/* La texture reste à moitié opaque sur sa dernière ligne : posée à 30 vh
+   du bas, elle traçait une ligne nette en travers de la page. Son bas est
+   fondu (sur le canvas, qui n'est pas animé lui-même). */
+.halloween-fog-mid .halloween-fog-tint {
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+.halloween-fog-front {
+  height: 30vh;
+  bottom: -4vh;
+  opacity: 0.5;
+  animation-duration: 44s;
+}
+
+@keyframes halloween-fog-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-50%, 0, 0); }
+}
+
+/* Bancs de fumée denses dans les coins bas, devant le site : ils couvrent les
+   coins du HeroSlider comme sur la maquette. Ils ne défilent pas, ils
+   respirent : 36 s aller, 36 s retour (dix fois 3,6 s, voir les
+   citrouilles). */
+.halloween-smoke {
+  position: absolute;
+  bottom: -3vh;
+  width: 34vw;
+  height: 42vh;
+  background: url('../assets/halloween/smoke-corner.webp') no-repeat left bottom / 100% 100%;
+  opacity: 0.85;
+  transform-origin: 50% 100%;
+  animation: halloween-smoke-breathe 36s ease-in-out infinite alternate;
+  will-change: transform;
+}
+.halloween-smoke-left { left: -2vw; }
+.halloween-smoke-right {
+  right: -2vw;
+  transform: scaleX(-1);
+  animation-name: halloween-smoke-breathe-right;
+  animation-delay: -18s;
+}
+@keyframes halloween-smoke-breathe {
+  from { transform: translate3d(-1.5vw, 0, 0) scale(1); }
+  to { transform: translate3d(1.5vw, -1.5vh, 0) scale(1.05); }
+}
+@keyframes halloween-smoke-breathe-right {
+  from { transform: scaleX(-1) translate3d(-1.5vw, 0, 0) scale(1); }
+  to { transform: scaleX(-1) translate3d(1.5vw, -1.5vh, 0) scale(1.05); }
+}
+
+/* ─── Citrouilles dans la brume ──────────────────────────────────────────────
+   Entre la nappe du fond et celle du milieu. Le corps est dessiné une fois ;
+   la lumière du visage et le halo sont deux calques à part dont seule
+   l'opacité vacille, ensemble (même animation, même durée), comme une bougie.
+   Plus de filtre drop-shadow : le halo est un dégradé peint une fois. De
+   temps en temps, la grande sautille et celle de droite se dandine.
+
+   Chaque fin de cycle coûte à la page quelques images de recalcul de style,
+   même pour une animation jouée par la carte graphique. Toutes les
+   animations des citrouilles et de la sorcière bouclent donc au même
+   instant que les ailes des chauves-souris : sur 3,6 s ou un multiple, sans
+   décalage (ou d'un multiple de 3,6 s). Elles ne coûtent alors aucun
+   réveil de plus. Les flammes des deux citrouilles ne vacillent pas pareil
+   (deux suites d'images clés), mais sur le même rythme. */
+.halloween-pumpkin {
+  --pumpkin: clamp(96px, 6vw, 124px);
+  position: absolute;
+  display: block;
+  aspect-ratio: 160 / 132;
+  transform-origin: 50% 100%;
+}
+.halloween-pumpkin-art,
+.halloween-pumpkin-light,
+.halloween-pumpkin-light svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.halloween-pumpkin-halo {
+  position: absolute;
+  inset: -45% -110% -55%;
+  background: radial-gradient(closest-side, rgb(255 176 72 / 0.42), rgb(249 115 22 / 0.16) 52%, transparent);
+}
+.halloween-pumpkin-halo,
+.halloween-pumpkin-light {
+  animation: halloween-pumpkin-flicker 3.6s linear infinite;
+  will-change: opacity;
+}
+/* Au pied des arbres, au bord de l'écran : à droite, plus à l'intérieur, la
+   flèche des carrousels (au-dessus du décor) cachait la citrouille. */
+.halloween-pumpkin-left {
+  left: 1.2vw;
+  bottom: 2vh;
+  width: var(--pumpkin);
+  animation: halloween-pumpkin-hop 7.2s ease-in-out infinite;
+  will-change: transform;
+}
+.halloween-pumpkin-small {
+  left: calc(1.2vw + var(--pumpkin) * 0.84);
+  bottom: 3.5vh;
+  width: calc(var(--pumpkin) * 0.48);
+}
+.halloween-pumpkin-right {
+  right: 0.6vw;
+  bottom: 6vh;
+  width: calc(var(--pumpkin) * 0.84);
+  transform-origin: 50% 95%;
+  animation: halloween-pumpkin-wobble 7.2s ease-in-out infinite;
+  will-change: transform;
+}
+.halloween-pumpkin-right .halloween-pumpkin-halo,
+.halloween-pumpkin-right .halloween-pumpkin-light { animation-name: halloween-pumpkin-flicker-b; }
+
+/* Bougie : creux irréguliers, plusieurs par cycle (un cycle court
+   réveillerait la page à chaque tour). */
+@keyframes halloween-pumpkin-flicker {
+  0%, 100% { opacity: 1; }
+  6% { opacity: 0.78; }
+  9% { opacity: 0.96; }
+  17% { opacity: 0.84; }
+  23% { opacity: 1; }
+  31% { opacity: 0.68; }
+  34% { opacity: 0.9; }
+  44% { opacity: 0.8; }
+  52% { opacity: 1; }
+  61% { opacity: 0.86; }
+  66% { opacity: 0.62; }
+  70% { opacity: 0.95; }
+  79% { opacity: 0.82; }
+  88% { opacity: 1; }
+  93% { opacity: 0.74; }
+}
+@keyframes halloween-pumpkin-flicker-b {
+  0%, 100% { opacity: 0.9; }
+  8% { opacity: 1; }
+  14% { opacity: 0.72; }
+  19% { opacity: 0.94; }
+  28% { opacity: 0.8; }
+  36% { opacity: 1; }
+  42% { opacity: 0.66; }
+  47% { opacity: 0.88; }
+  57% { opacity: 1; }
+  64% { opacity: 0.78; }
+  73% { opacity: 0.96; }
+  81% { opacity: 0.7; }
+  86% { opacity: 1; }
+  94% { opacity: 0.82; }
+}
+/* Petit saut en fin de cycle : elle s'écrase, s'étire en l'air, retombe et
+   rebondit. */
+@keyframes halloween-pumpkin-hop {
+  0%, 83%, 100% { transform: translate3d(0, 0, 0) scale(1, 1); }
+  86.5% { transform: translate3d(0, 0, 0) scale(1.08, 0.9); }
+  90% { transform: translate3d(0, -16px, 0) scale(0.95, 1.07); }
+  92.5% { transform: translate3d(0, -20px, 0) scale(1, 1); }
+  95.5% { transform: translate3d(0, 0, 0) scale(1.07, 0.92); }
+  98% { transform: translate3d(0, 0, 0) scale(0.98, 1.02); }
+}
+/* Dandinement, comme un fou rire, au milieu du cycle : pas en même temps
+   que le saut de l'autre. */
+@keyframes halloween-pumpkin-wobble {
+  0%, 30%, 47%, 100% { transform: rotate(0deg); }
+  33% { transform: rotate(-7deg); }
+  36% { transform: rotate(6deg); }
+  39% { transform: rotate(-4deg); }
+  42% { transform: rotate(2deg); }
+  44.5% { transform: rotate(-1deg); }
+}
+
+/* ─── Sorcière sur son balai ─────────────────────────────────────────────────
+   Traverse le ciel de gauche à droite en 6 s en montant un peu, puis reste
+   hors champ 4,8 s : cycle de 10,8 s (trois fois 3,6 s, voir les
+   citrouilles), décalé pour qu'elle passe 3,6 s après l'ouverture. Le
+   balancement (vagues et inclinaison) est un second <span> sur le même
+   cycle ; cape et cheveux ondulent, paillettes qui scintillent. */
+.halloween-witch {
+  position: absolute;
+  left: 0;
+  top: 15vh;
+  width: clamp(170px, 13vw, 240px);
+  animation: halloween-witch-fly 10.8s linear -7.2s infinite;
+  will-change: transform;
+}
+.halloween-witch-bob {
+  display: block;
+  animation: halloween-witch-bob 10.8s ease-in-out -7.2s infinite;
+}
+.halloween-witch-frame {
+  position: relative;
+  display: block;
+  height: 0;
+  padding-bottom: 58.333%;
+}
+.halloween-witch-part {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.halloween-witch-rim {
+  stroke: rgb(200 180 240 / 0.5);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+/* Pivot au dos de la sorcière : (150 ; 56) dans 240 × 140. */
+.halloween-witch-flutter {
+  position: absolute;
+  inset: 0;
+  transform-origin: 62.5% 40%;
+  animation: halloween-witch-flutter 3.6s ease-in-out infinite;
+}
+.halloween-witch-sparkles {
+  position: absolute;
+  right: 97%;
+  top: 52%;
+  width: 26%;
+  aspect-ratio: 60 / 40;
+  animation: halloween-witch-twinkle 3.6s ease-in-out infinite;
+}
+.halloween-witch-sparkles-b { animation-name: halloween-witch-twinkle-b; }
+.halloween-witch-sparkles svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* Attrapée au vol, elle lâche des bonbons puis file, vexée
+   (HalloweenWitchFlight). Seul son dessin se clique, pas le cadre autour :
+   elle ne vole aucun clic au site qu'elle survole. */
+.halloween-witch-part > * {
+  pointer-events: visiblePainted;
+  cursor: pointer;
+}
+/* Pivot au milieu du corps, (149 ; 76) dans 240 × 140 : elle se secoue et
+   se retourne sur place. */
+.halloween-witch-pose {
+  display: block;
+  transform-origin: 62% 54%;
+}
+/* Le chat a son propre calque, pivot sous ses pattes : (84 ; 93). */
+.halloween-witch-cat {
+  position: absolute;
+  inset: 0;
+  transform-origin: 35% 66.4%;
+}
+@keyframes halloween-witch-fly {
+  0% { transform: translate3d(-24vw, 7vh, 0); }
+  55.5%, 100% { transform: translate3d(106vw, -5vh, 0); }
+}
+@keyframes halloween-witch-bob {
+  0% { transform: translate3d(0, 0, 0) rotate(-3deg); }
+  9% { transform: translate3d(0, -16px, 0) rotate(2deg); }
+  18.5% { transform: translate3d(0, 6px, 0) rotate(-3deg); }
+  27.5% { transform: translate3d(0, -14px, 0) rotate(2deg); }
+  37% { transform: translate3d(0, 8px, 0) rotate(-3deg); }
+  46% { transform: translate3d(0, -12px, 0) rotate(1deg); }
+  55.5%, 100% { transform: translate3d(0, 0, 0) rotate(-3deg); }
+}
+@keyframes halloween-witch-flutter {
+  0%, 16.67%, 33.33%, 50%, 66.67%, 83.33%, 100% { transform: scale(1, 1) skewY(0deg); }
+  8.33%, 25%, 41.67%, 58.33%, 75%, 91.67% { transform: scale(1.04, 0.97) skewY(-2.5deg); }
+}
+@keyframes halloween-witch-twinkle {
+  0%, 50%, 100% { opacity: 1; }
+  25%, 75% { opacity: 0.15; }
+}
+@keyframes halloween-witch-twinkle-b {
+  0%, 50%, 100% { opacity: 0.15; }
+  25%, 75% { opacity: 1; }
+}
+
+/* Pluie de bonbons : chute lente, balancement et rotation propres à chacun
+   (--drift, --spin posés par le composant). */
+.halloween-candy {
+  position: absolute;
+  top: -40px;
+  opacity: 0;
+  animation: halloween-candy-fall linear infinite;
+  will-change: transform;
+}
+.halloween-candy svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+@keyframes halloween-candy-fall {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 0; }
+  6% { opacity: 1; }
+  50% { transform: translate3d(var(--drift, 0), 56vh, 0) rotate(calc(var(--spin, 360deg) * 0.5)); }
+  92% { opacity: 1; }
+  100% { transform: translate3d(0, 112vh, 0) rotate(var(--spin, 360deg)); opacity: 0; }
+}
+
+/* Bonbons lâchés par la sorcière : chacun jaillit du point du clic puis
+   tombe sous l'écran (animations posées par HalloweenWitchFlight).
+   Invisibles hors de leur animation. */
+.halloween-candy-burst {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+.halloween-candy-burst-fall { position: absolute; }
+.halloween-candy-burst-spin {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+.halloween-candy-burst svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Toiles des coins de page, comme sur la maquette : moyeu un peu à
+   l'intérieur, fil tendu en diagonale, dorée à gauche, cuivrée à droite
+   (texture dessinée pour le coin gauche, retournée à droite). */
+.halloween-web {
+  position: absolute;
+  top: 0;
+  width: var(--web-w);
+  height: var(--web-h);
+  background: url('../assets/halloween/web-left.webp') no-repeat top left / 100% 100%;
+}
+.halloween-web-left { left: 0; }
+.halloween-web-right {
+  right: 0;
+  background-image: url('../assets/halloween/web-right.webp');
+  transform: scaleX(-1);
+}
+
+/* ─── Araignées pendues ──────────────────────────────────────────────────────
+   Chacune accrochée à une vraie jonction de fils de sa toile (tirage de
+   scripts/generate-halloween-assets.py) : à (0,297 ; 0,632) de la texture de
+   gauche et (0,316 ; 0,568) de celle de droite, comptés depuis le bord de
+   l'écran. Le haut du fil ne bouge jamais ; la silhouette fait 28 px de
+   large, son fil passe au milieu. */
+.halloween-spider-left {
+  top: calc(var(--web-h) * 0.632);
+  left: calc(var(--web-w) * 0.297 - 14px);
+}
+.halloween-spider-right {
+  top: calc(var(--web-h) * 0.568);
+  right: calc(var(--web-w) * 0.316 - 14px);
+}
+/* Le tout se balance autour du point d'accroche. Cycles de 7,2 s (deux fois
+   3,6 s, voir les citrouilles) ; celle de droite et celle de l'arbre ont une
+   demi-période d'avance, toujours sur le même rythme : les deux de gauche
+   ne se balancent pas ensemble. */
+.halloween-hanging-spider {
+  position: absolute;
+  width: 28px;
+  height: 0;
+  transform-origin: 50% 0;
+  animation: halloween-spider-sway 7.2s ease-in-out infinite;
+}
+.halloween-spider-right,
+.halloween-spider-right .halloween-hanging-spider-thread,
+.halloween-spider-right .halloween-hanging-spider-body,
+.halloween-spider-tree,
+.halloween-spider-tree .halloween-hanging-spider-thread,
+.halloween-spider-tree .halloween-hanging-spider-body { animation-delay: -3.6s; }
+/* Nœud du fil sur la toile. */
+.halloween-hanging-spider::before {
+  content: '';
+  position: absolute;
+  top: -1.5px;
+  left: 12.5px;
+  width: 3px;
+  height: 3px;
+  border-radius: 9999px;
+  background: var(--spider-thread, rgb(235 228 220 / 0.85));
+}
+/* Le fil s'allonge de `--thread × (s − 1)` pendant que l'araignée descend
+   d'autant : mêmes étapes et même courbe, donc collés à chaque image. Les
+   3 px de plus entrent dans l'abdomen, sans jour entre fil et corps. */
+.halloween-hanging-spider-thread {
+  position: absolute;
+  top: 0;
+  left: 13.5px;
+  width: 1px;
+  height: calc(var(--thread) + 3px);
+  background: var(--spider-thread, rgb(235 228 220 / 0.75));
+  transform-origin: 50% 0;
+  animation: halloween-spider-thread 7.2s ease-in-out infinite;
+}
+.halloween-hanging-spider-body {
+  position: absolute;
+  top: var(--thread);
+  left: 0;
+  width: 28px;
+  height: 23.8px;
+  animation: halloween-spider-body 7.2s ease-in-out infinite;
+}
+.halloween-hanging-spider-body svg {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* Halo des araignées lumineuses, peint une fois : il suit le corps. */
+.halloween-hanging-spider-halo {
+  position: absolute;
+  inset: -70% -60%;
+  background: radial-gradient(closest-side, rgb(255 150 60 / 0.5), rgb(249 115 22 / 0.16) 55%, transparent);
+}
+[data-tone='ghost'] .halloween-hanging-spider-halo {
+  background: radial-gradient(closest-side, rgb(200 186 255 / 0.5), rgb(160 140 240 / 0.15) 55%, transparent);
+}
+@keyframes halloween-spider-thread {
+  0%, 100% { transform: scaleY(0.65); }
+  50% { transform: scaleY(1.2); }
+}
+@keyframes halloween-spider-body {
+  0%, 100% { transform: translateY(calc(var(--thread) * -0.35)); }
+  50% { transform: translateY(calc(var(--thread) * 0.2)); }
+}
+@keyframes halloween-spider-sway {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+}
+
+/* ─── Chauves-souris en vol ──────────────────────────────────────────────────
+   Chacune traverse le haut de l'écran pendant 60 % de son cycle, en
+   ondulant, puis reste hors champ : elles passent l'une après l'autre. Ailes
+   et corps sont trois SVG superposés (même cadre 100 × 38) : chaque aile
+   tourne comme un élément HTML, donc sur la carte graphique, sans repeindre
+   le dessin. Pas de filtre : le liseré clair est un trait SVG. */
+.halloween-bat {
+  position: absolute;
+  left: 0;
+  animation: halloween-bat-fly ease-in-out infinite;
+  will-change: transform;
+}
+.halloween-bat-frame {
+  position: relative;
+  display: block;
+  height: 0;
+  padding-bottom: 38%;
+}
+.halloween-bat-part {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: #0b0810;
+  stroke: rgb(190 170 230 / 0.5);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  paint-order: stroke;
+}
+.halloween-bat-torso { stroke: none; }
+/* Le <span> de chaque aile couvre tout le cadre : ses pourcentages sont
+   donc ceux du dessin. Épaules : (46 ; 22) et (54 ; 22) dans 100 × 38. */
+.halloween-bat-wing {
+  position: absolute;
+  inset: 0;
+}
+/* Huit battements par cycle de 3,6 s plutôt qu'un cycle de 0,45 s : chaque
+   fin de cycle réveille la page (événement animationiteration), même quand
+   l'animation tourne sur la carte graphique. Six ailes à 0,45 s, c'étaient
+   ~13 réveils par seconde ; ici moins de deux. */
+.halloween-bat-wing-l {
+  transform-origin: 46% 57.9%;
+  animation: halloween-bat-flap-left 3.6s ease-in-out infinite;
+}
+.halloween-bat-wing-r {
+  transform-origin: 54% 57.9%;
+  animation: halloween-bat-flap-right 3.6s ease-in-out infinite;
+}
+/* Traversée et ondulation dans une seule animation (une de moins à suivre
+   par chauve-souris). */
+@keyframes halloween-bat-fly {
+  0% { transform: translate3d(-15vw, 0, 0); }
+  15% { transform: translate3d(15.75vw, -10px, 0); }
+  30% { transform: translate3d(46.5vw, 14px, 0); }
+  45% { transform: translate3d(77.25vw, 2px, 0); }
+  60%, 100% { transform: translate3d(108vw, 30px, 0); }
+}
+@keyframes halloween-bat-flap-left {
+  0%, 12.5%, 25%, 37.5%, 50%, 62.5%, 75%, 87.5%, 100% { transform: rotate(12deg); }
+  6.25%, 18.75%, 31.25%, 43.75%, 56.25%, 68.75%, 81.25%, 93.75% { transform: rotate(-32deg); }
+}
+@keyframes halloween-bat-flap-right {
+  0%, 12.5%, 25%, 37.5%, 50%, 62.5%, 75%, 87.5%, 100% { transform: rotate(-12deg); }
+  6.25%, 18.75%, 31.25%, 43.75%, 56.25%, 68.75%, 81.25%, 93.75% { transform: rotate(32deg); }
+}
+
+/* Mobile et tactile : décor allégé, pour la batterie. Seule la brume
+   glisse : un `transform` joué par la carte graphique, sans repeinture (sa
+   teinte, elle, reste fixe). Sur un écran étroit, la bande ne fait que deux
+   largeurs de téléphone : aux durées du bureau, elle avançait de quelques
+   pixels par seconde et paraissait figée. Durées raccourcies d'autant. */
+@media (max-width: 1023px), (pointer: coarse) {
+  .halloween-fog-back { animation-duration: 40s; }
+  .halloween-fog-mid { animation-duration: 30s; }
+  .halloween-fog-front { animation-duration: 20s; }
+  .halloween-smoke {
+    animation: none;
+    will-change: auto;
+  }
+  .halloween-particles,
+  .halloween-pumpkin-small,
+  .halloween-spider,
+  .halloween-bat { display: none; }
+  /* Celle de droite aussi : sans quoi le nom de son vacillement (plus haut)
+     survit au repos, et une animation garde l'heure de son premier départ ;
+     aux passages de la sorcière, elle ne se relançait pas. */
+  .halloween-pumpkin,
+  .halloween-pumpkin-halo,
+  .halloween-pumpkin-light,
+  .halloween-pumpkin-right .halloween-pumpkin-halo,
+  .halloween-pumpkin-right .halloween-pumpkin-light {
+    animation: none;
+    will-change: auto;
+  }
+  /* Araignées et chauves-souris cachées, toiles dessinées dans l'en-tête
+     (plus bas) : le calque du dessus, vide, n'est plus composé. */
+  .halloween-overhead { display: none; }
+  .halloween-fog-back { height: 60vh; }
+  .halloween-fog-mid { height: 30vh; }
+  /* Devant le site, brume et bancs de fumée restent bas et légers : sur un
+     petit écran, ils voilaient les dernières lignes de texte. */
+  .halloween-fog-front {
+    bottom: -3vh;
+    height: 12vh;
+    opacity: 0.4;
+  }
+  .halloween-smoke {
+    bottom: -4vh;
+    width: 60vw;
+    height: 18vh;
+    opacity: 0.6;
+  }
+  /* Une citrouille dans chaque coin du bas, dans la brume : calées au ras du
+     bord, elles cachent moins le début et la fin des lignes du bas. */
+  .halloween-pumpkin-left {
+    left: 4px;
+    bottom: 4px;
+    width: 56px;
+  }
+  .halloween-pumpkin-right {
+    right: 4px;
+    bottom: 4px;
+    width: 56px;
+  }
+  /* Elles s'agitent au passage de la sorcière (attribut posé sur ce calque
+     par HalloweenWitchFlight pendant 10,8 s) : les visages vacillent trois
+     fois 3,6 s, celle de droite se dandine quand la sorcière fait demi-tour
+     de son côté (vers 4,3 s), celle de gauche sautille quand elle repasse
+     au-dessus d'elle (vers 8,2 s). Chaque animation finit au repos avant que
+     l'attribut soit retiré : rien ne s'arrête en plein mouvement. */
+  .halloween-atmosphere[data-witch-pass] .halloween-pumpkin-halo,
+  .halloween-atmosphere[data-witch-pass] .halloween-pumpkin-light {
+    animation: halloween-pumpkin-flicker 3.6s linear 3;
+  }
+  .halloween-atmosphere[data-witch-pass] .halloween-pumpkin-right .halloween-pumpkin-halo,
+  .halloween-atmosphere[data-witch-pass] .halloween-pumpkin-right .halloween-pumpkin-light {
+    animation-name: halloween-pumpkin-flicker-b;
+  }
+  .halloween-atmosphere[data-witch-pass] .halloween-pumpkin-right {
+    animation: halloween-pumpkin-wobble 7.2s ease-in-out 2.1s;
+  }
+  .halloween-atmosphere[data-witch-pass] .halloween-pumpkin-left {
+    animation: halloween-pumpkin-hop 7.2s ease-in-out 2.2s;
+  }
+  /* Sorcière plus petite, sans vol en boucle : affichée seulement pendant
+     un passage, toutes les 30 s, sur deux lignes (HalloweenWitchFlight pose
+     l'attribut et le trajet). Entre deux passages, rien ne bouge. */
+  .halloween-witch {
+    display: none;
+    top: 0;
+    width: 110px;
+    animation: none;
+  }
+  .halloween-witch[data-flying] { display: block; }
+  .halloween-witch-bob { animation: none; }
+  /* Toiles des coins dans l'en-tête, entre son dégradé (z-index 0) et sa
+     ligne d'icônes (z-index 10) : le logo et le bouton du menu, collés aux
+     coins de l'écran, passent devant au lieu d'être brouillés par les fils. */
+  html[data-halloween-decor] [data-site-header]::before,
+  html[data-halloween-decor] [data-site-header]::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    z-index: 5;
+    width: 64px;
+    height: 96px;
+    background: url('../assets/halloween/web-left.webp') no-repeat top left / 100% 100%;
+    pointer-events: none;
+  }
+  html[data-halloween-decor] [data-site-header]::before { left: 0; }
+  html[data-halloween-decor] [data-site-header]::after {
+    right: 0;
+    background-image: url('../assets/halloween/web-right.webp');
+    transform: scaleX(-1);
+  }
+}
+
+/* Menu Explorer ouvert : le décor se fige le temps du menu. Ses animations
+   tournent sur la carte graphique, mais chaque image calculée par la page
+   (ouverture du menu, survol des cartes) devait aussi les suivre : avec elles
+   en pause, l'ouverture est aussi fluide que sans thème. Le décor reste
+   affiché : le menu mobile laisse voir la page autour de lui, sous un voile,
+   et un décor qui disparaît d'un coup à l'ouverture clignotait.
+   L'attribut est posé sur les conteneurs du décor (Header.tsx) : lu depuis
+   <html>, il faisait recalculer le style de toute la page. */
+.halloween-backdrop[data-explore-paused] *,
+.halloween-atmosphere[data-explore-paused] *,
+.halloween-overhead[data-explore-paused] * { animation-play-state: paused; }
+
+/* Arbres seulement sur grand écran : ailleurs, le contenu touche les bords. */
+@media (max-width: 1279px) {
+  .halloween-tree,
+  .halloween-spider-tree { display: none; }
+}
+
+/* Animations de fond coupées (réglage ou « réduire les animations »). */
+html[data-no-bg-anim] .halloween-fog,
+html[data-no-bg-anim] .halloween-smoke,
+html[data-no-bg-anim] .halloween-hanging-spider,
+html[data-no-bg-anim] .halloween-hanging-spider-thread,
+html[data-no-bg-anim] .halloween-hanging-spider-body,
+html[data-no-bg-anim] .halloween-pumpkin,
+html[data-no-bg-anim] .halloween-pumpkin-halo,
+html[data-no-bg-anim] .halloween-pumpkin-light {
+  animation: none;
+  will-change: auto;
+}
+/* Une chauve-souris ou une sorcière immobile n'a rien d'un vol : on les
+   retire. */
+html[data-no-bg-anim] .halloween-particles,
+html[data-no-bg-anim] .halloween-witch,
+html[data-no-bg-anim] .halloween-bat { display: none; }

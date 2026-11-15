@@ -3,15 +3,16 @@ import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import HeroSlider from '../components/HeroSlider';
 import EmblaCarousel from '../components/EmblaCarousel';
-import HeroSkeleton from '../components/skeletons/HeroSkeleton';
+import CatalogSkeleton from '../components/skeletons/CatalogSkeleton';
 import EmblaCarouselGenres from '../components/EmblaCarouselGenres';
-import ContentRowSkeleton from '../components/skeletons/ContentRowSkeleton';
 import LazySection from '../components/LazySection';
 import CarouselTitle from '../components/CarouselTitle';
+import { Flame, Compass } from 'lucide-react';
 
 import TelegramPromotion from '../components/TelegramPromotion';
 import { useWrappedTracker } from '../hooks/useWrappedTracker';
 import { getTmdbLanguage } from '../i18n';
+import { readSessionStorage, writeSessionStorage } from '../utils/browserStorage';
 import { getMinimumCarouselCategoryItems, makeExclusiveCategories } from '../utils/exclusiveCategories';
 
 // Nombre de sections à charger immédiatement
@@ -408,24 +409,33 @@ const TVShows: React.FC = () => {
       setLoading(true);
 
       // Check for cached data first
-      const cachedData = sessionStorage.getItem('movix_tvshows_data');
-      const cacheTimestamp = sessionStorage.getItem('movix_tvshows_data_timestamp');
+      const cachedData = readSessionStorage('movix_tvshows_data');
+      const cacheTimestamp = readSessionStorage('movix_tvshows_data_timestamp');
 
       // Use cache if it exists and is less than 15 minutes old
       if (cachedData && cacheTimestamp) {
         const isRecent = (Date.now() - parseInt(cacheTimestamp)) < 15 * 60 * 1000; // 15 minutes
 
         if (isRecent) {
-          const parsedData = JSON.parse(cachedData);
-          setFeaturedShows((parsedData.featuredShows || []).map(normalizeTVItem) as any);
-          setTopContent((parsedData.topContent || []).map(normalizeTVItem) as any);
-          setTVShows(parsedData.tvShows || []);
-          // Regenerate categories from cached TV shows
-          if (parsedData.tvShows && parsedData.tvShows.length > 0) {
-            organizeContentByCategories(parsedData.tvShows);
+          try {
+            const parsedData = JSON.parse(cachedData);
+            if (!Array.isArray(parsedData?.featuredShows)
+              || !Array.isArray(parsedData?.topContent)
+              || !Array.isArray(parsedData?.tvShows)) {
+              throw new Error('Invalid TV shows cache');
+            }
+            setFeaturedShows(parsedData.featuredShows.map(normalizeTVItem) as any);
+            setTopContent(parsedData.topContent.map(normalizeTVItem) as any);
+            setTVShows(parsedData.tvShows);
+            // Regenerate categories from cached TV shows
+            if (parsedData.tvShows && parsedData.tvShows.length > 0) {
+              organizeContentByCategories(parsedData.tvShows);
+            }
+            setLoading(false);
+            return;
+          } catch {
+            // Cache illisible : les données réseau restent la source de repli.
           }
-          setLoading(false);
-          return;
         }
       }
 
@@ -643,8 +653,9 @@ const TVShows: React.FC = () => {
         categories: [] // Categories will be regenerated from tvShows
       };
 
-      sessionStorage.setItem('movix_tvshows_data', JSON.stringify(cacheData));
-      sessionStorage.setItem('movix_tvshows_data_timestamp', Date.now().toString());
+      if (writeSessionStorage('movix_tvshows_data', JSON.stringify(cacheData))) {
+        writeSessionStorage('movix_tvshows_data_timestamp', Date.now().toString());
+      }
     } catch (error) {
       console.error('Error fetching TV shows:', error);
       setError(t('home.errorLoadingData'));
@@ -661,16 +672,22 @@ const TVShows: React.FC = () => {
   useEffect(() => {
     const cacheKey = 'movix_tv_genre_images';
     const cacheTsKey = 'movix_tv_genre_images_ts';
-    const cached = sessionStorage.getItem(cacheKey);
-    const cachedTs = sessionStorage.getItem(cacheTsKey);
+    const cached = readSessionStorage(cacheKey);
+    const cachedTs = readSessionStorage(cacheTsKey);
     const oneDayMs = 24 * 60 * 60 * 1000;
     const load = async () => {
-      try {
-        if (cached && cachedTs && (Date.now() - parseInt(cachedTs)) < oneDayMs) {
+      if (cached && cachedTs && (Date.now() - parseInt(cachedTs)) < oneDayMs) {
+        try {
           const parsed = JSON.parse(cached);
+          if (!Array.isArray(parsed)) throw new Error('Invalid TV genre image cache');
           setGenreItems(parsed);
           return;
+        } catch {
+          // Cache illisible : récupérer de nouvelles images.
         }
+      }
+
+      try {
         const updated = await Promise.all(genreItems.map(async (g) => {
           try {
             const resp = await axios.get('https://api.themoviedb.org/3/discover/tv', {
@@ -692,8 +709,9 @@ const TVShows: React.FC = () => {
           }
         }));
         setGenreItems(updated);
-        sessionStorage.setItem(cacheKey, JSON.stringify(updated));
-        sessionStorage.setItem(cacheTsKey, Date.now().toString());
+        if (writeSessionStorage(cacheKey, JSON.stringify(updated))) {
+          writeSessionStorage(cacheTsKey, Date.now().toString());
+        }
       } catch (_) {
         // ignore
       }
@@ -742,7 +760,7 @@ const TVShows: React.FC = () => {
   }, [hoveredCardIndex]);
 
   const trendingTitle = useMemo(
-    () => <CarouselTitle icon="🔥" iconClass="text-red-600" label={t('home.trendingToday')} />,
+    () => <CarouselTitle icon={Flame} iconClass="text-red-600" label={t('home.trendingToday')} />,
     [t]
   );
 
@@ -752,7 +770,7 @@ const TVShows: React.FC = () => {
   );
 
   const genresTitle = useMemo(
-    () => <CarouselTitle icon="🧭" iconClass="text-white" label={t('genres.findByGenre')} />,
+    () => <CarouselTitle icon={Compass} iconClass="text-white" label={t('genres.findByGenre')} />,
     [t]
   );
 
@@ -768,16 +786,7 @@ const TVShows: React.FC = () => {
 
   if (loading && tvShows.length === 0) {
     return (
-      <div className="min-h-screen bg-black text-white">
-        <div className="relative w-full pt-16 md:pt-20 lg:pt-24">
-          <HeroSkeleton />
-        </div>
-        <div className="container mx-auto px-4 py-8 space-y-8">
-          <ContentRowSkeleton />
-          <ContentRowSkeleton />
-          <ContentRowSkeleton />
-        </div>
-      </div>
+      <CatalogSkeleton variant="tv" />
     );
   }
 

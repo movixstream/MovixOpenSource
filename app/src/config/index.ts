@@ -1,5 +1,5 @@
 export const CONFIG = {
-  SITE_URL: 'https://movix.tax',
+  SITE_URL: 'https://movix.miami',
   DNS_PRIMARY: '1.1.1.1',
   DNS_SECONDARY: '1.0.0.1',
   DNS_DOH_URL: 'https://cloudflare-dns.com/dns-query',
@@ -16,8 +16,26 @@ export const UPDATE_CHECK = {
   PENDING_DOWNLOAD_KEY: 'update:pendingDownload',
 };
 
+// Repli quand rentry ou address.json sont injoignables (souvent le cas derrière
+// un VPN, dont l'IP reçoit un défi Cloudflare). À garder aligné sur la liste
+// « active » de address.json.
 export const FALLBACK_CONFIG = {
-  PRIMARY_URL: 'https://movix.tax',
-  GITHUB_URL: 'https://github.com/Movix-STMG/MovixOpenSource',
-  TELEGRAM_URL: 'https://t.me/movix_site',
+  RESOLVER_HOSTS: ['movix.online'],
+  PRIMARY_URL: 'https://movix.miami',
+  MIRRORS: [
+    'https://movix.dog',
+    'https://movix.luxe',
+    'https://movix.college',
+    'https://movix.men',
+    'https://movix.fun',
+    'https://movix.show',
+    'https://movix.date',
+    'https://movix.chat',
+    'https://movix.golf',
+    'https://movix.cloud',
+    'https://movix.cash',
+  ],
+  CACHE_KEY: 'address:lastConfig',
+  GITHUB_URL: 'https://github.com/movixstream/MovixOpenSource',
+  TELEGRAM_URL: 'https://matrix.to/#/%23groupe-ix:matrix.org',
 };

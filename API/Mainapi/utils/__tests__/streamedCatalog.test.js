@@ -12,11 +12,12 @@ function fixture() {
   });
   responses.set('/api/matches/all', [
     match('future', 'football', time + 3600000),
-    match('finished', 'football', time - 3600000),
-    match('live', 'basketball', time - 7200000),
+    match('finished', 'football', time - 4 * 3600000),
+    match('started', 'football', time - 1800000),
+    match('live', 'basketball', time - 4 * 3600000),
     match('empty', 'golf', time + 60000, []),
   ]);
-  responses.set('/api/matches/live', [match('live', 'basketball', time - 7200000)]);
+  responses.set('/api/matches/live', [match('live', 'basketball', time - 4 * 3600000)]);
   const source = createStreamedSource({
     now: () => time,
     axios: { async get(url, options) {
@@ -43,13 +44,13 @@ test('catalogues Streamed : sports, statut amont, tri, absence de doublons et ca
   assert.ok(STREAMED_CATALOGS.some(c => c.id === 'streamed_football'));
   assert.ok(STREAMED_CATALOGS.some(c => c.id === 'streamed_golf'));
   const results = await Promise.all(Array.from({ length: 20 }, () => f.source.getCatalog('streamed_all')));
-  assert.deepEqual(results[0].map(m => m.id), ['streamed_live', 'streamed_empty', 'streamed_future']);
+  assert.deepEqual(results[0].map(m => m.id), ['streamed_live', 'streamed_started', 'streamed_empty', 'streamed_future']);
   assert.equal(results[0][0]._isLive, true);
   assert.equal(results[0][1]._isLive, false);
-  assert.equal(results[0][1]._serverCount, 0);
-  assert.equal(results[0][2]._timestamp, 1800003600000);
+  assert.equal(results[0][2]._serverCount, 0);
+  assert.equal(results[0][3]._timestamp, 1800003600000);
   assert.equal(results[0][0]._sportKey, 'basketball');
-  assert.deepEqual((await f.source.getCatalog('streamed_football')).map(m => m.id), ['streamed_future']);
+  assert.deepEqual((await f.source.getCatalog('streamed_football')).map(m => m.id), ['streamed_started', 'streamed_future']);
   assert.equal(f.calls.length, 2);
   assert.deepEqual(await f.source.getCatalog('streamed_unknown'), []);
   assert.equal(f.calls.length, 2);

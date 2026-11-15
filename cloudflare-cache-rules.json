@@ -1,0 +1,111 @@
+{
+  "phase": "http_request_cache_settings",
+  "html_only_domains": ["movix.help", "movix.online"],
+  "domains": [
+    "movix.cash",
+    "movix.chat",
+    "movix.cloud",
+    "movix.college",
+    "movix.date",
+    "movix.dog",
+    "movix.fun",
+    "movix.golf",
+    "movix.luxe",
+    "movix.men",
+    "movix.miami",
+    "movix.show"
+  ],
+  "ruleset": {
+    "name": "default",
+    "rules": [
+      {
+        "ref": "movix_frontend_dynamic",
+        "description": "Movix - HTML et fichiers de pilotage hors cache",
+        "expression": "(http.host in {\"{{DOMAIN}}\" \"www.{{DOMAIN}}\"})",
+        "action": "set_cache_settings",
+        "action_parameters": {
+          "browser_ttl": {
+            "mode": "respect_origin"
+          },
+          "cache": false
+        },
+        "enabled": true
+      },
+      {
+        "ref": "movix_public_media",
+        "description": "Movix - Medias publics selon les en-tetes origine",
+        "expression": "((http.host in {\"{{DOMAIN}}\" \"www.{{DOMAIN}}\"}) and ((starts_with(http.request.uri.path, \"/avatars/\") or starts_with(http.request.uri.path, \"/live/\") or starts_with(http.request.uri.path, \"/help/\") or starts_with(http.request.uri.path, \"/WatchpartyTutorial/\")) or http.request.uri.path in {\"/apothecary_backdrop.jpg\" \"/apple-touch-icon-180.png\" \"/favicon-48.png\" \"/movix-192.png\" \"/movix.png\" \"/movix.svg\" \"/movix512.png\" \"/thumbnail.png\"}) and lower(http.request.uri.path.extension) in {\"png\" \"jpg\" \"jpeg\" \"gif\" \"webp\" \"avif\" \"svg\" \"ico\" \"woff\" \"woff2\" \"ttf\" \"otf\" \"eot\" \"mp4\" \"webm\" \"m4v\" \"mp3\"}) and not any(lower(http.request.headers.names[*])[*] eq \"authorization\")",
+        "action": "set_cache_settings",
+        "action_parameters": {
+          "browser_ttl": {
+            "mode": "respect_origin"
+          },
+          "cache": true,
+          "edge_ttl": {
+            "mode": "bypass_by_default",
+            "status_code_ttl": [
+              {
+                "status_code_range": {
+                  "from": 400,
+                  "to": 599
+                },
+                "value": -1
+              }
+            ]
+          }
+        },
+        "enabled": true
+      },
+      {
+        "ref": "movix_build_assets",
+        "description": "Movix - Assets Vite immuables selon origine, erreurs exclues",
+        "expression": "(http.host in {\"{{DOMAIN}}\" \"www.{{DOMAIN}}\"}) and starts_with(http.request.uri.path, \"/assets/\") and not any(lower(http.request.headers.names[*])[*] eq \"authorization\")",
+        "action": "set_cache_settings",
+        "action_parameters": {
+          "browser_ttl": {
+            "mode": "respect_origin"
+          },
+          "cache": true,
+          "edge_ttl": {
+            "mode": "bypass_by_default",
+            "status_code_ttl": [
+              {
+                "status_code_range": {
+                  "from": 400,
+                  "to": 599
+                },
+                "value": -1
+              }
+            ]
+          }
+        },
+        "enabled": true
+      },
+      {
+        "ref": "movix_public_html_origin",
+        "description": "Movix - HTML public selon origine (60 s au prochain frontend)",
+        "expression": "(http.host in {\"{{DOMAIN}}\" \"www.{{DOMAIN}}\"}) and (http.request.uri.path in {\"/\" \"/index.html\" \"/movies\" \"/anime\" \"/tv-shows\" \"/collections\" \"/search\" \"/about\" \"/privacy\" \"/terms-of-service\" \"/extension\" \"/app\" \"/list-catalog\" \"/top10\" \"/calendar\" \"/live-tv\" \"/cinegraph\"} or starts_with(http.request.uri.path, \"/movie/\") or starts_with(http.request.uri.path, \"/tv/\")) and not any(lower(http.request.headers.names[*])[*] eq \"authorization\")",
+        "action": "set_cache_settings",
+        "action_parameters": {
+          "cache": true,
+          "browser_ttl": {
+            "mode": "respect_origin"
+          },
+          "edge_ttl": {
+            "mode": "bypass_by_default",
+            "status_code_ttl": [
+              {
+                "status_code_range": {
+                  "from": 400,
+                  "to": 599
+                },
+                "value": -1
+              }
+            ]
+          }
+        },
+        "enabled": true
+      }
+    ]
+  }
+}

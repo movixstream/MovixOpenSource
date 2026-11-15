@@ -33,3 +33,20 @@ export function sourceEffect(file, includes, bindings = {}) {
   const js = ts.transpile(`const effect = ${expression};`, { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None });
   return new Function(...Object.keys(bindings), `${js}\nreturn effect;`)(...Object.values(bindings));
 }
+
+export function sourceJsxHandler(file, attribute, includes, bindings = {}) {
+  const source = ts.createSourceFile(file, readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let expression;
+  const visit = node => {
+    if (ts.isJsxAttribute(node) && node.name.getText(source) === attribute
+      && node.initializer && ts.isJsxExpression(node.initializer)
+      && node.initializer.expression?.getText(source).includes(includes)) {
+      expression = node.initializer.expression.getText(source);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  if (!expression) throw new Error(`Gestionnaire JSX introuvable dans ${file}: ${includes}`);
+  const js = ts.transpile(`const handler = ${expression};`, { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None });
+  return new Function(...Object.keys(bindings), `${js}\nreturn handler;`)(...Object.values(bindings));
+}

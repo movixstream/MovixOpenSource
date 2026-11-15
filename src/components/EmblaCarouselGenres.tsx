@@ -1,6 +1,6 @@
 import { useLightMode } from '@/context/LightModeContext';
 import React, { useCallback, useEffect, useState } from 'react';
-import useEmblaCarousel from 'embla-carousel-react';
+import useEmblaCarousel from '@/hooks/useFlexGapEmblaCarousel';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { useTranslation } from 'react-i18next';

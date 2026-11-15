@@ -214,7 +214,7 @@ router.post('/', requireAuth, async (req, res) => {
 
     // Verification Turnstile (invisible captcha)
     if (TURNSTILE_INVISIBLE_SECRETKEY) {
-      const check = await verifyTurnstileFromRequest(req, turnstileToken, TURNSTILE_INVISIBLE_SECRETKEY);
+      const check = await verifyTurnstileFromRequest(req, turnstileToken, 'invisible');
       if (!check.valid) {
         return res.status(check.status).json({ error: check.error });
       }

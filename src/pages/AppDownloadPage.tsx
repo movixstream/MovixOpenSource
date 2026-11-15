@@ -7,7 +7,6 @@ import {
   Download,
   Apple,
   FlaskConical,
-  Github,
   ShieldCheck,
   Zap,
   Wifi,
@@ -22,7 +21,7 @@ import ShinyText from '../components/ui/shiny-text';
 import AnimatedBorderCard from '../components/ui/animated-border-card';
 
 const APK_URL = 'https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/app/movix-android.apk';
-const IOS_GITHUB_URL = 'https://github.com/movixstream/MovixOpenSource/tree/main/app';
+const IPA_URL = 'https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/app/movix-ios-unsigner.ipa';
 
 const features = [
   {
@@ -205,7 +204,7 @@ const AppDownloadPage: React.FC = () => {
               </div>
               <p className="text-white/55 text-sm leading-relaxed mb-6">
                 L'application iOS est déjà disponible en version de test, et tout le
-                monde peut l'essayer dès maintenant : récupère l'IPA sur GitHub,
+                monde peut l'essayer dès maintenant : télécharge l'IPA,
                 signe-la avec l'outil de ton choix (AltStore, Sideloadly, ESign…)
                 puis installe-la sur ton iPhone ou iPad.
               </p>
@@ -222,13 +221,12 @@ const AppDownloadPage: React.FC = () => {
                 </span>
               </div>
               <a
-                href={IOS_GITHUB_URL}
-                target="_blank"
-                rel="noopener noreferrer"
+                href={IPA_URL}
+                download="movix-ios-unsigner.ipa"
                 className="mt-auto inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 text-white shadow-lg shadow-blue-500/20 hover:bg-blue-700 px-6 text-sm sm:text-base font-semibold transition-all duration-200 active:scale-95"
               >
-                <Github className="w-5 h-5 flex-shrink-0" />
-                Récupérer l'IPA sur GitHub
+                <Download className="w-5 h-5 flex-shrink-0" />
+                Télécharger l'IPA iOS
               </a>
             </AnimatedBorderCard>
           </motion.div>

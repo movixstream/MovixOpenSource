@@ -129,11 +129,11 @@ const SHEGU_FIXTURE = JSON.parse(readFileSync(
 test('buildSheguUrl encodes movie and tv queries', () => {
   assert.equal(
     buildSheguUrl({ type: 'movie', tmdbId: '550' }),
-    'https://subtitles.shegu.st/subtitles?type=movie&tmdb=550',
+    'https://subs.wing.st/subtitles?type=movie&tmdb=550',
   );
   assert.equal(
     buildSheguUrl({ type: 'tv', tmdbId: '125988', season: 1, episode: 1 }),
-    'https://subtitles.shegu.st/subtitles?type=tv&tmdb=125988&season=1&episode=1',
+    'https://subs.wing.st/subtitles?type=tv&tmdb=125988&season=1&episode=1',
   );
 });
 

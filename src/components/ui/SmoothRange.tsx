@@ -45,6 +45,9 @@ export const SmoothRange = React.forwardRef<SmoothRangeHandle, SmoothRangeProps>
   const fillRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
   const currentValueRef = useRef(value);
+  const visualValueRef = useRef(value);
+  // React ne doit pas replacer le curseur sur un cran lors des rendus de l'aperçu.
+  const initialProgressRef = useRef(max === min ? 0 : ((clampValue(value, min, max) - min) / (max - min)) * 100);
   const pendingClientXRef = useRef<number | null>(null);
   const sliderBoundsRef = useRef({ left: 0, width: 1 });
   const frameRef = useRef<number | null>(null);
@@ -61,6 +64,13 @@ export const SmoothRange = React.forwardRef<SmoothRangeHandle, SmoothRangeProps>
   const applyVisualValue = useCallback((next: number) => {
     const normalized = clampValue(next, min, max);
     const progress = max === min ? 0 : ((normalized - min) / (max - min)) * 100;
+    visualValueRef.current = normalized;
+    if (fillRef.current) fillRef.current.style.transform = `scaleX(${progress / 100})`;
+    if (thumbRef.current) thumbRef.current.style.transform = `translate3d(${progress}%, 0, 0)`;
+  }, [max, min]);
+
+  const applyValue = useCallback((next: number) => {
+    const normalized = clampValue(next, min, max);
     currentValueRef.current = normalized;
     sliderRef.current?.setAttribute('aria-valuenow', normalized.toFixed(2));
     sliderRef.current?.setAttribute('aria-valuetext', formatValue(normalized));
@@ -70,14 +80,14 @@ export const SmoothRange = React.forwardRef<SmoothRangeHandle, SmoothRangeProps>
     } else if (outputRef?.current) {
       outputRef.current.textContent = formatValue(normalized);
     }
-    if (fillRef.current) fillRef.current.style.transform = `scaleX(${progress / 100})`;
-    if (thumbRef.current) thumbRef.current.style.transform = `translate3d(${progress}%, 0, 0)`;
   }, [formatValue, max, min, outputRef]);
 
   const animateTo = useCallback((nextValue: number) => {
     const target = clampValue(nextValue, min, max);
+    applyValue(target);
     externalTargetValueRef.current = target;
-    if (!animateExternalValue || window.matchMedia('(prefers-reduced-motion: reduce)').matches || Math.abs(target - currentValueRef.current) < 0.01) {
+    const visualEpsilon = Math.max((max - min) * 0.001, Number.EPSILON);
+    if (!animateExternalValue || window.matchMedia('(prefers-reduced-motion: reduce)').matches || Math.abs(target - visualValueRef.current) < visualEpsilon) {
       if (externalAnimationFrameRef.current !== null) window.cancelAnimationFrame(externalAnimationFrameRef.current);
       externalAnimationFrameRef.current = null;
       externalAnimationTimestampRef.current = null;
@@ -94,9 +104,9 @@ export const SmoothRange = React.forwardRef<SmoothRangeHandle, SmoothRangeProps>
       externalAnimationTimestampRef.current = timestamp;
       const liveTarget = externalTargetValueRef.current;
       const smoothing = 1 - Math.exp(-elapsedMs / 72);
-      const next = currentValueRef.current + (liveTarget - currentValueRef.current) * smoothing;
+      const next = visualValueRef.current + (liveTarget - visualValueRef.current) * smoothing;
 
-      if (Math.abs(liveTarget - next) < 0.01) {
+      if (Math.abs(liveTarget - next) < visualEpsilon) {
         applyVisualValue(liveTarget);
         externalAnimationFrameRef.current = null;
         externalAnimationTimestampRef.current = null;
@@ -108,7 +118,7 @@ export const SmoothRange = React.forwardRef<SmoothRangeHandle, SmoothRangeProps>
     };
     externalAnimationTimestampRef.current = null;
     externalAnimationFrameRef.current = window.requestAnimationFrame(animate);
-  }, [animateExternalValue, applyVisualValue, max, min]);
+  }, [animateExternalValue, applyValue, applyVisualValue, max, min]);
 
   useImperativeHandle(forwardedRef, () => ({ animateTo }), [animateTo]);
 
@@ -128,10 +138,13 @@ export const SmoothRange = React.forwardRef<SmoothRangeHandle, SmoothRangeProps>
     if (clientX === null || sliderRef.current?.getAttribute('aria-disabled') === 'true') return;
     const { left, width } = sliderBoundsRef.current;
     const ratio = clampValue((clientX - left) / width, 0, 1);
-    const next = normalizeInteraction(min + ratio * (max - min));
+    const next = min + ratio * (max - min);
+    // Le curseur suit le pointeur en continu, la valeur garde les crans autorisés.
     applyVisualValue(next);
-    onPreview(next);
-  }, [applyVisualValue, max, min, normalizeInteraction, onPreview]);
+    const selected = normalizeInteraction(next);
+    applyValue(selected);
+    onPreview(selected);
+  }, [applyValue, applyVisualValue, max, min, normalizeInteraction, onPreview]);
 
   const schedulePoint = useCallback((clientX: number) => {
     pendingClientXRef.current = clientX;
@@ -149,11 +162,13 @@ export const SmoothRange = React.forwardRef<SmoothRangeHandle, SmoothRangeProps>
     if (!interactingRef.current) return;
     if (applyFinalPoint) schedulePoint(event.clientX);
     flushPoint();
+    pendingClientXRef.current = null;
     interactingRef.current = false;
     sliderRef.current?.removeAttribute('data-dragging');
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    animateTo(currentValueRef.current);
     onCommit?.();
-  }, [flushPoint, onCommit, schedulePoint]);
+  }, [animateTo, flushPoint, onCommit, schedulePoint]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (disabled) return;
@@ -164,12 +179,11 @@ export const SmoothRange = React.forwardRef<SmoothRangeHandle, SmoothRangeProps>
     else if (event.key === 'End') next = max;
     else return;
     event.preventDefault();
-    applyVisualValue(normalizeInteraction(next));
-    onPreview(currentValueRef.current);
+    const selected = normalizeInteraction(next);
+    animateTo(selected);
+    onPreview(selected);
     onCommit?.();
-  }, [applyVisualValue, disabled, keyboardStep, max, min, normalizeInteraction, onCommit, onPreview]);
-
-  const initialProgress = max === min ? 0 : ((clampValue(value, min, max) - min) / (max - min)) * 100;
+  }, [animateTo, disabled, keyboardStep, max, min, normalizeInteraction, onCommit, onPreview]);
 
   return (
     <div
@@ -212,13 +226,13 @@ export const SmoothRange = React.forwardRef<SmoothRangeHandle, SmoothRangeProps>
         <div
           ref={fillRef}
           className="absolute inset-0 origin-left rounded-full bg-[var(--smooth-range-accent)] will-change-transform"
-          style={{ transform: `scaleX(${initialProgress / 100})` }}
+          style={{ transform: `scaleX(${initialProgressRef.current / 100})` }}
         />
       </div>
       <div
         ref={thumbRef}
         className="pointer-events-none absolute inset-x-0 top-1/2 h-0 will-change-transform"
-        style={{ transform: `translate3d(${initialProgress}%, 0, 0)` }}
+        style={{ transform: `translate3d(${initialProgressRef.current}%, 0, 0)` }}
       >
         <div className="absolute left-0 top-0 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[var(--smooth-range-accent)] shadow-lg shadow-black/40 transition-[transform,box-shadow] duration-150 motion-reduce:transition-none [@media(hover:hover)]:group-hover:scale-125 group-data-[dragging=true]:scale-[1.4]" />
       </div>

@@ -2,6 +2,9 @@ const crypto = require('node:crypto');
 
 const WIFLIX_PROXY_TELEMETRY_PREFIX = 'wiflix:proxy-telemetry';
 const WIFLIX_PROXY_TELEMETRY_TTL_SECONDS = 30 * 24 * 60 * 60;
+// Seuls les derniers essais servent au rapport de blocage : la liste est bornée
+// pour qu'un proxy jamais bloqué n'accumule pas 30 jours d'horodatages.
+const WIFLIX_PROXY_TELEMETRY_MAX_ATTEMPTS = 1000;
 const WIFLIX_PROXY_BLOCK_DEDUPE_SECONDS = 10 * 60;
 const DISCORD_WEBHOOK_HOSTS = new Set([
   'discord.com',
@@ -134,6 +137,7 @@ function createWiflixProxyTelemetry({
   now = Date.now,
   createId = () => crypto.randomUUID(),
   ttlSeconds = WIFLIX_PROXY_TELEMETRY_TTL_SECONDS,
+  maxAttempts = WIFLIX_PROXY_TELEMETRY_MAX_ATTEMPTS,
   dedupeSeconds = WIFLIX_PROXY_BLOCK_DEDUPE_SECONDS,
   logger = console,
 }) {
@@ -150,6 +154,9 @@ function createWiflixProxyTelemetry({
 
   const telemetry = {
     async recordAttempt(proxyUrl) {
+      // Sans webhook, ces horodatages ne servent à aucun rapport : rien n'est
+      // écrit (une transaction Redis par essai de proxy sinon).
+      if (!enabled) return false;
       const identity = parseProxyIdentity(proxyUrl);
       if (!identity || !redis) return false;
       const atMs = Number(now());
@@ -159,6 +166,7 @@ function createWiflixProxyTelemetry({
           .multi()
           .zadd(attempts, atMs, `${atMs}:${createId()}`)
           .zremrangebyscore(attempts, '-inf', atMs - (ttlSeconds * 1000))
+          .zremrangebyrank(attempts, 0, -(maxAttempts + 1))
           .expire(attempts, ttlSeconds)
           .exec();
         return true;
@@ -232,6 +240,7 @@ function createWiflixProxyTelemetry({
 
 module.exports = {
   WIFLIX_PROXY_BLOCK_DEDUPE_SECONDS,
+  WIFLIX_PROXY_TELEMETRY_MAX_ATTEMPTS,
   WIFLIX_PROXY_TELEMETRY_TTL_SECONDS,
   buildTimingMetrics,
   createWiflixProxyTelemetry,

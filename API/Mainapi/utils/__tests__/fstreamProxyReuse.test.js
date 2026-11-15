@@ -20,7 +20,7 @@ function fixture() {
     assert.ok(start > 0 && stop > start);
     return source.slice(start, stop);
   };
-  const code = fragment('const fstreamAgentPool =', 'const coflixAgentSweep =')
+  const code = fragment('const fstreamAgentPool =', 'const fstreamAgentSweep =')
     + fragment('function normalizeProxyType(', 'function updateArrayInPlace(')
     + fragment('function acquireFStreamProxy(', '// Fonction utilitaire pour cr\\u00e9er un agent proxy SOCKS5');
   const context = vm.createContext({ HttpProxyAgent, HttpsProxyAgent, SocksProxyAgent, createProxyAgentPool });

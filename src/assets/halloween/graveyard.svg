@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2400 160" width="2400" height="160">
+  <!-- Cimetière en silhouette du pied de page (thème Halloween). Même teinte
+       que le fond du pied de page : le sol se fond dedans. La bande se répète
+       à l'horizontale : le sol est à la même hauteur aux deux bords. -->
+  <defs>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#fdba74" stop-opacity=".7"/>
+      <stop offset=".3" stop-color="#f97316" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#ea580c" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Halos de la lanterne et de la citrouille, derrière les silhouettes. -->
+  <circle cx="766" cy="83" r="30" fill="url(#glow)"/>
+  <circle cx="1204" cy="133" r="30" fill="url(#glow)"/>
+
+  <g fill="#08070b">
+    <!-- Sol vallonné. -->
+    <path d="M0 142C120 138 220 145 340 141S560 136 700 141S900 146 1040 142S1260 136 1400 141S1640 146 1780 141S2000 136 2140 141S2330 144 2400 142V160H0Z"/>
+
+    <!-- Grille en fer forgé, à gauche. -->
+    <path d="M60 104h240v3H60zM60 132h240v3H60zM54 92h8v58h-8zM296 92h8v58h-8z"/>
+    <circle cx="58" cy="88" r="5"/>
+    <circle cx="300" cy="88" r="5"/>
+    <path d="M72 148V100l2-7 2 7v48zM87 148V100l2-7 2 7v48zM102 148V100l2-7 2 7v48zM117 148V100l2-7 2 7v48zM132 148V100l2-7 2 7v48zM147 148V100l2-7 2 7v48zM162 148V100l2-7 2 7v48zM177 148V100l2-7 2 7v48zM192 148V100l2-7 2 7v48zM207 148V100l2-7 2 7v48zM222 148V100l2-7 2 7v48zM237 148V100l2-7 2 7v48zM252 148V100l2-7 2 7v48zM267 148V100l2-7 2 7v48zM282 148V100l2-7 2 7v48z"/>
+
+    <!-- Croix celtique. -->
+    <path d="M340 58h10v92h-10zM324 76h42v9h-42zM332 138h26v12h-26z"/>
+    <circle cx="345" cy="80" r="13" fill="none" stroke="#08070b" stroke-width="4"/>
+
+    <!-- Petite stèle arrondie. -->
+    <path d="M400 150V112a17 17 0 0 1 34 0v38z"/>
+
+    <!-- Arbre mort. -->
+    <path d="M550 150C556 120 556 100 558 82h4c1 18 4 40 10 68z"/>
+    <g fill="none" stroke="#08070b" stroke-linecap="round">
+      <path stroke-width="5" d="M559 90C548 72 536 60 516 44M561 86C572 70 584 58 600 34M560 84C558 66 560 50 563 30"/>
+      <path stroke-width="2.5" d="M534 58C530 46 528 38 522 26M516 44C508 42 502 44 494 40M584 56C594 54 604 56 614 50M600 34C598 26 600 18 596 8M563 30C568 24 572 20 580 16M562 42C556 36 552 30 546 20"/>
+      <path stroke-width="1.4" d="M522 26l-6-6M494 40l-8 2M614 50l8-4M596 8l-4-4M580 16l8-2M546 20l-4-8"/>
+    </g>
+
+    <!-- Stèle penchée. -->
+    <rect x="640" y="104" width="38" height="46" rx="3" transform="rotate(7 659 148)"/>
+
+    <!-- Réverbère à lanterne. -->
+    <path d="M748 62h4v88h-4zM742 140h16v10h-16zM752 66h14v4h-14zM763 70h2v6h-2zM757 76h14l-3-4h-8zM757 89h14v2h-14z"/>
+
+    <!-- Petite croix. -->
+    <path d="M811 96h8v54h-8zM801 108h28v7h-28z"/>
+
+    <!-- Stèle arrondie. -->
+    <path d="M850 150v-40a20 20 0 0 1 40 0v40z"/>
+
+    <!-- Groupe central : stèle penchée, obélisque, grande stèle, citrouille,
+         croix, stèle à épaules et stèle brisée. -->
+    <rect x="936" y="108" width="34" height="42" rx="3" transform="rotate(-9 953 148)"/>
+    <path d="M1012 136h40v14h-40zM1020 138l5-80h14l5 80zM1024 59l8-19 8 19z"/>
+    <path d="M1089 150V96a36 36 0 0 1 72 0v54z" transform="rotate(-4 1125 150)"/>
+    <ellipse cx="1205" cy="146" rx="34" ry="7"/>
+    <ellipse cx="1196" cy="136" rx="9" ry="10"/>
+    <ellipse cx="1212" cy="136" rx="9" ry="10"/>
+    <ellipse cx="1204" cy="135" rx="10" ry="11"/>
+    <path d="M1203 126q0-5 3-7l1.5 1.5q-2 2-1.5 5.5z"/>
+    <path d="M1270 56h10v94h-10zM1254 74h42v9h-42zM1266 134h18v8h-18zM1262 140h26v10h-26z"/>
+    <path d="M1332 150V98q0-8 8-8h12q8-12 16 0h12q8 0 8 8v52z"/>
+    <path d="M1414 150v-34a16 16 0 0 1 22-15l-3 9 7 4-3 8 9 4v24z"/>
+
+    <!-- Partie droite. -->
+    <path d="M1498 150v-38a17 17 0 0 1 34 0v38z" transform="rotate(5 1515 150)"/>
+    <path d="M1595 64h10v86h-10zM1580 82h40v8h-40zM1588 140h24v10h-24z"/>
+    <circle cx="1600" cy="86" r="12" fill="none" stroke="#08070b" stroke-width="4"/>
+    <path d="M1680 104h220v3h-220zM1680 132h220v3h-220zM1672 92h8v58h-8zM1900 92h8v58h-8z"/>
+    <circle cx="1676" cy="88" r="5"/>
+    <circle cx="1904" cy="88" r="5"/>
+    <path d="M1690 148V100l2-7 2 7v48zM1705 148V100l2-7 2 7v48zM1720 148V100l2-7 2 7v48zM1735 148V100l2-7 2 7v48zM1750 148V100l2-7 2 7v48zM1765 148V100l2-7 2 7v48zM1795 148V100l2-7 2 7v48zM1810 148V100l2-7 2 7v48zM1825 148V100l2-7 2 7v48zM1840 148V100l2-7 2 7v48zM1855 148V100l2-7 2 7v48zM1870 148V100l2-7 2 7v48zM1885 148V100l2-7 2 7v48z"/>
+    <path d="M1780 148V100l2-7 2 7v48z" transform="rotate(14 1782 148)"/>
+    <path d="M1976 150c6-26 6-46 8-64h4c2 18 4 40 10 64z"/>
+    <g fill="none" stroke="#08070b" stroke-linecap="round">
+      <path stroke-width="5" d="M1986 94C1972 80 1962 70 1946 60M1987 90C2000 76 2010 62 2028 52M1986 88C1985 70 1988 56 1992 40"/>
+      <path stroke-width="2.5" d="M1962 70C1958 60 1956 52 1950 44M1946 60C1938 60 1932 62 1924 58M2010 62C2016 54 2018 46 2016 36M2028 52C2036 52 2042 54 2050 50M1992 40C1998 34 2002 30 2010 28M1989 52C1984 46 1980 38 1976 30"/>
+      <path stroke-width="1.4" d="M1950 44l-5-6M1924 58l-8 1M2016 36l2-8M2050 50l8-3M2010 28l7-2M1976 30l-3-8"/>
+    </g>
+    <path d="M2066 138h28v12h-28zM2072 140l4-62h8l4 62zM2075 79l5-13 5 13z"/>
+    <path d="M2156 92h8v58h-8zM2146 104h28v7h-28z" transform="rotate(-10 2160 150)"/>
+    <path d="M2226 150v-46q0-7 7-7h9q8-10 16 0h9q7 0 7 7v46z"/>
+    <path d="M2326 150v-30a14 14 0 0 1 28 0v30z"/>
+
+    <!-- Touffes d'herbe. -->
+    <path d="M30 144l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM190 144l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM470 144l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM620 144l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM700 145l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM900 146l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM990 144l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM1065 143l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM1170 141l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM1240 141l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM1312 140l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM1395 141l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM1470 143l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM1560 145l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM1640 145l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM1940 140l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM2030 140l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM2120 141l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM2200 142l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM2300 143l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6zM2380 143l2-7 1.5 7 2-10 1.5 10 2-6 1.5 6z"/>
+  </g>
+
+  <!-- Lumières : vitre de la lanterne et visage de la citrouille. -->
+  <path fill="#fdba74" d="M759 76h10v13h-10z"/>
+  <path fill="#08070b" d="M763.5 76h1v13h-1z"/>
+  <path fill="#fb923c" d="M1197 132l3-5 3 5zM1205 132l3-5 3 5zM1195 137q9 7 18 0l-2.5 1-1.5-2-2 2-2-2-2 2-2-2-1.5 2z"/>
+</svg>

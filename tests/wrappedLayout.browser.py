@@ -92,11 +92,12 @@ async def verify(work):
                     if dimensions['name'] == 'closing':
                         await page.locator('[data-wrapped-card-preview]').wait_for()
                         assert await page.get_by_role('button', name='Partager', exact=True).is_enabled()
-                        assert not await page.get_by_role('button', name='Film · 18 s', exact=True).is_visible()
-                        summary = page.get_by_text('Formats, vidéo et statistiques', exact=True)
+                        # Le film est proposé directement sur la carte, sans ouvrir les options.
+                        assert await page.get_by_role('button', name='Ton film · 18 s', exact=True).is_visible()
+                        summary = page.get_by_text('Autres formats et statistiques', exact=True)
                         await summary.focus()
                         await page.keyboard.press('Space')
-                        assert await page.get_by_role('button', name='Film · 18 s', exact=True).is_visible()
+                        assert await page.get_by_role('group', name='Choisis ton format', exact=True).is_visible()
                         if width == 1366:
                             options = page.get_by_role('group', name='Choisis ton format', exact=True).get_by_role('button')
                             for item, format_name in enumerate(['story', 'top-five', 'poster', 'ticket']):

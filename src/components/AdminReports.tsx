@@ -205,11 +205,11 @@ const AdminReports: React.FC = () => {
 
     const getTargetTypeIcon = (type: string) => {
         switch (type) {
-            case 'comment': return <MessageSquare className="w-4 h-4" />;
-            case 'reply': return <MessageSquare className="w-4 h-4" />;
-            case 'shared_list': return <List className="w-4 h-4" />;
-            case 'segment': return <Scissors className="w-4 h-4" />;
-            default: return <Flag className="w-4 h-4" />;
+            case 'comment': return <MessageSquare className="w-4 h-4 text-white opacity-50" />;
+            case 'reply': return <MessageSquare className="w-4 h-4 text-white opacity-50" />;
+            case 'shared_list': return <List className="w-4 h-4 text-white opacity-50" />;
+            case 'segment': return <Scissors className="w-4 h-4 text-white opacity-50" />;
+            default: return <Flag className="w-4 h-4 text-white opacity-50" />;
         }
     };
 
@@ -364,7 +364,7 @@ const AdminReports: React.FC = () => {
 
                                                 {tmdbData && (
                                                     <span className="text-xs text-white/40 flex items-center gap-1">
-                                                        {report.target?.content_type === 'tv' ? <Tv className="w-3 h-3" /> : <Film className="w-3 h-3" />}
+                                                        {report.target?.content_type === 'tv' ? <Tv className="w-3 h-3 text-white opacity-40" /> : <Film className="w-3 h-3 text-white opacity-40" />}
                                                         {tmdbData.title}
                                                     </span>
                                                 )}
@@ -404,11 +404,11 @@ const AdminReports: React.FC = () => {
                                             {/* Reporter + date */}
                                             <div className="flex flex-wrap items-center gap-3 text-xs text-white/40">
                                                 <span className="flex items-center gap-1">
-                                                    <User className="w-3 h-3" />
+                                                    <User className="w-3 h-3 text-white opacity-40" />
                                                     {t('admin.reportedBy')} <span className="text-white/70">{report.reporter?.username || t('common.unknown')}</span>
                                                 </span>
                                                 <span className="flex items-center gap-1">
-                                                    <Clock className="w-3 h-3" />
+                                                    <Clock className="w-3 h-3 text-white opacity-40" />
                                                     {formatDate(report.created_at)}
                                                 </span>
                                             </div>
@@ -426,13 +426,13 @@ const AdminReports: React.FC = () => {
                                                     {submitting === report.id ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Trash2 className="w-3 h-3 mr-1" />}
                                                     {t('common.delete')}
                                                 </Button>
-                                                <Button
+                                                <Button className="group/icon"
                                                     size="sm"
                                                     variant="ghost"
                                                     onClick={() => handleDismiss(report)}
                                                     disabled={submitting === report.id}
                                                 >
-                                                    {submitting === report.id ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <XCircle className="w-3 h-3 mr-1" />}
+                                                    {submitting === report.id ? <Loader2 className="w-3 h-3 animate-spin mr-1 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" /> : <XCircle className="w-3 h-3 mr-1 text-white opacity-70 group-hover/icon:opacity-100 transition-opacity duration-200" />}
                                                     {t('common.ignore')}
                                                 </Button>
                                                 <Button

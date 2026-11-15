@@ -389,11 +389,11 @@ const AdminLinkSubmissions: React.FC = () => {
                         </Button>
                     </>
                 )}
-                <Button size="sm" variant="ghost" onClick={() => window.open(sub.url, '_blank')} className="h-6 w-6 p-0 text-white/20 hover:text-white" title={t('admin.open')}>
-                    <ExternalLink className="w-3 h-3" />
+                <Button size="sm" variant="ghost" onClick={() => window.open(sub.url, '_blank')} className="h-6 w-6 p-0 text-white/20 hover:text-white group/icon" title={t('admin.open')}>
+                    <ExternalLink className="w-3 h-3 text-white opacity-20 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" />
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => handleDelete(sub.id)} className="h-6 w-6 p-0 text-white/20 hover:text-red-400" title={t('admin.delete')}>
-                    <Trash2 className="w-3 h-3" />
+                <Button size="sm" variant="ghost" onClick={() => handleDelete(sub.id)} className="h-6 w-6 p-0 text-white/20 hover:text-red-400 group/icon" title={t('admin.delete')}>
+                    <Trash2 className="w-3 h-3 text-white opacity-20 group-hover/icon:text-red-400 group-hover/icon:opacity-100 transition-[color,opacity] duration-200" />
                 </Button>
             </div>
         </div>
@@ -451,8 +451,8 @@ const AdminLinkSubmissions: React.FC = () => {
                     </SelectContent>
                 </Select>
 
-                <Button onClick={fetchSubmissions} variant="ghost" size="sm" className="text-white/60">
-                    <RefreshCw className="w-4 h-4" />
+                <Button onClick={fetchSubmissions} variant="ghost" size="sm" className="text-white/60 group/icon">
+                    <RefreshCw className="w-4 h-4 text-white opacity-60 group-hover/icon:opacity-100 transition-opacity duration-200" />
                 </Button>
             </div>
 
@@ -574,8 +574,8 @@ const AdminLinkSubmissions: React.FC = () => {
                                             </Button>
                                         )}
 
-                                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-white/30" onClick={(e) => { e.stopPropagation(); window.open(`https://www.themoviedb.org/${group.media_type}/${group.tmdb_id}`, '_blank'); }} title={t('greenlight.viewOnTmdb')}>
-                                            <ExternalLink className="w-3.5 h-3.5" />
+                                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-white/30 group/icon" onClick={(e) => { e.stopPropagation(); window.open(`https://www.themoviedb.org/${group.media_type}/${group.tmdb_id}`, '_blank'); }} title={t('greenlight.viewOnTmdb')}>
+                                            <ExternalLink className="w-3.5 h-3.5 text-white opacity-30 group-hover/icon:opacity-100 transition-opacity duration-200" />
                                         </Button>
 
                                         {isExpanded ? <ChevronUp className="w-4 h-4 text-white opacity-30 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-white opacity-30 flex-shrink-0" />}

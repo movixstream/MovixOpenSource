@@ -3,6 +3,9 @@ import { useLocation } from 'react-router-dom';
 import { checkVipStatus, isUserVip } from '../utils/vipUtils';
 import { getAdPopupMode, subscribeToAdPopupModeChanges } from '../utils/adPopupMode';
 import { SCRIPT_AD_MODE_ENABLED, loadAdScript } from '../utils/adScriptMode';
+import { readLocalStorage } from '../utils/browserStorage';
+import { readHalloweenTheme } from '../hooks/useHalloweenTheme';
+import { useLightMode } from './LightModeContext';
 
 
 interface AdFreePopupContextType {
@@ -55,7 +58,7 @@ export const AdFreePopupProvider: React.FC<{ children: React.ReactNode }> = ({ c
     // provider. On relit donc l'Ã©tat, puis on rejoint sa requÃªte en cours afin
     // de ne jamais rester bloquÃ© avec la valeur initiale aprÃ¨s une connexion.
     syncVipStatus();
-    if (localStorage.getItem('access_code')) {
+    if (readLocalStorage('access_code')) {
       void checkVipStatus().then((vip) => {
         if (mounted) setIsVip(vip);
       });
@@ -105,6 +108,50 @@ export const AdFreePopupProvider: React.FC<{ children: React.ReactNode }> = ({ c
     sync();
     return subscribeToAdPopupModeChanges(sync);
   }, []);
+
+  // Le décor animé de la popup (motifs SVG rastérisés) se prépare pendant un
+  // temps mort après le chargement : il est complet dès l'animation
+  // d'ouverture au lieu d'apparaître motif par motif. Seul le mode normal
+  // l'affiche, et le module reste hors du bundle principal.
+  const { effectivePrefs } = useLightMode();
+  const warmPopupDecor = !is_vip && effectivePrefs.bgAnimations;
+  useEffect(() => {
+    if (!warmPopupDecor) return;
+    let cancelled = false;
+    let idleId: number | undefined;
+    let timer: number | undefined;
+    const warm = () => {
+      if (cancelled || getAdPopupMode() !== 'normal') return;
+      // Thème Halloween activé : ce sont ses motifs que la popup affichera
+      // (réglage lu directement : la classe du thème est retirée au lecteur).
+      const halloween = readHalloweenTheme();
+      void Promise.all([
+        import('../utils/cinemaRainSprites'),
+        halloween ? import('../data/halloweenMotifs') : null,
+      ])
+        .then(([{ preloadCinemaRainSprites }, halloweenMotifs]) => {
+          if (!cancelled) void preloadCinemaRainSprites(halloweenMotifs ? { catalog: halloweenMotifs.HALLOWEEN_CATALOG } : undefined);
+        })
+        .catch(() => { /* La popup prépare elle-même son décor en secours. */ });
+    };
+    const schedule = () => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(warm, { timeout: 3000 });
+      } else {
+        timer = window.setTimeout(warm, 1500);
+      }
+    };
+    if (document.readyState === 'complete') schedule();
+    else window.addEventListener('load', schedule, { once: true });
+    const unsubscribe = subscribeToAdPopupModeChanges(warm);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('load', schedule);
+      if (idleId !== undefined) window.cancelIdleCallback?.(idleId);
+      if (timer !== undefined) window.clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [warmPopupDecor]);
 
   const showPopupForPlayer = useCallback((playerType: string, additionalInfo?: any) => {
     // First check VIP status via server-verified utility
@@ -188,7 +235,13 @@ export const AdFreePopupProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const resetVipStatus = useCallback(() => {
     // Don't reset if localStorage has permanent VIP status
-    if (localStorage.getItem('is_vip') !== 'true') {
+    let persistentVip: string | null;
+    try {
+      persistentVip = localStorage.getItem('is_vip');
+    } catch {
+      return;
+    }
+    if (persistentVip !== 'true') {
       setIsVip(false);
       console.log('[AdFreePopupContext] VIP status reset.');
     }

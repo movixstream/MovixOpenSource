@@ -46,8 +46,7 @@ window.addEventListener("message", async (event) => {
     }
 });
 
-// Also listen for external messages (from the web app via chrome.runtime.sendMessage)
-// This allows the app to directly communicate if externallyConnectable is configured
+// Messages envoyés par le service worker de l'extension vers la page.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Forward extraction results back to the page if needed
     if (message.type === 'EXTRACTION_RESULT') {

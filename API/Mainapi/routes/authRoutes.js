@@ -75,14 +75,20 @@ function getSyncModule() {
   return _syncModule;
 }
 
-const createUserSession = async (userType, userId, req) => {
+// `override` sert aux appareils appairés (télé, routes/tvLink.js) : la requête
+// vient alors du téléphone qui confirme, pas de l'appareil. L'appelant fournit
+// la fiche `device`, l'identifiant client et le User-Agent à enregistrer.
+// Sans `override`, le comportement historique est inchangé.
+const createUserSession = async (userType, userId, req, override = null) => {
   try {
     const pool = getPool();
     if (!pool) { console.error('MySQL pool not ready for session creation'); return null; }
 
-    const userAgent = req.headers['user-agent'] || 'Unknown';
-    const clientId = getSessionClientId(req);
-    const deviceInfo = getSessionDeviceInfo({
+    const userAgent = override ? String(override.userAgent || 'Unknown') : (req.headers['user-agent'] || 'Unknown');
+    const clientId = override
+      ? (CLIENT_ID_PATTERN.test(String(override.clientId || '')) ? String(override.clientId).toLowerCase() : null)
+      : getSessionClientId(req);
+    const deviceInfo = override ? { ...override.device } : getSessionDeviceInfo({
       userAgent,
       clientHints: req.headers,
     });
@@ -836,3 +842,4 @@ router.post('/username', authRateLimit, authorizeAuthWrite, ...authBodyParsers, 
 
 router.use(jsonParseErrorHandler);
 module.exports = router;
+module.exports.createUserSession = createUserSession;

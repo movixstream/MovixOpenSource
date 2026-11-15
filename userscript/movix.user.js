@@ -1,15 +1,11 @@
 // ==UserScript==
 // @name         Movix Proxy Extension (Tampermonkey)
 // @namespace    https://movix.cash
-// @version      1.6.1
+// @version      1.7.9
 // @description  Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus - version userscript Tampermonkey
 // @author       Movix
 // @updateURL    https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
 // @downloadURL  https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
-// @match        http://localhost/*
-// @match        http://127.0.0.1/*
-// @match        https://localhost/*
-// @match        https://127.0.0.1/*
 // @match        https://movix.cash/*
 // @match        https://*.movix.cash/*
 // @match        https://movix.club/*
@@ -32,6 +28,13 @@
 // @match        https://*.movix.men/*
 // @match        https://movix.college/*
 // @match        https://*.movix.college/*
+// @match        https://movix.luxe/*
+// @match        https://*.movix.luxe/*
+// @match        https://movix.dog/*
+// @match        https://*.movix.dog/*
+// @match        https://movix.miami/*
+// @match        https://*.movix.miami/*
+// @include      /^https:\/\/([a-z0-9-]+\.)*movix\.[a-z]{2,63}\/.*$/
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -46,6 +49,241 @@
 
 (() => {
   "use strict";
+
+  // BEGIN SITE DOMAINS
+  // Les domaines du site viennent de movix.online (address.json, champ
+  // « active ») et restent en cache : un nouveau domaine marche sans mise à
+  // jour du script, un domaine retiré n'est plus servi. La liste intégrée ne
+  // sert que tant que movix.online n'a jamais répondu.
+  //
+  // L'en-tête couvre donc tout « movix.<extension> ». Sous un gestionnaire de
+  // userscripts, le script s'arrête ici sur un domaine absent de la liste.
+  // Dans l'app mobile (pas de GM_info), c'est l'app qui choisit les pages :
+  // pas d'arrêt.
+  const SITE_DOMAINS_URL = "https://movix.online/address.json";
+  const SITE_DOMAINS_STORAGE_KEY = "movix_site_domains";
+  const SITE_DOMAINS_RELOAD_KEY = "movix_userscript_site_domains_reload";
+  const SITE_DOMAINS_REFRESH_MS = 60 * 60 * 1000;
+  const SITE_DOMAINS_POLL_MS = 5 * 60 * 1000;
+  const SITE_DOMAINS_RETRY_MS = 15 * 60 * 1000;
+  const SITE_DOMAINS_UNKNOWN_HOST_RETRY_MS = 5 * 60 * 1000;
+  const SITE_DOMAINS_TIMEOUT_MS = 10000;
+  const SITE_DOMAINS_MAX = 50;
+  const SITE_DOMAIN_RE =
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+  const BUILTIN_SITE_DOMAINS = [
+    "movix.cash",
+    "movix.club",
+    "movix.cloud",
+    "movix.tax",
+    "movix.golf",
+    "movix.chat",
+    "movix.date",
+    "movix.fun",
+    "movix.show",
+    "movix.men",
+    "movix.college",
+    "movix.luxe",
+    "movix.dog",
+    "movix.miami",
+  ];
+
+  // Liste reçue de movix.online, ou null tant qu'elle n'est jamais arrivée.
+  let remoteSiteDomains = null;
+  let siteDomains = BUILTIN_SITE_DOMAINS;
+  let siteDomainsCheckedAt = 0;
+  let siteDomainsLastCheckFailed = false;
+
+  function normalizeSiteDomains(list) {
+    if (!Array.isArray(list)) return null;
+    const domains = [];
+    for (const entry of list) {
+      if (typeof entry !== "string") continue;
+      const domain = entry.trim().toLowerCase();
+      if (domain.length > 253 || !SITE_DOMAIN_RE.test(domain)) continue;
+      if (!domains.includes(domain)) domains.push(domain);
+      if (domains.length >= SITE_DOMAINS_MAX) break;
+    }
+    return domains.length ? domains : null;
+  }
+
+  // address.json : { active: [{ url: "https://movix.miami" }, …] }
+  function parseSiteDomainsPayload(payload) {
+    if (!payload || !Array.isArray(payload.active)) return null;
+    const hosts = [];
+    for (const entry of payload.active) {
+      try {
+        const url = new URL(entry && entry.url);
+        if (url.protocol !== "https:" || url.port) continue;
+        if (url.username || url.password) continue;
+        hosts.push(url.hostname);
+      } catch {}
+    }
+    return normalizeSiteDomains(hosts);
+  }
+
+  function setRemoteSiteDomains(domains) {
+    remoteSiteDomains = domains;
+    siteDomains = domains || BUILTIN_SITE_DOMAINS;
+  }
+
+  function isSiteHost(hostname) {
+    const host = String(hostname || "").toLowerCase();
+    return siteDomains.some(
+      (domain) => host === domain || host.endsWith("." + domain),
+    );
+  }
+
+  function applyStoredSiteDomains(stored) {
+    if (!stored || typeof stored !== "object") return;
+    setRemoteSiteDomains(normalizeSiteDomains(stored.domains));
+    if (Number.isFinite(stored.checkedAt)) {
+      // Une horloge reculée ne doit pas geler la liste.
+      siteDomainsCheckedAt = Math.min(stored.checkedAt, Date.now());
+    }
+    siteDomainsLastCheckFailed = stored.failed === true;
+  }
+
+  function readStoredSiteDomains() {
+    try {
+      if (typeof GM_getValue === "function") {
+        return GM_getValue(SITE_DOMAINS_STORAGE_KEY, null);
+      }
+      if (
+        typeof GM !== "undefined" &&
+        GM &&
+        typeof GM.getValue === "function"
+      ) {
+        return GM.getValue(SITE_DOMAINS_STORAGE_KEY, null);
+      }
+    } catch {}
+    return null;
+  }
+
+  // Résout à true quand movix.online a rendu une liste valable. Réponse
+  // absente ou illisible : on garde la liste en place.
+  function refreshSiteDomains() {
+    return new Promise((resolve) => {
+      let request;
+      try {
+        request = getGMRequest();
+      } catch {
+        resolve(false);
+        return;
+      }
+
+      let settled = false;
+      const finish = (payload) => {
+        if (settled) return;
+        settled = true;
+        const domains = payload ? parseSiteDomainsPayload(payload) : null;
+        if (domains) setRemoteSiteDomains(domains);
+        siteDomainsCheckedAt = Date.now();
+        siteDomainsLastCheckFailed = !domains;
+        Promise.resolve()
+          .then(() =>
+            gmSetValueCompat(SITE_DOMAINS_STORAGE_KEY, {
+              domains: remoteSiteDomains,
+              checkedAt: siteDomainsCheckedAt,
+              failed: siteDomainsLastCheckFailed,
+            }),
+          )
+          .then(
+            () => resolve(Boolean(domains)),
+            () => resolve(Boolean(domains)),
+          );
+      };
+
+      try {
+        request({
+          method: "GET",
+          url: SITE_DOMAINS_URL,
+          timeout: SITE_DOMAINS_TIMEOUT_MS,
+          anonymous: true,
+          onload: (response) => {
+            let payload = null;
+            try {
+              if (response && response.status === 200) {
+                payload = JSON.parse(response.responseText);
+              }
+            } catch {}
+            finish(payload);
+          },
+          onerror: () => finish(null),
+          ontimeout: () => finish(null),
+          onabort: () => finish(null),
+        });
+      } catch {
+        finish(null);
+      }
+    });
+  }
+
+  function refreshSiteDomainsIfOlderThan(maxAgeMs) {
+    if (Date.now() - siteDomainsCheckedAt < maxAgeMs) {
+      return Promise.resolve(false);
+    }
+    return refreshSiteDomains();
+  }
+
+  // Relit d'abord le cache : un autre onglet a peut-être déjà fait la
+  // requête de l'heure.
+  function refreshSiteDomainsWhenDue() {
+    return Promise.resolve(readStoredSiteDomains())
+      .then((stored) => {
+        applyStoredSiteDomains(stored);
+        return refreshSiteDomainsIfOlderThan(
+          siteDomainsLastCheckFailed
+            ? SITE_DOMAINS_RETRY_MS
+            : SITE_DOMAINS_REFRESH_MS,
+        );
+      })
+      .catch(() => false);
+  }
+
+  // Un seul rechargement par onglet : sans stockage de session pour s'en
+  // souvenir, on ne recharge pas.
+  function reloadOnceForSiteDomains() {
+    try {
+      if (sessionStorage.getItem(SITE_DOMAINS_RELOAD_KEY)) return;
+      sessionStorage.setItem(SITE_DOMAINS_RELOAD_KEY, "1");
+    } catch {
+      return;
+    }
+    location.reload();
+  }
+
+  const siteDomainsHostname =
+    typeof location !== "undefined" && location ? location.hostname : "";
+  const storedSiteDomains = readStoredSiteDomains();
+  const storedSiteDomainsPending =
+    storedSiteDomains && typeof storedSiteDomains.then === "function";
+  if (!storedSiteDomainsPending) applyStoredSiteDomains(storedSiteDomains);
+
+  if (typeof GM_info !== "undefined" && !isSiteHost(siteDomainsHostname)) {
+    // Domaine inconnu : peut-être une adresse toute neuve. On relit la liste
+    // et, si elle le contient maintenant, on recharge la page pour démarrer
+    // le script normalement, dès le début du chargement. Un stockage
+    // asynchrone ne permet pas de le savoir à temps : la liste intégrée
+    // décide seule.
+    if (!storedSiteDomainsPending) {
+      refreshSiteDomainsIfOlderThan(SITE_DOMAINS_UNKNOWN_HOST_RETRY_MS)
+        .then((updated) => {
+          if (updated && isSiteHost(siteDomainsHostname)) {
+            reloadOnceForSiteDomains();
+          }
+        })
+        .catch(() => {});
+    }
+    return;
+  }
+
+  // La liste est relue toutes les heures, même si la page reste ouverte.
+  refreshSiteDomainsWhenDue();
+  if (typeof setInterval === "function") {
+    setInterval(refreshSiteDomainsWhenDue, SITE_DOMAINS_POLL_MS);
+  }
+  // END SITE DOMAINS
 
   // BEGIN KISSKH FALLBACK
   const KISSKH_REQUEST_TIMEOUT_MS = 10000;
@@ -423,7 +661,7 @@
 
   const USERSCRIPT_MANIFEST = {
     name: "Movix Proxy Extension",
-    version: "1.6.1",
+    version: "1.7.9",
     description:
       "Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus",
   };
@@ -825,6 +1063,13 @@
     );
     const body = serializeBody(init.body);
     const request = getGMRequest();
+    // Un gestionnaire peut taire l'en-tête Cookie posé à la main ; Tampermonkey
+    // et Violentmonkey prennent aussi l'option `cookie`, qu'ils ajoutent aux
+    // cookies envoyés (cookie de session Fsvid/Vidzy, voir
+    // fsvidVidzySessionCookie).
+    const cookieHeader = Object.keys(headers).find(
+      (name) => name.toLowerCase() === "cookie",
+    );
 
     return new Promise((resolve, reject) => {
       let finished = false;
@@ -856,6 +1101,10 @@
           method,
           url: requestUrl,
           headers,
+          ...(cookieHeader ? { cookie: headers[cookieHeader] } : {}),
+          // `anonymous` : sans les cookies du navigateur. Demandé par
+          // PROXY_HTTP, que la page appelle avec l'URL de son choix.
+          ...(init.anonymous === true ? { anonymous: true } : {}),
           data: body,
           responseType: "arraybuffer",
           timeout: init.timeout ?? 30000,
@@ -1959,13 +2208,44 @@
             step += sign * parseInt(numPart, 10);
           }
         } else if (/^(?:0[xX][0-9a-fA-F]+|\d+)$/.test(t)) {
-          seed += sign * parseInt(t, 10);
+          seed += sign * Number(t);
         } else if (/^[A-Za-z_$][\w$]*$/.test(t)) {
-          seed += sign * hostnameSum;
+          seed += sign * resolveRollingIdentifier(t, hostnameSum);
         }
       }
 
       return { seed, step };
+    };
+
+    // Le lecteur ajoute à la clé la largeur d'un div caché
+    // (`width:calc(1in + 43px)` → offsetWidth = 139 px en CSS). On relit la
+    // valeur depuis la page pour suivre une éventuelle rotation (cm, mm, calc…).
+    const CSS_PX_PER_UNIT = { px: 1, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, pt: 96 / 72, pc: 16, q: 96 / 101.6 };
+    const cssLengthToPx = (value) => {
+      let total = 0;
+      let found = false;
+      for (const term of String(value).matchAll(/([-+]?)\s*(\d+(?:\.\d+)?)\s*(px|in|cm|mm|pt|pc|q)\b/gi)) {
+        total += (term[1] === "-" ? -1 : 1) * parseFloat(term[2]) * CSS_PX_PER_UNIT[term[3].toLowerCase()];
+        found = true;
+      }
+      return found ? Math.round(total) : null;
+    };
+    const resolveRollingIdentifier = (name, hostnameSum) => {
+      const token = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const source = String(script || "");
+      const measured = new RegExp(`\\b${token}\\s*=\\s*[A-Za-z_$][\\w$]*\\.(?:offset|client)(Width|Height)\\b`).exec(source);
+      if (measured) {
+        const axis = measured[1] === "Width" ? "width" : "height";
+        const css = new RegExp(`(?:^|[;"'\\s])${axis}\\s*:\\s*([^;"']+)`, "i")
+          .exec(source.substring(Math.max(0, measured.index - 600), measured.index));
+        const pixels = css ? cssLengthToPx(css[1]) : null;
+        return pixels ?? 0;
+      }
+      const literal = new RegExp(`\\b${token}\\s*=\\s*(0[xX][0-9a-fA-F]+|\\d+)\\s*[;,]`).exec(source);
+      if (literal && !new RegExp(`\\b${token}\\s*=\\s*\\(?\\s*${token}\\s*\\+`).test(source)) {
+        return Number(literal[1]);
+      }
+      return hostnameSum;
     };
 
     const unifiedRollingXorPattern =
@@ -1999,21 +2279,39 @@
         const rawDecoded = atob(paddedPayload);
         const byteArray = Array.from(rawDecoded, (c) => c.charCodeAt(0));
         if (groups.bytes) byteArray.reverse();
-        const decodedBytes = Uint8Array.from(
-          byteArray,
-          (byteVal, index) =>
-            byteVal ^ ((parameters.seed + index * parameters.step) & mask),
-        );
         const matchIndex = match.index || 0;
         const matchTail = script.substring(matchIndex);
-        if (!groups.bytes && /\.reverse\(\s*\)\s*\.join/.test(matchTail.substring(0, 500))) {
-          decodedBytes.reverse();
-        }
-        const decoded = new TextDecoder("utf-8", { fatal: false }).decode(
-          decodedBytes,
-        );
-        const candidate = normalizeCandidate(decoded);
+        const postReverse =
+          !groups.bytes && /\.reverse\(\s*\)\s*\.join/.test(matchTail.substring(0, 500));
+        const decodeWith = (seed, fatal) => {
+          const decodedBytes = Uint8Array.from(
+            byteArray,
+            (byteVal, index) => byteVal ^ ((seed + index * parameters.step) & mask),
+          );
+          if (postReverse) decodedBytes.reverse();
+          try {
+            return new TextDecoder("utf-8", { fatal }).decode(decodedBytes);
+          } catch {
+            return "";
+          }
+        };
+        const candidate = normalizeCandidate(decodeWith(parameters.seed, false));
         if (candidate) return candidate;
+
+        // La graine dépend de mesures faites dans le navigateur
+        // (offsetWidth d'un div enfant à 50 % d'un parent en
+        // `calc(1in + Npx)`, somme du hostname…) que la page fait tourner.
+        // Une mesure mal relue donne une clé fausse, donc le leurre `troll`.
+        // La graine n'a que `mask + 1` valeurs possibles : on les essaie
+        // toutes et on n'accepte qu'une URL m3u8 complète, en ASCII
+        // imprimable, hors leurre.
+        for (let alternative = 0; alternative <= mask; alternative++) {
+          if (alternative === (parameters.seed & mask)) continue;
+          const decoded = decodeWith(alternative, true);
+          if (!/^https:\/\/[\x21-\x7e]+$/i.test(decoded)) continue;
+          const fallback = normalizeCandidate(decoded);
+          if (fallback) return fallback;
+        }
       } catch {}
     }
 
@@ -2342,6 +2640,644 @@
     return scripts;
   }
 
+  const FSVID_VIDZY_VIEWPORT_WIDTH = 1280;
+  const FSVID_VIDZY_VIEWPORT_HEIGHT = 720;
+
+  // Mini-DOM injecté dans QuickJS via `toString()` : la fonction doit rester
+  // autonome (aucune référence à la portée du userscript). Les lecteurs Fsvid
+  // et Vidzy dérivent leur clé de `offsetWidth` d'éléments qu'ils créent (un
+  // div enfant à 50 % d'un parent en `calc(1in + Npx)` en octobre 2026). On
+  // calcule donc les largeurs comme un navigateur : `style.cssText`, arbre
+  // parent/enfant, pourcentages relatifs au bloc conteneur, unités absolues
+  // et relatives, `calc()`, padding/bordure, `display:none` et élément
+  // détaché à 0, `html`/`body` posés sur une fenêtre de 1280 × 720.
+  // Copie conforme de `movixCreateDomEmulator` dans
+  // extension/runtime/fsvid-vidzy-quickjs-entry.js : garder les deux en phase.
+  function movixCreateDomEmulator(fallback, viewportWidth, viewportHeight) {
+    var BLOCK_TAGS = { html: 1, body: 1, div: 1, p: 1, section: 1, article: 1, main: 1, header: 1, footer: 1, nav: 1, aside: 1, ul: 1, ol: 1, li: 1, form: 1, h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1, pre: 1, blockquote: 1, figure: 1, table: 1, fieldset: 1, center: 1, dl: 1, dd: 1, dt: 1, hr: 1 };
+    var HIDDEN_TAGS = { head: 1, script: 1, style: 1, meta: 1, link: 1, title: 1, template: 1, noscript: 1 };
+    var REPLACED_SIZES = { img: [0, 0], video: [300, 150], canvas: [300, 150], iframe: [300, 150], object: [300, 150], embed: [300, 150], input: [153, 21], button: [0, 0], textarea: [182, 36], select: [0, 19] };
+    var ABSOLUTE_UNITS = { px: 1, 'in': 96, cm: 96 / 2.54, mm: 96 / 25.4, q: 96 / 101.6, pt: 96 / 72, pc: 16 };
+    var FONT_KEYWORDS = { 'xx-small': 9, 'x-small': 10, small: 13, medium: 16, large: 18, 'x-large': 24, 'xx-large': 32, 'xxx-large': 48 };
+    var BORDER_KEYWORDS = { thin: 1, medium: 3, thick: 5 };
+    var BORDER_STYLES = { none: 1, hidden: 1, dotted: 1, dashed: 1, solid: 1, double: 1, groove: 1, ridge: 1, inset: 1, outset: 1 };
+    var SIDES = ['top', 'right', 'bottom', 'left'];
+
+    function kebab(name) {
+      name = String(name);
+      if (name.indexOf('-') !== -1) return name.toLowerCase();
+      return name.replace(/[A-Z]/g, function (c) { return '-' + c.toLowerCase(); });
+    }
+
+    function splitTopLevel(text, separator) {
+      var parts = [];
+      var depth = 0;
+      var start = 0;
+      for (var i = 0; i < text.length; i++) {
+        var c = text.charAt(i);
+        if (c === '(') depth++;
+        else if (c === ')') depth = Math.max(0, depth - 1);
+        else if (depth === 0 && (separator === ' ' ? /\s/.test(c) : c === separator)) {
+          parts.push(text.slice(start, i));
+          start = i + 1;
+        }
+      }
+      parts.push(text.slice(start));
+      var out = [];
+      for (var j = 0; j < parts.length; j++) {
+        var part = parts[j].trim();
+        if (part) out.push(part);
+      }
+      return out;
+    }
+
+    function expandBox(declarations, name, value) {
+      var values = splitTopLevel(value, ' ');
+      if (!values.length || values.length > 4) return;
+      var top = values[0];
+      var right = values.length > 1 ? values[1] : top;
+      var bottom = values.length > 2 ? values[2] : top;
+      var left = values.length > 3 ? values[3] : right;
+      var expanded = [top, right, bottom, left];
+      for (var i = 0; i < 4; i++) {
+        declarations[name.replace('*', SIDES[i])] = expanded[i];
+      }
+    }
+
+    function expandBorder(declarations, sides, value) {
+      var width = 'medium';
+      var style = 'none';
+      var tokens = splitTopLevel(value, ' ');
+      for (var i = 0; i < tokens.length; i++) {
+        var token = tokens[i].toLowerCase();
+        if (BORDER_STYLES[token]) style = token;
+        else if (BORDER_KEYWORDS[token] !== undefined || /^[-+.\d]|^calc\(/.test(token)) width = token;
+      }
+      for (var j = 0; j < sides.length; j++) {
+        declarations['border-' + sides[j] + '-width'] = width;
+        declarations['border-' + sides[j] + '-style'] = style;
+      }
+    }
+
+    function setDeclaration(declarations, rawName, rawValue) {
+      var name = kebab(rawName).trim();
+      var value = String(rawValue == null ? '' : rawValue).replace(/!\s*important\s*$/i, '').trim();
+      if (!name) return;
+      if (!value) {
+        delete declarations[name];
+        return;
+      }
+      if (name === 'padding' || name === 'margin') expandBox(declarations, name + '-*', value);
+      else if (name === 'border-width') expandBox(declarations, 'border-*-width', value);
+      else if (name === 'border-style') expandBox(declarations, 'border-*-style', value);
+      else if (name === 'border') expandBorder(declarations, SIDES, value);
+      else if (/^border-(top|right|bottom|left)$/.test(name)) expandBorder(declarations, [name.slice(7)], value);
+      else if (name === 'inset') expandBox(declarations, '*', value);
+      else declarations[name] = value;
+    }
+
+    function parseCssText(declarations, text) {
+      var keys = Object.keys(declarations);
+      for (var k = 0; k < keys.length; k++) delete declarations[keys[k]];
+      var entries = splitTopLevel(String(text == null ? '' : text), ';');
+      for (var i = 0; i < entries.length; i++) {
+        var colon = entries[i].indexOf(':');
+        if (colon <= 0) continue;
+        setDeclaration(declarations, entries[i].slice(0, colon), entries[i].slice(colon + 1));
+      }
+    }
+
+    function serialize(declarations) {
+      var keys = Object.keys(declarations);
+      var out = [];
+      for (var i = 0; i < keys.length; i++) out.push(keys[i] + ': ' + declarations[keys[i]] + ';');
+      return out.join(' ');
+    }
+
+    // Évalue une longueur CSS (calc() compris) en px. `context.percent` est la
+    // base des pourcentages (null = indéfinie → la valeur est ignorée).
+    function resolveLength(raw, context) {
+      var text = String(raw == null ? '' : raw).trim().toLowerCase();
+      if (!text) return null;
+      var position = 0;
+      function skip() { while (position < text.length && /\s/.test(text.charAt(position))) position++; }
+      function fail() { throw new Error('css'); }
+      function primary() {
+        skip();
+        var c = text.charAt(position);
+        if (c === '(') {
+          position++;
+          var inner = sum();
+          skip();
+          if (text.charAt(position) !== ')') fail();
+          position++;
+          return inner;
+        }
+        var fn = /^(calc|min|max|clamp)\(/.exec(text.slice(position));
+        if (fn) {
+          position += fn[0].length;
+          var args = [sum()];
+          skip();
+          while (text.charAt(position) === ',') {
+            position++;
+            args.push(sum());
+            skip();
+          }
+          if (text.charAt(position) !== ')') fail();
+          position++;
+          if (fn[1] === 'calc') return args[0];
+          if (fn[1] === 'min') return Math.min.apply(Math, args);
+          if (fn[1] === 'max') return Math.max.apply(Math, args);
+          if (args.length !== 3) fail();
+          return Math.max(args[0], Math.min(args[1], args[2]));
+        }
+        var number = /^([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)(%|[a-z]+)?/.exec(text.slice(position));
+        if (!number) fail();
+        position += number[0].length;
+        var value = parseFloat(number[1]);
+        var unit = number[2] || '';
+        if (!unit) return value;
+        if (unit === '%') {
+          if (context.percent == null) throw new Error('indefinite');
+          return (value * context.percent) / 100;
+        }
+        if (ABSOLUTE_UNITS[unit] !== undefined) return value * ABSOLUTE_UNITS[unit];
+        if (unit === 'em') return value * context.fontSize;
+        if (unit === 'rem') return value * 16;
+        if (unit === 'ex' || unit === 'ch') return value * context.fontSize * 0.5;
+        if (unit === 'vw' || unit === 'svw' || unit === 'lvw' || unit === 'dvw') return (value * viewportWidth) / 100;
+        if (unit === 'vh' || unit === 'svh' || unit === 'lvh' || unit === 'dvh') return (value * viewportHeight) / 100;
+        if (unit === 'vmin') return (value * Math.min(viewportWidth, viewportHeight)) / 100;
+        if (unit === 'vmax') return (value * Math.max(viewportWidth, viewportHeight)) / 100;
+        fail();
+      }
+      function product() {
+        var value = primary();
+        for (;;) {
+          skip();
+          var c = text.charAt(position);
+          if (c !== '*' && c !== '/') return value;
+          position++;
+          var right = primary();
+          if (c === '*') value *= right;
+          else {
+            if (!right) fail();
+            value /= right;
+          }
+        }
+      }
+      function sum() {
+        var value = product();
+        for (;;) {
+          skip();
+          var c = text.charAt(position);
+          if (c !== '+' && c !== '-') return value;
+          position++;
+          var right = product();
+          value = c === '+' ? value + right : value - right;
+        }
+      }
+      try {
+        var result = sum();
+        skip();
+        if (position !== text.length || !isFinite(result)) return null;
+        return result;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    var nodes = [];
+    var documentElement;
+    var body;
+    var head;
+
+    function nodeOf(value) {
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].proxy === value || nodes[i] === value) return nodes[i];
+      }
+      return null;
+    }
+
+    function declared(node, name) {
+      return node.style[name];
+    }
+
+    function displayOf(node) {
+      var value = String(declared(node, 'display') || '').toLowerCase();
+      if (value) return value;
+      if (HIDDEN_TAGS[node.tag]) return 'none';
+      if (BLOCK_TAGS[node.tag]) return 'block';
+      if (REPLACED_SIZES[node.tag]) return 'inline-block';
+      return 'inline';
+    }
+
+    function positionOf(node) {
+      return String(declared(node, 'position') || 'static').toLowerCase();
+    }
+
+    function isRendered(node) {
+      var current = node;
+      while (current) {
+        if (displayOf(current) === 'none') return false;
+        if (current === documentElement) return true;
+        current = current.parent;
+      }
+      return false;
+    }
+
+    function fontSizeOf(node) {
+      var parentSize = node.parent ? fontSizeOf(node.parent) : 16;
+      var raw = String(declared(node, 'font-size') || '').toLowerCase();
+      if (!raw) return parentSize;
+      if (FONT_KEYWORDS[raw] !== undefined) return FONT_KEYWORDS[raw];
+      if (raw === 'smaller') return parentSize / 1.2;
+      if (raw === 'larger') return parentSize * 1.2;
+      var size = resolveLength(raw, { percent: parentSize, fontSize: parentSize });
+      return size == null || size < 0 ? parentSize : size;
+    }
+
+    function lengthOf(node, name, percentBase, fallbackValue) {
+      var raw = declared(node, name);
+      if (raw == null || raw === '' || /^(auto|none|initial|inherit|unset)$/i.test(String(raw))) return fallbackValue;
+      var value = resolveLength(raw, { percent: percentBase, fontSize: fontSizeOf(node) });
+      return value == null ? fallbackValue : value;
+    }
+
+    function borderOf(node, side) {
+      var style = String(declared(node, 'border-' + side + '-style') || 'none').toLowerCase();
+      if (style === 'none' || style === 'hidden') return 0;
+      var raw = String(declared(node, 'border-' + side + '-width') || 'medium').toLowerCase();
+      if (BORDER_KEYWORDS[raw] !== undefined) return BORDER_KEYWORDS[raw];
+      var value = resolveLength(raw, { percent: null, fontSize: fontSizeOf(node) });
+      return value == null || value < 0 ? 0 : value;
+    }
+
+    function horizontalExtras(node, containingWidth) {
+      return {
+        padding: Math.max(0, lengthOf(node, 'padding-left', containingWidth, 0)) + Math.max(0, lengthOf(node, 'padding-right', containingWidth, 0)),
+        border: borderOf(node, 'left') + borderOf(node, 'right'),
+        margin: lengthOf(node, 'margin-left', containingWidth, node.tag === 'body' ? 8 : 0) + lengthOf(node, 'margin-right', containingWidth, node.tag === 'body' ? 8 : 0)
+      };
+    }
+
+    function verticalExtras(node, containingWidth) {
+      return {
+        padding: Math.max(0, lengthOf(node, 'padding-top', containingWidth, 0)) + Math.max(0, lengthOf(node, 'padding-bottom', containingWidth, 0)),
+        border: borderOf(node, 'top') + borderOf(node, 'bottom'),
+        margin: lengthOf(node, 'margin-top', containingWidth, node.tag === 'body' ? 8 : 0) + lengthOf(node, 'margin-bottom', containingWidth, node.tag === 'body' ? 8 : 0)
+      };
+    }
+
+    // Bloc conteneur : contenu du parent en flux normal, boîte de padding du
+    // premier ancêtre positionné pour `absolute`, la fenêtre pour `fixed`.
+    // Les largeurs ne remontent que vers les ancêtres et ne descendent que
+    // pour le rétrécissement : aucun cycle possible.
+    function positionedAncestor(node) {
+      var ancestor = node.parent;
+      while (ancestor && ancestor !== documentElement && positionOf(ancestor) === 'static') ancestor = ancestor.parent;
+      return !ancestor || ancestor === documentElement ? null : ancestor;
+    }
+
+    function containingWidthOf(node) {
+      var position = positionOf(node);
+      if (node === documentElement || position === 'fixed') return viewportWidth;
+      if (position === 'absolute') {
+        var ancestor = positionedAncestor(node);
+        if (!ancestor) return viewportWidth;
+        var box = widthBox(ancestor);
+        return box.contentWidth + box.paddingX;
+      }
+      return node.parent ? widthBox(node.parent).contentWidth : 0;
+    }
+
+    function containingHeightOf(node) {
+      var position = positionOf(node);
+      if (node === documentElement || position === 'fixed') return viewportHeight;
+      if (position === 'absolute') {
+        var ancestor = positionedAncestor(node);
+        if (!ancestor) return viewportHeight;
+        var height = definiteHeightOf(ancestor);
+        return height == null ? null : height + verticalExtras(ancestor, containingWidthOf(ancestor)).padding;
+      }
+      return node.parent ? definiteHeightOf(node.parent) : null;
+    }
+
+    function clampWidth(node, width, containingWidth, extras, borderBox) {
+      var adjust = borderBox ? extras.padding + extras.border : 0;
+      var maxWidth = lengthOf(node, 'max-width', containingWidth, null);
+      if (maxWidth != null) width = Math.min(width, Math.max(0, maxWidth - adjust));
+      var minWidth = lengthOf(node, 'min-width', containingWidth, null);
+      if (minWidth != null) width = Math.max(width, Math.max(0, minWidth - adjust));
+      return Math.max(0, width);
+    }
+
+    function shrinkToFit(node) {
+      var width = 0;
+      for (var i = 0; i < node.children.length; i++) {
+        var child = node.children[i];
+        if (displayOf(child) === 'none' || positionOf(child) === 'absolute' || positionOf(child) === 'fixed') continue;
+        var box = widthBox(child, 0);
+        width = Math.max(width, box.contentWidth + box.paddingX + box.borderX + box.marginX);
+      }
+      return width;
+    }
+
+    function widthBox(node, forcedContainingWidth) {
+      var display = displayOf(node);
+      var containingWidth = forcedContainingWidth == null ? containingWidthOf(node) : forcedContainingWidth;
+      var horizontal = horizontalExtras(node, containingWidth);
+      var borderBox = String(declared(node, 'box-sizing') || '').toLowerCase() === 'border-box';
+      var position = positionOf(node);
+      var floating = /^(left|right|inline-start|inline-end)$/i.test(String(declared(node, 'float') || ''));
+      var replaced = REPLACED_SIZES[node.tag];
+      var contentWidth;
+
+      if (display === 'inline' && !replaced) {
+        contentWidth = 0;
+      } else {
+        var specified = lengthOf(node, 'width', containingWidth, null);
+        if (specified != null) {
+          contentWidth = borderBox ? specified - horizontal.padding - horizontal.border : specified;
+        } else if (replaced) {
+          contentWidth = replaced[0];
+        } else if (position === 'absolute' || position === 'fixed') {
+          var left = lengthOf(node, 'left', containingWidth, null);
+          var right = lengthOf(node, 'right', containingWidth, null);
+          contentWidth = left != null && right != null
+            ? containingWidth - left - right - horizontal.margin - horizontal.padding - horizontal.border
+            : shrinkToFit(node);
+        } else if (
+          floating ||
+          /^inline-|^table/.test(display) ||
+          /(?:fit|max|min)-content/i.test(String(declared(node, 'width') || ''))
+        ) {
+          contentWidth = shrinkToFit(node);
+        } else {
+          contentWidth = containingWidth - horizontal.margin - horizontal.padding - horizontal.border;
+        }
+        contentWidth = clampWidth(node, contentWidth, containingWidth, horizontal, borderBox);
+      }
+
+      return {
+        contentWidth: contentWidth,
+        paddingX: horizontal.padding,
+        borderX: horizontal.border,
+        marginX: horizontal.margin
+      };
+    }
+
+    // Hauteur de contenu imposée par le style (null si `auto` ou pourcentage
+    // d'un bloc conteneur sans hauteur définie).
+    function definiteHeightOf(node) {
+      if (node === documentElement) return viewportHeight;
+      if (displayOf(node) === 'inline' && !REPLACED_SIZES[node.tag]) return null;
+      var specified = lengthOf(node, 'height', containingHeightOf(node), null);
+      if (specified == null) return null;
+      if (String(declared(node, 'box-sizing') || '').toLowerCase() === 'border-box') {
+        var vertical = verticalExtras(node, containingWidthOf(node));
+        specified -= vertical.padding + vertical.border;
+      }
+      return Math.max(0, specified);
+    }
+
+    function heightBox(node) {
+      var vertical = verticalExtras(node, containingWidthOf(node));
+      var replaced = REPLACED_SIZES[node.tag];
+      var contentHeight = definiteHeightOf(node);
+      if (contentHeight == null) {
+        if (displayOf(node) === 'inline' && !replaced) contentHeight = 0;
+        else if (replaced) contentHeight = replaced[1];
+        else {
+          contentHeight = 0;
+          for (var i = 0; i < node.children.length; i++) {
+            var child = node.children[i];
+            var childPosition = positionOf(child);
+            if (displayOf(child) === 'none' || childPosition === 'absolute' || childPosition === 'fixed') continue;
+            var childBox = heightBox(child);
+            contentHeight += childBox.contentHeight + childBox.paddingY + childBox.borderY + childBox.marginY;
+          }
+        }
+      }
+      return {
+        contentHeight: contentHeight,
+        paddingY: vertical.padding,
+        borderY: vertical.border,
+        marginY: vertical.margin
+      };
+    }
+
+    function measure(node) {
+      if (!isRendered(node)) return { width: 0, height: 0, clientWidth: 0, clientHeight: 0 };
+      var box = widthBox(node);
+      var vertical = heightBox(node);
+      var inline = displayOf(node) === 'inline' && !REPLACED_SIZES[node.tag];
+      return {
+        width: box.contentWidth + box.paddingX + box.borderX,
+        height: vertical.contentHeight + vertical.paddingY + vertical.borderY,
+        clientWidth: inline ? 0 : box.contentWidth + box.paddingX,
+        clientHeight: inline ? 0 : vertical.contentHeight + vertical.paddingY
+      };
+    }
+
+    function detach(node) {
+      if (!node.parent) return;
+      var siblings = node.parent.children;
+      var index = siblings.indexOf(node);
+      if (index !== -1) siblings.splice(index, 1);
+      node.parent = null;
+    }
+
+    function contains(ancestor, node) {
+      for (var current = node; current; current = current.parent) {
+        if (current === ancestor) return true;
+      }
+      return false;
+    }
+
+    function insert(parent, child, before) {
+      var childNode = nodeOf(child);
+      if (!childNode) return child;
+      if (contains(childNode, parent)) throw new Error('HierarchyRequestError');
+      detach(childNode);
+      var referenceNode = before == null ? null : nodeOf(before);
+      var index = referenceNode ? parent.children.indexOf(referenceNode) : -1;
+      if (index === -1) parent.children.push(childNode);
+      else parent.children.splice(index, 0, childNode);
+      childNode.parent = parent;
+      return child;
+    }
+
+    function createStyle(node) {
+      return new Proxy({}, {
+        get: function (_target, property) {
+          if (typeof property !== 'string') return undefined;
+          if (property === 'cssText') return serialize(node.style);
+          if (property === 'setProperty') return function (name, value) { setDeclaration(node.style, name, value); };
+          if (property === 'getPropertyValue') return function (name) { return node.style[kebab(name)] || ''; };
+          if (property === 'removeProperty') return function (name) { var key = kebab(name); var old = node.style[key] || ''; delete node.style[key]; return old; };
+          if (property === 'length') return Object.keys(node.style).length;
+          return node.style[kebab(property)] || '';
+        },
+        set: function (_target, property, value) {
+          if (typeof property !== 'string') return true;
+          if (property === 'cssText') parseCssText(node.style, value);
+          else setDeclaration(node.style, property, value);
+          return true;
+        }
+      });
+    }
+
+    function createNode(tagName) {
+      var node = { tag: String(tagName || 'div').toLowerCase(), parent: null, children: [], style: {}, attributes: {}, props: {} };
+      var style = createStyle(node);
+      var methods = {
+        appendChild: function (child) { return insert(node, child, null); },
+        append: function () { for (var i = 0; i < arguments.length; i++) insert(node, arguments[i], null); },
+        prepend: function () { for (var i = arguments.length - 1; i >= 0; i--) insert(node, arguments[i], node.children[0] ? node.children[0].proxy : null); },
+        insertBefore: function (child, before) { return insert(node, child, before); },
+        removeChild: function (child) { var childNode = nodeOf(child); if (childNode && childNode.parent === node) detach(childNode); return child; },
+        replaceChild: function (child, old) { insert(node, child, old); var oldNode = nodeOf(old); if (oldNode) detach(oldNode); return old; },
+        remove: function () { detach(node); },
+        contains: function (other) { var otherNode = nodeOf(other); return Boolean(otherNode && contains(node, otherNode)); },
+        setAttribute: function (name, value) {
+          name = String(name).toLowerCase();
+          node.attributes[name] = String(value);
+          if (name === 'style') parseCssText(node.style, value);
+        },
+        getAttribute: function (name) {
+          name = String(name).toLowerCase();
+          if (name === 'style') return serialize(node.style);
+          return Object.prototype.hasOwnProperty.call(node.attributes, name) ? node.attributes[name] : null;
+        },
+        hasAttribute: function (name) { return Object.prototype.hasOwnProperty.call(node.attributes, String(name).toLowerCase()); },
+        removeAttribute: function (name) { delete node.attributes[String(name).toLowerCase()]; },
+        getBoundingClientRect: function () {
+          var size = measure(node);
+          return { x: 0, y: 0, top: 0, left: 0, width: size.width, height: size.height, right: size.width, bottom: size.height };
+        },
+        getClientRects: function () { return isRendered(node) ? [methods.getBoundingClientRect()] : []; },
+        addEventListener: function () {},
+        removeEventListener: function () {},
+        dispatchEvent: function () { return true; }
+      };
+      node.proxy = new Proxy(function () {}, {
+        get: function (_target, property) {
+          if (typeof property !== 'string') {
+            if (property === Symbol.toPrimitive) return function () { return '[object HTMLElement]'; };
+            return undefined;
+          }
+          if (Object.prototype.hasOwnProperty.call(methods, property)) return methods[property];
+          if (property === 'style') return style;
+          if (property === 'tagName' || property === 'nodeName') return node.tag.toUpperCase();
+          if (property === 'nodeType') return 1;
+          if (property === 'parentNode' || property === 'parentElement') return node.parent ? node.parent.proxy : null;
+          if (property === 'isConnected') return contains(documentElement, node);
+          if (property === 'children' || property === 'childNodes') return node.children.map(function (child) { return child.proxy; });
+          if (property === 'firstChild' || property === 'firstElementChild') return node.children.length ? node.children[0].proxy : null;
+          if (property === 'lastChild' || property === 'lastElementChild') return node.children.length ? node.children[node.children.length - 1].proxy : null;
+          if (property === 'childElementCount') return node.children.length;
+          if (property === 'offsetWidth') return Math.round(measure(node).width);
+          if (property === 'offsetHeight') return Math.round(measure(node).height);
+          if (property === 'clientWidth' || property === 'scrollWidth') return node === documentElement ? viewportWidth : Math.round(measure(node).clientWidth);
+          if (property === 'clientHeight' || property === 'scrollHeight') return node === documentElement ? viewportHeight : Math.round(measure(node).clientHeight);
+          if (property === 'offsetLeft' || property === 'offsetTop' || property === 'clientLeft' || property === 'clientTop' || property === 'scrollLeft' || property === 'scrollTop') return 0;
+          if (property === 'offsetParent') return isRendered(node) && node !== body && node !== documentElement && positionOf(node) !== 'fixed' ? body.proxy : null;
+          if (property === 'id' || property === 'className') return node.attributes[property === 'id' ? 'id' : 'class'] || '';
+          if (property === 'ownerDocument') return documentProxy;
+          if (property === 'then') return undefined;
+          if (Object.prototype.hasOwnProperty.call(node.props, property)) return node.props[property];
+          return fallback[property];
+        },
+        set: function (_target, property, value) {
+          if (typeof property !== 'string') return true;
+          if (property === 'style') parseCssText(node.style, value);
+          else if (property === 'id') node.attributes.id = String(value);
+          else if (property === 'className') node.attributes['class'] = String(value);
+          else node.props[property] = value;
+          return true;
+        },
+        apply: function () { return fallback; },
+        construct: function () { return fallback; }
+      });
+      nodes.push(node);
+      return node;
+    }
+
+    documentElement = createNode('html');
+    head = createNode('head');
+    body = createNode('body');
+    insert(documentElement, head.proxy, null);
+    insert(documentElement, body.proxy, null);
+
+    function findByTag(tag) {
+      tag = String(tag || '').trim().toLowerCase();
+      if (tag === 'html') return documentElement.proxy;
+      if (tag === 'body') return body.proxy;
+      if (tag === 'head') return head.proxy;
+      return null;
+    }
+
+    var documentMethods = {
+      createElement: function (tag) { return createNode(tag).proxy; },
+      createElementNS: function (_ns, tag) { return createNode(tag).proxy; },
+      createTextNode: function () { return createNode('#text').proxy; },
+      createDocumentFragment: function () { return createNode('#fragment').proxy; },
+      querySelector: function (selector) { return findByTag(selector) || fallback; },
+      getElementsByTagName: function (tag) { var found = findByTag(tag); return found ? [found] : [fallback]; },
+      addEventListener: function () {},
+      removeEventListener: function () {}
+    };
+
+    var documentProxy = new Proxy(function () {}, {
+      get: function (_target, property) {
+        if (typeof property !== 'string') {
+          if (property === Symbol.toPrimitive) return function () { return '[object HTMLDocument]'; };
+          return undefined;
+        }
+        if (Object.prototype.hasOwnProperty.call(documentMethods, property)) return documentMethods[property];
+        if (property === 'documentElement') return documentElement.proxy;
+        if (property === 'body') return body.proxy;
+        if (property === 'head') return head.proxy;
+        if (property === 'readyState') return 'complete';
+        if (property === 'visibilityState') return 'visible';
+        if (property === 'hidden') return false;
+        if (property === 'then') return undefined;
+        return fallback[property];
+      },
+      set: function () { return true; },
+      apply: function () { return fallback; },
+      construct: function () { return fallback; }
+    });
+
+    function getComputedStyle(element) {
+      var node = nodeOf(element);
+      if (!node) return fallback;
+      return new Proxy({}, {
+        get: function (_target, property) {
+          if (typeof property !== 'string') return undefined;
+          var name = kebab(property);
+          if (property === 'getPropertyValue') return function (other) { return getComputedStyle(element)[kebab(other)]; };
+          if (name === 'width' || name === 'height') {
+            if (!isRendered(node)) return node.style[name] || 'auto';
+            var borderBox = String(node.style['box-sizing'] || '').toLowerCase() === 'border-box';
+            var box = name === 'width' ? widthBox(node) : heightBox(node);
+            var size = name === 'width'
+              ? box.contentWidth + (borderBox ? box.paddingX + box.borderX : 0)
+              : box.contentHeight + (borderBox ? box.paddingY + box.borderY : 0);
+            return size + 'px';
+          }
+          if (name === 'display') return displayOf(node);
+          if (name === 'position') return positionOf(node);
+          if (name === 'font-size') return fontSizeOf(node) + 'px';
+          return node.style[name] || '';
+        }
+      });
+    }
+
+    return { document: documentProxy, getComputedStyle: getComputedStyle };
+  }
+
   function createFsvidVidzyQuickJsBootstrap(embedUrl) {
     const urlObj = new URL(embedUrl);
     const safeEmbedUrl = JSON.stringify(embedUrl);
@@ -2437,12 +3373,23 @@
           if (property === "getAttribute") return function (attr) { return attr === "src" ? "" : "true"; };
           if (property === "hasAttribute") return function () { return true; };
           if (property === "referrer") return ${safeEmbedOrigin};
+          if (/^(?:offset|client|scroll)(?:Width|Height|Left|Top)$/.test(property)) return 0;
           if (property === "then") return undefined;
           if (property === Symbol.toPrimitive) return function () { return ""; };
           return __movixLooseObject;
         },
         set: function () { return true; }
       });
+      // Les lecteurs dérivent leur clé de la largeur d'éléments qu'ils créent :
+      // un mini-DOM calcule ces mesures comme le ferait un navigateur.
+      var __movixDom = (${movixCreateDomEmulator.toString()})(__movixLooseObject, ${FSVID_VIDZY_VIEWPORT_WIDTH}, ${FSVID_VIDZY_VIEWPORT_HEIGHT});
+      var getComputedStyle = __movixDom.getComputedStyle;
+      var innerWidth = ${FSVID_VIDZY_VIEWPORT_WIDTH};
+      var innerHeight = ${FSVID_VIDZY_VIEWPORT_HEIGHT};
+      var outerWidth = ${FSVID_VIDZY_VIEWPORT_WIDTH};
+      var outerHeight = ${FSVID_VIDZY_VIEWPORT_HEIGHT};
+      var devicePixelRatio = 1;
+      var screen = { width: ${FSVID_VIDZY_VIEWPORT_WIDTH}, height: ${FSVID_VIDZY_VIEWPORT_HEIGHT}, availWidth: ${FSVID_VIDZY_VIEWPORT_WIDTH}, availHeight: ${FSVID_VIDZY_VIEWPORT_HEIGHT}, colorDepth: 24, pixelDepth: 24 };
       var console = { log: function(){}, info: function(){}, warn: function(){}, error: function(){}, debug: function(){} };
       var location = {
         href: ${safeEmbedUrl},
@@ -2457,7 +3404,7 @@
         protocol: "https:"
       };
       var navigator = { userAgent: "Mozilla/5.0 Chrome/140.0.0.0", language: "fr-FR" };
-      var document = __movixLooseObject;
+      var document = __movixDom.document;
       var videojs = __movixPlayerFactory;
       var player = __movixPlayerFactory;
       var jwplayer = __movixPlayerFactory;
@@ -2580,6 +3527,176 @@
     return extractFsvidVidzyWithQuickJs(html, safeEmbedUrl, provider);
   }
 
+  // Sans clé `gk`, le CDN Fsvid/Vidzy ne sert que les 9 à 19 premiers segments
+  // (selon le serveur), puis répond 403. Leur lecteur demande cette clé à une
+  // « porte » (gate.php chez Vidzy, /gk chez Fsvid) avec une empreinte du
+  // navigateur, puis l'ajoute au master ; le CDN la recopie ensuite dans les
+  // URLs des variantes et des segments. La clé ne dépend ni de l'IP ni de la
+  // vidéo, et les deux hébergeurs partagent la même : une seule sert partout.
+  // La porte refuse (`{"ok":0}`) une empreinte sans canvas : faute de canvas
+  // (QuickJS de l'app TV), on envoie les largeurs que mesure Chrome sous Windows.
+  // Même code dans extension/*/extractors.js : garder les deux en phase.
+  const FSVID_VIDZY_GATE_TEXT = "Movix7Qm@Éédoà1l";
+  const FSVID_VIDZY_GATE_FALLBACK_WIDTHS = { serif: 159.56, sans: 170.34 };
+  const FSVID_VIDZY_GATE_URLS = {
+    vidzy: "https://v6.vidzy.cc/gate.php",
+    fsvid: "https://fsvid.lol/gk",
+  };
+  const FSVID_VIDZY_GATE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+  const FSVID_VIDZY_GATE_RETRY_AFTER_MS = 60 * 1000;
+  let fsvidVidzyGateKey = null;
+  let fsvidVidzyGateKeyPromise = null;
+
+  function measureFsvidVidzyGateText() {
+    try {
+      const canvas =
+        typeof OffscreenCanvas === "function"
+          ? new OffscreenCanvas(16, 16)
+          : typeof document !== "undefined"
+            ? document.createElement("canvas")
+            : null;
+      const context = canvas?.getContext?.("2d");
+      if (context) {
+        const measure = (font) => {
+          context.textBaseline = "top";
+          context.font = font;
+          return (
+            Math.round(context.measureText(FSVID_VIDZY_GATE_TEXT).width * 100) /
+            100
+          );
+        };
+        const serif = measure("18px serif");
+        const sans = measure("18px sans-serif");
+        if (
+          Number.isFinite(serif) &&
+          Number.isFinite(sans) &&
+          serif > 0 &&
+          sans > 0
+        ) {
+          return { serif, sans };
+        }
+      }
+    } catch {}
+    return FSVID_VIDZY_GATE_FALLBACK_WIDTHS;
+  }
+
+  function buildFsvidVidzyGateQuery() {
+    const { serif, sans } = measureFsvidVidzyGateText();
+    const nav = typeof navigator !== "undefined" ? navigator : {};
+    const scr = typeof screen !== "undefined" ? screen : {};
+    const dpr =
+      typeof devicePixelRatio === "number" && devicePixelRatio > 0
+        ? devicePixelRatio
+        : 1;
+    return [
+      ["v", "p1"],
+      ["cw", serif],
+      ["cw2", sans],
+      ["wg", 1],
+      ["dpr", dpr],
+      ["sw", scr.width || 1920],
+      ["hw", nav.hardwareConcurrency || 8],
+      ["ft", "TOP"],
+      ["rf", ""],
+    ]
+      .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+      .join("&");
+  }
+
+  function getFsvidVidzyGateUrls(html, provider) {
+    const urls = [];
+    // Vidzy écrit l'adresse de sa porte dans la page : la suivre si elle change.
+    const inline = /fetch\(\s*['"](https:\/\/[a-z0-9.-]+\/gate\.php)\?/i.exec(
+      String(html || ""),
+    );
+    if (
+      inline &&
+      /(?:^|\.)(?:vidzy\.cc|vidzy\.org|fsvid\.lol)$/i.test(
+        new URL(inline[1]).hostname,
+      )
+    ) {
+      urls.push(inline[1]);
+    }
+    urls.push(
+      FSVID_VIDZY_GATE_URLS[provider],
+      FSVID_VIDZY_GATE_URLS[provider === "fsvid" ? "vidzy" : "fsvid"],
+    );
+    return [...new Set(urls)];
+  }
+
+  async function requestFsvidVidzyGateKey(gateUrls) {
+    const query = buildFsvidVidzyGateQuery();
+    for (const gateUrl of gateUrls) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      try {
+        const resp = await fetch(`${gateUrl}?${query}`, {
+          signal: controller.signal,
+        });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        if (
+          typeof data?.gk === "string" &&
+          /^[A-Za-z0-9_.-]{16,512}$/.test(data.gk)
+        ) {
+          return data.gk;
+        }
+      } catch {
+        // Porte suivante.
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return null;
+  }
+
+  function getFsvidVidzyGateKey(html, provider) {
+    if (fsvidVidzyGateKey && fsvidVidzyGateKey.expiresAt > Date.now()) {
+      return Promise.resolve(fsvidVidzyGateKey.value);
+    }
+    if (!fsvidVidzyGateKeyPromise) {
+      fsvidVidzyGateKeyPromise = requestFsvidVidzyGateKey(
+        getFsvidVidzyGateUrls(html, provider),
+      )
+        .then((value) => {
+          // La clé se termine par `.<émission>.<durée en s>` : la garder la
+          // moitié de sa durée, sans dépasser six heures.
+          const ttl = Number(String(value || "").split(".")[2]);
+          const lifetime =
+            Number.isFinite(ttl) && ttl > 0
+              ? Math.min(FSVID_VIDZY_GATE_MAX_AGE_MS, ttl * 500)
+              : FSVID_VIDZY_GATE_MAX_AGE_MS;
+          // Après un échec, ne pas rappeler les portes à chaque extraction.
+          fsvidVidzyGateKey = {
+            value: value || null,
+            expiresAt:
+              Date.now() + (value ? lifetime : FSVID_VIDZY_GATE_RETRY_AFTER_MS),
+          };
+          return value;
+        })
+        .finally(() => {
+          fsvidVidzyGateKeyPromise = null;
+        });
+    }
+    return fsvidVidzyGateKeyPromise;
+  }
+
+  function hasFsvidVidzyGateKey(url) {
+    return /[?&]gk=/.test(String(url || ""));
+  }
+
+  async function withFsvidVidzyGateKey(m3u8Url, html, provider) {
+    if (hasFsvidVidzyGateKey(m3u8Url)) return m3u8Url;
+    const gateKey = await getFsvidVidzyGateKey(html, provider);
+    if (!gateKey) {
+      console.warn(
+        `[EXT-${provider.toUpperCase()}] Gate key unavailable, playback will stop early`,
+      );
+      return m3u8Url;
+    }
+    return `${m3u8Url}${m3u8Url.includes("?") ? "&" : "?"}gk=${encodeURIComponent(gateKey)}`;
+  }
+
   function extractUqloadMediaUrl(html) {
     const candidates = [];
     const collect = (value) => {
@@ -2605,6 +3722,102 @@
       candidates.find((url) => /\/v\.mp4(?:[?#]|$)/i.test(url)) ||
       null
     );
+  }
+
+  // Code ISO 639-1 déduit du libellé jwplayer ou du suffixe du fichier
+  // (`abc_fre.vtt`), pour que le lecteur Movix range la piste dans la bonne langue.
+  const UQLOAD_SUBTITLE_LANGS = [
+    ["fr", /\b(?:fr|fra|fre|french|fran[cç]ais|vf|vostfr)\b/i],
+    ["en", /\b(?:en|eng|english|anglais)\b/i],
+    ["es", /\b(?:es|spa|spanish|espa[nñ]ol)\b/i],
+    ["de", /\b(?:de|ger|deu|german|deutsch)\b/i],
+    ["it", /\b(?:it|ita|italian|italiano)\b/i],
+    ["pt", /\b(?:pt|por|portuguese|portugu[eê]s)\b/i],
+    ["ar", /\b(?:ar|ara|arabic|arabe)\b/i],
+  ];
+
+  function guessUqloadSubtitleLang(label, url) {
+    const file = String(url || "").split(/[?#]/)[0].split("/").pop() || "";
+    const haystack = `${label || ""} ${file.replace(/[_.-]/g, " ")}`;
+    for (const [code, pattern] of UQLOAD_SUBTITLE_LANGS) {
+      if (pattern.test(haystack)) return code;
+    }
+    return "und";
+  }
+
+  /**
+   * Sous-titres déclarés dans `jwplayer().setup({ tracks: [...] })`.
+   * On ignore les vignettes (`kind: "thumbnails"`) et le `empty.srt` factice
+   * qu'Uqload ajoute sous le libellé « Upload captions ».
+   */
+  function extractUqloadSubtitles(html, pageUrl) {
+    const sources = [String(html || "")];
+    const decoded = decodePackedScriptFromHtml(html);
+    if (decoded) sources.push(decoded);
+
+    const subtitles = [];
+    const seen = new Set();
+    for (const source of sources) {
+      const normalized = source.replace(/\\\//g, "/");
+      for (const block of normalized.matchAll(/tracks\s*:\s*\[([\s\S]{0,8000}?)\]/g)) {
+        for (const entry of block[1].matchAll(/\{[^{}]*\}/g)) {
+          const field = (name) => {
+            const match = new RegExp(`["']?${name}["']?\\s*:\\s*["']([^"']*)["']`, "i").exec(entry[0]);
+            return match ? match[1].trim() : "";
+          };
+          const file = field("file") || field("src");
+          const kind = (field("kind") || "captions").toLowerCase();
+          if (!file || (kind !== "captions" && kind !== "subtitles")) continue;
+          if (/\/empty\.(?:srt|vtt)(?:[?#]|$)/i.test(file)) continue;
+          if (!/\.(?:vtt|srt)(?:[?#]|$)/i.test(file)) continue;
+
+          let url;
+          try {
+            url = parseAllowedUqloadUrl(new URL(file, pageUrl).href).href;
+          } catch {
+            continue;
+          }
+          if (seen.has(url)) continue;
+          seen.add(url);
+
+          const label = field("label");
+          const lang = guessUqloadSubtitleLang(label, url);
+          subtitles.push({
+            url,
+            label: label || (lang !== "und" ? lang.toUpperCase() : `Piste ${subtitles.length + 1}`),
+            lang,
+            format: /\.srt(?:[?#]|$)/i.test(url) ? "srt" : "vtt",
+            default: /["']?default["']?\s*:\s*(?:true|["']true["'])/i.test(entry[0]),
+          });
+          if (subtitles.length >= 20) return subtitles;
+        }
+      }
+    }
+    return subtitles;
+  }
+
+  /**
+   * Télécharge le texte des sous-titres ici, avec le Referer Uqload : le site
+   * Movix ne peut pas les lire lui-même (pas d'en-têtes CORS chez Uqload).
+   * Une piste qui échoue garde son URL seule, le lecteur tentera sa chance.
+   */
+  async function fetchUqloadSubtitleContents(subtitles, headers) {
+    const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
+    return Promise.all(subtitles.slice(0, 8).map(async (subtitle) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      try {
+        const resp = await fetch(subtitle.url, { headers, signal: controller.signal });
+        if (!resp.ok) return subtitle;
+        const content = await resp.text();
+        if (!content.trim() || content.length > MAX_SUBTITLE_BYTES || /^\s*</.test(content)) return subtitle;
+        return { ...subtitle, content };
+      } catch {
+        return subtitle;
+      } finally {
+        clearTimeout(timer);
+      }
+    }));
   }
 
   /**
@@ -2900,7 +4113,11 @@
 
     const cacheKey = md5Hash(safeFsvidUrl);
     const cached = caches.fsvid.get(cacheKey);
-    if (cached && normalizeFsvidVidzyMediaUrl(cached.m3u8Url, safeFsvidUrl, "fsvid")) {
+    if (
+      cached &&
+      normalizeFsvidVidzyMediaUrl(cached.m3u8Url, safeFsvidUrl, "fsvid") &&
+      hasFsvidVidzyGateKey(cached.m3u8Url)
+    ) {
       console.log("[EXT-FSVID] Cache hit");
       return { ...cached, fromCache: true };
     }
@@ -2957,9 +4174,10 @@
         return { success: false, error: "Fsvid: M3U8 not found in page" };
       }
 
-      console.log(`[EXT-FSVID] Final M3U8 URL: ${m3u8Url}`);
-      const result = { m3u8Url, success: true, source: "fsvid" };
-      caches.fsvid.set(cacheKey, result);
+      const playableUrl = await withFsvidVidzyGateKey(m3u8Url, html, "fsvid");
+      console.log(`[EXT-FSVID] Final M3U8 URL: ${playableUrl}`);
+      const result = { m3u8Url: playableUrl, success: true, source: "fsvid" };
+      if (hasFsvidVidzyGateKey(playableUrl)) caches.fsvid.set(cacheKey, result);
       return result;
     } catch (e) {
       if (e.name === "AbortError") {
@@ -2984,7 +4202,11 @@
 
     const cacheKey = md5Hash(safeVidzyUrl);
     const cached = caches.vidzy.get(cacheKey);
-    if (cached && normalizeFsvidVidzyMediaUrl(cached.m3u8Url, safeVidzyUrl, "vidzy")) {
+    if (
+      cached &&
+      normalizeFsvidVidzyMediaUrl(cached.m3u8Url, safeVidzyUrl, "vidzy") &&
+      hasFsvidVidzyGateKey(cached.m3u8Url)
+    ) {
       return { ...cached, fromCache: true };
     }
 
@@ -3019,8 +4241,9 @@
       if (!m3u8Url)
         return { success: false, error: "Vidzy: M3U8 not found in page" };
 
-      const result = { m3u8Url, success: true, source: "vidzy" };
-      caches.vidzy.set(cacheKey, result);
+      const playableUrl = await withFsvidVidzyGateKey(m3u8Url, html, "vidzy");
+      const result = { m3u8Url: playableUrl, success: true, source: "vidzy" };
+      if (hasFsvidVidzyGateKey(playableUrl)) caches.vidzy.set(cacheKey, result);
       return result;
     } catch (e) {
       console.error("[EXT-VIDZY] Error:", e);
@@ -3221,12 +4444,14 @@
       // Try embed and non-embed versions without leaving the validated host.
       const urls = [fullUrl, fullUrl.replace("/embed-", "/")];
       let html = null;
+      let pageUrl = fullUrl;
 
       for (const url of urls) {
         try {
           const resp = await fetch(url, { headers, signal: controller.signal });
           if (resp.ok) {
             html = await resp.text();
+            pageUrl = resp.url || url;
             break;
           }
         } catch {
@@ -3243,7 +4468,12 @@
       if (!videoUrl)
         return { success: false, error: "Uqload: video URL not found" };
 
+      const subtitles = await fetchUqloadSubtitleContents(
+        extractUqloadSubtitles(html, pageUrl),
+        headers,
+      );
       const result = { m3u8Url: videoUrl, success: true, source: "uqload" };
+      if (subtitles.length) result.subtitles = subtitles;
       caches.uqload.set(cacheKey, result);
       return result;
     } catch (e) {
@@ -4030,7 +5260,10 @@
       "|sandratableother|sandrataxeight|scatch176duplicities|sethniceletter|shannonpersonalcost" +
       "|simpulumlamerop|smoki|stevenfamilyedge|stevenimaginelittle|strawberriesporail|telyn610zoanthropy" +
       "|timberwoodanotia|timmaybealready|toddpartneranimal|toxitabellaeatrebates306|tracylocalschool" +
-      "|uptodatefinishconferenceroom|valeronevijao|walterprettytheir|wolfdyslectic|yodelswartlike)\\.",
+      "|uptodatefinishconferenceroom|valeronevijao|walterprettytheir|wolfdyslectic|yodelswartlike" +
+      // Domaines VOE des lecteurs d'anime-sama (2026-10-19)
+      "|claireguessthousand|derricknationtop|jamesbornmain|jeremyparticipantanything|megankiddifference" +
+      "|teresapoliticallearn)\\.",
     "i",
   );
 
@@ -4188,6 +5421,23 @@
   /**
    * Set up DNR headers for a service's extracted URL so the browser player can use it
    */
+  /**
+   * Cookie de session que le master Fsvid/Vidzy pose (`vz_pe`/`fsv_pe`, valeur
+   * = jeton `t=` de son URL). Depuis le 2026-10-27, Vidzy sert sa fausse
+   * playlist de 177 octets à la place des segments après quelques dizaines de
+   * requêtes sans lui. N'importe quel jeton valide du même serveur suffit,
+   * d'où une seule règle par domaine. Même code que l'extension.
+   */
+  function fsvidVidzySessionCookie(url) {
+    try {
+      const token = new URL(url).searchParams.get("t") || "";
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(token)) return null;
+      return `vz_pe=${token}; fsv_pe=${token}`;
+    } catch {
+      return null;
+    }
+  }
+
   async function setupHeadersForService(type, url, referer) {
     // Fsvid needs different referers:
     // - Embed page (fsvid.lol/embed-xxx) → fs13.lol (required by fsvid to serve content)
@@ -4273,8 +5523,12 @@
       },
     };
 
-    const hdrs = headerMap[type];
+    let hdrs = headerMap[type];
     if (!hdrs || !url) return;
+    if (type === "fsvid" || type === "vidzy") {
+      const cookie = fsvidVidzySessionCookie(url);
+      if (cookie) hdrs = { ...hdrs, Cookie: cookie };
+    }
 
     try {
       const parsedUrl = new URL(url);
@@ -4526,21 +5780,7 @@
         },
         condition: {
           urlFilter: "*",
-          initiatorDomains: [
-            "localhost",
-            "127.0.0.1",
-            "movix.cash",
-            "movix.club",
-            "movix.cloud",
-            "movix.tax",
-            "movix.golf",
-            "movix.chat",
-            "movix.date",
-            "movix.fun",
-            "movix.show",
-            "movix.men",
-            "movix.college",
-          ],
+          initiatorDomains: ["localhost", "127.0.0.1", ...siteDomains],
           resourceTypes: [
             "xmlhttprequest",
             "other",
@@ -4796,10 +6036,11 @@
   // BEGIN STREAMED HANDSHAKE
   async function streamedHandshake(embedUrl) {
     if (extractionPrefs.livetv.streamed === false) throw new Error("Source Streamed désactivée");
-    const allowedPages = new Set(["embed.st", "rockystream.st", "embedhd.cc"]);
+    // Pas de liste de domaines : Streamed change souvent de relais.
     const safeUrl = value => {
       const url = new URL(value);
-      if (url.protocol !== "https:" || url.username || url.password || url.port || !allowedPages.has(url.hostname)) {
+      if (url.protocol !== "https:" || url.username || url.password || url.port ||
+        /^(?:\d+\.){3}\d+$|^\[|(?:^|\.)localhost$/.test(url.hostname)) {
         throw new Error("URL Streamed invalide");
       }
       return url;
@@ -4832,8 +6073,7 @@
             const parts = (await legacy.text()).match(/return\s*\(\s*(\[\s*"[^"]+"(?:\s*,\s*"[^"]+")*\s*\])\.join\(\s*""\s*\)/)?.[1];
             if (!parts) throw new Error("Adresse golf introuvable");
             const media = new URL(JSON.parse(parts).join(""));
-            if (media.protocol !== "https:" || media.username || media.password || media.port ||
-              !(media.hostname === "zohanayaan.com" || media.hostname.endsWith(".zohanayaan.com"))) throw new Error("CDN golf inconnu");
+            if (media.protocol !== "https:" || media.username || media.password || media.port) throw new Error("CDN golf inconnu");
             return { url: media.href, referer: "https://exposestrat.com/" };
           }
           const iframe = html.match(/<iframe\b[^>]*\ssrc\s*=\s*(["'])(.*?)\1/is);
@@ -4889,7 +6129,10 @@
         }
       }
 
-      const response = await fetch(url, { headers });
+      // Sans cookies, comme l'extension : la page choisit l'URL et reçoit le
+      // corps de la réponse, elle ne doit pas lire un site où l'utilisateur
+      // est connecté.
+      const response = await fetch(url, { headers, anonymous: true });
       const buffer = await response.arrayBuffer();
       const base64 = proxyBytesToBase64(new Uint8Array(buffer));
 
@@ -5120,30 +6363,7 @@
       const currentOrigin = pageWindow.location?.origin;
       const currentHostname = pageWindow.location?.hostname ?? "";
 
-      if (
-        currentHostname === "movix.cash" ||
-        currentHostname.endsWith(".movix.cash") ||
-        currentHostname === "movix.club" ||
-        currentHostname.endsWith(".movix.club") ||
-        currentHostname === "movix.cloud" ||
-        currentHostname.endsWith(".movix.cloud") ||
-        currentHostname === "movix.tax" ||
-        currentHostname.endsWith(".movix.tax") ||
-        currentHostname === "movix.golf" ||
-        currentHostname === "movix.chat" ||
-        currentHostname.endsWith(".movix.chat") ||
-        currentHostname === "movix.date" ||
-        currentHostname.endsWith(".movix.date") ||
-        currentHostname === "movix.fun" ||
-        currentHostname.endsWith(".movix.fun") ||
-        currentHostname === "movix.show" ||
-        currentHostname.endsWith(".movix.show") ||
-        currentHostname === "movix.men" ||
-        currentHostname.endsWith(".movix.men") ||
-        currentHostname === "movix.college" ||
-        currentHostname.endsWith(".movix.college") ||
-        currentHostname.endsWith(".movix.golf")
-      ) {
+      if (isSiteHost(currentHostname)) {
         return (currentOrigin || "https://movix.fun").replace(/\/$/, "");
       }
     } catch {}

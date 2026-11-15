@@ -5,9 +5,10 @@ import {
   Modal,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
+
+import AppButton from './AppButton';
 
 export type DialogButtonStyle = 'default' | 'cancel' | 'destructive';
 
@@ -159,26 +160,29 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                   {actions.map((action, i) => {
                     const style = action.style ?? 'default';
                     return (
-                      <TouchableOpacity
+                      <AppButton
                         key={`${action.text}-${i}`}
+                        title={action.text}
                         onPress={() => runAction(action)}
-                        accessibilityRole="button"
-                        activeOpacity={0.8}
-                        style={[
+                        variant={
+                          style === 'cancel'
+                            ? 'secondary'
+                            : style === 'destructive'
+                              ? 'destructive'
+                              : 'primary'
+                        }
+                        style={horizontal && styles.buttonHorizontal}
+                        fallbackStyle={[
                           styles.button,
-                          horizontal && styles.buttonHorizontal,
                           style === 'cancel' && styles.buttonCancel,
                           style === 'destructive' && styles.buttonDestructive,
                           style === 'default' && styles.buttonDefault,
-                        ]}>
-                        <Text
-                          style={[
-                            styles.buttonText,
-                            style === 'cancel' && styles.buttonTextCancel,
-                          ]}>
-                          {action.text}
-                        </Text>
-                      </TouchableOpacity>
+                        ]}
+                        fallbackTextStyle={[
+                          styles.buttonText,
+                          style === 'cancel' && styles.buttonTextCancel,
+                        ]}
+                      />
                     );
                   })}
                 </View>

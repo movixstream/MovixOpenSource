@@ -9,7 +9,7 @@ import { SquareBackground } from '../components/ui/square-background';
 import ShinyText from '../components/ui/shiny-text';
 import CustomDropdown from '../components/CustomDropdown';
 import CustomCheckbox from '../components/CustomCheckbox';
-import GridSkeleton from '../components/skeletons/GridSkeleton';
+import SearchResultsSkeleton from '../components/skeletons/SearchResultsSkeleton';
 import GenreSkeleton from '../components/skeletons/GenreSkeleton';
 import { SearchResult } from '../context/SearchContext';
 import { encodeId } from '../utils/idEncoder';
@@ -85,8 +85,32 @@ const Search: React.FC = () => {
     const autocompleteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const keywordDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const peopleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const searchUrlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const navigate = useNavigate();
     const location = useLocation();
+
+    const cancelSearchUrlUpdate = () => {
+        if (searchUrlTimerRef.current !== null) {
+            clearTimeout(searchUrlTimerRef.current);
+            searchUrlTimerRef.current = null;
+        }
+    };
+
+    const scheduleSearchUrlUpdate = (url: string) => {
+        cancelSearchUrlUpdate();
+        searchUrlTimerRef.current = setTimeout(() => {
+            searchUrlTimerRef.current = null;
+            if (window.location.pathname !== '/search') return;
+            if (window.location.pathname + window.location.search === url) return;
+            // Safari limite les mutations de l'historique. Regrouper la saisie
+            // et conserver l'état de React Router (index et clé de navigation).
+            window.history.replaceState(window.history.state, '', url);
+        }, 400);
+    };
+
+    useEffect(() => () => {
+        cancelSearchUrlUpdate();
+    }, [location.key]);
 
     const {
         query,
@@ -350,7 +374,7 @@ const Search: React.FC = () => {
         setQuery(value);
 
         const newUrl = value ? `/search?q=${encodeURIComponent(value)}&page=1` : '/search';
-        window.history.replaceState(null, '', newUrl);
+        scheduleSearchUrlUpdate(newUrl);
 
         if (autocompleteDebounceRef.current) clearTimeout(autocompleteDebounceRef.current);
         if (value.length >= 2) {
@@ -392,6 +416,7 @@ const Search: React.FC = () => {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        cancelSearchUrlUpdate();
         if (query || selectedGenres.length > 0 || selectedType !== 'all' || minRating > 0 || director || actor || year || selectedKeywords.length > 0 || selectedLanguage || selectedCountry || selectedProviders.length > 0) {
             if (query) {
                 const newUrl = `/search?q=${encodeURIComponent(query)}&page=1`;
@@ -449,6 +474,7 @@ const Search: React.FC = () => {
     // Function to handle page selection
     const handlePageSelect = (selectedPage: number) => {
         if (selectedPage > 0 && selectedPage <= maxPages) {
+            cancelSearchUrlUpdate();
             const currentParams = new URLSearchParams(location.search);
             currentParams.set('page', selectedPage.toString());
             navigate(`/search?${currentParams.toString()}`);
@@ -475,7 +501,7 @@ const Search: React.FC = () => {
         setSortBy('popularity.desc');
         setActivePreset(null);
         // Drop the ?q= from the URL so browser back/forward can't restore it
-        window.history.replaceState(null, '', '/search');
+        scheduleSearchUrlUpdate('/search');
         setTimeout(() => {
             if (selectedGenres.length > 0) {
                 selectedGenres.forEach(genreId => toggleGenre(genreId));
@@ -627,21 +653,21 @@ const Search: React.FC = () => {
                                                 clearAutocompleteSuggestions();
                                                 setShowAutocomplete(false);
                                             }}
-                                            className="px-4 text-white/60 hover:text-white transition-colors md:hidden border-l border-white/10 shrink-0"
+                                            className="px-4 text-white/60 hover:text-white transition-colors md:hidden border-l border-white/10 shrink-0 group/icon"
                                             aria-label={t('search.searchPlaceholder')}
                                         >
-                                            <SearchIcon size={22} />
+                                            <SearchIcon className="text-white opacity-60 group-hover/icon:opacity-100 transition-[color,opacity]" size={22} />
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => setShowFilters(!showFilters)}
                                             aria-label="Filters"
-                                            className={`px-4 transition-all border-l shrink-0 ${filtersActive
+                                            className={`group/icon px-4 transition-all border-l shrink-0 ${filtersActive
                                                 ? 'bg-red-600 border-red-500 text-white hover:bg-red-500'
                                                 : 'border-white/10 text-white/70 hover:text-white hover:bg-white/5'
                                                 }`}
                                         >
-                                            <Filter size={22} />
+                                            <Filter className={(filtersActive ? "text-white opacity-100" : "text-white opacity-70 group-hover/icon:opacity-100")} size={22} />
                                         </button>
                                     </div>
 
@@ -713,7 +739,7 @@ const Search: React.FC = () => {
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                                             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
                                                 <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                                    <Film className="w-4 h-4" />
+                                                    <Film className="w-4 h-4 text-white opacity-70" />
                                                     {t('search.type')}
                                                 </h3>
                                                 <CustomDropdown
@@ -727,7 +753,7 @@ const Search: React.FC = () => {
 
                                             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
                                                 <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                                    <Star className="w-4 h-4" />
+                                                    <Star className="w-4 h-4 text-white opacity-70" />
                                                     {t('search.minRating')}
                                                 </h3>
                                                 <div className="flex items-center gap-4">
@@ -751,7 +777,7 @@ const Search: React.FC = () => {
 
                                             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
                                                 <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                                    <Globe className="w-4 h-4" />
+                                                    <Globe className="w-4 h-4 text-white opacity-70" />
                                                     {t('search.language')}
                                                 </h3>
                                                 <CustomDropdown
@@ -764,7 +790,7 @@ const Search: React.FC = () => {
 
                                             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
                                                 <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                                    <Globe className="w-4 h-4" />
+                                                    <Globe className="w-4 h-4 text-white opacity-70" />
                                                     {t('search.country')}
                                                 </h3>
                                                 <CustomDropdown
@@ -777,7 +803,7 @@ const Search: React.FC = () => {
 
                                             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }}>
                                                 <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                                    <ArrowUpDown className="w-4 h-4" />
+                                                    <ArrowUpDown className="w-4 h-4 text-white opacity-70" />
                                                     {t('search.sortBy')}
                                                 </h3>
                                                 <CustomDropdown
@@ -821,7 +847,7 @@ const Search: React.FC = () => {
                                         {/* Category Presets */}
                                         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.27 }}>
                                             <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                                <Sparkles className="w-4 h-4" />
+                                                <Sparkles className="w-4 h-4 text-white opacity-70" />
                                                 {t('search.categories')}
                                             </h3>
                                             <div className="flex flex-wrap gap-2">
@@ -849,7 +875,7 @@ const Search: React.FC = () => {
                                         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.275 }}>
                                             <div className="flex justify-between items-center mb-3">
                                                 <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2">
-                                                    <Tv className="w-4 h-4" />
+                                                    <Tv className="w-4 h-4 text-white opacity-70" />
                                                     {t('search.streamingPlatforms')}
                                                 </h3>
                                                 {selectedProviders.length > 0 && (
@@ -901,9 +927,9 @@ const Search: React.FC = () => {
                                                         <button
                                                             type="button"
                                                             onClick={() => setShowAllProviders(!showAllProviders)}
-                                                            className="flex items-center gap-1 mt-3 text-sm text-white/50 hover:text-white transition-colors"
+                                                            className="flex items-center gap-1 mt-3 text-sm text-white/50 hover:text-white transition-colors group/icon"
                                                         >
-                                                            {showAllProviders ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                                                            {showAllProviders ? <ChevronUp className="text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" size={16} /> : <ChevronDown className="text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" size={16} />}
                                                             {showAllProviders
                                                                 ? t('search.showLess')
                                                                 : t('search.showMore', { count: watchProvidersList.length - PROVIDERS_INITIAL_COUNT })}
@@ -916,7 +942,7 @@ const Search: React.FC = () => {
                                         {/* Keywords */}
                                         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.28 }} className="relative">
                                             <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                                <Tag className="w-4 h-4" />
+                                                <Tag className="w-4 h-4 text-white opacity-70" />
                                                 {t('search.keywords')}
                                             </h3>
                                             <div className="relative">
@@ -937,9 +963,9 @@ const Search: React.FC = () => {
                                                             clearKeywordSuggestions();
                                                             setShowKeywordSuggestions(false);
                                                         }}
-                                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white"
+                                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white group/icon"
                                                     >
-                                                        <X size={16} />
+                                                        <X className="text-white opacity-40 group-hover/icon:opacity-100" size={16} />
                                                     </button>
                                                 )}
 
@@ -1006,7 +1032,7 @@ const Search: React.FC = () => {
                                         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             <div className="relative">
                                                 <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                                    <User className="w-4 h-4" />
+                                                    <User className="w-4 h-4 text-white opacity-70" />
                                                     {t('search.director')}
                                                 </h3>
                                                 <div className="relative">
@@ -1025,9 +1051,9 @@ const Search: React.FC = () => {
                                                                 setDirector('');
                                                                 setShowDirectorSuggestions(false);
                                                             }}
-                                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white"
+                                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white group/icon"
                                                         >
-                                                            <X size={16} />
+                                                            <X className="text-white opacity-40 group-hover/icon:opacity-100" size={16} />
                                                         </button>
                                                     )}
 
@@ -1084,7 +1110,7 @@ const Search: React.FC = () => {
 
                                             <div className="relative">
                                                 <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                                    <User className="w-4 h-4" />
+                                                    <User className="w-4 h-4 text-white opacity-70" />
                                                     {t('search.actor')}
                                                 </h3>
                                                 <div className="relative">
@@ -1103,9 +1129,9 @@ const Search: React.FC = () => {
                                                                 setActor('');
                                                                 setShowActorSuggestions(false);
                                                             }}
-                                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white"
+                                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white group/icon"
                                                         >
-                                                            <X size={16} />
+                                                            <X className="text-white opacity-40 group-hover/icon:opacity-100" size={16} />
                                                         </button>
                                                     )}
 
@@ -1162,7 +1188,7 @@ const Search: React.FC = () => {
 
                                             <div>
                                                 <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                                    <Calendar className="w-4 h-4" />
+                                                    <Calendar className="w-4 h-4 text-white opacity-70" />
                                                     {t('search.year')}
                                                 </h3>
                                                 <div className="relative">
@@ -1177,9 +1203,9 @@ const Search: React.FC = () => {
                                                     {year && (
                                                         <button
                                                             onClick={() => setYear('')}
-                                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white"
+                                                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-white/40 hover:text-white group/icon"
                                                         >
-                                                            <X size={16} />
+                                                            <X className="text-white opacity-40 group-hover/icon:opacity-100" size={16} />
                                                         </button>
                                                     )}
                                                 </div>
@@ -1189,7 +1215,7 @@ const Search: React.FC = () => {
                                         {/* Genres */}
                                         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}>
                                             <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider flex items-center gap-2 mb-3">
-                                                <Award className="w-4 h-4" />
+                                                <Award className="w-4 h-4 text-white opacity-70" />
                                                 {t('search.genres')}
                                             </h3>
                                             {loadingGenres ? (
@@ -1199,7 +1225,7 @@ const Search: React.FC = () => {
                                                     exit={{ opacity: 0 }}
                                                     transition={{ duration: 0.3 }}
                                                 >
-                                                    <GenreSkeleton />
+                                                    <GenreSkeleton mediaType={selectedType} />
                                                 </motion.div>
                                             ) : (
                                                 <div className="flex flex-wrap gap-2">
@@ -1257,7 +1283,7 @@ const Search: React.FC = () => {
                             transition={{ duration: 0.3 }}
                             className="container mx-auto px-4 py-8"
                         >
-                            <GridSkeleton />
+                            <SearchResultsSkeleton gridClassName={getGridClasses()} viewType={viewType} count={results.length || 20} />
                         </motion.div>
                     ) : ageFilteredResults.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-20">
@@ -1299,15 +1325,15 @@ const Search: React.FC = () => {
                                             <div className="flex items-center gap-1">
                                                 <button
                                                     onClick={() => setViewType('grid')}
-                                                    className={`p-2 rounded-xl transition-all ${viewType === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                                    className={`group/icon p-2 rounded-xl transition-all ${viewType === 'grid' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                                                 >
-                                                    <LayoutGrid size={18} />
+                                                    <LayoutGrid className={(viewType === 'grid' ? "text-white opacity-100" : "text-white opacity-40 group-hover/icon:opacity-100")} size={18} />
                                                 </button>
                                                 <button
                                                     onClick={() => setViewType('list')}
-                                                    className={`p-2 rounded-xl transition-all ${viewType === 'list' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                                    className={`group/icon p-2 rounded-xl transition-all ${viewType === 'list' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                                                 >
-                                                    <List size={18} />
+                                                    <List className={(viewType === 'list' ? "text-white opacity-100" : "text-white opacity-40 group-hover/icon:opacity-100")} size={18} />
                                                 </button>
                                             </div>
 

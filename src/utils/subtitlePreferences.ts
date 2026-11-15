@@ -65,7 +65,7 @@ export const DEFAULT_SUBTITLE_PREFERENCES: Readonly<SubtitlePreferences> = Objec
   fontFamily: 'standard',
   edgeColor: '#000000',
   edgeSizePx: 2,
-  fontWeight: 400,
+  fontWeight: 700,
   delay: 0,
 });
 
