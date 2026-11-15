@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Écran « personne » : un acteur ouvert depuis la distribution d'une fiche. -->
+    <string name="person_movies">Films · %d</string>
+    <string name="person_series">Séries · %d</string>
+    <string name="person_as">rôle : %s</string>
+    <string name="person_born">Naissance en %s</string>
+    <string name="person_lifespan">%1$s – %2$s</string>
+    <string name="person_loading">Chargement de la filmographie…</string>
+    <string name="person_error">Impossible de charger la filmographie. Vérifie la connexion de la télé, puis réessaie.</string>
+    <string name="person_empty">Aucun film ni aucune série à montrer pour %s.</string>
+    <string name="person_back">Retour</string>
+</resources>

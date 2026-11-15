@@ -58,6 +58,8 @@ data class TmdbVideo(
 
 @Serializable
 data class TmdbCast(
+    /** Identifiant TMDB de la personne : ouvre son écran (filmographie). */
+    val id: Int = 0,
     val name: String = "",
     val character: String? = null,
     @SerialName("profile_path") val profilePath: String? = null,
@@ -197,7 +199,7 @@ data class Details(
 )
 
 @Immutable
-data class CastMember(val name: String, val character: String?, val profilePath: String?)
+data class CastMember(val name: String, val character: String?, val profilePath: String?, val id: Int = 0)
 
 /** Vidéo YouTube de la fiche (bande-annonce, teaser, extrait…), lue dans l'appli. */
 @Immutable
@@ -238,7 +240,7 @@ fun TmdbDetails.toDetails(type: MediaType): Details {
         similar = (recommendations?.results.orEmpty().ifEmpty { similar?.results.orEmpty() })
             .mapNotNull { it.toMediaItem(type) }.filter { it.id != id && it.posterPath != null }.take(20),
         cast = credits?.cast.orEmpty().sortedBy { it.order }.filter { it.name.isNotBlank() }.take(20)
-            .map { CastMember(it.name, it.character?.takeIf { c -> c.isNotBlank() }, it.profilePath) },
+            .map { CastMember(it.name, it.character?.takeIf { c -> c.isNotBlank() }, it.profilePath, it.id) },
         // Bandes-annonces d'abord, en français d'abord, puis teasers, extraits, coulisses.
         videos = videos?.results.orEmpty().filter { it.site == "YouTube" && it.key.isNotBlank() }
             .sortedWith(compareBy({ VIDEO_ORDER.indexOf(it.type).let { i -> if (i < 0) VIDEO_ORDER.size else i } }, { if (it.language == "fr") 0 else 1 }, { if (it.official) 0 else 1 }))

@@ -46,6 +46,13 @@ class TmdbApi(
     suspend fun findImdb(imdbId: String): TmdbFind =
         get("/find/$imdbId", mapOf("external_source" to "imdb_id"))
 
+    /**
+     * Personne (acteur…) et tous ses rôles en une requête. Les traductions
+     * donnent la biographie anglaise quand TMDB n'en a pas en français.
+     */
+    suspend fun person(id: Int): TmdbPerson =
+        get("/person/$id", mapOf("append_to_response" to "combined_credits,translations"))
+
     /** `true` si TMDB accepte la clé (HTTP 200 sur /configuration). */
     suspend fun validateKey(key: String): Boolean = withContext(Dispatchers.IO) {
         val url = baseUrl.newBuilder().addPathSegments("configuration").addQueryParameter("api_key", key).build()

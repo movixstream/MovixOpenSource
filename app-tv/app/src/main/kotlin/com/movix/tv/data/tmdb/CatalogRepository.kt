@@ -60,6 +60,21 @@ class CatalogRepository(private val api: TmdbApi, private val imdb: ImdbSuggesti
     suspend fun episodes(tvId: Int, season: Int): List<Episode> =
         api.season(tvId, season).episodes.map { it.toEpisode() }
 
+    // Acteurs récents en mémoire : revenir d'une fiche ouverte depuis la
+    // filmographie ne recharge rien, et le focus retrouve aussitôt son titre.
+    private val personCache = object : LinkedHashMap<Int, PersonPage>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, PersonPage>?) = size > 12
+    }
+
+    /** Écran « personne » : biographie et filmographie déjà triée (voir [toPersonPage]). */
+    suspend fun person(id: Int): PersonPage {
+        synchronized(personCache) { personCache[id] }?.let { return it }
+        // Hors du fil principal : réponse lourde pour un acteur prolifique
+        // (centaines de rôles et biographies traduites), lue puis triée ici.
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { api.person(id).toPersonPage() }
+            .also { synchronized(personCache) { personCache[id] = it } }
+    }
+
     /**
      * TMDB ne cherche que des mots entiers : « Inter » sort d'abord
      * « inter-medium » (0 vote) et laisse Interstellar en page 2. On y ajoute

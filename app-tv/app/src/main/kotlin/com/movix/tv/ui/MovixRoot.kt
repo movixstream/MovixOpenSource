@@ -44,6 +44,7 @@ import com.movix.tv.ui.components.railHiddenSections
 import com.movix.tv.ui.profiles.ProfilePickerScreen
 import kotlinx.coroutines.launch
 import com.movix.tv.ui.details.DetailsScreen
+import com.movix.tv.ui.person.PersonScreen
 import com.movix.tv.ui.home.BrowseScreen
 import com.movix.tv.ui.home.WatchlistScreen
 import com.movix.tv.ui.nav.Navigator
@@ -106,6 +107,7 @@ fun MovixRoot(onExit: () -> Unit) {
             when (r) {
                 is Route.Main -> "main"
                 is Route.Details -> "details:${r.type}:${r.id}"
+                is Route.Person -> "person:${r.id}"
                 is Route.Player -> "player"
                 Route.Link -> "link"
             }
@@ -160,6 +162,23 @@ fun MovixRoot(onExit: () -> Unit) {
                     onPlay = { nav.push(Route.Player(it)) },
                     modifier = Modifier.fillMaxSize(),
                     onOpen = { nav.push(Route.Details(it.type, it.id, it)) },
+                    onPerson = { if (nav.current == route) nav.push(Route.Person(it.id, it.name, it.profilePath)) },
+                )
+            }
+            is Route.Person -> saveable.SaveableStateProvider("person:${route.id}") {
+                PersonScreen(
+                    id = route.id, name = route.name, profilePath = route.profilePath,
+                    onOpen = { m ->
+                        // Le titre d'où l'on vient : on y retourne au lieu d'empiler une
+                        // seconde fiche identique (elles partageraient leur état sauvegardé).
+                        // Rien si l'écran s'efface déjà (double appui sur OK pendant le fondu).
+                        val from = nav.previous
+                        if (nav.current != route) Unit
+                        else if (from is Route.Details && from.type == m.type && from.id == m.id) nav.pop()
+                        else nav.push(Route.Details(m.type, m.id, m))
+                    },
+                    onBack = { if (nav.current == route) nav.pop() },
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
             is Route.Player -> PlayerScreen(
