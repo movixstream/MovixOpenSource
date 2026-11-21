@@ -153,6 +153,28 @@ if (typeof window !== 'undefined') {
 const MAX_IMAGE_REQUESTS = 3;
 let activeImageRequests = 0;
 const pendingImageRequests: Array<() => void> = [];
+let pendingImageRequestHead = 0;
+
+function runNextImageRequest(): void {
+  const next = pendingImageRequests[pendingImageRequestHead];
+  if (!next) return;
+
+  pendingImageRequestHead++;
+  if (pendingImageRequestHead >= pendingImageRequests.length) {
+    // Release completed callbacks as soon as the queue drains.
+    pendingImageRequests.length = 0;
+    pendingImageRequestHead = 0;
+  } else if (
+    pendingImageRequestHead >= 64
+    && pendingImageRequestHead * 2 >= pendingImageRequests.length
+  ) {
+    // Compact occasionally rather than shifting the whole queue per request.
+    pendingImageRequests.splice(0, pendingImageRequestHead);
+    pendingImageRequestHead = 0;
+  }
+
+  next();
+}
 
 function withImageRequestSlot<T>(request: () => Promise<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -160,7 +182,7 @@ function withImageRequestSlot<T>(request: () => Promise<T>): Promise<T> {
       activeImageRequests++;
       void Promise.resolve().then(request).then(resolve, reject).finally(() => {
         activeImageRequests--;
-        pendingImageRequests.shift()?.();
+        runNextImageRequest();
       });
     };
     if (activeImageRequests < MAX_IMAGE_REQUESTS) run();
