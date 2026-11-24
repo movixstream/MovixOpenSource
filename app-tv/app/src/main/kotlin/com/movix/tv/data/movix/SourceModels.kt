@@ -64,7 +64,19 @@ data class PlaybackSource(
     val extracted: Boolean = false,
     /** Fichier SwiftFlux annoncé (bloc `mp4`), dont l'URL reste à demander au serveur. */
     val mp4Index: Int? = null,
+    /**
+     * Version exacte quand [language] la résume mal : « VF2 », « VA » (doublage
+     * anglais), « VJ », « VKR », « VOSTENG » d'anime-sama. `null` ailleurs.
+     */
+    val langTag: String? = null,
+    /**
+     * `Referer` de la page embed dans le lecteur web : les lecteurs
+     * d'anime-sama (Smoothpre…) n'affichent la vidéo que venant de ce site.
+     */
+    val pageReferer: String? = null,
 ) {
+    /** Version affichée : [langTag], sinon celle de [language]. */
+    val langLabel: String? get() = langTag ?: language.label
     val playable: Boolean get() = streamUrl != null
     val id: String get() = "${provider.name}|${if (extracted) embedUrl else streamUrl ?: embedUrl}"
 }

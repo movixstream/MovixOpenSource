@@ -477,7 +477,7 @@ private fun sourceSubtitle(s: PlaybackSource, tail: String, result: QualityResul
         result == QualityResult.Unknown || (rating != null && rating.height == null) -> context.getString(R.string.player_quality_unknown)
         else -> null
     }
-    return listOfNotNull(s.provider.label.takeUnless { s.extracted }, quality, s.language.label, note ?: tail).distinct().joinToString(", ")
+    return listOfNotNull(s.provider.label.takeUnless { s.extracted }, quality, s.langLabel, note ?: tail).distinct().joinToString(", ")
 }
 
 /**

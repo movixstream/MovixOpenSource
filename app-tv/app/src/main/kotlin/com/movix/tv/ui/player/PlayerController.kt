@@ -390,7 +390,7 @@ class PlayerController(
             val device = SourceSelector.deviceOnly(all, prefer)
             val types = runCatching { container.extractor.embedTypes(device.mapNotNull { it.embedUrl }) }.getOrDefault(emptyMap())
             deviceSources = if (types.isEmpty()) device else device.mapNotNull { s ->
-                types[s.embedUrl]?.let { type -> s.copy(host = type, label = com.movix.tv.data.movix.SourceParsers.extractedLabel(type, s.language)) }
+                types[s.embedUrl]?.let { type -> s.copy(host = type, label = com.movix.tv.data.movix.SourceParsers.extractedLabel(type, s.language, s.langTag)) }
             }
             webSources = SourceSelector.webCandidates(all, prefer)
             // Le serveur n'annonce souvent que « HD » : on lit les playlists

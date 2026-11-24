@@ -55,6 +55,8 @@ object SourceSelector {
         val langs = langRank(prefer)
         return compareBy(
             { langs[it.language] ?: 9 },
+            // Même langue : la version principale avant les autres (VF avant VF2).
+            { if (it.langTag != null) 1 else 0 },
             { categoryRank(it) },
             { rank(PROVIDER_RANK, it.provider) },
             { rank(HOST_RANK, it.host) },
@@ -93,6 +95,7 @@ object SourceSelector {
         return device.filter { it.embedUrl != null && (it.host == null || it.host in DEVICE_HOSTS) }
             .sortedWith(compareBy(
                 { langs[it.language] ?: 9 },
+                { if (it.langTag != null) 1 else 0 },
                 { if (it.host == null) 1 else 0 },
             ))
     }

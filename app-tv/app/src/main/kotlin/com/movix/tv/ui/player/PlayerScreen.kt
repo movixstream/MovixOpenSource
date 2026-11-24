@@ -152,8 +152,9 @@ fun PlayerScreen(target: PlayTarget, onExit: () -> Unit, onOpenSettings: () -> U
     BackHandler { back() }
 
     // Lecteur web (souris virtuelle) : remplace tout l'écran, Retour y revient.
-    c.webSource?.embedUrl?.let { url ->
-        EmbedView(url, container.embedFilter, onClose = c::closeWeb, onNext = c::nextWeb)
+    c.webSource?.let { web ->
+        val url = web.embedUrl ?: return@let
+        EmbedView(url, container.embedFilter, onClose = c::closeWeb, onNext = c::nextWeb, referer = web.pageReferer)
         return
     }
 

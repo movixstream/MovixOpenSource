@@ -53,6 +53,9 @@ class AnimeSources(
     companion object {
         private const val CACHE_MS = 20 * 60_000L
 
+        /** Site d'où viennent les lecteurs (`ANIME_SAMA_URL` de la Main API). */
+        const val SITE_REFERER = "https://anime-sama.to/"
+
         /** `vostfr` → VOSTFR ; `vf`, `vf1`, `vf2`, `vqc` → VF ; les autres doublages (`va`, `vkr`…) → VO. */
         fun language(raw: String): Lang {
             val s = raw.trim().lowercase()
@@ -67,6 +70,8 @@ class AnimeSources(
         fun sources(links: List<AnimeLinks>, m3u8ByPlayer: Map<String, String>): List<PlaybackSource> =
             links.flatMap { l ->
                 val lang = language(l.language)
+                // « VF2 », « VA »… gardés tels quels, comme sur le site ; « VF » et « VOSTFR » restent ceux de [lang].
+                val tag = l.language.trim().uppercase().takeIf { it.isNotEmpty() && it != lang.label }
                 l.players.filter { it.startsWith("http") }.map { url ->
                     val host = SourceParsers.hoster(url)
                     val name = host?.let(SourceParsers::hosterLabel)
@@ -74,8 +79,10 @@ class AnimeSources(
                     val m3u8 = m3u8ByPlayer[url]?.takeIf { it.startsWith("http") }
                     PlaybackSource(
                         provider = Provider.ANIME,
-                        label = listOfNotNull(name, lang.label).joinToString(" "),
+                        label = listOfNotNull(name, tag ?: lang.label).joinToString(" "),
                         language = lang,
+                        langTag = tag,
+                        pageReferer = SITE_REFERER,
                         host = host,
                         embedUrl = url,
                         streamUrl = m3u8,

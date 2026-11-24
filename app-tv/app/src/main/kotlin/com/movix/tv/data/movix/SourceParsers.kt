@@ -115,7 +115,7 @@ object SourceParsers {
      * Nom d'un lecteur extrait sur la télé, comme le groupe Nexus du site
      * (`runExtractionPass.ts`) : hébergeur puis langue, sans le site d'origine.
      */
-    fun extractedLabel(host: String, lang: Lang): String = listOfNotNull(hosterLabel(host), lang.label).joinToString(" ")
+    fun extractedLabel(host: String, lang: Lang, tag: String? = null): String = listOfNotNull(hosterLabel(host), tag ?: lang.label).joinToString(" ")
 
     /** Nom de lecteur rendu par une route : « premium » est le Fsvid de FStream. */
     private fun playerName(raw: String?, host: String?): String? =

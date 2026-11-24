@@ -102,8 +102,25 @@ class AnimeMatchTest {
         assertTrue(list.all { it.provider == Provider.ANIME })
         assertEquals(listOf(Lang.VOSTFR, Lang.VOSTFR, Lang.VF, Lang.VO), list.map { it.language })
         assertEquals("Sibnet VOSTFR", list[0].label)
+        assertNull(list[0].langTag)
         assertEquals("https://relay/x.m3u8", list[1].streamUrl)
         assertNull(list[2].streamUrl)
-        assertEquals("ansembed.net VO", list[3].label)
+        // Versions gardées telles que l'API les nomme, comme sur le site.
+        assertEquals("Uqload VF2", list[2].label)
+        assertEquals("VF2", list[2].langLabel)
+        assertEquals("ansembed.net VA", list[3].label)
+        assertEquals("VA", list[3].langTag)
+        assertTrue(list.all { it.pageReferer == AnimeSources.SITE_REFERER })
+    }
+
+    @Test
+    fun mainVersionComesBeforeAlternateDub() {
+        val links = listOf(
+            AnimeLinks("vf2", listOf("https://voe.sx/e/aaaaaaaaaaaa")),
+            AnimeLinks("vf", listOf("https://vidmoly.to/embed-b.html")),
+        )
+        val list = AnimeSources.sources(links, emptyMap())
+        assertEquals(listOf("VF", "VF2"), com.movix.tv.data.movix.SourceSelector.deviceCandidates(list).map { it.langLabel })
+        assertEquals(listOf("VF", "VF2"), com.movix.tv.data.movix.SourceSelector.webCandidates(list).map { it.langLabel })
     }
 }
