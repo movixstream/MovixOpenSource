@@ -107,4 +107,49 @@ class LiveExtractionTest {
         logs.take(25).forEach(::println)
         runtime.close()
     }
+
+    /**
+     * Lecteurs d'anime-sama (`/anime/episode`, sans VIP) : type reconnu par le
+     * userscript, extraction, puis lecture du début du flux.
+     *
+     * Lancer : `MOVIX_LIVE=1 ./gradlew :extractor:test --tests "*LiveExtractionTest.extractsAnimeEmbeds"`.
+     */
+    @Test
+    fun extractsAnimeEmbeds() = runBlocking {
+        assumeTrue("MOVIX_LIVE=1 pour l'essai réel", System.getenv("MOVIX_LIVE") == "1")
+        val script = File("../app/src/main/assets/extract/movix.user.js").readText()
+        val episodes = listOf(
+            "jujutsu-kaisen?season=saison2&episode=1",
+            "one-piece?season=saison12&episode=1",
+            "frieren?season=saison1&episode=1",
+            "solo-leveling?season=saison2&episode=1",
+        )
+        val urlRe = Regex("""https?://[^"\\\s<>]+""")
+        val players = withContext(Dispatchers.IO) {
+            episodes.flatMap { ep ->
+                val body = get("https://api.movix.men/anime/episode/$ep")?.second?.decodeToString().orEmpty()
+                urlRe.findAll(body).map { it.value.replace("\\/", "/") }.toList()
+            }
+        }.distinct()
+        val bridge = OkHttpBridge(client) { url, h ->
+            val base = if (h.keys.none { it.equals("User-Agent", true) }) h + ("User-Agent" to MediaHeaders.SIGNED_USER_AGENT) else h
+            MediaHeaders.apply(url, base)
+        }
+        val runtime = ExtractorRuntime(bridge, { script }, MediaHeaders.SIGNED_USER_AGENT)
+        runtime.warmUp()
+        val types = runtime.embedTypes(players)
+        val gate = Semaphore(3)
+        val results = players.map { url ->
+            async {
+                val type = types[url] ?: return@async Triple(url, "—", "non reconnu (lecteur web seulement)")
+                val r = gate.withPermit { runtime.extract(url) }
+                val check = r.url?.let { u -> withContext(Dispatchers.IO) { get(u, MediaHeaders.apply(u, r.headers + ("Range" to "bytes=0-4095"))) } }
+                val ok = check != null && check.first in 200..299 && check.second.isNotEmpty()
+                Triple(url, type, if (ok) "lisible (${check!!.first})" else "échec : ${r.error ?: check?.first}")
+            }
+        }.awaitAll()
+        results.forEach { (url, type, state) -> println("%-9s %-60s %s".format(type, url.take(60), state.take(60))) }
+        println("\n${results.count { it.third.startsWith("lisible") }} / ${results.size} lecteurs lisibles sur la télé")
+        runtime.close()
+    }
 }
