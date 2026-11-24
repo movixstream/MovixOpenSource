@@ -15,7 +15,12 @@ import kotlinx.serialization.json.JsonElement
  * donne simplement zéro source. Les fichiers SwiftFlux ne s'obtiennent que
  * par la route signée des télés reliées.
  */
-class SourceRepository(private val api: MovixApi, private val json: Json) {
+class SourceRepository(
+    private val api: MovixApi,
+    private val json: Json,
+    /** Sources anime-sama des titres d'animation ([com.movix.tv.data.anime.AnimeSources]). */
+    private val anime: (suspend (PlayRequest, String?) -> List<PlaybackSource>)? = null,
+) {
 
     /** Une route : chemin, paramètres, `resolve` demandé, parseur. */
     internal class Route(
@@ -74,7 +79,17 @@ class SourceRepository(private val api: MovixApi, private val json: Json) {
         perRouteMs: Long = 35_000,
         swiftflux: (suspend (index: Int) -> Pair<String, String?>?)? = null,
     ): List<PlaybackSource> = coroutineScope {
-        routes(req).map { route ->
+        val animeJob = anime?.let { load ->
+            async {
+                val started = System.currentTimeMillis()
+                val result = withTimeoutOrNull(perRouteMs) { runCatching { load(req, vipKey) }.getOrNull() }.orEmpty()
+                runCatching {
+                    Log.i("MovixSources", "${Provider.ANIME} : ${result.size} source(s), ${result.count { it.playable }} jouable(s), ${System.currentTimeMillis() - started} ms")
+                }
+                result
+            }
+        }
+        val fromRoutes = routes(req).map { route ->
             async {
                 val started = System.currentTimeMillis()
                 val fetched = withTimeoutOrNull(perRouteMs) { fetch(route, vipKey) } ?: emptyList()
@@ -84,7 +99,8 @@ class SourceRepository(private val api: MovixApi, private val json: Json) {
                 }
                 result
             }
-        }.awaitAll().flatten().filter { s ->
+        }
+        (fromRoutes + listOfNotNull(animeJob)).awaitAll().flatten().filter { s ->
             // Sans VIP, PurStream rend l'URL brute de l'amont, qui exige des
             // en-têtes qu'on ne connaît pas : rien à lancer. KissKH, lui, se lit
             // sans en-tête (vérifié le 2026-10-16 : playlist et segments PNG en 200).

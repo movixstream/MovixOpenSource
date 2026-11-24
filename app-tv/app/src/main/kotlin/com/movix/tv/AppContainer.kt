@@ -109,12 +109,17 @@ class AppContainer(context: Context) {
         { store.read(TvKeys.VIP_KEY) ?: BuildConfig.DEV_VIP_KEY.takeIf { it.isNotBlank() } },
         { store.set(TvKeys.VIP_KEY, it) },
     )
-    val sources = SourceRepository(movix, json)
 
     val accountApi = AccountApi(http, json, movix.baseUrl)
     val accounts = AccountManager(context.applicationContext, store, accountApi, vip, json)
+    /** Routes `/anime` : sources anime-sama et rangées du catalogue anime. */
+    val anime = com.movix.tv.data.anime.AnimeApi(http, json, movix.baseUrl)
     /** Tous les titres affichés passent par ici, filtrés pour le profil qui regarde (restriction d'âge). */
-    val catalog = CatalogRepository(tmdb, imdb, ages, accounts)
+    val catalog = CatalogRepository(tmdb, imdb, ages, accounts, anime)
+    private val animeSources = com.movix.tv.data.anime.AnimeSources(anime) { type, id ->
+        catalog.info(type, id).let { com.movix.tv.data.anime.AnimeHint(it.animation, it.episodeCounts) }
+    }
+    val sources = SourceRepository(movix, json, animeSources::load)
     val sync = SyncManager(appScope, store, accountApi, accounts, json)
     val swiftflux = SwiftFluxClient(http, json, movix.baseUrl)
     /** Rangée « Reprendre » lue sur le serveur (historique en base). */

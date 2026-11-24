@@ -33,7 +33,7 @@ object SourceSelector {
 
     private val PROVIDER_RANK = listOf(
         Provider.FSTREAM, Provider.SWIFTFLUX, Provider.WIFLIX, Provider.VIPER, Provider.J1F, Provider.OMEGA, Provider.LINKS,
-        Provider.SWIFTFLOW, Provider.VOX, Provider.PURSTREAM, Provider.KISSKH, Provider.COFLIX,
+        Provider.SWIFTFLOW, Provider.VOX, Provider.ANIME, Provider.PURSTREAM, Provider.KISSKH, Provider.COFLIX,
     )
 
     private val HOST_RANK = listOf(

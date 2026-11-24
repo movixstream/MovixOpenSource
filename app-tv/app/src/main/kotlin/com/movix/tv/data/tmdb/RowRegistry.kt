@@ -977,6 +977,27 @@ object RowRegistry {
             tier = 2,
             params = fixed("with_genres" to "16", "with_original_language" to "ja", "sort_by" to "vote_average.desc", "vote_count.gte" to 300),
         ),
+        // Catalogue d'anime-sama (Main API) : seulement des œuvres qu'on peut lire.
+        RowSpec(
+            id = "animes-vf",
+            collection = true,
+            title = "Disponibles en VF",
+            path = "/anime/catalogue",
+            fallbackType = MediaType.TV,
+            tier = 1,
+            source = RowSource.ANIME_CATALOGUE,
+            params = fixed("lang" to "vf", "sort" to "recent"),
+        ),
+        RowSpec(
+            id = "animes-catalogue",
+            collection = true,
+            title = "Tout le catalogue anime",
+            path = "/anime/catalogue",
+            fallbackType = MediaType.TV,
+            tier = 2,
+            source = RowSource.ANIME_CATALOGUE,
+            params = fixed("sort" to "recent"),
+        ),
         // Même requête que la rangée `animes` de l'accueil, sous le titre que cette page
         // attend en fin de parcours.
         RowSpec(
@@ -1081,17 +1102,21 @@ object RowRegistry {
     )
 
     /**
-     * Page Animés : la saison en cours (bannière), le classement, les nouveautés, puis les
-     * genres. Le donghua, l'animation coréenne, Ghibli et le hentai restent au registre, hors
+     * Page Animés : la saison en cours (bannière), les animes en VF, le classement, les
+     * nouveautés, les films, tout le catalogue anime (ces deux rangées-là viennent
+     * d'anime-sama, donc jouables), puis les genres. `catalogue-animes` (TMDB) et
+     * `animes-familial` restent au registre, hors de la page. Le donghua, l'animation coréenne, Ghibli et le hentai restent au registre, hors
      * des pages.
      */
     val anime: List<RowSpec> = resolve(
         listOf(
             "animes-en-cours",
+            "animes-vf",
             "animes-top10",
             "animes-nouveaux",
-            "animes-action",
             "animes-films",
+            "animes-catalogue",
+            "animes-action",
             "animes-comedies",
             "animes-sf-fantastique",
             "animes-drames",
@@ -1101,12 +1126,10 @@ object RowRegistry {
             "animes-mieux-notes",
             "animes-jeunesse",
             "animes-policier",
-            "animes-familial",
             "animes-annees-2010",
             "animes-termines",
             "animes-films-recents",
             "animes-films-cultes",
-            "catalogue-animes",
         ),
     )
 

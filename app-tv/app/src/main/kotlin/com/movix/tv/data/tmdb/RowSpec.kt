@@ -3,6 +3,13 @@ package com.movix.tv.data.tmdb
 /** Type de média TMDB ; `path` est le segment d'URL (`/movie/…`, `/tv/…`). */
 enum class MediaType(val path: String) { MOVIE("movie"), TV("tv") }
 
+/**
+ * D'où viennent les titres d'une rangée : TMDB (`path` + `params`), ou le
+ * catalogue d'anime-sama de la Main API (`/anime/catalogue`, `params` = filtres
+ * `lang`, `status`, `sort`…), qui ne liste que des œuvres jouables.
+ */
+enum class RowSource { TMDB, ANIME_CATALOGUE }
+
 /** Gabarit de carte d'une rangée. Par défaut, l'affiche. */
 enum class RowLayout { POSTER, STILL, RANK }
 
@@ -33,4 +40,5 @@ data class RowSpec(
     val limit: Int? = null,
     val dedupe: Boolean = true,
     val collection: Boolean = false,
+    val source: RowSource = RowSource.TMDB,
 )

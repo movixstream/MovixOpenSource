@@ -207,6 +207,10 @@ data class Details(
      * [com.movix.tv.data.age.AgeRules]) ; `null` : aucune classification lisible.
      */
     val age: Int? = null,
+    /** Genre « Animation » (16) : la lecture interroge aussi anime-sama. */
+    val animation: Boolean = false,
+    /** Nombre d'épisodes de chaque saison (saison 0 comprise), pour relier les épisodes d'anime-sama. */
+    val episodeCounts: Map<Int, Int> = emptyMap(),
 )
 
 @Immutable
@@ -248,6 +252,8 @@ fun TmdbDetails.toDetails(type: MediaType): Details {
         certification = certification,
         trailerKey = trailer,
         imdbId = externalIds?.imdbId?.takeIf { it.startsWith("tt") },
+        animation = genres.any { it.id == ANIMATION_GENRE },
+        episodeCounts = this.seasons.associate { it.seasonNumber to it.episodeCount },
         // Recommandations TMDB, sinon titres « similaires » ; sans le titre lui-même.
         similar = (recommendations?.results.orEmpty().ifEmpty { similar?.results.orEmpty() })
             .mapNotNull { it.toMediaItem(type) }.filter { it.id != id && it.posterPath != null }.take(20),
@@ -265,6 +271,9 @@ fun TmdbDetails.toDetails(type: MediaType): Details {
         },
     )
 }
+
+/** Genre TMDB « Animation » (films et séries). */
+private const val ANIMATION_GENRE = 16
 
 private val VIDEO_ORDER = listOf("Trailer", "Teaser", "Clip", "Featurette", "Behind the Scenes", "Bloopers")
 

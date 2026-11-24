@@ -170,8 +170,22 @@ fun BrowseScreen(
     var hero by remember { mutableStateOf<HeroInfo?>(null) }
     LaunchedEffect(focusedHero) {
         if (hero == null) hero = focusedHero else { delay(HERO_DEBOUNCE_MS); hero = focusedHero }
-        // Arrêté sur un titre : sa fiche se charge en avance.
-        focusedHero?.let { delay(250); context.container.catalog.prefetchDetails(it.type, it.id) }
+        // Arrêté sur un titre : sa fiche se charge en avance. Un titre du catalogue
+        // anime n'a ni image de fond ni résumé : la fiche les donne au bandeau.
+        focusedHero?.let { f ->
+            delay(250)
+            if (f.backdropPath != null || f.kicker != null) {
+                context.container.catalog.prefetchDetails(f.type, f.id)
+                return@let
+            }
+            val d = runCatching { context.container.catalog.info(f.type, f.id) }.getOrNull() ?: return@let
+            hero = f.copy(
+                title = d.item.title.ifBlank { f.title },
+                backdropPath = d.item.backdropPath,
+                overview = d.item.overview,
+                rating = d.item.rating,
+            )
+        }
     }
 
     // Carte arrêtée 2 s : sa bande-annonce, muette, remplace l'image du bandeau.

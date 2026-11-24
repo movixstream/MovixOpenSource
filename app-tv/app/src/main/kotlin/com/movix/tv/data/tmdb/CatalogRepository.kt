@@ -49,6 +49,7 @@ class CatalogRepository(
     private val imdb: ImdbSuggestions? = null,
     private val ages: ContentAges? = null,
     private val limits: AgeLimits? = null,
+    private val anime: com.movix.tv.data.anime.AnimeApi? = null,
 ) {
     private val noLimit = MutableStateFlow<Int?>(0)
 
@@ -115,6 +116,7 @@ class CatalogRepository(
      * quelques titres et elle disparaîtrait.
      */
     private suspend fun rowItems(spec: RowSpec, limit: Int): List<MediaItem> {
+        if (spec.source == RowSource.ANIME_CATALOGUE) return animeRow(spec, limit)
         if (limit <= 0) return api.list(spec.path, spec.params()).results.mapNotNull { it.toMediaItem(spec.fallbackType) }
         return KidCatalog.fill(
             queries = KidCatalog.queries(spec.path, spec.params(), limit),
@@ -129,6 +131,33 @@ class CatalogRepository(
         )
     }
 
+    /**
+     * Rangée du catalogue d'anime-sama. Profil limité : jusqu'à trois pages,
+     * filtrées, pour que la rangée ne se vide pas.
+     */
+    private suspend fun animeRow(spec: RowSpec, limit: Int): List<MediaItem> {
+        if (limit <= 0) return animePage(spec, 1)
+        val kept = ArrayList<MediaItem>()
+        for (page in 1..3) {
+            val found = animePage(spec, page)
+            kept += allowedItems(found, limit)
+            if (found.isEmpty() || kept.size >= KidCatalog.ROW_ENOUGH) break
+        }
+        return kept.distinctBy { it.key }
+    }
+
+    /** Une page du catalogue d'anime-sama : œuvres reliées à TMDB et qui ont une affiche. */
+    private suspend fun animePage(spec: RowSpec, page: Int): List<MediaItem> {
+        val api = anime ?: return emptyList()
+        return api.catalogue(spec.params(), page).items.mapNotNull { a ->
+            val ref = a.tmdb ?: return@mapNotNull null
+            val type = when (ref.type) { "tv" -> MediaType.TV; "movie" -> MediaType.MOVIE; else -> return@mapNotNull null }
+            val poster = a.posterPath?.takeIf { it.startsWith("/") } ?: return@mapNotNull null
+            if (ref.id <= 0 || a.name.isBlank()) return@mapNotNull null
+            MediaItem(id = ref.id, type = type, title = a.name, posterPath = poster, backdropPath = null, overview = "", rating = null, year = a.year?.toString())
+        }.distinctBy { it.key }
+    }
+
     /** Titres affichables d'une page de [query] (avec affiche) ; leur type vient de la liste si elle le fixe, sinon de la rangée. */
     private fun titles(found: TmdbPage, query: ListQuery, spec: RowSpec): List<MediaItem> {
         val type = KidCatalog.typeOf(query.path) ?: spec.fallbackType
@@ -141,6 +170,11 @@ class CatalogRepository(
      */
     suspend fun page(spec: RowSpec, page: Int): CatalogPage = coroutineScope {
         val limit = limitNow()
+        if (spec.source == RowSource.ANIME_CATALOGUE) {
+            val found = animePage(spec, page)
+            val kept = allowedItems(found, limit)
+            return@coroutineScope CatalogPage(kept, hidden = found.size - kept.size)
+        }
         val found = KidCatalog.interleave(
             KidCatalog.queries(spec.path, spec.params(), limit).map { query ->
                 async { titles(api.list(query.path, query.params, page), query, spec) }

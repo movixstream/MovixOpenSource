@@ -6,6 +6,8 @@ Jetpack Compose for TV et Media3.
 - Catalogue par genre, fiches, filmographie des acteurs, épisodes, recherche,
   Ma liste et réglages.
 - Lecteur natif avec les sources du serveur Movix, reprise et épisode suivant.
+- Animes : lecteurs d'anime-sama pour les titres d'animation (VF et VOSTFR),
+  rangées « Disponibles en VF » et « Tout le catalogue anime » sur la page Animés.
 - Qualité réelle de chaque source mesurée à la demande ; langue audio,
   sous-titres et version retenus d'un épisode à l'autre.
 - Son Dolby et DTS décodé par l'appli quand la télé ne le gère pas

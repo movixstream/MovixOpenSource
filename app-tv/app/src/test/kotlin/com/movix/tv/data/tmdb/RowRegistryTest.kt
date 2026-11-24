@@ -22,8 +22,8 @@ class RowRegistryTest {
 
     @Test
     fun idsUniquesEtIndexes() {
-        // 78 rangées dans le registre TS d'origine.
-        assertEquals(78, RowRegistry.all.size)
+        // 78 rangées dans le registre TS d'origine, plus les deux du catalogue anime-sama.
+        assertEquals(80, RowRegistry.all.size)
         RowRegistry.all.forEach { (id, spec) -> assertEquals(id, spec.id) }
     }
 

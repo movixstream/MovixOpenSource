@@ -22,6 +22,8 @@ enum class Provider(val label: String) {
     VIPER("Viper"),
     KISSKH("KissKH"),
     VOX("Vox"),
+    /** Anime-sama (`/anime`), pour les titres d'animation reliés à une œuvre. */
+    ANIME("Anime"),
 }
 
 enum class Lang(val label: String?) { VF("VF"), VOSTFR("VOSTFR"), VO("VO"), UNKNOWN(null) }

@@ -1,0 +1,87 @@
+package com.movix.tv.data.anime
+
+import android.util.Log
+import com.movix.tv.data.movix.Lang
+import com.movix.tv.data.movix.PlayRequest
+import com.movix.tv.data.movix.PlaybackSource
+import com.movix.tv.data.movix.Provider
+import com.movix.tv.data.movix.SourceParsers
+import com.movix.tv.data.tmdb.MediaType
+import com.movix.tv.player.MediaHeaders
+
+/** Ce que la télé sait du titre TMDB : un anime possible, et la taille de ses saisons. */
+data class AnimeHint(val animation: Boolean, val episodeCounts: Map<Int, Int>)
+
+/**
+ * Sources anime-sama d'un film ou d'un épisode TMDB, comme la page de lecture
+ * anime du site (`WatchAnime.tsx`) : l'œuvre reliée à l'ID TMDB par l'index
+ * du serveur, l'épisode retrouvé par [AnimeMatch], puis ses lecteurs demandés
+ * à `/anime/episode` (adresses à jour, flux extraits pour un VIP).
+ *
+ * Seuls les titres d'animation sont demandés ([hint]) : inutile d'interroger
+ * le serveur pour un film en prises de vue réelles.
+ */
+class AnimeSources(
+    private val api: AnimeApi,
+    private val hint: suspend (MediaType, Int) -> AnimeHint?,
+) {
+    // Œuvres récentes : l'épisode suivant n'en redemande pas la liste (600 Ko pour One Piece).
+    private val works = object : LinkedHashMap<String, Pair<Long, List<AnimeWork>>>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, List<AnimeWork>>>?) = size > 4
+    }
+
+    suspend fun load(req: PlayRequest, vipKey: String?): List<PlaybackSource> {
+        val h = runCatching { hint(req.type, req.tmdbId) }.getOrNull() ?: return emptyList()
+        if (!h.animation) return emptyList()
+        val target = works(req.type, req.tmdbId).firstNotNullOfOrNull { work ->
+            if (req.isTv) AnimeMatch.episode(work, h.episodeCounts, req.season ?: 1, req.episode ?: 1) else AnimeMatch.movie(work)
+        } ?: return emptyList()
+        runCatching { Log.i("MovixSources", "anime-sama : ${target.slug} ${target.season.path} n°${target.episode.index} (${target.episode.name})") }
+        val fresh = runCatching { api.episode(target.slug, target.season.path, target.episode.index, vipKey) }.getOrNull()
+        return sources(fresh?.links?.takeIf { l -> l.any { it.players.isNotEmpty() } } ?: target.episode.links, fresh?.m3u8ByPlayer.orEmpty())
+    }
+
+    private suspend fun works(type: MediaType, id: Int): List<AnimeWork> {
+        val key = "${type.path}:$id"
+        val now = System.currentTimeMillis()
+        synchronized(works) { works[key] }?.takeIf { now - it.first < CACHE_MS }?.let { return it.second }
+        val found = runCatching { api.byTmdb(type.path, id) }.getOrNull() ?: return emptyList()
+        synchronized(works) { works[key] = now to found }
+        return found
+    }
+
+    companion object {
+        private const val CACHE_MS = 20 * 60_000L
+
+        /** `vostfr` → VOSTFR ; `vf`, `vf1`, `vf2`, `vqc` → VF ; les autres doublages (`va`, `vkr`…) → VO. */
+        fun language(raw: String): Lang {
+            val s = raw.trim().lowercase()
+            return when {
+                s.startsWith("vostfr") -> Lang.VOSTFR
+                s.startsWith("vf") || s == "vqc" -> Lang.VF
+                else -> Lang.VO
+            }
+        }
+
+        /** Lecteurs d'un épisode, avec le flux du serveur quand il l'a extrait (VIP). */
+        fun sources(links: List<AnimeLinks>, m3u8ByPlayer: Map<String, String>): List<PlaybackSource> =
+            links.flatMap { l ->
+                val lang = language(l.language)
+                l.players.filter { it.startsWith("http") }.map { url ->
+                    val host = SourceParsers.hoster(url)
+                    val name = host?.let(SourceParsers::hosterLabel)
+                        ?: MediaHeaders.hostnameOf(url)?.removePrefix("www.") ?: "Lecteur"
+                    val m3u8 = m3u8ByPlayer[url]?.takeIf { it.startsWith("http") }
+                    PlaybackSource(
+                        provider = Provider.ANIME,
+                        label = listOfNotNull(name, lang.label).joinToString(" "),
+                        language = lang,
+                        host = host,
+                        embedUrl = url,
+                        streamUrl = m3u8,
+                        kind = m3u8?.let { SourceParsers.kindFor(it, host) } ?: com.movix.tv.data.movix.StreamKind.HLS,
+                    )
+                }
+            }.distinctBy { it.embedUrl }
+    }
+}
