@@ -1,12 +1,12 @@
 {
-  "versionCode": 9,
-  "versionName": "0.3.0",
+  "versionCode": 10,
+  "versionName": "0.3.1",
   "apkUrl": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app-tv/movix-tv.apk",
-  "apkSize": 21037791,
-  "apkSha256": "8aec096b66cbc38b59dbaa2875e9683f40f61c0ce2c2d148de09cf1e1fe472f1",
+  "apkSize": 21054323,
+  "apkSha256": "f2af10a405135175cb3ff337e1902113725762450707f5c58f93cd27dbd90169",
   "minSdk": 25,
   "notes": {
-    "fr": "Nouveau : genres et « Voir tout » dans le catalogue, « Vérifier la qualité » dans le lecteur, préférences de lecture (sous-titres, audio et version retenus), filmographie des acteurs, mode enfant et gestion des profils sur la télé.",
-    "en": "New: genres and “See all” in the catalogue, “Check quality” in the player, playback preferences (subtitles, audio and version remembered), actor filmographies, kids mode and profile management on the TV."
+    "fr": "Nouveau : les animes ! Lecture des épisodes et films d'animes (VF, VOSTFR, VF2…), rangées « Disponibles en VF » et « Tout le catalogue anime » dans Animés.",
+    "en": "New: anime! Anime episodes and films now play (VF, VOSTFR, VF2…), plus “Available in French” and “Full anime catalogue” rows in Anime."
   }
 }
