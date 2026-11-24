@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useProfile } from '../context/ProfileContext';
@@ -86,14 +87,20 @@ const ProfileManagement: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (isCreating) {
-      if (modalName.trim() && modalAvatar) {
-        await createProfile(modalName.trim(), modalAvatar, modalAgeRestriction);
+    // Session expirée (« No auth token ») ou réseau coupé : on le dit, et la
+    // fenêtre reste ouverte (GlitchTip 8707181, 8667375).
+    try {
+      if (isCreating) {
+        if (modalName.trim() && modalAvatar) {
+          await createProfile(modalName.trim(), modalAvatar, modalAgeRestriction);
+          handleCloseModal();
+        }
+      } else if (editingProfileId && modalName.trim()) {
+        await updateProfile(editingProfileId, { name: modalName.trim(), avatar: modalAvatar, ageRestriction: modalAgeRestriction });
         handleCloseModal();
       }
-    } else if (editingProfileId && modalName.trim()) {
-      await updateProfile(editingProfileId, { name: modalName.trim(), avatar: modalAvatar, ageRestriction: modalAgeRestriction });
-      handleCloseModal();
+    } catch {
+      toast.error(t('profilePage.header.saveError', 'Impossible d’enregistrer pour l’instant. Réessaie dans un moment.'));
     }
   };
 

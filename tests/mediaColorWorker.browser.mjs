@@ -383,7 +383,7 @@ async function scenario(name, options, verify) {
       const cards = [...document.querySelectorAll('[data-card-slot]')];
       return {
         swControlled: Boolean(navigator.serviceWorker?.controller),
-        sessionColorCache: sessionStorage.getItem('movix_media_colors_v8') || sessionStorage.getItem('movix_media_colors_v7'),
+        sessionColorCache: sessionStorage.getItem('movix_media_colors_v9') || sessionStorage.getItem('movix_media_colors_v8') || sessionStorage.getItem('movix_media_colors_v7'),
         cards: cards.map((slot) => {
           const card = slot.querySelector('[style*="--media-color"]') || slot.firstElementChild;
           const image = slot.querySelector('img');
@@ -500,7 +500,7 @@ try {
       'cache: échantillon initial selon le profil');
     snapshot.initialNetworkRequests = networkRequests.slice();
     await page.evaluate(() => {
-      for (const key of ['movix_media_colors_v7', 'movix_media_colors_v8']) sessionStorage.removeItem(key);
+      for (const key of ['movix_media_colors_v7', 'movix_media_colors_v8', 'movix_media_colors_v9']) sessionStorage.removeItem(key);
     });
     networkRequests.length = 0;
     await page.reload({ waitUntil: 'domcontentloaded' });

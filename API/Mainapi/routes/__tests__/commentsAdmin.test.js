@@ -68,6 +68,8 @@ function fixture(t, { role = 'admin', userType = 'oauth', cachedAdmin } = {}) {
     } },
     './utils/redisRateLimitStore': { createRedisRateLimitStore: () => ({}) },
     './utils/turnstile': {}, './services/mediaSegments/communityStore': {},
+    './utils/commentsAi': { analyzeComment: async () => ({ decision: null }) },
+    './utils/commentsAiSettings': { loadCommentsAiConfig: async () => ({ provider: 'off' }) },
   };
   const filename = path.resolve(__dirname, '../../commentsRoutes.js');
   const module = { exports: {} };

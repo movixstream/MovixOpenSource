@@ -155,6 +155,15 @@ const LOAD_PARSE_ERROR_PATTERNS = [
   /^missing \) after argument list$/,
   /^missing name after \. operator$/,
   /^Invalid character: '@'$/,
+  // Même famille, relevée en novembre au chargement d'une fiche (GlitchTip
+  // 8889230, 8876878, 8877037, 8823624 sous Firefox 152-160 ; 8673427 sous
+  // Chrome 156 ; 8855695 sous Safari 15.6 : caractère de contrôle U+0011).
+  /^missing \} after property list$/,
+  /^missing \} after function body$/,
+  /^missing : after property id$/,
+  /^Unexpected token '\*'$/,
+  // Safari affiche le caractère échappé ou brut selon la version.
+  /^Invalid character '(?:\\u0011|\u0011)'$/,
 ];
 
 /**

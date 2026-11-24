@@ -11,11 +11,37 @@ interface LikeDislikeButtonProps {
   contentType: 'movie' | 'tv' | 'shared-list';
   contentId: string;
   onStatsChange?: (stats: LikeDislikeStats) => void;
+  /** Petits boutons ronds sur une ligne, sans message de vérification : bandeau collé des fiches. */
+  compact?: boolean;
 }
 
 export interface LikeDislikeStats {
   likes: number;
   dislikes: number;
+}
+
+type UserVote = 'like' | 'dislike' | null;
+interface VoteSnapshot extends LikeDislikeStats {
+  userVote: UserVote;
+}
+
+/*
+ * Votes partagés entre les boutons d'un même contenu. Une fiche en montre
+ * deux (grande image, bandeau collé) : une seule requête pour les deux, et un
+ * vote dans l'un se voit aussitôt dans l'autre. La valeur reste réutilisable
+ * 30 s, puis on redemande au serveur.
+ */
+const VOTE_SNAPSHOT_TTL_MS = 30_000;
+const voteSnapshots = new Map<string, { value: VoteSnapshot; at: number }>();
+const voteRequests = new Map<string, Promise<VoteSnapshot>>();
+const voteListeners = new Map<string, Set<(snapshot: VoteSnapshot, source: symbol) => void>>();
+
+const voteKey = (contentType: string, contentId: string, profileId: string | number | null | undefined) =>
+  `${contentType}:${contentId}:${profileId ?? 'anonyme'}`;
+
+function publishVotes(key: string, snapshot: VoteSnapshot, source: symbol) {
+  voteSnapshots.set(key, { value: snapshot, at: Date.now() });
+  voteListeners.get(key)?.forEach((listener) => listener(snapshot, source));
 }
 
 const MIN_MOVIX_RATING_VOTES = 50;
@@ -41,8 +67,10 @@ const getPlacesForValue = (value: number): number[] => {
   return places;
 };
 
-const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, contentId, onStatsChange }) => {
+const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, contentId, onStatsChange, compact = false }) => {
   const { currentProfile } = useProfile();
+  const instanceId = useRef(Symbol('likeDislike'));
+  const sharedKey = voteKey(contentType, contentId, currentProfile?.id);
   const { isVerifying: verifying, resetToken: resetTurnstile, getValidToken } = useTurnstile();
   const [likes, setLikes] = useState(0);
   const [dislikes, setDislikes] = useState(0);
@@ -61,41 +89,74 @@ const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, cont
 
   // Fetch like/dislike stats
   useEffect(() => {
-    const fetchLikes = async () => {
-      try {
-        const authToken = localStorage.getItem('auth_token');
-        const profileId = currentProfile?.id;
-
-        const params = profileId ? { profileId } : {};
-        const headers = authToken ? { Authorization: `Bearer ${authToken}` } : {};
-
-        const response = await axios.get(
-          `${API_URL}/api/likes/${contentType}/${contentId}`,
-          { params, headers }
-        );
-
-        previousLikes.current = 0;
-        previousDislikes.current = 0;
-        const fetchedLikes = Number(response.data.likes) || 0;
-        const fetchedDislikes = Number(response.data.dislikes) || 0;
-
-        // Set likes/dislikes which will trigger animation from 0 to actual value
-        setLikes(fetchedLikes);
-        setDislikes(fetchedDislikes);
-        onStatsChange?.({ likes: fetchedLikes, dislikes: fetchedDislikes });
-        // Keep display at 0 - the useEffect will animate them up
-        previousDisplayLikes.current = 0;
-        previousDisplayDislikes.current = 0;
-        animationStartLikes.current = 0;
-        animationStartDislikes.current = 0;
-        setUserVote(response.data.userVote);
-      } catch (error) {
-        console.error('Error fetching likes:', error);
-      }
+    let cancelled = false;
+    const apply = (snapshot: VoteSnapshot) => {
+      if (cancelled) return;
+      previousLikes.current = 0;
+      previousDislikes.current = 0;
+      // Set likes/dislikes which will trigger animation from 0 to actual value
+      setLikes(snapshot.likes);
+      setDislikes(snapshot.dislikes);
+      onStatsChange?.({ likes: snapshot.likes, dislikes: snapshot.dislikes });
+      // Keep display at 0 - the useEffect will animate them up
+      previousDisplayLikes.current = 0;
+      previousDisplayDislikes.current = 0;
+      animationStartLikes.current = 0;
+      animationStartDislikes.current = 0;
+      setUserVote(snapshot.userVote);
     };
 
-    fetchLikes();
-  }, [contentType, contentId, currentProfile, onStatsChange]);
+    const cached = voteSnapshots.get(sharedKey);
+    if (cached && Date.now() - cached.at < VOTE_SNAPSHOT_TTL_MS) {
+      apply(cached.value);
+      return () => { cancelled = true; };
+    }
+
+    let request = voteRequests.get(sharedKey);
+    if (!request) {
+      const authToken = localStorage.getItem('auth_token');
+      const profileId = currentProfile?.id;
+      const params = profileId ? { profileId } : {};
+      const headers = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+      const key = sharedKey;
+      request = axios.get(`${API_URL}/api/likes/${contentType}/${contentId}`, { params, headers })
+        .then((response): VoteSnapshot => ({
+          likes: Number(response.data.likes) || 0,
+          dislikes: Number(response.data.dislikes) || 0,
+          userVote: response.data.userVote ?? null,
+        }));
+      voteRequests.set(key, request);
+      request
+        .then((snapshot) => voteSnapshots.set(key, { value: snapshot, at: Date.now() }))
+        .catch(() => undefined)
+        .finally(() => voteRequests.delete(key));
+    }
+    request.then(apply).catch((error) => {
+      if (!cancelled) console.error('Error fetching likes:', error);
+    });
+    return () => { cancelled = true; };
+  }, [sharedKey, contentType, contentId, currentProfile, onStatsChange]);
+
+  // Un vote posé par l'autre bouton du même contenu.
+  useEffect(() => {
+    const listener = (snapshot: VoteSnapshot, source: symbol) => {
+      if (source === instanceId.current) return;
+      setLikes(snapshot.likes);
+      setDislikes(snapshot.dislikes);
+      setUserVote(snapshot.userVote);
+      onStatsChange?.({ likes: snapshot.likes, dislikes: snapshot.dislikes });
+    };
+    let listeners = voteListeners.get(sharedKey);
+    if (!listeners) {
+      listeners = new Set();
+      voteListeners.set(sharedKey, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) voteListeners.delete(sharedKey);
+    };
+  }, [sharedKey, onStatsChange]);
 
   // Handle like/dislike
   const handleVote = async (voteType: 'like' | 'dislike') => {
@@ -157,6 +218,7 @@ const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, cont
     setDislikes(newDislikes);
     setUserVote(newUserVote);
     onStatsChange?.({ likes: newLikes, dislikes: newDislikes });
+    publishVotes(sharedKey, { likes: newLikes, dislikes: newDislikes, userVote: newUserVote }, instanceId.current);
 
     // Déclencher l'animation immédiatement
     if (voteType === 'like') {
@@ -204,6 +266,7 @@ const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, cont
       onStatsChange?.({ likes: serverLikes, dislikes: serverDislikes });
 
       setUserVote(response.data.userVote);
+      publishVotes(sharedKey, { likes: serverLikes, dislikes: serverDislikes, userVote: response.data.userVote ?? null }, instanceId.current);
 
       // Reset Turnstile pour le prochain vote
       resetTurnstile();
@@ -216,6 +279,7 @@ const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, cont
       previousLikes.current = oldLikes;
       previousDislikes.current = oldDislikes;
       onStatsChange?.({ likes: oldLikes, dislikes: oldDislikes });
+      publishVotes(sharedKey, { likes: oldLikes, dislikes: oldDislikes, userVote: oldUserVote }, instanceId.current);
       // Si 403 (token Turnstile expiré/invalide), reset pour en obtenir un nouveau
       if (error?.response?.status === 403) {
         resetTurnstile();
@@ -295,8 +359,8 @@ const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, cont
   }, [dislikes]);
 
   return (
-    <div className="flex flex-col items-start gap-2">
-      {verifying && (
+    <div className={compact ? 'flex items-center' : 'flex flex-col items-start gap-2'}>
+      {verifying && !compact && (
         <motion.div
           initial={{ opacity: 0, y: -5 }}
           animate={{ opacity: 1, y: 0 }}
@@ -310,13 +374,13 @@ const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, cont
           On vérifie que vous n'êtes pas un robot...
         </motion.div>
       )}
-      <div className="flex items-center gap-3">
+      <div className={`flex items-center ${compact ? 'gap-2' : 'gap-3'}`}>
       {/* Like Button */}
       <motion.button
         onClick={() => handleVote('like')}
         disabled={isLoading || verifying}
         data-halloween-frame="orange"
-        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-300 ${userVote === 'like'
+        className={`${compact ? 'flex h-10 items-center gap-1.5 rounded-full px-3.5 text-sm' : 'flex items-center gap-2 px-4 py-2 rounded-lg'} transition-all duration-300 ${userVote === 'like'
           ? 'bg-green-500/30 text-green-300 shadow-lg shadow-green-500/20'
           : 'bg-white/10 text-gray-300 hover:bg-white/20 hover:text-white'
           } disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -343,7 +407,7 @@ const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, cont
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="w-5 h-5"
+          className={compact ? 'h-4 w-4' : 'w-5 h-5'}
           animate={{
             scale: animatingLike ? [1, 1.3, 1] : 1,
             rotate: animatingLike ? [0, -10, 10, 0] : 0,
@@ -374,7 +438,7 @@ const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, cont
         onClick={() => handleVote('dislike')}
         disabled={isLoading || verifying}
         data-halloween-frame="red"
-        className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-300 ${userVote === 'dislike'
+        className={`${compact ? 'flex h-10 items-center gap-1.5 rounded-full px-3.5 text-sm' : 'flex items-center gap-2 px-4 py-2 rounded-lg'} transition-all duration-300 ${userVote === 'dislike'
           ? 'bg-red-500/30 text-red-300 shadow-lg shadow-red-500/20'
           : 'bg-white/10 text-gray-300 hover:bg-white/20 hover:text-white'
           } disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -401,7 +465,7 @@ const LikeDislikeButton: React.FC<LikeDislikeButtonProps> = ({ contentType, cont
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="w-5 h-5"
+          className={compact ? 'h-4 w-4' : 'w-5 h-5'}
           animate={{
             scale: animatingDislike ? [1, 1.3, 1] : 1,
             rotate: animatingDislike ? [0, 10, -10, 0] : 0,

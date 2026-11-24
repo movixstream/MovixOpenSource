@@ -1,17 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
-import { Film, Calendar, Star, ArrowLeft, Info, Grid, List, Eye, EyeOff, Building, MapPin, Languages, DollarSign, TrendingUp, Heart, Bookmark, Plus } from 'lucide-react';
+import { Film, ArrowLeft, ChevronRight, Eye, EyeOff } from 'lucide-react';
 import AddToListMenu from '../components/AddToListMenu';
-import { encodeId } from '../utils/idEncoder';
 import { getTmdbLanguage } from '../i18n';
-import { motion } from 'framer-motion';
-import { SquareBackground } from '../components/ui/square-background';
-import ShinyText from '../components/ui/shiny-text';
-import BlurText from '../components/ui/blur-text';
-import AnimatedBorderCard from '../components/ui/animated-border-card';
 import { useAgeRestrictedContent } from '../hooks/useAgeRestrictedContent';
+import { useSagaProgress } from '@/hooks/useSagaProgress';
+import { useMediaQuery } from '@/components/cinegraph/useMediaQuery';
+import { cn } from '@/lib/utils';
+import { encodeId } from '@/utils/idEncoder';
+import { SagaCard } from '@/components/sagas/SagaCard';
+import { SagaFilms } from '@/components/sagas/SagaFilms';
+import { SagaHero, type SagaHeroCta } from '@/components/sagas/SagaHero';
+import { SagaProduction } from '@/components/sagas/SagaProduction';
+import { SagaSection } from '@/components/sagas/SagaSection';
+import { SagaDetailSkeleton } from '@/components/sagas/SagaSkeletons';
+import { SagaStats } from '@/components/sagas/SagaStats';
+import { SagaViewToggle } from '@/components/sagas/SagaViewToggle';
+import { getSagaYears, hasProductionData } from '@/components/sagas/sagaFormat';
+import { useCompactSagaActions } from '@/components/sagas/useCompactSagaActions';
+import { useSagaLibrary } from '@/components/sagas/useSagaLibrary';
+import type { SagaSummary, SagaViewMode } from '@/components/sagas/types';
 
 interface Movie {
   id: number;
@@ -54,6 +64,7 @@ interface CollectionStats {
   averageRating: number;
   totalRuntime: number;
   totalMovies: number;
+  ratedMovies: number;
   averageBudget: number;
   averageRevenue: number;
   profitMargin: number;
@@ -66,72 +77,94 @@ interface ProductionInfo {
   genres: { id: number; name: string; count: number }[];
 }
 
-
+// Sous `md`, la liste numérotée est la vue par défaut ; au-dessus, la grille.
+const WIDE_QUERY = '(min-width: 768px)';
+const getDefaultViewMode = (): SagaViewMode =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function' && !window.matchMedia(WIDE_QUERY).matches
+    ? 'list'
+    : 'grid';
 
 const CollectionDetails: React.FC = () => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const [collection, setCollection] = useState<Collection | null>(null);
   const [similarCollections, setSimilarCollections] = useState<SimilarCollection[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingSimilar, setLoadingSimilar] = useState(false);
   const [error, setError] = useState(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<SagaViewMode>(getDefaultViewMode);
   const [showMoviesWithoutImages, setShowMoviesWithoutImages] = useState(false);
-  
+
   // Nouveaux états pour les informations détaillées
   const [collectionStats, setCollectionStats] = useState<CollectionStats | null>(null);
   const [productionInfo, setProductionInfo] = useState<ProductionInfo | null>(null);
 
-  const [, setDetailedMovies] = useState<Movie[]>([]);
+  const [detailedMovies, setDetailedMovies] = useState<Movie[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
   // Nouveaux états pour les listes
-  const [isInWatchlist, setIsInWatchlist] = useState(false);
-  const [isInFavorites, setIsInFavorites] = useState(false);
   const [showAddToListMenu, setShowAddToListMenu] = useState(false);
-  const [selectedCollection, setSelectedCollection] = useState<SimilarCollection | null>(null);
-  
-  // États pour les collections similaires
-  const [similarCollectionsStatus, setSimilarCollectionsStatus] = useState<{
-    [key: number]: { watchlist: boolean; favorites: boolean }
-  }>({});
+  const [selectedCollection, setSelectedCollection] = useState<SagaSummary | null>(null);
+
+  // Watchlist et favoris, pour cette collection comme pour les similaires :
+  // lus dans le stockage dès le montage.
+  const { watchlist, favorites, toggleWatchlist: toggleSagaWatchlist, toggleFavorite: toggleSagaFavorite } = useSagaLibrary();
+  const compactActions = useCompactSagaActions();
+  const isWide = useMediaQuery(WIDE_QUERY);
 
   const API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
   const BASE_URL = 'https://api.themoviedb.org/3';
-  const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
-  const { items: ageAllowedCollectionMovies, isFiltering: isFilteringCollectionMoviesByAge } = useAgeRestrictedContent(
-    (collection?.parts || []).map((movie) => ({ ...movie, media_type: 'movie' as const })),
+
+  // Tableau stable : le filtre d'âge relance sa vérification, et rend une
+  // nouvelle liste, quand celle qu'il reçoit change d'identité.
+  const collectionParts = useMemo(
+    () => (collection?.parts || []).map((movie) => ({ ...movie, media_type: 'movie' as const })),
+    [collection],
+  );
+  const { items: ageAllowedCollectionMovies, isFiltering: isFilteringCollectionMoviesByAge } = useAgeRestrictedContent(collectionParts);
+
+  // Trier les films par date de sortie et filtrer selon les préférences
+  const allMovies = useMemo(
+    () => [...ageAllowedCollectionMovies].sort((a, b) =>
+      new Date(a.release_date || '1900-01-01').getTime() - new Date(b.release_date || '1900-01-01').getTime()
+    ),
+    [ageAllowedCollectionMovies],
+  );
+  const moviesWithImages = useMemo(() => allMovies.filter(movie => movie.poster_path), [allMovies]);
+  const moviesWithoutImagesCount = allMovies.length - moviesWithImages.length;
+  const displayedMovies = showMoviesWithoutImages ? allMovies : moviesWithImages;
+
+  // Durée de chaque film, connue une fois son détail chargé.
+  const runtimeById = useMemo(
+    () => new Map(detailedMovies.map((movie) => [movie.id, movie.runtime])),
+    [detailedMovies],
+  );
+  const displayedFilms = useMemo(
+    () => displayedMovies.map((movie) => ({ ...movie, runtime: runtimeById.get(movie.id) })),
+    [displayedMovies, runtimeById],
   );
 
-  // Fonction pour optimiser les images selon le mode d'affichage
-  const getOptimizedImageUrl = (path: string, size: 'small' | 'medium' | 'large' = 'medium') => {
-    if (!path) return '';
-    const sizes = {
-      small: 'w200',
-      medium: 'w500',
-      large: 'w780'
-    };
-    return `https://image.tmdb.org/t/p/${sizes[size]}${path}`;
-  };
+  // Avancement : les films réellement affichés, dans l'ordre de la collection.
+  const movieIds = useMemo(() => displayedMovies.map((movie) => movie.id), [displayedMovies]);
+  const progress = useSagaProgress(movieIds);
 
   // Fonction pour récupérer les détails complets des films
   const fetchDetailedMovies = async (movies: Movie[]) => {
     setLoadingDetails(true);
     try {
       const detailedMoviesData: Movie[] = [];
-      
+
       // Récupérer les détails de chaque film par lots pour éviter trop de requêtes
       const batchSize = 5;
       for (let i = 0; i < movies.length; i += batchSize) {
         const batch = movies.slice(i, i + batchSize);
-        
+
         await Promise.all(batch.map(async (movie) => {
           try {
             const response = await fetch(
               `${BASE_URL}/movie/${movie.id}?api_key=${API_KEY}&language=${getTmdbLanguage()}&append_to_response=credits`
             );
-            
+
             if (response.ok) {
               const movieDetails = await response.json();
               detailedMoviesData.push({
@@ -153,13 +186,13 @@ const CollectionDetails: React.FC = () => {
           }
         }));
       }
-      
+
       setDetailedMovies(detailedMoviesData);
-      
+
       // Calculer les statistiques
       calculateCollectionStats(detailedMoviesData);
       calculateProductionInfo(detailedMoviesData);
-      
+
     } catch (error) {
       console.error('Erreur lors de la récupération des détails des films:', error);
     } finally {
@@ -170,23 +203,30 @@ const CollectionDetails: React.FC = () => {
   // Fonction pour calculer les statistiques de la collection
   const calculateCollectionStats = (movies: Movie[]) => {
     const moviesWithData = movies.filter(movie => movie.budget !== undefined || movie.revenue !== undefined);
-    
+
     const totalBudget = moviesWithData.reduce((sum, movie) => sum + (movie.budget || 0), 0);
     const totalRevenue = moviesWithData.reduce((sum, movie) => sum + (movie.revenue || 0), 0);
     const totalRuntime = movies.reduce((sum, movie) => sum + (movie.runtime || 0), 0);
-    const totalRating = movies.reduce((sum, movie) => sum + movie.vote_average, 0);
-    
+
+    // Une moyenne ne compte que les films qui ont la donnée : un film pas
+    // encore sorti (note, budget et recettes à 0) ne doit pas la tirer vers le bas.
+    const ratedMovies = movies.filter(movie => movie.vote_average > 0);
+    const totalRating = ratedMovies.reduce((sum, movie) => sum + movie.vote_average, 0);
+    const moviesWithBudget = moviesWithData.filter(movie => (movie.budget || 0) > 0).length;
+    const moviesWithRevenue = moviesWithData.filter(movie => (movie.revenue || 0) > 0).length;
+
     const stats: CollectionStats = {
       totalBudget,
       totalRevenue,
-      averageRating: totalRating / movies.length,
+      averageRating: ratedMovies.length > 0 ? totalRating / ratedMovies.length : 0,
       totalRuntime,
       totalMovies: movies.length,
-      averageBudget: totalBudget / moviesWithData.length,
-      averageRevenue: totalRevenue / moviesWithData.length,
+      ratedMovies: ratedMovies.length,
+      averageBudget: moviesWithBudget > 0 ? totalBudget / moviesWithBudget : 0,
+      averageRevenue: moviesWithRevenue > 0 ? totalRevenue / moviesWithRevenue : 0,
       profitMargin: totalBudget > 0 ? ((totalRevenue - totalBudget) / totalBudget) * 100 : 0
     };
-    
+
     setCollectionStats(stats);
   };
 
@@ -196,7 +236,7 @@ const CollectionDetails: React.FC = () => {
     const countriesMap = new Map<string, { code: string; name: string; count: number }>();
     const languagesMap = new Map<string, { code: string; name: string; count: number }>();
     const genresMap = new Map<number, { id: number; name: string; count: number }>();
-    
+
     movies.forEach(movie => {
       // Compter les sociétés de production
       movie.production_companies?.forEach(company => {
@@ -207,7 +247,7 @@ const CollectionDetails: React.FC = () => {
           companiesMap.set(company.id, { id: company.id, name: company.name, count: 1 });
         }
       });
-      
+
       // Compter les pays de production
       movie.production_countries?.forEach(country => {
         const existing = countriesMap.get(country.iso_3166_1);
@@ -217,7 +257,7 @@ const CollectionDetails: React.FC = () => {
           countriesMap.set(country.iso_3166_1, { code: country.iso_3166_1, name: country.name, count: 1 });
         }
       });
-      
+
       // Compter les langues
       movie.spoken_languages?.forEach(language => {
         const existing = languagesMap.get(language.iso_639_1);
@@ -227,7 +267,7 @@ const CollectionDetails: React.FC = () => {
           languagesMap.set(language.iso_639_1, { code: language.iso_639_1, name: language.name, count: 1 });
         }
       });
-      
+
       // Compter les genres
       movie.genres?.forEach(genre => {
         const existing = genresMap.get(genre.id);
@@ -238,60 +278,60 @@ const CollectionDetails: React.FC = () => {
         }
       });
     });
-    
+
     const productionInfo: ProductionInfo = {
       productionCompanies: Array.from(companiesMap.values()).sort((a, b) => b.count - a.count).slice(0, 10),
       productionCountries: Array.from(countriesMap.values()).sort((a, b) => b.count - a.count),
       spokenLanguages: Array.from(languagesMap.values()).sort((a, b) => b.count - a.count),
       genres: Array.from(genresMap.values()).sort((a, b) => b.count - a.count).slice(0, 10)
     };
-    
+
     setProductionInfo(productionInfo);
   };
 
   // Fonction pour récupérer les collections similaires
   const fetchSimilarCollections = async (movies: Movie[]) => {
     if (movies.length === 0) return;
-    
+
     setLoadingSimilar(true);
     try {
       const similarCollectionsSet = new Set<number>();
       const similarCollectionsData: SimilarCollection[] = [];
-      
+
       // Prendre les 3 premiers films de la collection pour chercher des films similaires
       const moviesToCheck = movies.slice(0, 3);
-      
+
       for (const movie of moviesToCheck) {
         // Récupérer les films similaires
         const similarResponse = await fetch(
           `${BASE_URL}/movie/${movie.id}/similar?api_key=${API_KEY}&language=${getTmdbLanguage()}&page=1`
         );
-        
+
         if (similarResponse.ok) {
           const similarData = await similarResponse.json();
           const similarMovies = similarData.results.slice(0, 5); // Prendre les 5 premiers
-          
+
           // Pour chaque film similaire, vérifier s'il appartient à une collection
           for (const similarMovie of similarMovies) {
             const movieDetailsResponse = await fetch(
               `${BASE_URL}/movie/${similarMovie.id}?api_key=${API_KEY}&language=${getTmdbLanguage()}`
             );
-            
+
             if (movieDetailsResponse.ok) {
               const movieDetails = await movieDetailsResponse.json();
-              
+
               // Si le film appartient à une collection et que ce n'est pas la collection actuelle
-              if (movieDetails.belongs_to_collection && 
+              if (movieDetails.belongs_to_collection &&
                   movieDetails.belongs_to_collection.id !== parseInt(id || '0') &&
                   !similarCollectionsSet.has(movieDetails.belongs_to_collection.id)) {
-                
+
                 similarCollectionsSet.add(movieDetails.belongs_to_collection.id);
-                
+
                 // Récupérer les détails de la collection
                 const collectionResponse = await fetch(
                   `${BASE_URL}/collection/${movieDetails.belongs_to_collection.id}?api_key=${API_KEY}&language=${getTmdbLanguage()}`
                 );
-                
+
                 if (collectionResponse.ok) {
                   const collectionData = await collectionResponse.json();
                   similarCollectionsData.push(collectionData);
@@ -301,14 +341,9 @@ const CollectionDetails: React.FC = () => {
           }
         }
       }
-      
+
       // Limiter à 6 collections similaires maximum
       setSimilarCollections(similarCollectionsData.slice(0, 6));
-      
-      // Vérifier le statut des collections similaires après un délai
-      setTimeout(() => {
-        checkSimilarCollectionsStatus();
-      }, 100);
     } catch (error) {
       console.error('Erreur lors de la récupération des collections similaires:', error);
     } finally {
@@ -316,97 +351,29 @@ const CollectionDetails: React.FC = () => {
     }
   };
 
-  // Fonction pour vérifier si la collection est dans les listes
-  const checkCollectionStatus = () => {
-    if (!collection) return;
-
-    // Vérifier watchlist
-    const watchlistCollections = JSON.parse(localStorage.getItem('watchlist_collections') || '[]');
-    setIsInWatchlist(watchlistCollections.some((item: any) => item.id === collection.id));
-
-    // Vérifier favoris
-    const favoriteCollections = JSON.parse(localStorage.getItem('favorite_collections') || '[]');
-    setIsInFavorites(favoriteCollections.some((item: any) => item.id === collection.id));
-  };
-
-  // Fonction pour vérifier le statut de toutes les collections similaires
-  const checkSimilarCollectionsStatus = () => {
-    const watchlistCollections = JSON.parse(localStorage.getItem('watchlist_collections') || '[]');
-    const favoriteCollections = JSON.parse(localStorage.getItem('favorite_collections') || '[]');
-    
-    const status: { [key: number]: { watchlist: boolean; favorites: boolean } } = {};
-    
-    similarCollections.forEach(similarCollection => {
-      status[similarCollection.id] = {
-        watchlist: watchlistCollections.some((item: any) => item.id === similarCollection.id),
-        favorites: favoriteCollections.some((item: any) => item.id === similarCollection.id)
-      };
-    });
-    
-    setSimilarCollectionsStatus(status);
-  };
-
   // Fonction pour ajouter/retirer de la watchlist
   const toggleWatchlist = () => {
     if (!collection) return;
-
-    const watchlistCollections = JSON.parse(localStorage.getItem('watchlist_collections') || '[]');
-    
-    if (isInWatchlist) {
-      // Retirer de la watchlist
-      const updatedWatchlist = watchlistCollections.filter((item: any) => item.id !== collection.id);
-      localStorage.setItem('watchlist_collections', JSON.stringify(updatedWatchlist));
-      setIsInWatchlist(false);
-    } else {
-      // Ajouter à la watchlist
-      const collectionItem = {
-        id: collection.id,
-        name: collection.name,
-        poster_path: collection.poster_path,
-        backdrop_path: collection.backdrop_path,
-        overview: collection.overview,
-        type: 'collection',
-        addedAt: new Date().toISOString()
-      };
-      watchlistCollections.unshift(collectionItem);
-      localStorage.setItem('watchlist_collections', JSON.stringify(watchlistCollections));
-      setIsInWatchlist(true);
-    }
+    toggleSagaWatchlist(collection);
   };
 
   // Fonction pour ajouter/retirer des favoris
   const toggleFavorites = () => {
     if (!collection) return;
-
-    const favoriteCollections = JSON.parse(localStorage.getItem('favorite_collections') || '[]');
-    
-    if (isInFavorites) {
-      // Retirer des favoris
-      const updatedFavorites = favoriteCollections.filter((item: any) => item.id !== collection.id);
-      localStorage.setItem('favorite_collections', JSON.stringify(updatedFavorites));
-      setIsInFavorites(false);
-    } else {
-      // Ajouter aux favoris
-      const collectionItem = {
-        id: collection.id,
-        name: collection.name,
-        poster_path: collection.poster_path,
-        backdrop_path: collection.backdrop_path,
-        overview: collection.overview,
-        type: 'collection',
-        addedAt: new Date().toISOString()
-      };
-      favoriteCollections.unshift(collectionItem);
-      localStorage.setItem('favorite_collections', JSON.stringify(favoriteCollections));
-      setIsInFavorites(true);
-    }
+    toggleSagaFavorite(collection);
   };
 
-  // Fonction pour ouvrir le menu d'ajout à une liste
+  // Fonction pour ouvrir le menu d'ajout à une liste (cette collection)
   const openAddToListMenu = () => {
-    console.log('Opening AddToListMenu for collection:', collection?.id, collection?.name);
+    setSelectedCollection(null);
     setShowAddToListMenu(true);
   };
+
+  // Même menu pour une collection similaire
+  const openAddToListMenuFor = useCallback((saga: SagaSummary) => {
+    setSelectedCollection(saga);
+    setShowAddToListMenu(true);
+  }, []);
 
   // Fonction pour fermer le menu d'ajout à une liste
   const closeAddToListMenu = () => {
@@ -420,17 +387,27 @@ const CollectionDetails: React.FC = () => {
 
       try {
         setLoading(true);
+        // D'une collection à l'autre (collections similaires), la page reste
+        // montée : on repart de zéro pour ne pas afficher les chiffres, les
+        // similaires ou l'erreur de la collection précédente.
+        setError(false);
+        setCollectionStats(null);
+        setProductionInfo(null);
+        setDetailedMovies([]);
+        setSimilarCollections([]);
+        setShowMoviesWithoutImages(false);
+
         const response = await fetch(
           `${BASE_URL}/collection/${id}?api_key=${API_KEY}&language=${getTmdbLanguage()}`
         );
-        
+
         if (!response.ok) {
           throw new Error('Collection non trouvée');
         }
 
         const data = await response.json();
         setCollection(data);
-        
+
         // Récupérer les détails des films et les collections similaires
         if (data.parts && data.parts.length > 0) {
           fetchDetailedMovies(data.parts);
@@ -447,853 +424,216 @@ const CollectionDetails: React.FC = () => {
     fetchCollectionDetails();
   }, [id, API_KEY]);
 
-  // Vérifier le statut de la collection quand elle change
-  useEffect(() => {
-    if (collection) {
-      checkCollectionStatus();
-    }
-  }, [collection]);
-
+  // Les écrans sans grande image ajoutent eux-mêmes la marge sous l'en-tête
+  // fixe : la route n'en a plus (App.tsx, `isHeroHeaderPage`).
   if (loading) {
     return (
-      <SquareBackground squareSize={48} borderColor="rgba(239, 68, 68, 0.10)" className="min-h-screen bg-black text-white pt-32 pb-20">
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="flex items-center justify-center h-64">
-            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-              <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-red-500"></div>
-            </motion.div>
-          </div>
-        </div>
-      </SquareBackground>
+      <div data-square-bg="" className="bg-black text-white">
+        <SagaDetailSkeleton label={t('collections.loadingCollection')} />
+      </div>
     );
   }
 
   if (error || !collection) {
     return (
-      <SquareBackground squareSize={48} borderColor="rgba(239, 68, 68, 0.10)" className="min-h-screen bg-black text-white pt-32 pb-20">
-        <div className="container mx-auto px-4 relative z-10">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center py-20">
-            <Film size={64} className="mx-auto mb-4 text-gray-500" />
-            <h1 className="text-2xl font-bold mb-4">{t('collections.notFound')}</h1>
-            <p className="text-gray-400 mb-8">{t('collections.notAvailable')}</p>
-            <Link
-              to="/collections"
-              className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 px-6 py-3 rounded-lg transition-colors"
-            >
-              <ArrowLeft size={20} />
-              {t('collections.backToCollections')}
-            </Link>
-          </motion.div>
+      <div data-square-bg="" className="min-h-screen bg-black px-3 pb-24 pt-20 text-white sm:px-6">
+        <div className="mx-auto max-w-[480px] py-20 text-center">
+          <Film className="mx-auto mb-4 h-16 w-16 text-white opacity-40" aria-hidden="true" />
+          <h1 className="mb-3 text-2xl font-bold">{t('collections.notFound')}</h1>
+          <p className="mb-8 text-white/60">{t('collections.notAvailable')}</p>
+          <Link
+            to="/collections"
+            className="inline-flex h-12 items-center gap-2 rounded-[14px] bg-red-600 px-5 font-semibold text-white outline-none transition-[background-color,transform] duration-200 hover:bg-red-700 active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none"
+          >
+            <ArrowLeft className="h-5 w-5 text-white" aria-hidden="true" />
+            {t('collections.backToCollections')}
+          </Link>
         </div>
-      </SquareBackground>
+      </div>
     );
   }
 
   if (collection.parts.length > 0 && isFilteringCollectionMoviesByAge) {
     return (
-      <SquareBackground squareSize={48} borderColor="rgba(239, 68, 68, 0.10)" className="min-h-screen bg-black text-white pt-32 pb-20">
-        <div className="flex justify-center py-20">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-500" />
-        </div>
-      </SquareBackground>
+      <div data-square-bg="" className="bg-black text-white">
+        <SagaDetailSkeleton label={t('collections.loadingCollection')} />
+      </div>
     );
   }
 
   if (collection.parts.length > 0 && ageAllowedCollectionMovies.length === 0) return null;
 
-  // Trier les films par date de sortie et filtrer selon les préférences
-  const allMovies = [...ageAllowedCollectionMovies].sort((a, b) =>
-    new Date(a.release_date || '1900-01-01').getTime() - new Date(b.release_date || '1900-01-01').getTime()
-  );
-  
-  const moviesWithImages = allMovies.filter(movie => movie.poster_path);
-  const moviesWithoutImages = allMovies.filter(movie => !movie.poster_path);
-  
-  const displayedMovies = showMoviesWithoutImages ? allMovies : moviesWithImages;
+  // Bouton rouge : il mène à la fiche du film (même lien que les cartes), pas
+  // au lecteur. Rien de vu ni d'entamé : le premier film. Tout vu : revoir le
+  // premier. Sinon : le film à suivre, avec son numéro et son titre.
+  const firstMovie = displayedMovies[0];
+  const nextIndex = progress.nextId === null
+    ? -1
+    : displayedMovies.findIndex((movie) => movie.id === progress.nextId);
+  const nextMovie = nextIndex >= 0 ? displayedMovies[nextIndex] : null;
+  const hasStarted = progress.watchedCount > 0
+    || (nextMovie !== null && progress.films.get(nextMovie.id)?.status === 'in_progress');
+  let cta: SagaHeroCta | null = null;
+  if (firstMovie && progress.total > 0) {
+    if (!nextMovie) {
+      cta = { href: `/movie/${encodeId(firstMovie.id)}`, label: t('collections.rewatchFirst') };
+    } else if (!hasStarted) {
+      cta = { href: `/movie/${encodeId(nextMovie.id)}`, label: t('collections.startFirst') };
+    } else {
+      cta = {
+        href: `/movie/${encodeId(nextMovie.id)}`,
+        label: t('collections.continueWith', { number: nextIndex + 1 }),
+        caption: nextMovie.title,
+      };
+    }
+  }
 
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: { staggerChildren: 0.08 },
-    },
-  };
+  const heroProgress = progress.total > 0
+    ? {
+        watchedCount: progress.watchedCount,
+        total: progress.total,
+        watched: displayedMovies.map((movie) => {
+          const status = progress.films.get(movie.id)?.status;
+          return status === 'watched' || status === 'estimated';
+        }),
+      }
+    : null;
 
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: { opacity: 1, y: 0 },
-  };
+  const menuCollection = selectedCollection || collection;
 
   return (
-    <SquareBackground squareSize={48} borderColor="rgba(239, 68, 68, 0.10)" className="min-h-screen bg-black text-white">
-      {/* Hero Section */}
-      <div className="relative min-h-screen">
-        {/* Contenu */}
-        <div className="relative z-10">
-          {/* Header avec bouton retour */}
-          <div className="container mx-auto px-4 pt-24 pb-8">
-            <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="mb-8">
+    // `data-square-bg` : le thème Halloween rend ce fond transparent pour
+    // laisser voir son décor, comme sur les autres pages.
+    <div data-square-bg="" className="min-h-screen bg-black pb-10 text-white md:pb-24">
+      <SagaHero
+        name={collection.name}
+        backdropPath={collection.backdrop_path}
+        overview={collection.overview}
+        filmCount={displayedMovies.length}
+        years={getSagaYears(displayedMovies)}
+        totalRuntime={collectionStats && collectionStats.totalRuntime > 0 ? collectionStats.totalRuntime : null}
+        averageRating={collectionStats && collectionStats.ratedMovies > 0 ? collectionStats.averageRating : null}
+        cta={cta}
+        progress={heroProgress}
+        inWatchlist={watchlist.has(collection.id)}
+        isFavorite={favorites.has(collection.id)}
+        onToggleWatchlist={toggleWatchlist}
+        onToggleFavorite={toggleFavorites}
+        onAddToList={openAddToListMenu}
+      />
+
+      {/* Positionné : passe au-dessus de la coulure de la grande image, qui sort de `SagaHero`. */}
+      <div className="relative mx-auto max-w-[1920px] px-3 sm:px-6 md:px-12 lg:px-20">
+        {/* Films de la collection */}
+        <SagaSection
+          first
+          title={displayedMovies.length > 1
+            ? t('collections.filmsInOrder', { count: displayedMovies.length })
+            : t('collections.movies')}
+          aside={
+            <div className="flex items-center gap-2 md:gap-3">
+              {/* Toggle films sans images */}
+              {moviesWithoutImagesCount > 0 && (
+                <button
+                  type="button"
+                  aria-pressed={showMoviesWithoutImages}
+                  onClick={() => setShowMoviesWithoutImages(!showMoviesWithoutImages)}
+                  className={cn(
+                    'inline-flex h-[46px] items-center gap-2 rounded-[10px] border border-white/10 px-3 text-[13px] font-medium transition-[background-color,color,transform] duration-200 hover:text-white active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none md:h-[42px] md:text-[14px]',
+                    showMoviesWithoutImages ? 'bg-white/[0.18] text-white' : 'bg-white/[0.08] text-white/70',
+                  )}
+                >
+                  {showMoviesWithoutImages
+                    ? <EyeOff className="h-4 w-4 flex-none text-white" aria-hidden="true" />
+                    : <Eye className="h-4 w-4 flex-none text-white opacity-70" aria-hidden="true" />}
+                  {showMoviesWithoutImages ? t('collections.hideWithoutImages') : t('collections.showWithoutImages')}
+                </button>
+              )}
+
+              {/* Mode d'affichage */}
+              <SagaViewToggle value={viewMode} onChange={setViewMode} />
+            </div>
+          }
+        >
+          <SagaFilms
+            films={displayedFilms}
+            viewMode={viewMode}
+            wide={isWide}
+            progress={progress.films}
+            nextId={progress.nextId}
+          />
+        </SagaSection>
+
+        {/* La collection en chiffres */}
+        {(collectionStats || loadingDetails) && (
+          <SagaSection title={t('collections.byTheNumbers')}>
+            <SagaStats stats={collectionStats} />
+          </SagaSection>
+        )}
+
+        {/* Production */}
+        {productionInfo && hasProductionData(productionInfo) && (
+          <SagaSection title={t('collections.production')}>
+            <SagaProduction info={productionInfo} />
+          </SagaSection>
+        )}
+
+        {/* Collections similaires */}
+        {(loadingSimilar || similarCollections.length > 0) && (
+          <SagaSection
+            title={t('collections.similarCollections')}
+            aside={
               <Link
                 to="/collections"
-                className="inline-flex items-center gap-2 text-white/50 hover:text-white transition-colors group/icon"
+                className="relative inline-flex min-h-8 items-center gap-1 whitespace-nowrap rounded-md text-[13px] font-medium text-white/70 outline-none transition-colors duration-200 after:absolute after:inset-x-0 after:-inset-y-1.5 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none md:gap-1.5 md:text-[14px]"
               >
-                <ArrowLeft className="text-white opacity-50 group-hover/icon:opacity-100 transition-[color,opacity]" size={20} />
-                {t('collections.backToCollections')}
+                <span className="md:hidden">{t('collections.seeAll')}</span>
+                <span className="hidden md:inline">{t('collections.allCollections')}</span>
+                <ChevronRight className="h-[15px] w-[15px] text-white opacity-70 md:h-4 md:w-4" aria-hidden="true" />
               </Link>
-            </motion.div>
-
-            {/* Détails de la collection */}
-            <div className="flex flex-col lg:flex-row gap-8 mb-12">
-              {/* Poster */}
-              {collection.poster_path && (
-                <div className="flex-shrink-0">
-                  <img
-                    src={`${IMAGE_BASE_URL}${collection.poster_path}`}
-                    alt={collection.name}
-                    className="w-64 rounded-xl shadow-2xl"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                </div>
-              )}
-
-              {/* Informations */}
-              <div className="flex-1">
-                <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="text-4xl lg:text-6xl font-black tracking-tight mb-4">
-                  <ShinyText text={collection.name} speed={3} color="#ffffff" shineColor="#ef4444" className="leading-tight" />
-                </motion.h1>
-                
-                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="flex items-center gap-6 mb-6 text-gray-300">
-                  <div className="flex items-center gap-2">
-                    <Film size={20} />
-                    <span>{t('collections.movieCount', { count: moviesWithImages.length })}</span>
-                    {moviesWithoutImages.length > 0 && (
-                      <span className="text-sm text-gray-500">
-                        {t('collections.withoutImages', { count: moviesWithoutImages.length })}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Calendar size={20} />
-                    <span>
-                      {allMovies[0]?.release_date ? new Date(allMovies[0].release_date).getFullYear() : 'N/A'} -
-                      {allMovies[allMovies.length - 1]?.release_date ? new Date(allMovies[allMovies.length - 1].release_date).getFullYear() : 'N/A'}
-                    </span>
-                  </div>
-                </motion.div>
-
-                {collection.overview && (
-                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="text-lg lg:text-xl text-white/60 leading-relaxed max-w-3xl mb-6">
-                    {collection.overview}
-                  </motion.p>
-                )}
-
-                {/* Boutons d'action */}
-                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="flex flex-wrap items-center gap-4">
-                  {/* Bouton Watchlist */}
-                  <button
-                    onClick={toggleWatchlist}
-                    className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-colors duration-200 ${
-                      isInWatchlist
-                        ? 'bg-blue-600 text-white hover:bg-blue-700'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white'
-                    }`}
-                  >
-                    <Bookmark size={20} className={isInWatchlist ? 'fill-current' : ''} />
-                    {isInWatchlist ? t('collections.inMyWatchlist') : t('collections.addToMyWatchlist')}
-                  </button>
-
-                  {/* Bouton Favoris */}
-                  <button
-                    onClick={toggleFavorites}
-                    className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-colors duration-200 ${
-                      isInFavorites
-                        ? 'bg-red-600 text-white hover:bg-red-700'
-                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white'
-                    }`}
-                  >
-                    <Heart size={20} className={isInFavorites ? 'fill-current' : ''} />
-                    {isInFavorites ? t('collections.inMyFavorites') : t('collections.addToFavorites')}
-                  </button>
-
-                  {/* Bouton Ajouter à une liste */}
-                  <button
-                    onClick={() => {
-                      console.log('Button clicked! Collection:', collection?.id, collection?.name);
-                      openAddToListMenu();
-                    }}
-                    className="flex items-center gap-2 px-6 py-3 bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white rounded-lg font-medium transition-colors duration-200"
-                  >
-                    <Plus size={20} />
-                    {t('collections.addToList')}
-                  </button>
-                </motion.div>
-              </div>
-            </div>
-          </div>
-
-          {/* Section Films de la collection - Superposée sur le background */}
-          <div className="container mx-auto px-4 pb-12">
-            <div>
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8 gap-4">
-                <h2 className="text-2xl sm:text-3xl font-bold">
-                  <ShinyText text={t('collections.movies')} speed={2} color="#ffffff" shineColor="#ef4444" />
-                </h2>
-                
-                <div className="flex items-center gap-4">
-                  {/* Toggle films sans images */}
-                  {moviesWithoutImages.length > 0 && (
-                    <button
-                      onClick={() => setShowMoviesWithoutImages(!showMoviesWithoutImages)}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                        showMoviesWithoutImages 
-                          ? 'bg-red-600 text-white' 
-                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      }`}
-                    >
-                      {showMoviesWithoutImages ? <EyeOff size={16} /> : <Eye size={16} />}
-                      <span className="text-sm">
-                        {showMoviesWithoutImages ? t('collections.hideWithoutImages') : t('collections.showWithoutImages')}
-                      </span>
-                    </button>
-                  )}
-
-                  {/* Mode d'affichage */}
-                  <div className="flex bg-gray-700 rounded-lg p-1">
-                    <button
-                      onClick={() => setViewMode('grid')}
-                      className={`p-2 rounded transition-colors ${
-                        viewMode === 'grid' 
-                          ? 'bg-red-600 text-white' 
-                          : 'text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <Grid size={18} />
-                    </button>
-                    <button
-                      onClick={() => setViewMode('list')}
-                      className={`p-2 rounded transition-colors ${
-                        viewMode === 'list' 
-                          ? 'bg-red-600 text-white' 
-                          : 'text-gray-400 hover:text-white'
-                      }`}
-                    >
-                      <List size={18} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Affichage en grille */}
-              {viewMode === 'grid' && (
-                <motion.div variants={containerVariants} initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-50px' }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                  {displayedMovies.map((movie, index) => (
-                    <motion.div key={movie.id} variants={itemVariants}>
+            }
+          >
+            {/* Bande à faire défiler sur téléphone, grille à partir de `md`. */}
+            <div className="scrollbar-hide -mx-3 flex snap-x gap-3 overflow-x-auto px-3 sm:-mx-6 sm:px-6 md:mx-0 md:grid md:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] md:gap-5 md:overflow-visible md:px-0">
+              {similarCollections.length > 0
+                ? similarCollections.map((similarCollection) => (
+                    <SagaCard
+                      key={similarCollection.id}
+                      saga={similarCollection}
+                      variant="overlay"
+                      inWatchlist={watchlist.has(similarCollection.id)}
+                      isFavorite={favorites.has(similarCollection.id)}
+                      onToggleWatchlist={toggleSagaWatchlist}
+                      onToggleFavorite={toggleSagaFavorite}
+                      onAddToList={openAddToListMenuFor}
+                      compactActions={compactActions}
+                      className="w-[252px] flex-none snap-start md:w-auto"
+                    />
+                  ))
+                : Array.from({ length: 4 }, (_, index) => (
                     <div
-                      className="bg-white/[0.03] rounded-xl overflow-hidden border border-white/10 hover:border-red-500/30 transition-all duration-300 group cursor-pointer hover:bg-white/[0.06]"
-                    >
-                      <Link to={`/movie/${encodeId(movie.id)}`} className="block">
-                        <div className="relative">
-                          {movie.poster_path ? (
-                            <img
-                              src={`${IMAGE_BASE_URL}${movie.poster_path}`}
-                              alt={movie.title}
-                              className="w-full h-96 object-cover"
-                              loading="lazy"
-                              decoding="async"
-                            />
-                          ) : (
-                            <div className="w-full h-96 bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center">
-                              <div className="text-center">
-                                <Film size={48} className="text-gray-500 mx-auto mb-2" />
-                                <p className="text-gray-500 text-sm px-4">{movie.title}</p>
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* Overlay avec indicateur cliquable */}
-                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                            <div className="bg-red-600 hover:bg-red-700 rounded-full p-3 transition-colors">
-                              <Info size={20} />
-                            </div>
-                          </div>
-
-                          {/* Note */}
-                          {movie.vote_average > 0 && (
-                            <div className="absolute top-4 right-4 bg-black/70 rounded-full px-2 py-1 flex items-center gap-1">
-                              <Star size={14} className="text-yellow-400 fill-yellow-400" />
-                              <span className="text-sm font-medium">{movie.vote_average.toFixed(1)}</span>
-                            </div>
-                          )}
-
-                          {/* Numéro du film dans la série */}
-                          <div className="absolute top-4 left-4 bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold">
-                            {index + 1}
-                          </div>
-                        </div>
-
-                        <div className="p-4">
-                          <h3 className="text-lg font-semibold mb-2 line-clamp-2">{movie.title}</h3>
-                          
-                          <div className="flex items-center gap-2 text-sm text-gray-400 mb-3">
-                            <Calendar size={14} />
-                            <span>
-                              {movie.release_date ? new Date(movie.release_date).getFullYear() : t('common.unknownDate')}
-                            </span>
-                          </div>
-
-                          {movie.overview && (
-                            <p className="text-gray-400 text-sm line-clamp-3">
-                              {movie.overview}
-                            </p>
-                          )}
-                        </div>
-                      </Link>
-                    </div>
-                    </motion.div>
+                      key={index}
+                      aria-hidden="true"
+                      className="aspect-video w-[252px] flex-none animate-pulse-soft rounded-xl border border-white/10 bg-white/5 motion-reduce:animate-none md:w-auto md:rounded-[14px]"
+                    />
                   ))}
-                </motion.div>
-              )}
-
-              {/* Affichage en liste */}
-              {viewMode === 'list' && (
-                <motion.div variants={containerVariants} initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-50px' }} className="space-y-4">
-                  {displayedMovies.map((movie, index) => (
-                    <motion.div key={movie.id} variants={itemVariants}>
-                    <div
-                      className="bg-white/[0.03] rounded-xl border border-white/10 hover:border-red-500/30 transition-all duration-300 group cursor-pointer hover:bg-white/[0.06]"
-                    >
-                      <Link to={`/movie/${encodeId(movie.id)}`} className="block">
-                        <div className="flex gap-4 p-4">
-                          {/* Numéro */}
-                          <div className="flex-shrink-0 w-8 h-8 bg-red-600 text-white rounded-full flex items-center justify-center text-sm font-bold">
-                            {index + 1}
-                          </div>
-
-                          {/* Poster */}
-                          <div className="flex-shrink-0 w-16 h-24 rounded overflow-hidden">
-                            {movie.poster_path ? (
-                              <img
-                                src={`${IMAGE_BASE_URL}${movie.poster_path}`}
-                                alt={movie.title}
-                                className="w-full h-full object-cover"
-                                loading="lazy"
-                                decoding="async"
-                              />
-                            ) : (
-                              <div className="w-full h-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center">
-                                <Film size={20} className="text-gray-500" />
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Informations */}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1 min-w-0">
-                                <h3 className="text-lg font-semibold mb-1 truncate">{movie.title}</h3>
-                                
-                                <div className="flex items-center gap-4 text-sm text-gray-400 mb-2">
-                                  <div className="flex items-center gap-1">
-                                    <Calendar size={14} />
-                                    <span>
-                                      {movie.release_date ? new Date(movie.release_date).getFullYear() : t('common.unknownDate')}
-                                    </span>
-                                  </div>
-                                  
-                                  {movie.vote_average > 0 && (
-                                    <div className="flex items-center gap-1">
-                                      <Star size={14} className="text-yellow-400 fill-yellow-400" />
-                                      <span>{movie.vote_average.toFixed(1)}</span>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {movie.overview && (
-                                  <p className="text-gray-400 text-sm line-clamp-2">
-                                    {movie.overview}
-                                  </p>
-                                )}
-                              </div>
-
-                              {/* Indicateur cliquable */}
-                              <div className="flex-shrink-0 ml-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <div className="bg-red-600 hover:bg-red-700 rounded-full p-2 transition-colors">
-                                  <Info size={16} />
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </Link>
-                    </div>
-                    </motion.div>
-                  ))}
-                </motion.div>
-              )}
             </div>
-          </div>
-        </div>
+          </SagaSection>
+        )}
       </div>
 
-      {/* Section Statistiques globales */}
-      {collectionStats && (
-        <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="container mx-auto px-4 py-8 relative z-10">
-          <div>
-            <h2 className="text-2xl sm:text-3xl font-bold mb-8 flex items-center gap-3">
-              <TrendingUp className="text-red-500" />
-              <ShinyText text={t('collections.globalStats')} speed={2} color="#ffffff" shineColor="#ef4444" />
-            </h2>
-            
-            {loadingDetails ? (
-              <div className="flex items-center justify-center h-32">
-                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-red-500"></div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {/* Budget total */}
-                <AnimatedBorderCard highlightColor="239 68 68" backgroundColor="12 12 12" className="p-6">
-                  <div className="flex items-center gap-3 mb-3">
-                    <DollarSign className="text-green-400" size={24} />
-                    <h3 className="text-lg font-semibold">{t('collections.totalBudget')}</h3>
-                  </div>
-                  <p className="text-2xl font-bold text-green-400">
-                    {collectionStats.totalBudget > 0
-                      ? new Intl.NumberFormat(i18n.language, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(collectionStats.totalBudget)
-                      : t('collections.notAvailableData')
-                    }
-                  </p>
-                  <p className="text-sm text-gray-400 mt-1">
-                    {t('collections.average')}: {collectionStats.averageBudget > 0
-                      ? new Intl.NumberFormat(i18n.language, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(collectionStats.averageBudget)
-                      : t('collections.notAvailableData')
-                    }
-                  </p>
-                </AnimatedBorderCard>
-
-                {/* Revenus totaux */}
-                <AnimatedBorderCard highlightColor="239 68 68" backgroundColor="12 12 12" className="p-6">
-                  <div className="flex items-center gap-3 mb-3">
-                    <DollarSign className="text-blue-400" size={24} />
-                    <h3 className="text-lg font-semibold">{t('collections.totalRevenue')}</h3>
-                  </div>
-                  <p className="text-2xl font-bold text-blue-400">
-                    {collectionStats.totalRevenue > 0
-                      ? new Intl.NumberFormat(i18n.language, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(collectionStats.totalRevenue)
-                      : t('collections.notAvailableData')
-                    }
-                  </p>
-                  <p className="text-sm text-gray-400 mt-1">
-                    {t('collections.average')}: {collectionStats.averageRevenue > 0
-                      ? new Intl.NumberFormat(i18n.language, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(collectionStats.averageRevenue)
-                      : t('collections.notAvailableData')
-                    }
-                  </p>
-                </AnimatedBorderCard>
-
-                {/* Note moyenne */}
-                <AnimatedBorderCard highlightColor="239 68 68" backgroundColor="12 12 12" className="p-6">
-                  <div className="flex items-center gap-3 mb-3">
-                    <Star className="text-yellow-400" size={24} />
-                    <h3 className="text-lg font-semibold">{t('collections.averageRating')}</h3>
-                  </div>
-                  <p className="text-2xl font-bold text-yellow-400">
-                    {collectionStats.averageRating.toFixed(1)}/10
-                  </p>
-                  <p className="text-sm text-gray-400 mt-1">
-                    {t('collections.moviesRated', { count: collectionStats.totalMovies })}
-                  </p>
-                </AnimatedBorderCard>
-
-                {/* Durée totale */}
-                <AnimatedBorderCard highlightColor="239 68 68" backgroundColor="12 12 12" className="p-6">
-                  <div className="flex items-center gap-3 mb-3">
-                    <Film className="text-purple-400" size={24} />
-                    <h3 className="text-lg font-semibold">{t('collections.totalDuration')}</h3>
-                  </div>
-                  <p className="text-2xl font-bold text-purple-400">
-                    {Math.floor(collectionStats.totalRuntime / 60)}h {collectionStats.totalRuntime % 60}min
-                  </p>
-                  <p className="text-sm text-gray-400 mt-1">
-                    {collectionStats.totalMovies} {t('collections.films')}
-                  </p>
-                </AnimatedBorderCard>
-
-                {/* Bénéfice/Perte */}
-                {collectionStats.totalBudget > 0 && collectionStats.totalRevenue > 0 && (
-                  <div className="col-span-full">
-                    <AnimatedBorderCard highlightColor="239 68 68" backgroundColor="12 12 12" className="p-6">
-                      <div className="flex items-center gap-3 mb-3">
-                        <TrendingUp className={collectionStats.profitMargin > 0 ? "text-green-400" : "text-red-400"} size={24} />
-                        <h3 className="text-lg font-semibold">{t('collections.profitLoss')}</h3>
-                      </div>
-                      <p className={`text-2xl font-bold ${collectionStats.profitMargin > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {new Intl.NumberFormat(i18n.language, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(collectionStats.totalRevenue - collectionStats.totalBudget)}
-                        <span className="ml-2 text-lg">
-                          ({collectionStats.profitMargin > 0 ? '+' : ''}{collectionStats.profitMargin.toFixed(1)}%)
-                        </span>
-                      </p>
-                    </AnimatedBorderCard>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </motion.div>
-      )}
-
-      {/* Section Informations de production */}
-      {productionInfo && (
-        <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="container mx-auto px-4 py-8 relative z-10">
-          <div>
-            <h2 className="text-2xl sm:text-3xl font-bold mb-8 flex items-center gap-3">
-              <Building className="text-red-500" />
-              <ShinyText text={t('collections.productionInfo')} speed={2} color="#ffffff" shineColor="#ef4444" />
-            </h2>
-            
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Sociétés de production */}
-              {productionInfo.productionCompanies.length > 0 && (
-                <AnimatedBorderCard highlightColor="239 68 68" backgroundColor="12 12 12" className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <Building className="text-blue-400" size={24} />
-                    <h3 className="text-xl font-semibold">{t('collections.productionCompanies')}</h3>
-                  </div>
-                  <div className="space-y-3">
-                    {productionInfo.productionCompanies.map((company) => (
-                      <div key={company.id} className="flex justify-between items-center">
-                        <span className="text-gray-300">{company.name}</span>
-                        <span className="text-gray-400 text-sm bg-gray-700 px-2 py-1 rounded">
-                          {t('collections.filmCount', { count: company.count })}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </AnimatedBorderCard>
-              )}
-
-              {/* Pays de production */}
-              {productionInfo.productionCountries.length > 0 && (
-                <AnimatedBorderCard highlightColor="239 68 68" backgroundColor="12 12 12" className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <MapPin className="text-green-400" size={24} />
-                    <h3 className="text-xl font-semibold">{t('collections.productionCountries')}</h3>
-                  </div>
-                  <div className="space-y-3">
-                    {productionInfo.productionCountries.map((country) => (
-                      <div key={country.code} className="flex justify-between items-center">
-                        <span className="text-gray-300">{country.name}</span>
-                        <span className="text-gray-400 text-sm bg-gray-700 px-2 py-1 rounded">
-                          {t('collections.filmCount', { count: country.count })}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </AnimatedBorderCard>
-              )}
-
-              {/* Langues */}
-              {productionInfo.spokenLanguages.length > 0 && (
-                <AnimatedBorderCard highlightColor="239 68 68" backgroundColor="12 12 12" className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <Languages className="text-purple-400" size={24} />
-                    <h3 className="text-xl font-semibold">{t('collections.languages')}</h3>
-                  </div>
-                  <div className="space-y-3">
-                    {productionInfo.spokenLanguages.map((language) => (
-                      <div key={language.code} className="flex justify-between items-center">
-                        <span className="text-gray-300">{language.name}</span>
-                        <span className="text-gray-400 text-sm bg-gray-700 px-2 py-1 rounded">
-                          {t('collections.filmCount', { count: language.count })}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </AnimatedBorderCard>
-              )}
-
-              {/* Genres */}
-              {productionInfo.genres.length > 0 && (
-                <AnimatedBorderCard highlightColor="239 68 68" backgroundColor="12 12 12" className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <Film className="text-orange-400" size={24} />
-                    <h3 className="text-xl font-semibold">{t('collections.mainGenres')}</h3>
-                  </div>
-                  <div className="space-y-3">
-                    {productionInfo.genres.map((genre) => (
-                      <div key={genre.id} className="flex justify-between items-center">
-                        <span className="text-gray-300">{genre.name}</span>
-                        <span className="text-gray-400 text-sm bg-gray-700 px-2 py-1 rounded">
-                          {t('collections.filmCount', { count: genre.count })}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </AnimatedBorderCard>
-              )}
-            </div>
-          </div>
-        </motion.div>
-      )}
-
-
-      {/* Section Collections similaires - En bas avec fond noir */}
-      {similarCollections.length > 0 && (
-        <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="py-12 relative z-10">
-          <div className="container mx-auto px-4">
-            <div>
-              <h2 className="text-2xl sm:text-3xl font-bold mb-8">
-                <ShinyText text={t('collections.similarCollections')} speed={2} color="#ffffff" shineColor="#ef4444" />
-              </h2>
-              
-              {loadingSimilar ? (
-                <div className="flex items-center justify-center h-32">
-                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-red-500"></div>
-                </div>
-              ) : (
-                <motion.div variants={containerVariants} initial="hidden" whileInView="visible" viewport={{ once: true, margin: '-50px' }} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {similarCollections.map((similarCollection) => (
-                    <motion.div key={similarCollection.id} variants={itemVariants}>
-                    <div
-                      className="bg-white/[0.03] rounded-xl overflow-hidden border border-white/10 hover:border-red-500/30 transition-all duration-300 group cursor-pointer hover:bg-white/[0.06]"
-                    >
-                      <Link to={`/collection/${similarCollection.id}`} className="block">
-                        <div className="relative">
-                          {similarCollection.backdrop_path ? (
-                            <img
-                              src={getOptimizedImageUrl(similarCollection.backdrop_path, 'medium')}
-                              alt={similarCollection.name}
-                              className="w-full h-48 object-cover"
-                              loading="lazy"
-                              decoding="async"
-                            />
-                          ) : (
-                            <div className="w-full h-48 bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center">
-                              <Film size={48} className="text-gray-500" />
-                            </div>
-                          )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                          <div className="absolute bottom-4 left-4 right-4">
-                            <h3 className="text-xl font-bold text-white mb-2">{similarCollection.name}</h3>
-                            <div className="flex items-center gap-2 text-sm text-gray-300">
-                              <Film size={16} />
-                              <span>{similarCollection.parts?.filter(movie => movie.poster_path).length || 0} {t('collections.films')}</span>
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <div className="p-4">
-                          {/* Boutons d'action */}
-                          <div className="flex items-center gap-2 mb-4">
-                            {/* Bouton Watchlist */}
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                
-                                const watchlistCollections = JSON.parse(localStorage.getItem('watchlist_collections') || '[]');
-                                const currentStatus = similarCollectionsStatus[similarCollection.id]?.watchlist || false;
-                                
-                                if (currentStatus) {
-                                  // Retirer de la watchlist
-                                  const updatedWatchlist = watchlistCollections.filter((item: any) => item.id !== similarCollection.id);
-                                  localStorage.setItem('watchlist_collections', JSON.stringify(updatedWatchlist));
-                                } else {
-                                  // Ajouter à la watchlist
-                                  const collectionItem = {
-                                    id: similarCollection.id,
-                                    name: similarCollection.name,
-                                    poster_path: similarCollection.poster_path,
-                                    backdrop_path: similarCollection.backdrop_path,
-                                    overview: similarCollection.overview,
-                                    type: 'collection',
-                                    addedAt: new Date().toISOString()
-                                  };
-                                  watchlistCollections.unshift(collectionItem);
-                                  localStorage.setItem('watchlist_collections', JSON.stringify(watchlistCollections));
-                                }
-                                
-                                // Mettre à jour l'état local
-                                setSimilarCollectionsStatus(prev => ({
-                                  ...prev,
-                                  [similarCollection.id]: {
-                                    ...prev[similarCollection.id],
-                                    watchlist: !currentStatus
-                                  }
-                                }));
-                              }}
-                              className={`flex items-center gap-1 px-3 py-1.5 text-white text-xs rounded-lg transition-colors ${
-                                similarCollectionsStatus[similarCollection.id]?.watchlist
-                                  ? 'bg-blue-700 hover:bg-blue-800'
-                                  : 'bg-blue-600 hover:bg-blue-700'
-                              }`}
-                            >
-                              <Bookmark size={14} className={similarCollectionsStatus[similarCollection.id]?.watchlist ? 'fill-current' : ''} />
-                              {similarCollectionsStatus[similarCollection.id]?.watchlist ? t('collections.remove') : t('collections.watchlist')}
-                            </button>
-
-                            {/* Bouton Favoris */}
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                
-                                const favoriteCollections = JSON.parse(localStorage.getItem('favorite_collections') || '[]');
-                                const currentStatus = similarCollectionsStatus[similarCollection.id]?.favorites || false;
-                                
-                                if (currentStatus) {
-                                  // Retirer des favoris
-                                  const updatedFavorites = favoriteCollections.filter((item: any) => item.id !== similarCollection.id);
-                                  localStorage.setItem('favorite_collections', JSON.stringify(updatedFavorites));
-                                } else {
-                                  // Ajouter aux favoris
-                                  const collectionItem = {
-                                    id: similarCollection.id,
-                                    name: similarCollection.name,
-                                    poster_path: similarCollection.poster_path,
-                                    backdrop_path: similarCollection.backdrop_path,
-                                    overview: similarCollection.overview,
-                                    type: 'collection',
-                                    addedAt: new Date().toISOString()
-                                  };
-                                  favoriteCollections.unshift(collectionItem);
-                                  localStorage.setItem('favorite_collections', JSON.stringify(favoriteCollections));
-                                }
-                                
-                                // Mettre à jour l'état local
-                                setSimilarCollectionsStatus(prev => ({
-                                  ...prev,
-                                  [similarCollection.id]: {
-                                    ...prev[similarCollection.id],
-                                    favorites: !currentStatus
-                                  }
-                                }));
-                              }}
-                              className={`flex items-center gap-1 px-3 py-1.5 text-white text-xs rounded-lg transition-colors ${
-                                similarCollectionsStatus[similarCollection.id]?.favorites
-                                  ? 'bg-red-700 hover:bg-red-800'
-                                  : 'bg-red-600 hover:bg-red-700'
-                              }`}
-                            >
-                              <Heart size={14} className={similarCollectionsStatus[similarCollection.id]?.favorites ? 'fill-current' : ''} />
-                              {similarCollectionsStatus[similarCollection.id]?.favorites ? t('collections.remove') : t('collections.favorites')}
-                            </button>
-
-                            {/* Bouton Ajouter à une liste */}
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                // Ouvrir le menu d'ajout à une liste pour cette collection
-                                setSelectedCollection(similarCollection);
-                                setShowAddToListMenu(true);
-                              }}
-                              className="flex items-center gap-1 px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded-lg transition-colors"
-                            >
-                              <Plus size={14} />
-                              {t('collections.list')}
-                            </button>
-                          </div>
-
-                          <p className="text-gray-300 text-sm mb-4 line-clamp-3">
-                            {similarCollection.overview || t('collections.discoverCollection')}
-                          </p>
-                          
-                          <div className="flex items-center justify-between">
-                            <div className="flex gap-2">
-                              {(() => {
-                                const totalMovies = similarCollection.parts?.filter(movie => movie.poster_path).length || 0;
-                                const maxDisplayed = 5; // Maximum 5 films affichés
-                                const moviesToShow = Math.min(totalMovies, maxDisplayed);
-                                
-                                // Si on a 5 films ou moins, on les affiche tous
-                                if (totalMovies <= 5) {
-                                  return similarCollection.parts?.slice(0, moviesToShow).map((movie) => (
-                                    <div
-                                      key={movie.id}
-                                      className="w-14 h-20 sm:w-12 sm:h-16 rounded overflow-hidden hover:scale-110 transition-transform border border-gray-600"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      {movie.poster_path ? (
-                                        <img
-                                          src={getOptimizedImageUrl(movie.poster_path, 'small')}
-                                          alt={movie.title}
-                                          className="w-full h-full object-cover"
-                                          loading="lazy"
-                                          decoding="async"
-                                        />
-                                      ) : (
-                                        <div className="w-full h-full bg-gray-700 flex items-center justify-center">
-                                          <Film size={16} className="text-gray-500" />
-                                        </div>
-                                      )}
-                                    </div>
-                                  ));
-                                } else {
-                                  // Si on a plus de 5 films, on affiche 4 images + 1 compteur
-                                  return (
-                                    <>
-                                      {similarCollection.parts?.slice(0, 4).map((movie) => (
-                                        <div
-                                          key={movie.id}
-                                          className="w-14 h-20 sm:w-12 sm:h-16 rounded overflow-hidden hover:scale-110 transition-transform border border-gray-600"
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          {movie.poster_path ? (
-                                            <img
-                                              src={getOptimizedImageUrl(movie.poster_path, 'small')}
-                                              alt={movie.title}
-                                              className="w-full h-full object-cover"
-                                              loading="lazy"
-                                              decoding="async"
-                                            />
-                                          ) : (
-                                            <div className="w-full h-full bg-gray-700 flex items-center justify-center">
-                                              <Film size={16} className="text-gray-500" />
-                                            </div>
-                                          )}
-                                        </div>
-                                      ))}
-                                      <div className="w-14 h-20 sm:w-12 sm:h-16 bg-gray-700/50 rounded flex items-center justify-center text-xs text-gray-400 border border-gray-600">
-                                        +{totalMovies - 4}
-                                      </div>
-                                    </>
-                                  );
-                                }
-                              })()}
-                            </div>
-                          </div>
-                        </div>
-                      </Link>
-                    </div>
-                    </motion.div>
-                  ))}
-                </motion.div>
-              )}
-            </div>
-          </div>
-        </motion.div>
-      )}
-
       {/* Menu d'ajout à une liste */}
-      {showAddToListMenu && (collection || selectedCollection) && (
-        <>
-          {console.log('Rendering AddToListMenu with:', { 
-            showAddToListMenu, 
-            collectionId: selectedCollection?.id || collection?.id, 
-            collectionName: selectedCollection?.name || collection?.name 
-          })}
-          <AddToListMenu
-            mediaId={selectedCollection?.id || collection?.id || 0}
-            mediaType="collection"
-            title={selectedCollection?.name || collection?.name || ''}
-            posterPath={selectedCollection?.poster_path || collection?.poster_path || ''}
-            movieCount={selectedCollection?.parts?.length || collection?.parts?.length || 0}
-            onClose={closeAddToListMenu}
-          />
-        </>
+      {showAddToListMenu && (
+        <AddToListMenu
+          mediaId={menuCollection.id}
+          mediaType="collection"
+          title={menuCollection.name}
+          posterPath={menuCollection.poster_path || ''}
+          movieCount={menuCollection.parts?.length || 0}
+          onClose={closeAddToListMenu}
+        />
       )}
-    </SquareBackground>
+    </div>
   );
 };
 

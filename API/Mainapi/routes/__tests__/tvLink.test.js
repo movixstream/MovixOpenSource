@@ -42,6 +42,13 @@ function createFakeRedis() {
       store.set(key, { value: String(value), expiresAt: item?.expiresAt ?? null });
       return value;
     },
+    async decr(key) {
+      this.check();
+      const item = live(key);
+      const value = Number(item?.value || 0) - 1;
+      store.set(key, { value: String(value), expiresAt: item?.expiresAt ?? null });
+      return value;
+    },
     async expire(key, seconds) { this.check(); const item = live(key); if (!item) return 0; item.expiresAt = clock + seconds * 1000; return 1; },
     async ttl(key) { this.check(); const item = live(key); if (!item) return -2; return item.expiresAt === null ? -1 : Math.ceil((item.expiresAt - clock) / 1000); },
     async pttl(key) { this.check(); const item = live(key); if (!item) return -2; return item.expiresAt === null ? -1 : item.expiresAt - clock; },
@@ -303,6 +310,14 @@ test('cinq codes faux en 10 min → 429, même avec un bon code, puis la fenêtr
   clock += 601_000;
   const next = await start();
   assert.equal((await confirm(next.body.userCode)).status, 200);
+});
+
+test('codes faux envoyés en même temps : jamais plus de cinq essais', async () => {
+  await start();
+  const results = await Promise.all(Array.from({ length: 12 }, () => confirm('ZZZZZ')));
+  const statuses = results.map((result) => result.status);
+  assert.equal(statuses.filter((status) => status === 404).length, 5);
+  assert.equal(statuses.filter((status) => status === 429).length, 7);
 });
 
 test('sans JWT valide : 401', async () => {

@@ -909,6 +909,171 @@ test('getTitle : même classement mémorisé que l\'onglet ; mode anime → num�
   assert.equal(fake.callsMatching(/^SELECT .* FROM watch_marks/).length, 2);
 });
 
+// --- Plusieurs films en un appel (GET /history/titles) ---
+
+// Faux pool de la lecture par lot : les tables du profil, le temps des
+// lecteurs web (une ligne par film) et le cache TMDB en base.
+function batchPool({ history = [], progress = [], marks = [], viewing = [], runtimes = [], viewingError = null, runtimeError = null } = {}) {
+  return createFakeHistoryPool((sql) => {
+    if (sql.includes('FROM wrapped_viewing_data')) {
+      if (viewingError) throw viewingError;
+      return viewing;
+    }
+    if (sql.includes('FROM tmdb_media')) {
+      if (runtimeError) throw runtimeError;
+      return runtimes;
+    }
+    if (sql.includes('FROM watch_marks')) return marks;
+    if (sql.includes('FROM watch_history')) return history;
+    if (sql.includes('FROM watch_progress')) return progress;
+    return [];
+  });
+}
+// Lignes rendues par MySQL : SUM en texte, content_id en texte, SMALLINT en nombre.
+const viewed = (tmdbId, seconds) => ({ content_id: String(tmdbId), seconds: String(seconds) });
+const runtimeRow = (tmdbId, minutes) => ({ tmdb_id: tmdbId, runtime_minutes: minutes });
+const noMediaCalls = (media) => media.calls.getMany.length + media.calls.getEpisodes.length + media.calls.getEpisodeRuntimes.length;
+
+test('getMovieTitles : même statut et mêmes champs que getTitle pour chaque film ; film inconnu absent ; ordre demandé', async () => {
+  const rows = {
+    history: [
+      hist('movie', 101, { at: T(1) }), hist('movie', 102, { at: T(2) }), hist('movie', 103, { at: T(3) }),
+      hist('movie', 104, { at: T(4) }), hist('movie', 106, { at: T(6) }), hist('movie', 107, { at: T(7), finished: 1 }),
+      hist('movie', 108, { at: T(8) }), hist('movie', 109, { at: T(9) }), hist('movie', 110, { at: T(10) }),
+    ],
+    progress: [
+      prog('movie', 101, 0, 0, 3, 100), // exact 3 % → non démarré
+      prog('movie', 102, 0, 0, 50, 100), // exact 50 % → en cours
+      prog('movie', 106, 0, 0, 50, 100), // exact : l'estimé (97 %) ne sert pas
+      prog('movie', 107, 0, 0, 30, 100), // fini d'après l'historique
+      prog('movie', 110, 0, 0, 0, 5000), // lancé puis arrêté à 0 s
+    ],
+    marks: [mark('movie', 105, 0, 0, T(5))], // coché « Vu », sans historique
+  };
+  // 103 : 50 % estimé ; 104 : 96 % → vu (estimé) ; 108 : 3 % ; 109 : durée
+  // inconnue ; 111 : du temps de lecteur web seulement, donc inconnu du profil.
+  const seconds = { 103: 3600, 104: 6912, 106: 7000, 108: 216, 109: 5000, 111: 7000 };
+  const runtimes = { 103: 120, 104: 120, 106: 120, 108: 120, 111: 120 };
+  const ids = [110, 101, 102, 103, 104, 105, 106, 107, 108, 109, 999, 111];
+
+  const singlePool = overviewPool({ ...rows, viewing: Object.entries(seconds).map(([id, value]) => view('movie', id, value)) });
+  const singleMedia = fakeMediaStore(Object.fromEntries(Object.entries(runtimes).map(([id, minutes]) => (
+    [`movie:${id}`, { mediaType: 'movie', tmdbId: Number(id), title: `Film ${id}`, runtimeMinutes: minutes, seasons: null }]
+  ))));
+  const single = createHistoryStore({ pool: singlePool.pool, mediaStore: singleMedia });
+
+  const fake = batchPool({
+    ...rows,
+    viewing: Object.entries(seconds).map(([id, value]) => viewed(id, value)),
+    // Une ligne par langue en base : la durée est la même.
+    runtimes: Object.entries(runtimes).flatMap(([id, minutes]) => [runtimeRow(Number(id), minutes), runtimeRow(Number(id), minutes)]),
+  });
+  const media = fakeMediaStore();
+  const store = createHistoryStore({ pool: fake.pool, mediaStore: media });
+
+  const titles = await store.getMovieTitles(OWNER, ids);
+
+  // Ordre de la demande ; 999 et 111 sont inconnus du profil.
+  assert.deepEqual(titles.map((title) => title.tmdbId), [110, 101, 102, 103, 104, 105, 106, 107, 108, 109]);
+  const byId = new Map(titles.map((title) => [title.tmdbId, title]));
+  for (const tmdbId of ids) {
+    const expected = await single.getTitle(OWNER, { mediaType: 'movie', tmdbId, language: 'fr-FR' });
+    if (!expected) {
+      assert.equal(byId.has(tmdbId), false, `film ${tmdbId}`);
+      continue;
+    }
+    assert.deepEqual(byId.get(tmdbId), {
+      mediaType: 'movie', tmdbId, status: expected.status, markedWatched: expected.markedWatched,
+      estimated: expected.estimated, position: expected.position, duration: expected.duration,
+    }, `film ${tmdbId}`);
+  }
+
+  const film = (tmdbId, fields) => ({ mediaType: 'movie', tmdbId, markedWatched: false, estimated: false, ...fields });
+  assert.deepEqual(byId.get(102), film(102, { status: 'in_progress', position: 50, duration: 100 }));
+  assert.deepEqual(byId.get(103), film(103, { status: 'in_progress', estimated: true, position: 3600, duration: 7200 }));
+  // « Vu (estimé) » : terminé d'après le temps passé dans un lecteur web.
+  assert.deepEqual(byId.get(104), film(104, { status: 'finished', estimated: true, position: 6912, duration: 7200 }));
+  // Coché « Vu » sans aucune lecture : ni position ni durée.
+  assert.deepEqual(byId.get(105), film(105, { status: 'finished', markedWatched: true, position: null, duration: null }));
+  assert.deepEqual(byId.get(107), film(107, { status: 'finished', position: 30, duration: 100 }));
+  assert.deepEqual(byId.get(109), film(109, { status: 'not_started', position: null, duration: null }));
+
+  // Durées lues en base pour les seuls films à estimer, jamais demandées à TMDB.
+  assert.deepEqual(fake.callsMatching('FROM tmdb_media')[0].params, [103, 104, 108, 109]);
+  assert.equal(noMediaCalls(media), 0);
+});
+
+test('getMovieTitles : nombre de requêtes SQL constant (1 film ou 60), listes IN paramétrées, aucun appel TMDB', async () => {
+  const countFor = async (ids) => {
+    const fake = batchPool({
+      history: ids.map((id) => hist('movie', id)),
+      viewing: ids.map((id) => viewed(id, 600)),
+      runtimes: ids.map((id) => runtimeRow(id, 100)),
+    });
+    const media = fakeMediaStore();
+    const titles = await createHistoryStore({ pool: fake.pool, mediaStore: media }).getMovieTitles(OWNER, ids);
+    assert.equal(titles.length, ids.length);
+    assert.equal(noMediaCalls(media), 0);
+    for (const call of fake.calls) {
+      // Liste de longueur variable : `query`, et une valeur par `?`.
+      assert.equal(call.method, 'query');
+      assert.equal((call.sql.match(/\?/g) || []).length, call.params.length, call.sql);
+      assert.ok(call.sql.includes(`IN (${ids.map(() => '?').join(', ')})`), call.sql);
+    }
+    return fake;
+  };
+
+  const one = await countFor([550]);
+  const sixty = await countFor(Array.from({ length: 60 }, (_, index) => index + 1));
+  assert.equal(one.calls.length, 5);
+  assert.equal(sixty.calls.length, 5);
+
+  assert.deepEqual(one.calls.map((call) => call.sql), [
+    "SELECT media_type, tmdb_id, season, episode, finished, last_watched_at FROM watch_history WHERE user_type = ? AND user_id = ? AND profile_id = ? AND media_type = 'movie' AND tmdb_id IN (?)",
+    "SELECT media_type, tmdb_id, season, episode, position_sec, duration_sec FROM watch_progress WHERE user_type = ? AND user_id = ? AND profile_id = ? AND media_type = 'movie' AND tmdb_id IN (?)",
+    "SELECT media_type, tmdb_id, season, episode, marked_at FROM watch_marks WHERE user_type = ? AND user_id = ? AND profile_id = ? AND media_type = 'movie' AND tmdb_id IN (?)",
+    "SELECT content_id, SUM(watch_duration) AS seconds FROM wrapped_viewing_data WHERE user_id = ? AND profile_id <=> ? AND content_type = 'movie' AND content_id IN (?) GROUP BY content_id",
+    "SELECT tmdb_id, runtime_minutes FROM tmdb_media WHERE media_type = 'movie' AND tmdb_id IN (?) AND runtime_minutes > 0",
+  ]);
+  for (const call of one.calls.slice(0, 3)) assert.deepEqual(call.params, ['oauth', 'u-1', 'p-1', 550]);
+  // Temps des lecteurs web : propriétaire sans user_type, identifiant en texte.
+  assert.deepEqual(one.calls[3].params, ['u-1', 'p-1', '550']);
+  assert.deepEqual(one.calls[4].params, [550]);
+  assert.deepEqual(sixty.calls[0].params.slice(3), Array.from({ length: 60 }, (_, index) => index + 1));
+
+  // Aucun film à estimer : la lecture des durées n'a pas lieu.
+  const exact = batchPool({ history: [hist('movie', 550)], progress: [prog('movie', 550, 0, 0, 50, 100)], viewing: [viewed(550, 7000)] });
+  await createHistoryStore({ pool: exact.pool, mediaStore: fakeMediaStore() }).getMovieTitles(OWNER, [550, 13]);
+  assert.equal(exact.calls.length, 4);
+  assert.equal(exact.callsMatching('FROM tmdb_media').length, 0);
+
+  // Liste vide : rien à lire.
+  const empty = batchPool();
+  assert.deepEqual(await createHistoryStore({ pool: empty.pool, mediaStore: fakeMediaStore() }).getMovieTitles(OWNER, []), []);
+  assert.equal(empty.calls.length, 0);
+});
+
+test('getMovieTitles : durée absente de la base → pas d\'estimation ni d\'appel TMDB ; lecture en panne → film servi sans estimé', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const rows = { history: [hist('movie', 550)], viewing: [viewed(550, 7000)] };
+  const plainTitle = [{ mediaType: 'movie', tmdbId: 550, status: 'not_started', markedWatched: false, estimated: false, position: null, duration: null }];
+  const read = async (options) => {
+    const fake = batchPool({ ...rows, ...options });
+    const media = fakeMediaStore({ 'movie:550': { mediaType: 'movie', tmdbId: 550, title: 'Fight Club', runtimeMinutes: 120, seasons: null } });
+    const titles = await createHistoryStore({ pool: fake.pool, mediaStore: media }).getMovieTitles(OWNER, [550]);
+    assert.equal(noMediaCalls(media), 0);
+    return titles;
+  };
+
+  // 7000 s sur 120 min = 97 % : vu (estimé) quand la durée est en base.
+  assert.deepEqual(await read({ runtimes: [runtimeRow(550, 120)] }), [{ ...plainTitle[0], status: 'finished', estimated: true, position: 7000, duration: 7200 }]);
+  // Durée absente, nulle ou illisible : pas d'estimation.
+  assert.deepEqual(await read({ runtimes: [] }), plainTitle);
+  assert.deepEqual(await read({ runtimes: [runtimeRow(550, 0), runtimeRow(550, null)] }), plainTitle);
+  assert.deepEqual(await read({ runtimeError: new Error("Table 'tmdb_media' doesn't exist") }), plainTitle);
+  assert.deepEqual(await read({ viewingError: new Error("Table 'wrapped_viewing_data' doesn't exist") }), plainTitle);
+});
+
 test('deleteTitle : 3 tables de l\'historique + temps du lecteur web du titre (film : movie ; série : tv et anime)', async () => {
   const fake = createFakeHistoryPool();
   const store = createHistoryStore({ pool: fake.pool, mediaStore: fakeMediaStore() });

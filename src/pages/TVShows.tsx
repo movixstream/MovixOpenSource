@@ -14,6 +14,8 @@ import { useWrappedTracker } from '../hooks/useWrappedTracker';
 import { getTmdbLanguage } from '../i18n';
 import { readSessionStorage, writeSessionStorage } from '../utils/browserStorage';
 import { getMinimumCarouselCategoryItems, makeExclusiveCategories } from '../utils/exclusiveCategories';
+import { genreSearchHref } from '@/utils/genreSearchLink';
+import { pickGenrePosters } from '@/utils/genreTiles';
 
 // Nombre de sections à charger immédiatement
 const IMMEDIATE_LOAD_COUNT = 2;
@@ -310,22 +312,22 @@ const TVShows: React.FC = () => {
   const [isTop10CardHovered, setIsTop10CardHovered] = useState(false);
   const top10RowRef = useRef<HTMLDivElement>(null);
   const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null);
-  const [genreItems, setGenreItems] = useState<{ id: number; name: string; route: string; imageUrl?: string }[]>([
-    { id: 10759, name: 'Action & Aventure', route: '/genre/tv/10759' },
-    { id: 16, name: 'Animation', route: '/genre/tv/16' },
-    { id: 35, name: 'Comédie', route: '/genre/tv/35' },
-    { id: 80, name: 'Crime', route: '/genre/tv/80' },
-    { id: 99, name: 'Documentaire', route: '/genre/tv/99' },
-    { id: 18, name: 'Drame', route: '/genre/tv/18' },
-    { id: 10751, name: 'Famille', route: '/genre/tv/10751' },
-    { id: 10762, name: 'Enfants', route: '/genre/tv/10762' },
-    { id: 9648, name: 'Mystère', route: '/genre/tv/9648' },
-    { id: 10763, name: 'Actualités', route: '/genre/tv/10763' },
-    { id: 10764, name: 'Téléréalité', route: '/genre/tv/10764' },
-    { id: 10765, name: 'SF & Fantastique', route: '/genre/tv/10765' },
-    { id: 10766, name: 'Feuilleton', route: '/genre/tv/10766' },
-    { id: 10767, name: 'Talk-show', route: '/genre/tv/10767' },
-    { id: 10768, name: 'Guerre & Politique', route: '/genre/tv/10768' },
+  const [genreItems, setGenreItems] = useState<{ id: number; name: string; route: string; posters?: string[] }[]>([
+    { id: 10759, name: 'Action & Aventure', route: genreSearchHref('tv', 10759) },
+    { id: 16, name: 'Animation', route: genreSearchHref('tv', 16) },
+    { id: 35, name: 'Comédie', route: genreSearchHref('tv', 35) },
+    { id: 80, name: 'Crime', route: genreSearchHref('tv', 80) },
+    { id: 99, name: 'Documentaire', route: genreSearchHref('tv', 99) },
+    { id: 18, name: 'Drame', route: genreSearchHref('tv', 18) },
+    { id: 10751, name: 'Famille', route: genreSearchHref('tv', 10751) },
+    { id: 10762, name: 'Enfants', route: genreSearchHref('tv', 10762) },
+    { id: 9648, name: 'Mystère', route: genreSearchHref('tv', 9648) },
+    { id: 10763, name: 'Actualités', route: genreSearchHref('tv', 10763) },
+    { id: 10764, name: 'Téléréalité', route: genreSearchHref('tv', 10764) },
+    { id: 10765, name: 'SF & Fantastique', route: genreSearchHref('tv', 10765) },
+    { id: 10766, name: 'Feuilleton', route: genreSearchHref('tv', 10766) },
+    { id: 10767, name: 'Talk-show', route: genreSearchHref('tv', 10767) },
+    { id: 10768, name: 'Guerre & Politique', route: genreSearchHref('tv', 10768) },
   ]);
 
   // Track page visit for Movix Wrapped
@@ -668,10 +670,10 @@ const TVShows: React.FC = () => {
     fetchTVShows();
   }, []);
 
-  // Fetch representative TMDB images for each TV genre and cache for 24h
+  // Affiches des tuiles de genre (deux par genre, sans doublon), gardées 24 h
   useEffect(() => {
-    const cacheKey = 'movix_tv_genre_images';
-    const cacheTsKey = 'movix_tv_genre_images_ts';
+    const cacheKey = 'movix_tv_genre_posters';
+    const cacheTsKey = 'movix_tv_genre_posters_ts';
     const cached = readSessionStorage(cacheKey);
     const cachedTs = readSessionStorage(cacheTsKey);
     const oneDayMs = 24 * 60 * 60 * 1000;
@@ -688,7 +690,7 @@ const TVShows: React.FC = () => {
       }
 
       try {
-        const updated = await Promise.all(genreItems.map(async (g) => {
+        const candidates = await Promise.all(genreItems.map(async (g) => {
           try {
             const resp = await axios.get('https://api.themoviedb.org/3/discover/tv', {
               params: {
@@ -700,14 +702,13 @@ const TVShows: React.FC = () => {
                 page: 1
               }
             });
-            const first = Array.isArray(resp.data?.results) ? resp.data.results.find((m: any) => m.backdrop_path || m.poster_path) : null;
-            const path = first?.backdrop_path || first?.poster_path || '';
-            const imageUrl = path ? `https://image.tmdb.org/t/p/w780${path}` : undefined;
-            return { ...g, imageUrl };
+            return Array.isArray(resp.data?.results) ? resp.data.results : [];
           } catch (_) {
-            return g;
+            return [];
           }
         }));
+        const posters = pickGenrePosters(candidates);
+        const updated = genreItems.map((g, index) => ({ ...g, posters: posters[index] }));
         setGenreItems(updated);
         if (writeSessionStorage(cacheKey, JSON.stringify(updated))) {
           writeSessionStorage(cacheTsKey, Date.now().toString());

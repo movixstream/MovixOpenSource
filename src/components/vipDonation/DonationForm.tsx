@@ -28,6 +28,7 @@ import GiftCardDonation from './GiftCardDonation';
 import { CryptoLogo, GiftCardIcon, type CryptoLogoCoin } from './DonationMethodIcons';
 import {
   formatDonationAmount,
+  formatEnabledGiftCards,
   getDonationSuggestions,
   getEuroAffix,
   getInitialAmountState,
@@ -93,6 +94,7 @@ const DonationForm: React.FC<DonationFormProps> = ({ settings, availability }) =
 
   const suggestions = useMemo(() => getDonationSuggestions(settings), [settings]);
   const methods = useMemo(() => getVisibleDonationMethods(settings, availability), [settings, availability]);
+  const giftCardList = useMemo(() => formatEnabledGiftCards(locale, settings), [locale, settings]);
 
   const [initialAmount] = useState(() => getInitialAmountState(settings, suggestions));
   const [presetAmount, setPresetAmount] = useState<number | null>(initialAmount.preset);
@@ -421,7 +423,7 @@ const DonationForm: React.FC<DonationFormProps> = ({ settings, availability }) =
                         {t(title)}
                       </span>
                       <span className="mt-0.5 block text-xs leading-5 text-white/55">
-                        {t(subtitle)}
+                        {id === 'giftcard' ? t(subtitle, { cards: giftCardList }) : t(subtitle)}
                       </span>
                     </span>
                     <span

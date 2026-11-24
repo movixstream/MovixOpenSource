@@ -11,11 +11,18 @@ import { useWrappedTracker } from '../hooks/useWrappedTracker';
 import { getTmdbLanguage } from '../i18n';
 import { getNumericAge } from '../utils/certificationUtils';
 import { resolveTmdbKeywordId } from '../utils/tmdbKeywords';
-import { fetchAnimeCatalogue, type AnimeCatalogueItem } from '../services/animeSamaService';
+import {
+  fetchAnimeCatalogue,
+  fetchAnimeHome,
+  type AnimeCatalogueItem,
+  type AnimeHomePayload,
+  type AnimeHomeShow,
+} from '../services/animeSamaService';
+import { genreSearchHref } from '@/utils/genreSearchLink';
+import { pickGenrePosters } from '@/utils/genreTiles';
 
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
 const IMMEDIATE_LOAD_COUNT = 2;
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const DATA_CACHE_TTL_MS = 15 * 60 * 1000;
 const MATURE_ANIME_AGE_THRESHOLD = 17;
 const CONTENT_RATING_REGION_PRIORITY = ['FR', 'US', 'JP', 'GB', 'CA'] as const;
@@ -27,19 +34,7 @@ const SITE_ROW_FETCH_LIMIT = 40;
 const SITE_ROW_SIZE = 15;
 const SITE_ROW_MIN_ITEMS = 5;
 
-interface AnimeShow {
-  id: number;
-  name: string;
-  overview: string;
-  poster_path: string;
-  backdrop_path: string;
-  vote_average: number;
-  vote_count?: number;
-  popularity?: number;
-  first_air_date: string;
-  genre_ids?: number[];
-  media_type?: 'tv';
-}
+type AnimeShow = AnimeHomeShow;
 
 interface Category {
   id: string;
@@ -48,14 +43,14 @@ interface Category {
 }
 
 const ANIME_GENRE_CONFIG = [
-  { id: 16, labelKey: 'genres.id_16', route: '/genre/anime/16', discoverGenres: '16' },
-  { id: 10759, labelKey: 'genres.id_10759', route: '/genre/anime/10759', discoverGenres: '16,10759' },
-  { id: 10765, labelKey: 'genres.id_10765', route: '/genre/anime/10765', discoverGenres: '16,10765' },
-  { id: 35, labelKey: 'genres.id_35', route: '/genre/anime/35', discoverGenres: '16,35' },
-  { id: 18, labelKey: 'genres.id_18', route: '/genre/anime/18', discoverGenres: '16,18' },
-  { id: 9648, labelKey: 'genres.id_9648', route: '/genre/anime/9648', discoverGenres: '16,9648' },
-  { id: 10751, labelKey: 'genres.id_10751', route: '/genre/anime/10751', discoverGenres: '16,10751' },
-  { id: 10762, labelKey: 'genres.id_10762', route: '/genre/anime/10762', discoverGenres: '16,10762' },
+  { id: 16, labelKey: 'genres.id_16', route: genreSearchHref('anime', 16), discoverGenres: '16' },
+  { id: 10759, labelKey: 'genres.id_10759', route: genreSearchHref('anime', 10759), discoverGenres: '16,10759' },
+  { id: 10765, labelKey: 'genres.id_10765', route: genreSearchHref('anime', 10765), discoverGenres: '16,10765' },
+  { id: 35, labelKey: 'genres.id_35', route: genreSearchHref('anime', 35), discoverGenres: '16,35' },
+  { id: 18, labelKey: 'genres.id_18', route: genreSearchHref('anime', 18), discoverGenres: '16,18' },
+  { id: 9648, labelKey: 'genres.id_9648', route: genreSearchHref('anime', 9648), discoverGenres: '16,9648' },
+  { id: 10751, labelKey: 'genres.id_10751', route: genreSearchHref('anime', 10751), discoverGenres: '16,10751' },
+  { id: 10762, labelKey: 'genres.id_10762', route: genreSearchHref('anime', 10762), discoverGenres: '16,10762' },
 ] as const;
 
 const CATEGORY_PRIORITY = [10759, 10765, 35, 18, 9648, 10751, 10762];
@@ -345,6 +340,70 @@ const loadSiteShows = async (language: string): Promise<SiteShows> => {
   return { airing: rowOf(airing.items), dubbed: rowOf(dubbed.items) };
 };
 
+/**
+ * Repli quand le serveur n'a pas la page (premier calcul en cours, panne) : le
+ * navigateur interroge TMDB lui-même, comme le fait le serveur
+ * (API/Mainapi/utils/animeHome.js). Les tuiles de genre reprennent les mêmes
+ * listes que les rangées, sans nouvelle demande.
+ */
+const loadAnimeShowsFromTmdb = async (language: string) => {
+  const animeKeywordId = await resolveTmdbKeywordId('anime', language);
+  const requests: Array<{ genreId: number | null; params: ReturnType<typeof buildAnimeDiscoverParams> }> = [
+    ...Array.from({ length: 3 }, (_, index) => ({
+      genreId: index === 0 ? 16 : null,
+      params: buildAnimeDiscoverParams(language, animeKeywordId, { page: index + 1 }),
+    })),
+    ...ANIME_GENRE_CONFIG.filter((genre) => genre.id !== 16).map((genre) => ({
+      genreId: genre.id,
+      params: buildAnimeDiscoverParams(language, animeKeywordId, { page: 1, with_genres: genre.discoverGenres }),
+    })),
+  ];
+
+  const responses = await Promise.all(
+    requests.map(({ params }) => axios.get('https://api.themoviedb.org/3/discover/tv', { params })),
+  );
+  const resultsOf = responses.map((response) =>
+    (Array.isArray(response.data?.results) ? (response.data.results as AnimeShow[]) : [])
+      .filter((show) => show?.id && show.poster_path)
+      .map((show) => ({ ...show, media_type: 'tv' as const })),
+  );
+
+  const candidates = uniqueById(resultsOf.flat());
+  const safeIds = new Set((await filterMatureAnime(candidates)).map((show) => show.id));
+  const shows = candidates
+    .filter((show) => isValidAnimeShow(show) && safeIds.has(show.id))
+    .sort(compareAnimeByPopularity);
+
+  const posters = pickGenrePosters(ANIME_GENRE_CONFIG.map((genre) =>
+    (resultsOf[requests.findIndex((request) => request.genreId === genre.id)] ?? [])
+      .filter((show) => safeIds.has(show.id)),
+  ));
+  const genrePosters = Object.fromEntries(ANIME_GENRE_CONFIG.map((genre, index) => [genre.id, posters[index]]));
+
+  return { shows, genrePosters };
+};
+
+const readHomeCache = (key: string): AnimeHomePayload | null => {
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(key) || 'null') as (AnimeHomePayload & { at?: number }) | null;
+    if (cached && Date.now() - Number(cached.at) < DATA_CACHE_TTL_MS
+      && Array.isArray(cached.shows) && cached.shows.length > 0) {
+      return cached;
+    }
+  } catch {
+    // Cache illisible : on recharge.
+  }
+  return null;
+};
+
+const writeHomeCache = (key: string, home: AnimeHomePayload) => {
+  try {
+    sessionStorage.setItem(key, JSON.stringify({ ...home, at: Date.now() }));
+  } catch {
+    // Ignore cache write failures.
+  }
+};
+
 const Anime: React.FC = () => {
   const { t, i18n } = useTranslation();
   const tmdbLanguage = getTmdbLanguage();
@@ -352,15 +411,12 @@ const Anime: React.FC = () => {
   const [featuredShows, setFeaturedShows] = useState<AnimeShow[]>([]);
   const [topContent, setTopContent] = useState<AnimeShow[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [genreImages, setGenreImages] = useState<Record<number, string | undefined>>({});
+  const [genreImages, setGenreImages] = useState<Record<number, string[] | undefined>>({});
   const [siteShows, setSiteShows] = useState<SiteShows>(NO_SITE_SHOWS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const dataCacheKey = `movix_anime_data_v2_${tmdbLanguage}`;
-  const dataCacheTsKey = `${dataCacheKey}_timestamp`;
-  const genreImageCacheKey = `movix_anime_genre_images_v2_${tmdbLanguage}`;
-  const genreImageCacheTsKey = `${genreImageCacheKey}_timestamp`;
+  const homeCacheKey = `movix_anime_home_v1_${tmdbLanguage}`;
 
   useWrappedTracker({
     mode: 'page',
@@ -376,7 +432,7 @@ const Anime: React.FC = () => {
       id: genre.id,
       name: t(genre.labelKey),
       route: genre.route,
-      imageUrl: genreImages[genre.id],
+      posters: genreImages[genre.id],
     }));
   }, [genreImages, t]);
 
@@ -452,182 +508,83 @@ const Anime: React.FC = () => {
     setCategories(nextCategories);
   }, [getGenreLabel, t]);
 
-  const fetchAnimeShows = useCallback(async () => {
-    try {
+  const applyShows = useCallback((shows: AnimeShow[]) => {
+    setFeaturedShows(shows.filter((show) => show.backdrop_path && show.overview).slice(0, 8));
+    setTopContent(shows.slice(0, 15));
+    setAnimeShows(shows);
+    organizeContentByCategories(shows);
+  }, [organizeContentByCategories]);
+
+  // Une seule demande au serveur, qui a déjà interrogé TMDB pour tout le monde.
+  // S'il n'a pas encore la page, elle est construite ici depuis TMDB.
+  useEffect(() => {
+    let cancelled = false;
+
+    const applyHome = (home: AnimeHomePayload) => {
+      applyShows(home.shows);
+      setGenreImages(home.genrePosters);
+      setSiteShows(home.siteRows);
+    };
+
+    const load = async () => {
       setLoading(true);
       setError(null);
 
-      const cachedData = sessionStorage.getItem(dataCacheKey);
-      const cacheTimestamp = sessionStorage.getItem(dataCacheTsKey);
-
-      if (cachedData && cacheTimestamp) {
-        const isRecent = (Date.now() - Number(cacheTimestamp)) < DATA_CACHE_TTL_MS;
-        if (isRecent) {
-          const parsedData = JSON.parse(cachedData);
-          setFeaturedShows(parsedData.featuredShows || []);
-          setTopContent(parsedData.topContent || []);
-          setAnimeShows(parsedData.animeShows || []);
-
-          if (Array.isArray(parsedData.animeShows) && parsedData.animeShows.length > 0) {
-            organizeContentByCategories(parsedData.animeShows);
-          }
-
-          setLoading(false);
-          return;
-        }
-      }
-
-      const animeKeywordId = await resolveTmdbKeywordId('anime', tmdbLanguage);
-
-      const discoverRequests = [
-        ...Array.from({ length: 3 }, (_, index) =>
-          axios.get('https://api.themoviedb.org/3/discover/tv', {
-            params: buildAnimeDiscoverParams(tmdbLanguage, animeKeywordId, {
-              page: index + 1,
-            }),
-          }),
-        ),
-        ...ANIME_GENRE_CONFIG.filter((genre) => genre.id !== 16).map((genre) =>
-          axios.get('https://api.themoviedb.org/3/discover/tv', {
-            params: buildAnimeDiscoverParams(tmdbLanguage, animeKeywordId, {
-              page: 1,
-              with_genres: genre.discoverGenres,
-            }),
-          }),
-        ),
-      ];
-
-      const responses = await Promise.all(discoverRequests);
-      const allShows = uniqueById(
-        responses.flatMap((response) =>
-          (response.data?.results || [])
-            .filter(isValidAnimeShow)
-            .map((show: AnimeShow) => ({
-              ...show,
-              media_type: 'tv',
-            })),
-        ),
-      ).sort(compareAnimeByPopularity);
-      const safeShows = await filterMatureAnime(allShows);
-
-      const heroShows = safeShows
-        .filter((show) => show.backdrop_path && show.overview)
-        .slice(0, 8);
-      const topAnime = safeShows.slice(0, 15);
-
-      setFeaturedShows(heroShows);
-      setTopContent(topAnime);
-      setAnimeShows(safeShows);
-      organizeContentByCategories(safeShows);
-
-      sessionStorage.setItem(dataCacheKey, JSON.stringify({
-        featuredShows: heroShows,
-        topContent: topAnime,
-        animeShows: safeShows,
-      }));
-      sessionStorage.setItem(dataCacheTsKey, Date.now().toString());
-    } catch (fetchError) {
-      console.error('Error fetching anime shows:', fetchError);
-      setError(t('home.errorLoadingData'));
-    } finally {
-      setLoading(false);
-    }
-  }, [dataCacheKey, dataCacheTsKey, organizeContentByCategories, t, tmdbLanguage]);
-
-  useEffect(() => {
-    fetchAnimeShows();
-  }, [fetchAnimeShows]);
-
-  // Rangées du catalogue de la source anime. Indépendantes du reste : la page
-  // s'affiche sans les attendre, et sans elles si l'index ne répond pas.
-  useEffect(() => {
-    let cancelled = false;
-    const cacheKey = `movix_anime_site_rows_v1_${tmdbLanguage}`;
-
-    try {
-      const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null') as (SiteShows & { at?: number }) | null;
-      if (cached && Date.now() - Number(cached.at) < DATA_CACHE_TTL_MS
-        && Array.isArray(cached.airing) && Array.isArray(cached.dubbed)) {
-        setSiteShows({ airing: cached.airing, dubbed: cached.dubbed });
+      const cached = readHomeCache(homeCacheKey);
+      if (cached) {
+        applyHome(cached);
+        setLoading(false);
         return;
       }
-    } catch {
-      // Cache illisible : on recharge.
-    }
 
-    loadSiteShows(tmdbLanguage).then((rows) => {
+      const home = await fetchAnimeHome(tmdbLanguage);
       if (cancelled) {
         return;
       }
-
-      setSiteShows(rows);
-      // Un résultat vide n'est pas gardé : l'index peut juste être en retard.
-      if (rows.airing.length > 0 || rows.dubbed.length > 0) {
-        try {
-          sessionStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), ...rows }));
-        } catch {
-          // Ignore cache write failures.
-        }
+      if (home) {
+        applyHome(home);
+        writeHomeCache(homeCacheKey, home);
+        setLoading(false);
+        return;
       }
-    });
 
+      // Les rangées du catalogue n'attendent pas : la page s'affiche sans elles.
+      const siteRowsTask = loadSiteShows(tmdbLanguage);
+      try {
+        const { shows, genrePosters } = await loadAnimeShowsFromTmdb(tmdbLanguage);
+        if (cancelled) {
+          return;
+        }
+        applyShows(shows);
+        setGenreImages(genrePosters);
+        setLoading(false);
+
+        const siteRows = await siteRowsTask;
+        if (cancelled) {
+          return;
+        }
+        setSiteShows(siteRows);
+        writeHomeCache(homeCacheKey, { language: tmdbLanguage, updatedAt: Date.now(), shows, genrePosters, siteRows });
+      } catch (fetchError) {
+        if (cancelled) {
+          return;
+        }
+        console.error('Error fetching anime shows:', fetchError);
+        setError(t('home.errorLoadingData'));
+        setLoading(false);
+      }
+    };
+
+    load();
     return () => {
       cancelled = true;
     };
-  }, [tmdbLanguage]);
+  }, [applyShows, homeCacheKey, t, tmdbLanguage]);
 
   const siteRows = useMemo<Category[]>(() => [
     { id: 'anime-airing-on-site', title: t('animePage.airingOnSite'), items: siteShows.airing },
     { id: 'anime-recent-dubbed', title: t('animePage.recentDubbed'), items: siteShows.dubbed },
   ].filter((row) => row.items.length >= SITE_ROW_MIN_ITEMS), [siteShows, t]);
-
-  useEffect(() => {
-    const loadGenreImages = async () => {
-      try {
-        const cachedImages = sessionStorage.getItem(genreImageCacheKey);
-        const cachedTimestamp = sessionStorage.getItem(genreImageCacheTsKey);
-
-        if (cachedImages && cachedTimestamp && (Date.now() - Number(cachedTimestamp)) < ONE_DAY_MS) {
-          setGenreImages(JSON.parse(cachedImages));
-          return;
-        }
-
-        const animeKeywordId = await resolveTmdbKeywordId('anime', tmdbLanguage);
-        const imageEntries = await Promise.all(
-          ANIME_GENRE_CONFIG.map(async (genre) => {
-            try {
-              const response = await axios.get('https://api.themoviedb.org/3/discover/tv', {
-                params: buildAnimeDiscoverParams(tmdbLanguage, animeKeywordId, {
-                  with_genres: genre.discoverGenres,
-                  page: 1,
-                }),
-              });
-
-              const candidateShows = Array.isArray(response.data?.results)
-                ? response.data.results.filter((show: AnimeShow) => show.backdrop_path || show.poster_path)
-                : [];
-              const safeCandidateShows = await filterMatureAnime(candidateShows);
-              const firstVisual = safeCandidateShows[0] || null;
-              const imagePath = firstVisual?.backdrop_path || firstVisual?.poster_path || '';
-
-              return [genre.id, imagePath ? `https://image.tmdb.org/t/p/w780${imagePath}` : undefined] as const;
-            } catch {
-              return [genre.id, undefined] as const;
-            }
-          }),
-        );
-
-        const nextImages = Object.fromEntries(imageEntries);
-        setGenreImages(nextImages);
-        sessionStorage.setItem(genreImageCacheKey, JSON.stringify(nextImages));
-        sessionStorage.setItem(genreImageCacheTsKey, Date.now().toString());
-      } catch {
-        // Ignore genre image loading failures.
-      }
-    };
-
-    loadGenreImages();
-  }, [genreImageCacheKey, genreImageCacheTsKey, tmdbLanguage]);
 
   useEffect(() => {
     document.title = `${t('animePage.title')} - Movix`;

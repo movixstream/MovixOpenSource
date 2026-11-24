@@ -241,27 +241,37 @@ async function enrichWithTMDBData(contents) {
 /**
  * Middleware to verify JWT token
  */
-const verifyToken = (req, res, next) => {
+let _getAuthIfValid = null;
+function getAuthIfValid(req) {
+    if (!_getAuthIfValid) _getAuthIfValid = require('./middleware/auth').getAuthIfValid;
+    return _getAuthIfValid(req);
+}
+
+const verifyToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) {
-        // If no token, check if we can proceed without it (e.g. for simple tracking?)
-        // But user asked for verification "like other routes", so we enforce it.
-        // However, wrapped tracker might not have header set if useWrappedTracker uses standard fetch without setting headers.
-        // Let's check useWrappedTracker.ts... It uses fetch without custom headers?
-        // Wait, I need to check useWrappedTracker.ts. 
-        // If useWrappedTracker doesn't send Authorization header, this will break tracking.
         return res.status(401).json({ success: false, error: 'Access denied. No token provided.' });
     }
 
+    let decoded;
     try {
-        const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-        req.user = decoded;
-        next();
+        decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     } catch (error) {
         return res.status(403).json({ success: false, error: 'Invalid token.' });
     }
+
+    // La signature seule ne suffit pas : une session supprimée (déconnexion,
+    // « supprimer cet appareil ») doit couper aussi le Wrapped et le
+    // parrainage qu'il crédite, comme sur les autres routes.
+    const auth = await getAuthIfValid(req).catch(() => null);
+    if (!auth || String(auth.userId) !== String(decoded.sub)) {
+        return res.status(401).json({ success: false, error: 'Session invalide.' });
+    }
+
+    req.user = decoded;
+    next();
 };
 
 /**

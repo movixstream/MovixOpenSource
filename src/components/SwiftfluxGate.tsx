@@ -11,8 +11,11 @@
 // « Publicités » de l'admin). Emplacement inactif ou aucune pub pour
 // l'audience du visiteur = étape sautée, la porte commence à Turnstile.
 //
-// Vient ensuite Turnstile, obligatoire pour tout le monde (hors dispense
-// admin) : c'est lui, et lui seul, qui débloque l'URL du fichier côté serveur.
+// Vient ensuite Turnstile, obligatoire pour tout le monde : c'est lui, et lui
+// seul, qui débloque l'URL du fichier côté serveur. D'abord en invisible (jeton
+// souvent préparé pendant l'écran de chargement, sinon demandé ici sans rien
+// afficher) ; la case visible n'arrive qu'en plan B, quand Cloudflare refuse
+// l'invisible (VPN, navigateur inhabituel…) ou que le serveur rejette son jeton.
 // Sans cette étape, `/mp4/resolve` serait un robinet à liens directs sur le
 // catalogue du partenaire, ouvert à n'importe quel script.
 //
@@ -28,6 +31,7 @@ import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ExternalLink, Loader2, ShieldCheck, X } from 'lucide-react';
 
 import TurnstileWidget from './TurnstileWidget';
+import { useSwiftfluxTokenPrefetch } from '@/hooks/useSwiftfluxTokenPrefetch';
 import { Button } from './ui/button';
 import { getOverlayPortalRoot } from '../utils/overlayPortal';
 import { isUserVip } from '../utils/vipUtils';
@@ -39,6 +43,7 @@ import {
 } from '../services/swiftfluxService';
 
 type GateStep = 'ad' | 'verify' | 'resolving' | 'error';
+type VerifyMode = 'invisible' | 'visible';
 
 interface SwiftfluxGateProps {
   /** Identité du contenu à débloquer. Le jeton Turnstile est ajouté ici. */
@@ -46,9 +51,11 @@ interface SwiftfluxGateProps {
   onResolved: (playback: SwiftfluxPlayback) => void;
   /** Croix, Échap ou clic sur le voile. Ce qui jouait derrière reprend la main. */
   onClose: () => void;
+  /** Jeton invisible préparé pendant le chargement de la page, s'il y en a un. */
+  takePrefetchedToken?: () => string | null;
 }
 
-const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onClose }) => {
+const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onClose, takePrefetchedToken }) => {
   const { t } = useTranslation();
   // Lu une fois au montage : un changement de statut VIP ou de config des pubs
   // en cours de porte n'a pas à faire disparaître l'étape sous le doigt de
@@ -56,6 +63,10 @@ const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onCl
   const [skipAd] = useState(() => isUserVip() || !hasAdToOpen('swiftflux'));
   const [step, setStep] = useState<GateStep>(() => (skipAd ? 'verify' : 'ad'));
   const [token, setToken] = useState('');
+  const [verifyMode, setVerifyMode] = useState<VerifyMode>('invisible');
+  const { fetchFresh } = useSwiftfluxTokenPrefetch();
+  // Une tentative invisible par passage dans l'étape : `retry` la réarme.
+  const invisibleTriedRef = useRef(false);
   const [error, setError] = useState('');
   const [resetSignal, setResetSignal] = useState(0);
   // Laisse le fondu de sortie se jouer avant de rendre la main à la page.
@@ -89,14 +100,21 @@ const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onCl
     setStep('verify');
   }, []);
 
-  const resolve = useCallback(async (verifiedToken: string) => {
+  const resolve = useCallback(async (verifiedToken: string, kind: VerifyMode) => {
     if (resolvingRef.current) return;
     resolvingRef.current = true;
     setStep('resolving');
     setError('');
     try {
-      onResolved(await resolveSwiftfluxPlayback({ ...request, turnstileToken: verifiedToken }));
+      onResolved(await resolveSwiftfluxPlayback({ ...request, turnstileToken: verifiedToken, turnstileKind: kind }));
     } catch (err) {
+      if (kind === 'invisible') {
+        // Jeton invisible refusé (expiré, serveur pas encore à jour…) : la
+        // case visible prend le relais, sans message d'erreur.
+        setVerifyMode('visible');
+        setStep('verify');
+        return;
+      }
       setError(err instanceof Error ? err.message : t('watch.swiftflux.genericError'));
       setStep('error');
       setToken('');
@@ -106,17 +124,37 @@ const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onCl
     }
   }, [onResolved, request, t]);
 
-  // Le jeton arrive de façon asynchrone (widget résolu ou dispense admin) : on
-  // enchaîne dès qu'il est là, sans bouton intermédiaire à cliquer.
+  // Vérification invisible : le jeton préparé par la page, sinon un neuf.
+  // Rien ne s'affiche à part « Préparation de SwiftFlux ».
   useEffect(() => {
-    if (step !== 'verify' || !token) return;
-    void resolve(token);
-  }, [resolve, step, token]);
+    if (step !== 'verify' || verifyMode !== 'invisible' || invisibleTriedRef.current) return undefined;
+    invisibleTriedRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      const invisibleToken = takePrefetchedToken?.() ?? await fetchFresh();
+      if (cancelled) return;
+      if (invisibleToken) void resolve(invisibleToken, 'invisible');
+      else setVerifyMode('visible');
+    })();
+    return () => { cancelled = true; };
+  }, [fetchFresh, resolve, step, takePrefetchedToken, verifyMode]);
+
+  // Plan B : le jeton de la case arrive de façon asynchrone, on enchaîne dès
+  // qu'il est là, sans bouton intermédiaire à cliquer.
+  useEffect(() => {
+    if (step !== 'verify' || verifyMode !== 'visible' || !token) return;
+    void resolve(token, 'visible');
+  }, [resolve, step, token, verifyMode]);
 
   const retry = useCallback(() => {
     setError('');
+    setToken('');
+    setVerifyMode('invisible');
+    invisibleTriedRef.current = false;
     setStep(skipAd ? 'verify' : 'ad');
   }, [skipAd]);
+
+  const invisiblePending = step === 'verify' && verifyMode === 'invisible';
 
   const StepIcon = step === 'ad'
     ? ExternalLink
@@ -129,7 +167,7 @@ const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onCl
   const iconClass = step === 'ad'
     ? 'text-indigo-400'
     : step === 'verify'
-      ? 'text-emerald-400'
+      ? (invisiblePending ? 'text-stone-200 animate-pulse-soft' : 'text-amber-300')
       : step === 'resolving'
         ? 'text-indigo-400 animate-spin'
         : 'text-amber-400';
@@ -137,7 +175,7 @@ const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onCl
   const title = step === 'ad'
     ? t('watch.swiftflux.adTitle')
     : step === 'verify'
-      ? t('watch.swiftflux.verifyTitle')
+      ? (invisiblePending ? t('watch.swiftflux.preparingTitle') : t('watch.swiftflux.verifyTitle'))
       : step === 'resolving'
         ? t('watch.swiftflux.resolvingTitle')
         : t('watch.swiftflux.errorTitle');
@@ -145,7 +183,7 @@ const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onCl
   const description = step === 'ad'
     ? t('watch.swiftflux.adDescription')
     : step === 'verify'
-      ? t('watch.swiftflux.verifyDescription')
+      ? (invisiblePending ? t('watch.swiftflux.preparingDescription') : t('watch.swiftflux.verifyDescription'))
       : step === 'resolving'
         ? t('watch.swiftflux.resolvingDescription')
         : error || t('watch.swiftflux.genericError');
@@ -203,7 +241,13 @@ const SwiftfluxGate: React.FC<SwiftfluxGateProps> = ({ request, onResolved, onCl
                 </div>
               )}
 
-              {step === 'verify' && (
+              {invisiblePending && (
+                <div className="relative mx-auto h-[3px] w-full max-w-[260px] overflow-hidden rounded-full bg-white/10" aria-hidden="true">
+                  <div className="absolute inset-y-0 left-0 w-2/5 rounded-full bg-stone-100 motion-safe:animate-[swiftflux-slide_1.6s_cubic-bezier(.45,0,.2,1)_infinite]" />
+                </div>
+              )}
+
+              {step === 'verify' && verifyMode === 'visible' && (
                 <div className="flex justify-center">
                   <TurnstileWidget
                     onTokenChange={setToken}

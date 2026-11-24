@@ -1,6 +1,6 @@
 import { extractMediaColor, HERO_GRADIENT_POSITIONS, isMediaColorAlgorithm, MEDIA_COLOR_ALGORITHMS, normalizeMediaColor, type HeroGradientCardinal, type MediaColorAlgorithm } from '@/utils/mediaColors';
 
-const CACHE_KEY = 'movix_media_colors_v8';
+const CACHE_KEY = 'movix_media_colors_v9';
 const CACHE_LIMIT = 256;
 
 export interface MediaColorCacheEntry {

@@ -2,6 +2,7 @@ import React from 'react';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { Filter } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { genreSearchHref } from '@/utils/genreSearchLink';
 
 // Genre IDs from TMDB
 const GENRES: Record<number, string> = {
@@ -108,7 +109,7 @@ const GenreFilter: React.FC<GenreFilterProps> = ({
           {displayGenres.map(([id, name]) => (
             <Link
               key={id}
-              to={`/genre/${mediaType}/${id}`}
+              to={genreSearchHref(mediaType, id)}
               className="relative h-24 rounded-lg overflow-hidden group"
             >
               <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-all z-10"></div>
@@ -138,7 +139,7 @@ const GenreFilter: React.FC<GenreFilterProps> = ({
         {displayGenres.map(([id, name]) => (
           <Link
             key={id}
-            to={`/genre/${mediaType}/${id}`}
+            to={genreSearchHref(mediaType, id)}
             className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-full text-sm transition-colors"
           >
             {name}

@@ -53,11 +53,63 @@ const SHARED_LIST_MODERATION_SCHEMA = {
   }
 };
 
+// === Empreinte du contenu modéré ===
+// Le nom de la liste, ses titres et le pseudo viennent du fichier du profil,
+// que /api/sync réécrit à volonté. Une liste validée pouvait donc être
+// renommée ensuite et rester au catalogue sans nouvelle modération. On retient
+// l'empreinte du contenu au moment où l'IA (ou un admin) l'a validé ; si le
+// contenu affiché ne correspond plus, la liste quitte le catalogue le temps
+// d'être remodérée.
+const MODERATION_ITEMS_LIMIT = 200;
+const MODERATION_HASH_KEY = (shareId) => `sharedList:modhash:${shareId}`;
+const MODERATION_LOCK_KEY = (shareId) => `sharedList:modlock:${shareId}`;
+const MODERATION_LOCK_SECONDS = 300;
+
+function itemLabel(item) {
+  return String(item?.title || item?.name || 'Sans titre');
+}
+
+function sharedListFingerprint(username, listName, items) {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    u: String(username || ''),
+    n: String(listName || ''),
+    t: (items || []).map(itemLabel),
+  })).digest('hex');
+}
+
+async function rememberModeratedContent(shareId, fingerprint) {
+  try { await redis.set(MODERATION_HASH_KEY(shareId), fingerprint); } catch { /* Redis indisponible */ }
+}
+
+/**
+ * true si le contenu affiché est celui qui a été validé. Sans clé
+ * OpenRouter, il n'y a pas de modération possible : on garde l'ancien
+ * comportement plutôt que de vider le catalogue.
+ */
+async function isModeratedContent(shareId, data) {
+  if (!OPENROUTER_API_KEY) return true;
+  const fingerprint = sharedListFingerprint(data.username, data.listName, data.items);
+  let stored = null;
+  try { stored = await redis.get(MODERATION_HASH_KEY(shareId)); } catch { return true; }
+  if (stored === fingerprint) return true;
+
+  // Une seule remodération à la fois par liste.
+  let locked = false;
+  try {
+    locked = await redis.set(MODERATION_LOCK_KEY(shareId), '1', 'EX', MODERATION_LOCK_SECONDS, 'NX') === 'OK';
+  } catch { /* Redis indisponible */ }
+  if (locked) {
+    moderateSharedListWithAI(shareId, data.listName, data.items, data.username)
+      .catch(err => console.error('Erreur remodération IA liste (non bloquant):', err));
+  }
+  return false;
+}
+
 // Fonction de modération des listes partagées avec Claude Haiku 5.5 via OpenRouter (exécutée en background)
 async function moderateSharedListWithAI(shareId, listName, items, username) {
   try {
     // Construire un résumé des items de la liste
-    const itemsSummary = (items || []).slice(0, 30).map(i => `${i.title || i.name || 'Sans titre'} (${i.type || 'inconnu'})`).join(', ');
+    const itemsSummary = (items || []).slice(0, MODERATION_ITEMS_LIMIT).map(i => `${itemLabel(i)} (${i.type || 'inconnu'})`).join(', ');
 
     const prompt = `Tu es un modérateur de contenu. Analyse le nom de la liste, le pseudo de l'utilisateur, et le contenu de la liste partagée suivants et réponds UNIQUEMENT par un JSON valide.
 
@@ -148,6 +200,9 @@ Réponds UNIQUEMENT avec ce format JSON (sans markdown, sans backticks):
       }
 
       console.log(`✅ Liste partagée ID ${shareId} retirée du catalogue pour modération`);
+    } else {
+      // Seule une vraie réponse « rien à signaler » valide ce contenu.
+      await rememberModeratedContent(shareId, sharedListFingerprint(username, listName, items));
     }
 
     return moderationResult;
@@ -414,6 +469,16 @@ async function getProfileCustomLists(userId, userType, profileId) {
 // === Helper: générer un code de partage unique ===
 function generateShareCode() {
   return crypto.randomBytes(6).toString('base64url').slice(0, 10);
+}
+
+// === Helper: lire la liste partagée depuis le cache Redis ===
+async function readCachedSharedList(shareCode) {
+  try {
+    const raw = await redis.get(`sharedList:${shareCode}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
 }
 
 // === Helper: construire le cache de la liste partagée et le mettre dans Redis ===
@@ -700,7 +765,7 @@ router.get('/catalog', async (req, res) => {
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(100, limitRaw)) : 50;
 
     const rows = await dbAll(
-      'SELECT share_code, user_id, user_type, profile_id, list_id, created_at, updated_at, is_public_in_catalog FROM shared_lists WHERE is_public_in_catalog = 1 AND moderation_flagged = 0 ORDER BY updated_at DESC LIMIT ?',
+      'SELECT id, share_code, user_id, user_type, profile_id, list_id, created_at, updated_at, is_public_in_catalog FROM shared_lists WHERE is_public_in_catalog = 1 AND moderation_flagged = 0 ORDER BY updated_at DESC LIMIT ?',
       [limit]
     );
 
@@ -729,7 +794,9 @@ router.get('/catalog', async (req, res) => {
 
     const lists = (await Promise.all(
       rows.map(async (row) => {
-        const data = await buildAndCacheSharedList(
+        // Le cache Redis (10 min) d'abord : avant, chaque appel public
+        // relisait sur disque jusqu'à 100 listes et leurs profils.
+        const data = await readCachedSharedList(row.share_code) || await buildAndCacheSharedList(
           row.share_code,
           row.user_id,
           row.user_type,
@@ -739,6 +806,7 @@ router.get('/catalog', async (req, res) => {
         );
 
         if (!data) return null;
+        if (!(await isModeratedContent(row.id, data))) return null;
 
         const likeStats = likeStatsByShareCode.get(String(row.share_code)) || {
           likesCount: 0,
@@ -921,7 +989,7 @@ router.put('/admin/moderated/:id/approve', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const row = await dbGet('SELECT share_code FROM shared_lists WHERE id = ? AND moderation_flagged = 1', [id]);
+    const row = await dbGet('SELECT share_code, user_id, user_type, profile_id, list_id FROM shared_lists WHERE id = ? AND moderation_flagged = 1', [id]);
     if (!row) {
       return res.status(404).json({ error: 'Liste modérée non trouvée' });
     }
@@ -932,8 +1000,13 @@ router.put('/admin/moderated/:id/approve', requireAdmin, async (req, res) => {
       [id]
     );
 
-    // Invalider le cache Redis pour forcer un rafraîchissement
+    // Reconstruire le cache et retenir le contenu que l'admin vient de
+    // valider : il ne sera pas remodéré tant qu'il ne change pas.
     try { await redis.del(`sharedList:${row.share_code}`); } catch { /* ignore */ }
+    const approved = await buildAndCacheSharedList(row.share_code, row.user_id, row.user_type, row.profile_id, row.list_id, true);
+    if (approved) {
+      await rememberModeratedContent(id, sharedListFingerprint(approved.username, approved.listName, approved.items));
+    }
 
     console.log(`✅ Liste partagée ID ${id} approuvée par admin (remise au catalogue)`);
     res.json({ success: true, message: 'Liste approuvée et remise au catalogue' });

@@ -1,9 +1,8 @@
-import 'bootstrap-icons/font/bootstrap-icons.min.css';
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback, memo } from 'react';
 import ReactCountryFlag from 'react-country-flag';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { Tv, Loader2, Radio, Search, Crown, Puzzle, ChevronDown, Lock, Globe, Wifi, Star, Smartphone } from 'lucide-react';
+import { Tv, Radio, Search, Crown, Puzzle, Lock, Globe, Wifi, Star, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 
 
@@ -14,14 +13,12 @@ import { isExtensionAvailable, fetchFromExtension } from '../utils/extensionProx
 import { isLiveTvSourceEnabled, subscribeToPrefsChanges, type LiveTvSourceKey } from '../utils/extractionPrefs';
 import LiveTVPlayer from '../components/LiveTVPlayer';
 import { Button } from '../components/ui/button';
-import { Badge } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useWrappedTracker } from '../hooks/useWrappedTracker';
 import AdFreePlayerAds from '../components/AdFreePlayerAds';
 import { hasAdToOpen } from '../services/monetizationConfig';
 import { isUserVip } from '../utils/authUtils';
-import { getVipHeaders } from '../utils/vipUtils';
 import { cn } from '../lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/tooltip';
 import { groupVavooChannels, type VavooChannelVariant } from '../utils/vavooChannelGroups';
@@ -73,20 +70,6 @@ interface Channel {
   _vavooVariants?: VavooChannelVariant[];
 }
 
-interface IptvCategory {
-  category_id: string;
-  category_name: string;
-  parent_id: number;
-}
-
-interface IptvStream {
-  stream_id: number;
-  name: string;
-  stream_icon: string | null;
-  epg_channel_id: string | null;
-  category_id: string;
-}
-
 interface LiveTVFavorite {
   key: string;
   source: string;
@@ -94,35 +77,21 @@ interface LiveTVFavorite {
   name: string;
   poster?: string | null;
   addedAt: string;
-  kind: 'channel' | 'iptv';
+  kind: 'channel';
   catalogId?: string;
-  categoryId?: string;
-}
-
-interface FavoriteIptvCategory {
-  id: string;
-  name: string;
-  addedAt: string;
 }
 
 const LIVE_TV_FAVORITES_STORAGE_KEY = 'live_tv_favorite_channels';
-const LIVE_TV_IPTV_CATEGORY_FAVORITES_STORAGE_KEY = 'live_tv_favorite_iptv_categories';
 
 const buildLiveTvFavoriteKey = (source: string, id: string | number): string => `${source}:${String(id)}`;
 
+// Les anciens favoris de la source IPTV Web (retirée) sont ignorés à la lecture.
 const readLiveTvFavorites = (): LiveTVFavorite[] => {
   try {
     const parsed = JSON.parse(localStorage.getItem(LIVE_TV_FAVORITES_STORAGE_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-const readFavoriteIptvCategories = (): FavoriteIptvCategory[] => {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(LIVE_TV_IPTV_CATEGORY_FAVORITES_STORAGE_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((favorite) => favorite && favorite.kind !== 'iptv' && favorite.source !== 'iptv')
+      : [];
   } catch {
     return [];
   }
@@ -184,7 +153,6 @@ const sourceDisplayNames: { [key: string]: string } = {
   'vavoo': 'Vavoo',
   'fctv': 'FCTV33',
   'streamed': 'Streamed',
-  'iptv': 'liveTV.iptvWebSource',
 };
 
 // Get source key from catalog ID
@@ -273,58 +241,6 @@ const FavoriteChannelButton: React.FC<FavoriteChannelButtonProps> = ({ active, a
   </Tooltip>
 );
 
-interface FavoriteInlineButtonProps {
-  active: boolean;
-  activeLabel: string;
-  inactiveLabel: string;
-  onToggle: (event: React.MouseEvent<HTMLButtonElement>) => void;
-  className?: string;
-  iconClassName?: string;
-}
-
-const FavoriteInlineButton: React.FC<FavoriteInlineButtonProps> = ({
-  active,
-  activeLabel,
-  inactiveLabel,
-  onToggle,
-  className,
-  iconClassName,
-}) => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <motion.button
-        type="button"
-        onClick={onToggle}
-        whileTap={{ scale: 0.72 }}
-        className={cn(
-          'group/icon flex items-center justify-center rounded-full transition-all duration-200',
-          active
-            ? 'bg-yellow-500/15 text-yellow-400'
-            : 'bg-white/[0.04] text-white/35 hover:bg-white/[0.08] hover:text-white/70',
-          className
-        )}
-      >
-        <motion.div
-          key={active ? 'on' : 'off'}
-          initial={{ scale: 0.3, rotate: -45 }}
-          animate={{ scale: 1, rotate: 0 }}
-          transition={{ type: 'spring', stiffness: 500, damping: 15 }}
-        >
-          <Star
-            className={cn(
-              'w-3.5 h-3.5 transition-[color,opacity] duration-150',
-              active ? 'text-yellow-400' : 'text-white opacity-35 group-hover/icon:opacity-70',
-              iconClassName,
-            )}
-            fill={active ? 'currentColor' : 'none'}
-          />
-        </motion.div>
-      </motion.button>
-    </TooltipTrigger>
-    <TooltipContent>{active ? activeLabel : inactiveLabel}</TooltipContent>
-  </Tooltip>
-);
-
 const LiveTVSectionDivider: React.FC<{ title: string; count: number }> = ({ title, count }) => (
   <div className="flex items-center gap-3 my-5">
     <div className="h-px flex-1 bg-white/10" />
@@ -336,10 +252,10 @@ const LiveTVSectionDivider: React.FC<{ title: string; count: number }> = ({ titl
   </div>
 );
 
-// Tailwind-aligned breakpoints for the IPTV grid. Mirrors the className
+// Tailwind-aligned breakpoints for the channel grid. Mirrors the className
 // `grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6`.
-const IPTV_GRID_GAP_PX = 12;
-const useResponsiveIptvColumns = () => {
+const CHANNEL_GRID_GAP_PX = 12;
+const useResponsiveGridColumns = () => {
   const compute = () => {
     if (typeof window === 'undefined') return 2;
     const w = window.innerWidth;
@@ -358,10 +274,10 @@ const useResponsiveIptvColumns = () => {
   return columns;
 };
 
-// Window-scrolled virtualizer for IPTV regular grid. Renders only visible
-// rows; without this, a category like France (~3000 streams) creates ~45k DOM
-// nodes and crashes the tab. — perf
-const VirtualizedIptvGrid = <T,>({
+// Window-scrolled virtualizer for large channel grids. Renders only visible
+// rows; without this, a category with thousands of channels creates tens of
+// thousands of DOM nodes and crashes the tab. — perf
+const VirtualizedChannelGrid = <T,>({
   items,
   columns,
   getKey,
@@ -412,8 +328,8 @@ const VirtualizedIptvGrid = <T,>({
               transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
               display: 'grid',
               gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-              gap: `${IPTV_GRID_GAP_PX}px`,
-              paddingBottom: `${IPTV_GRID_GAP_PX}px`,
+              gap: `${CHANNEL_GRID_GAP_PX}px`,
+              paddingBottom: `${CHANNEL_GRID_GAP_PX}px`,
             }}
           >
             {rowItems.map((item, colIdx) => (
@@ -583,11 +499,10 @@ LiveTVPlayback.displayName = 'LiveTVPlayback';
 interface LiveTVLaunchTarget {
   source: string;
   targetId: string;
-  kind: 'channel' | 'iptv';
+  kind: 'channel';
   name?: string;
   poster?: string | null;
   catalogId?: string;
-  categoryId?: string;
 }
 
 // Seul ce petit composant écoute le routeur. Le popstate qui ferme un lecteur
@@ -598,7 +513,7 @@ const LiveTVLaunchRequest = ({ onLaunch }: { onLaunch: (target: LiveTVLaunchTarg
     const source = searchParams.get('source')?.trim();
     const targetId = searchParams.get('targetId')?.trim();
     const kind = searchParams.get('kind');
-    if (!source || !targetId || (kind !== 'channel' && kind !== 'iptv')) return;
+    if (!source || !targetId || kind !== 'channel') return;
 
     const storedFavorite = readLiveTvFavorites().find((favorite) => (
       favorite.source === source && favorite.id === targetId && favorite.kind === kind
@@ -610,7 +525,6 @@ const LiveTVLaunchRequest = ({ onLaunch }: { onLaunch: (target: LiveTVLaunchTarg
       name: storedFavorite?.name,
       poster: storedFavorite?.poster ?? null,
       catalogId: searchParams.get('catalogId')?.trim() || storedFavorite?.catalogId,
-      categoryId: searchParams.get('categoryId')?.trim() || storedFavorite?.categoryId,
     });
     setSearchParams({}, { replace: true });
   }, [onLaunch, searchParams, setSearchParams]);
@@ -629,34 +543,12 @@ const LiveTV: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   // Countdown ticking is now per-card via the <TimeRemaining/> component above.
 
-  // IPTV Web states
-  const [iptvCategories, setIptvCategories] = useState<IptvCategory[]>([]);
-  const [iptvStreams, setIptvStreams] = useState<IptvStream[]>([]);
-  const [selectedIptvCategory, setSelectedIptvCategory] = useState<string>('');
-  const [iptvCategorySearch, setIptvCategorySearch] = useState('');
-  const [loadingIptvCategories, setLoadingIptvCategories] = useState(false);
-  const [loadingIptvStreams, setLoadingIptvStreams] = useState(false);
-  const [iptvCategoryDropdownOpen, setIptvCategoryDropdownOpen] = useState(false);
-  const iptvDropdownRef = useRef<HTMLDivElement>(null);
   const [favoriteChannels, setFavoriteChannels] = useState<LiveTVFavorite[]>(() => readLiveTvFavorites());
-  const [favoriteIptvCategories, setFavoriteIptvCategories] = useState<FavoriteIptvCategory[]>(() => readFavoriteIptvCategories());
   const [, setPrefsVersion] = useState(0);
   useEffect(() => subscribeToPrefsChanges(() => setPrefsVersion((v) => v + 1)), []);
   const [launchTarget, setLaunchTarget] = useState<LiveTVLaunchTarget | null>(null);
   const lastLaunchSelectionKeyRef = useRef<string | null>(null);
   const activeLaunchKeyRef = useRef<string | null>(null);
-
-  // Close IPTV dropdown on outside click
-  useEffect(() => {
-    if (!iptvCategoryDropdownOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (iptvDropdownRef.current && !iptvDropdownRef.current.contains(e.target as Node)) {
-        setIptvCategoryDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [iptvCategoryDropdownOpen]);
 
   // Filter catalogs by selected source
   const filteredCatalogs = catalogs.filter((catalog) => {
@@ -672,7 +564,6 @@ const LiveTV: React.FC = () => {
 
   // Access model:
   // - northlive is FREE (iframe embed, no extension/VIP) — always accessible.
-  // - iptv is VIP-only.
   // - every other source needs full access (VIP OR extension).
   const isVip = isUserVip();
   const hasExtension = isExtensionAvailable();
@@ -680,7 +571,7 @@ const LiveTV: React.FC = () => {
 
   const isSourceFree = (source: string) => source === 'northlive' || source === 'vavoo' || source === 'streamed';
   const isSourceAccessible = (source: string) =>
-    isSourceFree(source) ? true : source === 'iptv' ? isVip : hasFullAccess;
+    isSourceFree(source) ? true : hasFullAccess;
   const hasAccess = isSourceAccessible(selectedSource);
 
   const groupedChannels = useMemo(
@@ -709,18 +600,10 @@ const LiveTV: React.FC = () => {
     [favoriteChannels]
   );
 
-  const favoriteIptvCategoryIds = useMemo(
-    () => new Set(favoriteIptvCategories.map((category) => category.id)),
-    [favoriteIptvCategories]
-  );
-
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
       if (event.key === LIVE_TV_FAVORITES_STORAGE_KEY) {
         setFavoriteChannels(readLiveTvFavorites());
-      }
-      if (event.key === LIVE_TV_IPTV_CATEGORY_FAVORITES_STORAGE_KEY) {
-        setFavoriteIptvCategories(readFavoriteIptvCategories());
       }
     };
 
@@ -736,19 +619,6 @@ const LiveTV: React.FC = () => {
       // Ignore storage errors
     }
   }, []);
-
-  const persistFavoriteIptvCategories = useCallback((nextFavorites: FavoriteIptvCategory[]) => {
-    setFavoriteIptvCategories(nextFavorites);
-    try {
-      localStorage.setItem(LIVE_TV_IPTV_CATEGORY_FAVORITES_STORAGE_KEY, JSON.stringify(nextFavorites));
-    } catch {
-      // Ignore storage errors
-    }
-  }, []);
-
-  const isFavoriteChannel = useCallback((source: string, id: string | number) => {
-    return favoriteChannelKeys.has(buildLiveTvFavoriteKey(source, id));
-  }, [favoriteChannelKeys]);
 
   const getFavoriteVariantId = useCallback((source: string, channel: Channel): string | null => {
     const channelIds = channel._vavooVariants?.map((variant) => variant.id) || [channel.id];
@@ -766,9 +636,8 @@ const LiveTV: React.FC = () => {
       id: string | number;
       name: string;
       poster?: string | null;
-      kind: 'channel' | 'iptv';
+      kind: 'channel';
       catalogId?: string;
-      categoryId?: string;
     }
   ) => {
     event.preventDefault();
@@ -795,46 +664,12 @@ const LiveTV: React.FC = () => {
         addedAt: new Date().toISOString(),
         kind: payload.kind,
         catalogId: payload.catalogId,
-        categoryId: payload.categoryId,
       }
     ];
 
     persistFavoriteChannels(nextFavorites);
     toast.success(`${payload.name} ${t('liveTV.addedToFavoritesToast')}`, { duration: 2000 });
   }, [favoriteChannelKeys, favoriteChannels, persistFavoriteChannels, t]);
-
-  const isFavoriteIptvCategory = useCallback((categoryId: string) => {
-    return favoriteIptvCategoryIds.has(categoryId);
-  }, [favoriteIptvCategoryIds]);
-
-  const toggleFavoriteIptvCategory = useCallback((
-    event: React.MouseEvent<HTMLButtonElement>,
-    category: Pick<IptvCategory, 'category_id' | 'category_name'>
-  ) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const exists = favoriteIptvCategoryIds.has(category.category_id);
-
-    if (exists) {
-      const nextFavorites = favoriteIptvCategories.filter((favorite) => favorite.id !== category.category_id);
-      persistFavoriteIptvCategories(nextFavorites);
-      toast.success(`${category.category_name} ${t('liveTV.removedCategoryFromFavoritesToast')}`, { duration: 2000 });
-      return;
-    }
-
-    const nextFavorites = [
-      ...favoriteIptvCategories,
-      {
-        id: category.category_id,
-        name: category.category_name,
-        addedAt: new Date().toISOString(),
-      }
-    ];
-
-    persistFavoriteIptvCategories(nextFavorites);
-    toast.success(`${category.category_name} ${t('liveTV.addedCategoryToFavoritesToast')}`, { duration: 2000 });
-  }, [favoriteIptvCategoryIds, favoriteIptvCategories, persistFavoriteIptvCategories, t]);
 
   // API Base URL (utilise notre backend)
   const API_BASE = import.meta.env.VITE_MAIN_API || 'http://localhost:25565';
@@ -930,24 +765,13 @@ const LiveTV: React.FC = () => {
   useEffect(() => {
     if (!launchTarget || catalogs.length === 0) return;
 
-    const launchSelectionKey = `${launchTarget.source}:${launchTarget.targetId}:${launchTarget.kind}:${launchTarget.catalogId || ''}:${launchTarget.categoryId || ''}`;
+    const launchSelectionKey = `${launchTarget.source}:${launchTarget.targetId}:${launchTarget.kind}:${launchTarget.catalogId || ''}`;
     if (launchSelectionKey === lastLaunchSelectionKeyRef.current) {
       return;
     }
 
     const sourceAccessible = isSourceAccessible(launchTarget.source);
     if (!sourceAccessible) {
-      return;
-    }
-
-    if (launchTarget.source === 'iptv') {
-      setSelectedSource('iptv');
-      setSelectedCatalog('');
-      setChannels([]);
-      if (launchTarget.categoryId) {
-        setSelectedIptvCategory(launchTarget.categoryId);
-      }
-      lastLaunchSelectionKeyRef.current = launchSelectionKey;
       return;
     }
 
@@ -960,9 +784,8 @@ const LiveTV: React.FC = () => {
 
     setSelectedSource(launchTarget.source);
     setSelectedCatalog(preferredCatalog.id);
-    setSelectedIptvCategory('');
     lastLaunchSelectionKeyRef.current = launchSelectionKey;
-  }, [catalogs, hasFullAccess, isVip, launchTarget]);
+  }, [catalogs, hasFullAccess, launchTarget]);
 
   // Fetch channels when catalog changes
   useEffect(() => {
@@ -996,57 +819,6 @@ const LiveTV: React.FC = () => {
 
     fetchChannels();
   }, [selectedCatalog, hasAccess]);
-
-  // Fetch IPTV categories when IPTV source is selected
-  useEffect(() => {
-    if (selectedSource !== 'iptv' || !isVip) return;
-    if (iptvCategories.length > 0) return; // already loaded
-
-    const fetchIptvCategories = async () => {
-      try {
-        setLoadingIptvCategories(true);
-        const response = await fetch(`${API_BASE}/api/livetv/iptv/categories`, {
-          headers: { ...getVipHeaders() }
-        });
-        if (!response.ok) throw new Error(t('liveTV.loadCategoriesError'));
-        const data = await response.json();
-        setIptvCategories(data.categories || []);
-      } catch (err) {
-        console.error('Error fetching IPTV categories:', err);
-        setError(err instanceof Error ? err.message : t('liveTV.loadingError'));
-      } finally {
-        setLoadingIptvCategories(false);
-      }
-    };
-
-    fetchIptvCategories();
-  }, [selectedSource, isVip]);
-
-  // Fetch IPTV streams when category changes
-  useEffect(() => {
-    if (selectedSource !== 'iptv' || !selectedIptvCategory || !isVip) return;
-
-    const fetchIptvStreams = async () => {
-      try {
-        setLoadingIptvStreams(true);
-        setIptvStreams([]);
-        const response = await fetch(`${API_BASE}/api/livetv/iptv/streams/${selectedIptvCategory}`, {
-          headers: { ...getVipHeaders() }
-        });
-        if (!response.ok) throw new Error(t('liveTV.loadChannelsError'));
-        const data = await response.json();
-        setIptvStreams(data.streams || []);
-      } catch (err) {
-        console.error('Error fetching IPTV streams:', err);
-        setError(err instanceof Error ? err.message : t('liveTV.loadingError'));
-        setIptvStreams([]);
-      } finally {
-        setLoadingIptvStreams(false);
-      }
-    };
-
-    fetchIptvStreams();
-  }, [selectedIptvCategory, isVip]);
 
   const playbackRef = useRef<LiveTVPlaybackHandle>(null);
   const openPlayer = useCallback((channel: Channel) => playbackRef.current?.openPlayer(channel), []);
@@ -1108,54 +880,6 @@ const LiveTV: React.FC = () => {
     }
   }, [isVip, openPlayer]);
 
-  const handleIptvChannelClick = async (stream: IptvStream) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/livetv/iptv/stream-url/${stream.stream_id}`, {
-        headers: { ...getVipHeaders() }
-      });
-      if (!response.ok) throw new Error(t('liveTV.streamFetchError'));
-      const data = await response.json();
-      const streamUrl = data.streams?.[0]?.url;
-      if (streamUrl) {
-        // Créer un Channel virtuel pour le LiveTVPlayer
-        openPlayer({
-          id: `iptv_${stream.stream_id}`,
-          type: 'tv',
-          name: stream.name,
-          poster: stream.stream_icon || '',
-        });
-      }
-    } catch (err) {
-      console.error('Error getting IPTV stream URL:', err);
-      setError(err instanceof Error ? err.message : t('liveTV.loadingError'));
-    }
-  };
-
-  const openIptvFavoriteById = useCallback(async (
-    streamId: string | number,
-    options?: { name?: string; poster?: string | null }
-  ) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/livetv/iptv/stream-url/${streamId}`, {
-        headers: { ...getVipHeaders() }
-      });
-      if (!response.ok) throw new Error(t('liveTV.streamFetchError'));
-      const data = await response.json();
-      const streamUrl = data.streams?.[0]?.url;
-      if (streamUrl) {
-        openPlayer({
-          id: `iptv_${streamId}`,
-          type: 'tv',
-          name: options?.name || t('liveTV.iptvWebSource'),
-          poster: options?.poster || '',
-        });
-      }
-    } catch (err) {
-      console.error('Error getting IPTV stream URL:', err);
-      setError(err instanceof Error ? err.message : t('liveTV.loadingError'));
-    }
-  }, [API_BASE, openPlayer, t]);
-
   const resolveLaunchChannelTarget = useCallback(async (target: NonNullable<typeof launchTarget>) => {
     const sourceCatalogs = catalogs.filter((catalog) => getSourceKey(catalog.id) === target.source);
     if (sourceCatalogs.length === 0) {
@@ -1199,7 +923,7 @@ const LiveTV: React.FC = () => {
     // Une demande reçue dès le montage attend le manifeste avant résolution.
     if (!launchTarget || loadingCatalogs) return;
 
-    const launchKey = `${launchTarget.source}:${launchTarget.targetId}:${launchTarget.kind}:${launchTarget.catalogId || ''}:${launchTarget.categoryId || ''}`;
+    const launchKey = `${launchTarget.source}:${launchTarget.targetId}:${launchTarget.kind}:${launchTarget.catalogId || ''}`;
     if (activeLaunchKeyRef.current === launchKey) {
       return;
     }
@@ -1216,22 +940,6 @@ const LiveTV: React.FC = () => {
 
     const run = async () => {
       try {
-        if (launchTarget.kind === 'iptv') {
-          if (launchTarget.categoryId && launchTarget.categoryId !== selectedIptvCategory) {
-            setSelectedIptvCategory(launchTarget.categoryId);
-          }
-
-          await openIptvFavoriteById(launchTarget.targetId, {
-            name: launchTarget.name,
-            poster: launchTarget.poster,
-          });
-
-          if (!cancelled) {
-            setLaunchTarget(null);
-          }
-          return;
-        }
-
         const resolved = await resolveLaunchChannelTarget(launchTarget);
         if (cancelled) return;
 
@@ -1263,13 +971,10 @@ const LiveTV: React.FC = () => {
   }, [
     handleChannelClick,
     hasFullAccess,
-    isVip,
     launchTarget,
     loadingCatalogs,
-    openIptvFavoriteById,
     resolveLaunchChannelTarget,
     selectedCatalog,
-    selectedIptvCategory,
   ]);
 
   // Helper pour formater le nom du catalogue proprement
@@ -1393,34 +1098,21 @@ const LiveTV: React.FC = () => {
   const sourceIcons: Record<string, React.ReactNode> = {
     'fctv': <span className="text-sm leading-none">⚽</span>,
     'streamed': <span className="text-sm leading-none">🏟️</span>,
-    'iptv': <i className="bi bi-globe text-sm" />,
   };
-
-  // All sources for pill tabs (inject IPTV if VIP)
-  const allSources = useMemo(() => {
-    const sources = [...availableSources];
-    if (isVip && !sources.includes('iptv')) sources.push('iptv');
-    return sources;
-  }, [availableSources, isVip]);
 
   const handleSourceChange = (newSource: string) => {
     if (!isSourceAccessible(newSource)) return;
 
     setSelectedSource(newSource);
-    if (newSource === 'iptv') {
-      setSelectedCatalog('');
-      setChannels([]);
-    } else {
-      const firstCatalog = catalogs.find(c => getSourceKey(c.id) === newSource);
-      if (firstCatalog) setSelectedCatalog(firstCatalog.id);
-    }
+    const firstCatalog = catalogs.find(c => getSourceKey(c.id) === newSource);
+    if (firstCatalog) setSelectedCatalog(firstCatalog.id);
   };
 
   // Skeleton loader component
   const ChannelSkeleton = () => {
     const isEvent = selectedCatalog.startsWith('matches_') || selectedCatalog.startsWith('streamed_');
     const isNameOnly = isEvent || selectedCatalog.startsWith('northlive_');
-    const landscape = selectedSource === 'iptv' || isNameOnly;
+    const landscape = isNameOnly;
     return (
       <div className={channelGridClassName} aria-hidden="true">
         {Array.from({ length: 18 }, (_, index) => (
@@ -1434,7 +1126,7 @@ const LiveTV: React.FC = () => {
                 <Skeleton width="80%" height={16} containerClassName="w-full flex justify-center" baseColor="#2a2a2a" />
               </div>
             ) : (
-              <div className={cn('absolute inset-x-0 bottom-0', selectedSource === 'iptv' ? 'p-2 pt-6' : 'p-2.5 pt-8')}>
+              <div className="absolute inset-x-0 bottom-0 p-2.5 pt-8">
                 <Skeleton width="75%" height={16} baseColor="#2a2a2a" />
               </div>
             )}
@@ -1444,171 +1136,10 @@ const LiveTV: React.FC = () => {
     );
   };
 
-  // Filtered IPTV streams for search
-  const filteredIptvStreams = useMemo(
-    () => {
-      const normalizedSearchQuery = searchQuery.trim().toLowerCase();
-
-      return iptvStreams.filter((stream) => {
-        if (stream.name.includes('#')) {
-          return false;
-        }
-
-        return normalizedSearchQuery.length === 0 || stream.name.toLowerCase().includes(normalizedSearchQuery);
-      });
-    },
-    [iptvStreams, searchQuery]
-  );
-
-  const selectedIptvCategoryName = useMemo(() => {
-    if (!selectedIptvCategory) return '';
-    return (
-      iptvCategories.find((category) => category.category_id === selectedIptvCategory)?.category_name
-      || favoriteIptvCategories.find((category) => category.id === selectedIptvCategory)?.name
-      || ''
-    );
-  }, [favoriteIptvCategories, iptvCategories, selectedIptvCategory]);
-
-  const favoriteIptvCategoryShortcuts = useMemo(() => {
-    const categoriesMap = new Map(iptvCategories.map((category) => [category.category_id, category]));
-    return favoriteIptvCategories.map((favorite) => {
-      const liveCategory = categoriesMap.get(favorite.id);
-      return liveCategory || {
-        category_id: favorite.id,
-        category_name: favorite.name,
-        parent_id: 0,
-      };
-    });
-  }, [favoriteIptvCategories, iptvCategories]);
-
-  const normalizedIptvCategorySearch = iptvCategorySearch.trim().toLowerCase();
-
-  const filteredFavoriteIptvCategories = useMemo(
-    () => favoriteIptvCategoryShortcuts.filter((category) => (
-      normalizedIptvCategorySearch.length === 0
-      || category.category_name.toLowerCase().includes(normalizedIptvCategorySearch)
-    )),
-    [favoriteIptvCategoryShortcuts, normalizedIptvCategorySearch]
-  );
-
-  const filteredRegularIptvCategories = useMemo(
-    () => iptvCategories.filter((category) => (
-      !favoriteIptvCategoryIds.has(category.category_id)
-      && (
-        normalizedIptvCategorySearch.length === 0
-        || category.category_name.toLowerCase().includes(normalizedIptvCategorySearch)
-      )
-    )),
-    [favoriteIptvCategoryIds, iptvCategories, normalizedIptvCategorySearch]
-  );
-
-  const favoriteIptvStreams = useMemo(
-    () => filteredIptvStreams.filter((stream) => isFavoriteChannel('iptv', stream.stream_id)),
-    [filteredIptvStreams, isFavoriteChannel]
-  );
-
-  const regularIptvStreams = useMemo(
-    () => filteredIptvStreams.filter((stream) => !isFavoriteChannel('iptv', stream.stream_id)),
-    [filteredIptvStreams, isFavoriteChannel]
-  );
-
-  const iptvColumns = useResponsiveIptvColumns();
+  const gridColumns = useResponsiveGridColumns();
 
   const channelGridClassName =
     'grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6';
-
-  // No per-card framer-motion — at ~3000 cards (e.g. France IPTV category) the
-  // animation pipeline + DOM overwhelmed the tab. Plain div + CSS opacity
-  // transition on hover is the budget. — perf
-  const renderIptvCard = (stream: IptvStream, _index: number) => {
-    const isFavorite = isFavoriteChannel('iptv', stream.stream_id);
-
-    return (
-      <div
-        key={stream.stream_id}
-        onClick={() => handleIptvChannelClick(stream)}
-        className="group cursor-pointer"
-      >
-        <div className="media-aspect-video relative rounded-xl overflow-hidden bg-white/[0.02] border border-white/[0.04] group-hover:border-white/10 transition-all duration-300 group-hover:bg-white/[0.04]">
-          <FavoriteChannelButton
-            active={isFavorite}
-            activeLabel={t('liveTV.removeFromFavorites')}
-            inactiveLabel={t('liveTV.addToFavorites')}
-            onToggle={(event) => toggleFavoriteChannel(event, {
-              source: 'iptv',
-              id: stream.stream_id,
-              name: stream.name,
-              poster: stream.stream_icon,
-              kind: 'iptv',
-              categoryId: selectedIptvCategory || stream.category_id,
-            })}
-          />
-          {stream.stream_icon ? (
-            <img
-              src={stream.stream_icon}
-              alt={stream.name}
-              className="absolute inset-0 h-full w-full object-contain p-4"
-              loading="lazy"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = 'none';
-                (e.target as HTMLImageElement).parentElement!.querySelector('.iptv-fallback')?.classList.remove('hidden');
-              }}
-            />
-          ) : null}
-          <div className={cn('iptv-fallback absolute inset-0 flex flex-col items-center justify-center gap-1.5 p-3', stream.stream_icon ? 'hidden' : '')}>
-            <Tv className="w-6 h-6 text-white opacity-10" />
-            <span className="text-[10px] text-white/30 line-clamp-2 text-center leading-tight">{stream.name}</span>
-          </div>
-          <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 bg-red-500 rounded text-[9px] font-bold tracking-wide uppercase">
-            <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-            {t('liveTV.liveTag')}
-          </div>
-          <div className="absolute inset-x-0 bottom-0 p-2 pt-6 bg-gradient-to-t from-black/80 to-transparent">
-            <p className="text-[11px] font-medium text-white/90 truncate">{stream.name}</p>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderIptvCategoryOption = (category: IptvCategory) => {
-    const active = selectedIptvCategory === category.category_id;
-    const favorite = isFavoriteIptvCategory(category.category_id);
-
-    return (
-      <div
-        key={category.category_id}
-        className={cn(
-          'group mx-1 flex items-center rounded-xl border pr-1 transition-colors',
-          active
-            ? 'bg-red-500/10 border-red-500/20'
-            : 'border-transparent hover:bg-white/[0.04] hover:border-white/[0.05]'
-        )}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            setSelectedIptvCategory(category.category_id);
-            setIptvCategoryDropdownOpen(false);
-            setIptvCategorySearch('');
-          }}
-          className="flex min-w-0 flex-1 items-center px-3 py-2 text-left text-sm"
-        >
-          <span className={cn('truncate pr-2', active ? 'text-red-400' : 'text-white/70 group-hover:text-white/90')}>
-            {category.category_name}
-          </span>
-        </button>
-        <FavoriteInlineButton
-          active={favorite}
-          activeLabel={t('liveTV.removeCategoryFromFavorites')}
-          inactiveLabel={t('liveTV.addCategoryToFavorites')}
-          onToggle={(event) => toggleFavoriteIptvCategory(event, category)}
-          className="ml-auto h-7 w-7 shrink-0"
-          iconClassName="w-3.5 h-3.5"
-        />
-      </div>
-    );
-  };
 
   const renderChannelCard = (channel: Channel, index: number) => {
     const isMatch = selectedCatalog.startsWith('matches_') || selectedCatalog.startsWith('streamed_');
@@ -1787,12 +1318,12 @@ const LiveTV: React.FC = () => {
             </div>
 
             {/* ── SOURCE PILL TABS ── */}
-            {!loadingCatalogs && allSources.length > 0 && (
+            {!loadingCatalogs && availableSources.length > 0 && (
               <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-1 px-1">
-                {allSources.map((source) => {
+                {availableSources.map((source) => {
                   const isLocked = !isSourceAccessible(source);
                   const isActive = selectedSource === source;
-                  const label = sourceDisplayNames[source]?.startsWith('liveTV.') ? t(sourceDisplayNames[source]) : (sourceDisplayNames[source] || source);
+                  const label = sourceDisplayNames[source] || source;
 
                   return (
                     <motion.button
@@ -1811,9 +1342,6 @@ const LiveTV: React.FC = () => {
                       {getSourceIcon(source, isActive, isLocked)}
                       {label}
                       {isLocked && <Lock className="w-3 h-3 ml-0.5 text-white opacity-20" />}
-                      {source === 'iptv' && !isLocked && (
-                        <Badge variant="premium" className="text-[9px] px-1.5 py-0 ml-0.5">{t('common.vip')}</Badge>
-                      )}
                     </motion.button>
                   );
                 })}
@@ -1857,7 +1385,7 @@ const LiveTV: React.FC = () => {
           </div>
         </motion.div>
 
-        {/* ── CATEGORY BAR + IPTV DROPDOWN ── */}
+        {/* ── CATEGORY BAR ── */}
         {!loadingCatalogs && hasAccess && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -1865,141 +1393,7 @@ const LiveTV: React.FC = () => {
             transition={{ delay: 0.15 }}
             className="mb-6"
           >
-            {selectedSource === 'iptv' ? (
-              /* IPTV searchable category dropdown */
-              <div className="w-full max-w-xl space-y-3">
-                {favoriteIptvCategoryShortcuts.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] uppercase tracking-[0.18em] text-white/30">
-                        {t('liveTV.favoriteCategories')}
-                      </span>
-                      <div className="h-px flex-1 bg-white/[0.08]" />
-                    </div>
-                    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-                      {favoriteIptvCategoryShortcuts.map((category) => {
-                        const active = selectedIptvCategory === category.category_id;
-
-                        return (
-                          <div
-                            key={category.category_id}
-                            className={cn(
-                              'group flex shrink-0 items-center gap-1 rounded-full border pr-1 transition-all duration-200',
-                              active
-                                ? 'bg-yellow-500/10 border-yellow-500/30'
-                                : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.05] hover:border-white/10'
-                            )}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => setSelectedIptvCategory(category.category_id)}
-                              className="flex items-center gap-2 px-3 py-1.5 text-sm"
-                            >
-                              <Star className="w-3.5 h-3.5 text-yellow-400" fill="currentColor" />
-                              <span className={cn('max-w-52 truncate', active ? 'text-white' : 'text-white/75 group-hover:text-white/95')}>
-                                {category.category_name}
-                              </span>
-                            </button>
-                            <FavoriteInlineButton
-                              active={true}
-                              activeLabel={t('liveTV.removeCategoryFromFavorites')}
-                              inactiveLabel={t('liveTV.addCategoryToFavorites')}
-                              onToggle={(event) => toggleFavoriteIptvCategory(event, category)}
-                              className="h-7 w-7 shrink-0 bg-yellow-500/15 text-yellow-400"
-                              iconClassName="w-3.5 h-3.5"
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                <div className="relative w-full sm:w-96" ref={iptvDropdownRef}>
-                  {loadingIptvCategories ? (
-                    <div className="flex items-center gap-3 h-10 px-4 bg-white/[0.03] border border-white/[0.06] rounded-lg text-white/40 text-sm">
-                      <Loader2 className="w-4 h-4 animate-spin text-white opacity-40" />
-                      {t('common.loading')}
-                    </div>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => setIptvCategoryDropdownOpen(!iptvCategoryDropdownOpen)}
-                        className={cn(
-                          'flex items-center gap-3 w-full h-10 px-4 rounded-lg text-sm transition-all duration-200 border',
-                          iptvCategoryDropdownOpen
-                            ? 'bg-white/[0.06] border-red-500/30 ring-1 ring-red-500/10'
-                            : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.05] hover:border-white/10'
-                        )}
-                      >
-                        <i className="bi bi-globe text-red-400 shrink-0" />
-                        <span className="truncate flex-1 text-left text-white/80">
-                          {selectedIptvCategoryName || t('liveTV.chooseCategory')}
-                        </span>
-                        <span className="text-white/25 text-xs tabular-nums shrink-0">{iptvCategories.length}</span>
-                        <ChevronDown className={cn('w-4 h-4 text-white opacity-30 shrink-0 transition-transform duration-200', iptvCategoryDropdownOpen && 'rotate-180')} />
-                      </button>
-
-                      <AnimatePresence>
-                        {iptvCategoryDropdownOpen && (
-                          <motion.div
-                            initial={{ opacity: 0, y: -4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -4 }}
-                            transition={{ duration: 0.15 }}
-                            className="absolute z-50 mt-1.5 w-full bg-[#141416] border border-white/[0.08] rounded-xl shadow-2xl shadow-black/60 overflow-hidden"
-                            data-lenis-prevent
-                          >
-                            <div className="p-2 border-b border-white/[0.06]">
-                              <div className="relative">
-                                <Input
-                                  type="text"
-                                  placeholder={t('common.searchPlaceholder')}
-                                  value={iptvCategorySearch}
-                                  onChange={(e) => setIptvCategorySearch(e.target.value)}
-                                  className="pl-8 h-8 text-xs bg-white/[0.04] border-white/[0.06]"
-                                  autoFocus
-                                />
-                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white opacity-30" />
-                              </div>
-                            </div>
-                            <div className="overflow-y-auto max-h-64 py-1" data-lenis-prevent>
-                              {filteredFavoriteIptvCategories.length > 0 && (
-                                <div className="px-3 pb-1 pt-2">
-                                  <p className="text-[10px] uppercase tracking-[0.18em] text-white/25">
-                                    {t('liveTV.favoriteCategories')}
-                                  </p>
-                                </div>
-                              )}
-                              {filteredFavoriteIptvCategories.map((category) => renderIptvCategoryOption(category))}
-
-                              {filteredFavoriteIptvCategories.length > 0 && filteredRegularIptvCategories.length > 0 && (
-                                <div className="px-3 py-2">
-                                  <div className="h-px bg-white/[0.06]" />
-                                </div>
-                              )}
-
-                              {filteredRegularIptvCategories.length > 0 && (
-                                <div className="px-3 pb-1 pt-1">
-                                  <p className="text-[10px] uppercase tracking-[0.18em] text-white/20">
-                                    {t('liveTV.otherCategories')}
-                                  </p>
-                                </div>
-                              )}
-                              {filteredRegularIptvCategories.map((category) => renderIptvCategoryOption(category))}
-
-                              {filteredFavoriteIptvCategories.length === 0 && filteredRegularIptvCategories.length === 0 && (
-                                <p className="text-white/25 text-xs text-center py-6">{t('common.noResults')}</p>
-                              )}
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </>
-                  )}
-                </div>
-              </div>
-            ) : filteredCatalogs.length > 1 ? (
+            {filteredCatalogs.length > 1 ? (
               /* Regular category chips */
               <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
                 {filteredCatalogs.map((catalog) => {
@@ -2077,66 +1471,8 @@ const LiveTV: React.FC = () => {
           </motion.div>
         )}
 
-        {/* ── IPTV GRID ── */}
-        {!loadingCatalogs && hasAccess && selectedSource === 'iptv' && (
-          <div className="pb-12">
-            {loadingIptvStreams ? (
-              <ChannelSkeleton />
-            ) : !selectedIptvCategory ? (
-              <div className="flex flex-col items-center justify-center py-24 gap-4">
-                <p className="text-3xl font-bold text-white/10 tabular-nums">{iptvCategories.length}</p>
-                <div className="p-5 bg-white/[0.02] rounded-2xl border border-white/[0.04]">
-                  <i className="bi bi-globe text-4xl text-white/10" />
-                </div>
-                <div className="text-center space-y-1">
-                  <p className="text-white/60 text-sm font-medium">{t('liveTV.selectCategoryPrompt')}</p>
-                  <p className="text-white/25 text-xs">{t('liveTV.availableCategories', { count: iptvCategories.length })}</p>
-                </div>
-              </div>
-            ) : filteredIptvStreams.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-24 gap-3">
-                <Radio className="w-10 h-10 text-white opacity-10" />
-                <p className="text-white/40 text-sm">
-                  {searchQuery ? t('liveTV.noChannelMatch') : t('liveTV.noChannelInCategory')}
-                </p>
-              </div>
-            ) : (
-              <motion.div
-                key={selectedIptvCategory}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.25 }}
-                className="space-y-5"
-              >
-                {favoriteIptvStreams.length > 0 && (
-                  <div className="space-y-3">
-                    <LiveTVSectionDivider title={t('liveTV.favorites')} count={favoriteIptvStreams.length} />
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                      {favoriteIptvStreams.map((stream, index) => renderIptvCard(stream, index))}
-                    </div>
-                  </div>
-                )}
-
-                {regularIptvStreams.length > 0 && (
-                  <div className="space-y-3">
-                    {favoriteIptvStreams.length > 0 && (
-                      <LiveTVSectionDivider title={t('liveTV.otherChannels')} count={regularIptvStreams.length} />
-                    )}
-                    <VirtualizedIptvGrid
-                      items={regularIptvStreams}
-                      columns={iptvColumns}
-                      getKey={(stream) => stream.stream_id}
-                      renderItem={(stream, index) => renderIptvCard(stream, favoriteIptvStreams.length + index)}
-                    />
-                  </div>
-                )}
-              </motion.div>
-            )}
-          </div>
-        )}
-
-        {/* ── CHANNELS GRID (non-IPTV) ── */}
-        {!loadingCatalogs && hasAccess && selectedSource !== 'iptv' && (
+        {/* ── CHANNELS GRID ── */}
+        {!loadingCatalogs && hasAccess && (
           <div className="pb-12">
             {loadingChannels ? (
               <ChannelSkeleton />
@@ -2172,10 +1508,10 @@ const LiveTV: React.FC = () => {
                         )}
                         {selectedSource === 'vavoo' ? (
                           /* Vavoo groups (esp. "All") can be thousands of channels —
-                             virtualize like the IPTV grid to avoid a DOM blow-up. */
-                          <VirtualizedIptvGrid
+                             virtualize to avoid a DOM blow-up. */
+                          <VirtualizedChannelGrid
                             items={regularDisplayedChannels}
-                            columns={iptvColumns}
+                            columns={gridColumns}
                             getKey={(channel) => channel.id}
                             renderItem={(channel, index) => renderChannelCard(channel, index)}
                           />

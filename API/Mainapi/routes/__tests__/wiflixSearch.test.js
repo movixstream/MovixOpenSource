@@ -12,9 +12,13 @@ const start = source.indexOf('const normalizeString =');
 // Recherche et extraction des fiches, jusqu'au chargement des données.
 const end = source.indexOf('// === Data Fetching ===', start);
 assert.ok(start > 0 && end > start);
-const searchSource = source.slice(start, end)
+// Lecture des liens de lecteur (data-v, hébergeurs sautés), avant les caches.
+const linkStart = source.indexOf('function decodeWiflixStream');
+const linkEnd = source.indexOf('// === Cache helpers', linkStart);
+assert.ok(linkStart > 0 && linkEnd > linkStart && linkEnd < start);
+const searchSource = source.slice(linkStart, linkEnd) + source.slice(start, end)
   + '\nglobalThis.search = searchWiflixMovie;\nglobalThis.extract = extractWiflixPlayers;'
-  + '\nglobalThis.fragment = wiflixResultsFragment;';
+  + '\nglobalThis.fragment = wiflixResultsFragment;\nglobalThis.complete = completeWiflixPlayers;';
 const base = 'https://source.test';
 
 function card(title, href, season = null) {
@@ -25,7 +29,7 @@ function card(title, href, season = null) {
 
 function load(globals) {
   const context = vm.createContext({
-    cheerio, URL,
+    cheerio, URL, URLSearchParams, Buffer,
     WIFLIX_BASE_URL: base,
     refreshStep() {},
     console: { log() {}, error() {} },
@@ -238,4 +242,78 @@ test('le coupe-circuit Flemmix reste une indisponibilité, sans journal à chaqu
     '[WIFLIX SEARCH] Echec: timeout of 15000ms exceeded',
     '[WIFLIX PLAYERS] Echec: timeout of 15000ms exceeded',
   ]);
+});
+
+// Fiche au format du 2026-11-22 : jetons « fx1_ », hébergeur en base64 dans
+// data-n, clé de page dans un tableau XOR.
+const b64 = (text) => Buffer.from(text).toString('base64');
+const keyScript = (key, mask = 65) => `<script>(function(){var _a=[${
+  [...`${key}|sl`].map((c) => c.charCodeAt(0) ^ mask).join(',')}],_m=${mask},_in=1;})();</script>`;
+const tokenPage = keyScript('cle42')
+  + '<div class="tabs-sel linkstab">'
+  + `<a data-v="fx1_aaa" onclick="playSafe(this)"><span data-n="${b64('Vidara')}">Lecteur HD</span></a>`
+  + `<a data-v="fx1_bbb" onclick="playSafe(this)"><span data-n="${b64('Voe')}">Lecteur HD</span></a>`
+  + `<a data-v="https://direct.test/e/1"><span>Direct</span></a>`
+  + `<a data-v="fx1_ccc" onclick="playSafe(this)"><span data-n="${b64('Swish')}">Lecteur HD</span></a>`
+  + '</div>';
+
+function tokenSource(resolve) {
+  const calls = [];
+  const context = load({
+    parseSourceIdentity: () => ({ year: 2026 }),
+    makeWiflixRequest: async (url, options = {}) => {
+      if (!options.method) return { data: tokenPage };
+      const params = new URLSearchParams(options.data);
+      calls.push({ url, referer: options.headers.Referer, v: params.get('v'), k: params.get('k'), b: params.get('b') });
+      return { data: await resolve(params.get('v')) };
+    },
+  });
+  return { context, calls };
+}
+
+test('les jetons fx1_ sont échangés après coup, dans l’ordre de la fiche', async () => {
+  const urls = { fx1_aaa: 'https://vidara.to/e/A', fx1_bbb: 'https://lancewhosedifficult.com/e/B' };
+  const { context, calls } = tokenSource(async (token) => (urls[token]
+    ? JSON.stringify({ u: urls[token] }) : '{"e":"expired"}'));
+  const pageUrl = `${base}/film-en-streaming/1-film.html`;
+  const extraction = await context.extract(pageUrl);
+  // Avant l'échange : seul le lien lisible, aucune requête de jeton.
+  assert.equal(extraction.tokenCount, 3);
+  assert.deepEqual(Array.from(extraction.players, (p) => p.url), ['https://direct.test/e/1']);
+  assert.equal(calls.length, 0);
+
+  assert.deepEqual({ ...await context.complete(extraction) }, { ok: true });
+  assert.deepEqual(Array.from(extraction.players, (p) => [p.name, p.url]), [
+    ['vidara.to', 'https://vidara.to/e/A'],
+    // Nom « Voe » lu dans data-n : domaine miroir réécrit comme avant.
+    ['voe.sx', 'https://voe.sx/e/B'],
+    ['direct.test', 'https://direct.test/e/1'],
+  ]);
+  assert.equal(calls.length, 3);
+  for (const call of calls) {
+    assert.equal(call.url, `${base}/ajax_player.php`);
+    assert.equal(call.referer, pageUrl);
+    assert.equal(call.k, 'cle42');
+    assert.equal(call.b, '1');
+  }
+  // Déjà complétée : rien à refaire.
+  assert.deepEqual({ ...await context.complete(extraction) }, { ok: true });
+  assert.equal(calls.length, 3);
+});
+
+test('débit global atteint ou aucun jeton échangé : panne, jamais un introuvable', async () => {
+  const limited = tokenSource(async () => {
+    throw Object.assign(new Error('Débit global'), { code: 'WIFLIX_RATE_LIMITED' });
+  });
+  const first = await limited.context.extract(`${base}/a.html`);
+  assert.deepEqual({ ...await limited.context.complete(first) }, { ok: false, rateLimited: true });
+
+  const onlyTokens = tokenPage.replace(/<a data-v="https:[^]*?<\/a>/, '');
+  const refused = load({
+    parseSourceIdentity: () => ({ year: null }),
+    makeWiflixRequest: async (_url, options = {}) => ({ data: options.method ? '{"e":"expired"}' : onlyTokens }),
+  });
+  const second = await refused.extract(`${base}/b.html`);
+  assert.equal(second.players.length, 0);
+  assert.deepEqual({ ...await refused.complete(second) }, { ok: false });
 });

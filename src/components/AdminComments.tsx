@@ -4,7 +4,7 @@ import { PrefetchLink as Link } from '@/routing/PrefetchLink';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Search, Trash2, Loader2, Film, Tv, RefreshCw, MessageSquare, AlertCircle, Sparkles,
-    Ban, Shield, Copy, UserX, Clock, CheckCircle, MoreHorizontal
+    Ban, Shield, Copy, UserX, Clock, CheckCircle, MoreHorizontal, Bot
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/button';
@@ -18,6 +18,7 @@ import {
     SelectValue,
 } from './ui/select';
 import ReusableModal from './ui/reusable-modal';
+import AdminCommentsAiSettings from './AdminCommentsAiSettings';
 import { getTmdbLanguage } from '../i18n';
 import { copyText } from '../utils/clipboard';
 
@@ -135,7 +136,9 @@ const AdminComments: React.FC = () => {
         moderated: 0,
     });
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'live' | 'moderated' | 'bans'>('live');
+    const [activeTab, setActiveTab] = useState<'live' | 'moderated' | 'bans' | 'ai'>('live');
+    // Les onglets « Commentaires » et « Modération » partagent la liste et ses filtres.
+    const listTab = activeTab === 'live' || activeTab === 'moderated';
     const [searchQuery, setSearchQuery] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [contentTypeFilter, setContentTypeFilter] = useState('all');
@@ -318,6 +321,7 @@ const AdminComments: React.FC = () => {
     }, [API_URL, showExpiredBans, bansPage, bansSearch]);
 
     useEffect(() => {
+        if (activeTab === 'ai') return;
         if (activeTab === 'bans') {
             fetchBans(1);
             setBansPage(1);
@@ -980,7 +984,7 @@ const AdminComments: React.FC = () => {
             </div>
 
             {/* Tabs */}
-            <div className="flex items-center gap-4 bg-white/5 p-1 rounded-lg w-fit border border-white/10">
+            <div className="flex flex-wrap items-center gap-1 sm:gap-4 bg-white/5 p-1 rounded-lg w-fit max-w-full border border-white/10">
                 <button
                     onClick={() => setActiveTab('live')}
                     className={`group/icon px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'live'
@@ -1022,10 +1026,24 @@ const AdminComments: React.FC = () => {
                         {t('admin.bans')}
                     </div>
                 </button>
+                <button
+                    onClick={() => setActiveTab('ai')}
+                    className={`group/icon px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'ai'
+                        ? 'bg-violet-600 text-white shadow-lg'
+                        : 'text-white/60 hover:text-white hover:bg-white/5'
+                        }`}
+                >
+                    <div className="flex items-center gap-2">
+                        <Bot className={`h-4 w-4 transition-[color,opacity] ${(activeTab === 'ai' ? "text-white opacity-100" : "text-white opacity-60 group-hover/icon:opacity-100")}`} />
+                        {t('comments.aiAdmin.tab')}
+                    </div>
+                </button>
             </div>
 
+            {activeTab === 'ai' && <AdminCommentsAiSettings />}
+
             {/* Filters */}
-            {activeTab !== 'bans' && (
+            {listTab && (
                 <div className="flex flex-wrap items-center gap-4">
                     <div className="relative flex-1 min-w-[200px]">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white opacity-40" />
@@ -1165,7 +1183,7 @@ const AdminComments: React.FC = () => {
             )}
 
             {/* === COMMENTS / MODERATED TAB === */}
-            {activeTab !== 'bans' && (
+            {listTab && (
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -1194,14 +1212,14 @@ const AdminComments: React.FC = () => {
                                 </colgroup>
                                 <thead>
                                     <tr className="border-b border-white/10 bg-white/5">
-                                        <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70">{t('admin.user')}</th>
-                                        <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70">{t('admin.content')}</th>
-                                        <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70">
+                                        <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70">{t('admin.user')}</th>
+                                        <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70">{t('admin.content')}</th>
+                                        <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70">
                                             {activeTab === 'live' ? t('admin.comment') : t('admin.messageAndReason')}
                                         </th>
-                                        <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70 whitespace-nowrap">{t('admin.date')}</th>
-                                        {activeTab === 'live' && <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70">{t('admin.reactions')}</th>}
-                                        <th className="sticky top-0 z-20 bg-black/95 text-right p-4 text-sm font-medium text-white/70">{t('admin.actions')}</th>
+                                        <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70 whitespace-nowrap">{t('admin.date')}</th>
+                                        {activeTab === 'live' && <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70">{t('admin.reactions')}</th>}
+                                        <th className="sticky top-0 z-20 bg-black text-right p-4 text-sm font-medium text-white/70">{t('admin.actions')}</th>
                                     </tr>
                                 </thead>
                                 <tbody>

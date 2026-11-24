@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bold, Italic, Code, Link, List, ListOrdered, Quote, Strikethrough, Eye, EyeOff, Info, X } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import { useSafeRemarkGfm } from '../utils/markdownPlugins';
 import remarkEmoji from 'remark-emoji';
 import { useTranslation } from 'react-i18next';
@@ -14,7 +14,38 @@ interface MarkdownToolbarProps {
   value: string;
   onChange: (value: string) => void;
   maxLength?: number;
+  /** `details` : habillage des nouvelles fiches (blanc translucide, sans bleu). */
+  tone?: 'default' | 'details';
+  /** Rendu de l'aperçu ; par défaut celui des anciens commentaires. */
+  markdownComponents?: Components;
 }
+
+/**
+ * Classes de la barre selon l'habillage. En `details`, les icônes gardent un
+ * blanc plein et c'est le svg qui porte l'opacité.
+ */
+const TOOLBAR_TONES = {
+  default: {
+    row: 'flex items-center gap-0.5 flex-wrap',
+    button: 'p-1.5 text-gray-400 hover:text-white hover:bg-gray-600/50 rounded transition-colors duration-150',
+    divider: 'w-px h-5 bg-gray-600/50 mx-1',
+    toggle: 'p-1.5 rounded transition-colors duration-150 flex items-center gap-1 text-xs',
+    toggleOn: 'text-blue-400 bg-blue-500/10',
+    toggleOff: 'text-gray-400 hover:text-white hover:bg-gray-600/50',
+    preview: 'bg-gray-900/50 rounded-lg p-3 border border-gray-700/50 text-gray-300 text-sm break-words overflow-hidden',
+  },
+  details: {
+    // Décalage : l'icône du premier bouton s'aligne sur le texte du champ.
+    // Une seule ligne : dans un champ étroit (réponse sur téléphone), les boutons se resserrent.
+    row: '-ml-[7px] flex items-center gap-0.5',
+    button: 'flex size-7 items-center justify-center rounded-md text-white transition-colors duration-200 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white motion-reduce:transition-none [&>svg]:opacity-60 [&>svg]:transition-opacity [&>svg]:duration-200 hover:[&>svg]:opacity-100 focus-visible:[&>svg]:opacity-100',
+    divider: 'mx-0.5 h-5 w-px bg-white/[.12]',
+    toggle: 'flex h-7 items-center gap-1.5 rounded-md px-1.5 text-xs font-medium text-white transition-colors duration-200 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white motion-reduce:transition-none [&>*]:transition-opacity [&>*]:duration-200',
+    toggleOn: 'bg-white/[.14]',
+    toggleOff: '[&>*]:opacity-60 hover:[&>*]:opacity-100 focus-visible:[&>*]:opacity-100',
+    preview: 'rounded-xl border border-white/[.12] bg-black/30 p-3 text-sm text-white/[.88] break-words overflow-hidden',
+  },
+} as const;
 
 const previewComponents = {
   p: ({ children }: any) => <p className="mb-1 last:mb-0">{children}</p>,
@@ -172,7 +203,10 @@ const MarkdownHelpModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   );
 };
 
-const MarkdownToolbar: React.FC<MarkdownToolbarProps> = ({ textareaRef, value, onChange, maxLength }) => {
+const MarkdownToolbar: React.FC<MarkdownToolbarProps> = ({
+  textareaRef, value, onChange, maxLength, tone = 'default', markdownComponents = previewComponents,
+}) => {
+  const look = TOOLBAR_TONES[tone];
   const { t } = useTranslation();
   const [showPreview, setShowPreview] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -224,26 +258,26 @@ const MarkdownToolbar: React.FC<MarkdownToolbarProps> = ({ textareaRef, value, o
 
   return (
     <div className="flex flex-col gap-1 relative">
-      <div className="flex items-center gap-0.5 flex-wrap">
+      <div className={look.row}>
         {actions.map((action) => (
           <button
             key={action.label}
             type="button"
             onClick={() => applyFormat(action)}
             title={action.label}
-            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-600/50 rounded transition-colors duration-150"
+            aria-label={action.label}
+            className={look.button}
           >
             {action.icon}
           </button>
         ))}
-        <div className="w-px h-5 bg-gray-600/50 mx-1" />
+        <div className={look.divider} />
         <button
           type="button"
           onClick={() => setShowPreview(!showPreview)}
             title={showPreview ? t('markdownToolbar.hidePreview') : t('markdownToolbar.preview')}
-          className={`p-1.5 rounded transition-colors duration-150 flex items-center gap-1 text-xs ${
-            showPreview ? 'text-blue-400 bg-blue-500/10' : 'text-gray-400 hover:text-white hover:bg-gray-600/50'
-          }`}
+          aria-pressed={showPreview}
+          className={`${look.toggle} ${showPreview ? look.toggleOn : look.toggleOff}`}
         >
           {showPreview ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           <span className="hidden sm:inline">{showPreview ? t('common.hide') : t('markdownToolbar.preview')}</span>
@@ -252,7 +286,8 @@ const MarkdownToolbar: React.FC<MarkdownToolbarProps> = ({ textareaRef, value, o
           type="button"
           onClick={() => setShowHelp(true)}
           title={t('markdownToolbar.guideTitle')}
-          className="p-1.5 rounded transition-colors duration-150 flex items-center gap-1 text-xs text-gray-400 hover:text-white hover:bg-gray-600/50"
+          aria-label={t('markdownToolbar.guideTitle')}
+          className={`${look.toggle} ${look.toggleOff}`}
         >
           <Info className="w-3.5 h-3.5" />
         </button>
@@ -260,8 +295,8 @@ const MarkdownToolbar: React.FC<MarkdownToolbarProps> = ({ textareaRef, value, o
 
       {/* Aperçu markdown */}
       {showPreview && value.trim() && (
-        <div className="bg-gray-900/50 rounded-lg p-3 border border-gray-700/50 text-gray-300 text-sm break-words overflow-hidden">
-          <ReactMarkdown remarkPlugins={previewPlugins} components={previewComponents}>
+        <div className={look.preview}>
+          <ReactMarkdown remarkPlugins={previewPlugins} components={markdownComponents}>
             {value}
           </ReactMarkdown>
         </div>

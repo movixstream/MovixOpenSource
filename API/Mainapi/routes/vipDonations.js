@@ -11,6 +11,7 @@ const {
   handleCryptoGateWebhook,
   handlePaygateCallback,
   fetchInvoiceByPublicId,
+  isPublicInvoiceLinkExpired,
   fetchInvoiceByGiftToken,
   getVipInvoiceDetails,
   listUserVipInvoices,
@@ -44,12 +45,15 @@ const setNoStore = (req, res, next) => {
   return next();
 };
 
-const canAccessInvoice = (invoice, auth) => {
+// Le lien public suffit pour lire la facture (le publicId fait 96 bits
+// aléatoires), mais seulement pendant 14 jours : voir
+// isPublicInvoiceLinkExpired.
+const canAccessInvoice = (invoice) => {
   if (!invoice) {
     return false;
   }
 
-  return true;
+  return !isPublicInvoiceLinkExpired(invoice);
 };
 
 const getRateLimitKey = (req) => req.headers['cf-connecting-ip']
@@ -272,9 +276,8 @@ router.get('/vip/invoices/mine', setNoStore, async (req, res) => {
 router.get('/vip/invoices/:publicId', setNoStore, async (req, res) => {
   try {
     const pool = getPool();
-    const auth = await getAuthIfValid(req);
     const invoice = await fetchInvoiceByPublicId(pool, req.params.publicId);
-    if (!canAccessInvoice(invoice, auth)) {
+    if (!canAccessInvoice(invoice)) {
       return res.status(404).json({
         success: false,
         error: 'Invoice introuvable'
@@ -297,9 +300,8 @@ router.get('/vip/invoices/:publicId', setNoStore, async (req, res) => {
 router.post('/vip/invoices/:publicId/check', setNoStore, invoiceCheckRateLimit, async (req, res) => {
   try {
     const pool = getPool();
-    const auth = await getAuthIfValid(req);
     const invoice = await fetchInvoiceByPublicId(pool, req.params.publicId);
-    if (!canAccessInvoice(invoice, auth)) {
+    if (!canAccessInvoice(invoice)) {
       return res.status(404).json({
         success: false,
         error: 'Invoice introuvable'
@@ -318,12 +320,11 @@ router.post('/vip/invoices/:publicId/check', setNoStore, invoiceCheckRateLimit, 
   } catch (error) {
     console.error('VIP invoice check error:', error);
     const pool = getPool();
-    const auth = await getAuthIfValid(req);
     const invoice = await fetchInvoiceByPublicId(pool, req.params.publicId);
     return res.status(502).json({
       success: false,
       error: 'Vérification de paiement indisponible temporairement',
-      invoice: canAccessInvoice(invoice, auth) ? serializePublicInvoice(invoice) : null
+      invoice: canAccessInvoice(invoice) ? serializePublicInvoice(invoice) : null
     });
   }
 });

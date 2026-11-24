@@ -39,6 +39,9 @@ export default {
         fadeIn: "fadeIn 0.5s ease-in-out",
         fadeOut: "fadeOut 0.5s ease-in-out",
         "skeleton-fade": "skeletonFade 0.3s ease-out",
+        // `animate-pulse` est redéfini dans index.css (grossissement unique) : les
+        // gabarits et textes de chargement respirent avec celle-ci, en opacité seulement.
+        "pulse-soft": "pulseSoft 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite",
         "card-enter": "cardEnter 0.3s ease-out both",
         "ad-content-enter": "adContentEnter 250ms cubic-bezier(0.23, 1, 0.32, 1) both",
         "ad-easter-egg-enter": "adEasterEggEnter 250ms cubic-bezier(0.23, 1, 0.32, 1) both",
@@ -69,6 +72,10 @@ export default {
         skeletonFade: {
           "0%": { opacity: "0" },
           "100%": { opacity: "1" },
+        },
+        pulseSoft: {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.45" },
         },
         cardEnter: {
           "0%": { opacity: "0", transform: "translateY(20px)" },

@@ -459,6 +459,43 @@ async function searchWiflixMovie(title, baseUrl = WIFLIX_BASE_URL) {
 }
 
 // === Player Extraction ===
+// Lien de lecteur tel que la fiche le donne : URL lisible (http, base64 +
+// ROT13) ou jeton « fx1_ » à échanger contre l'URL (resolveWiflixToken).
+function wiflixLinkSource($link) {
+  const raw = $link.attr("data-v") || "";
+  if (raw.startsWith(WIFLIX_TOKEN_PREFIX)) return { token: raw };
+  const url = wiflixLinkUrl($link);
+  return url ? { url } : null;
+}
+
+// Hébergeur réécrit comme le fait le site, nom tiré du domaine.
+function wiflixPlayer(linkUrl, name, episode, type) {
+  if (!linkUrl || isSkippedWiflixHost(linkUrl)) return null;
+  let processedUrl = linkUrl;
+  if (processedUrl.includes("tipfly.xyz")) {
+    const tipflyMatch = processedUrl.match(/tipfly\.xyz\/em-?\d+-(.+)/);
+    if (tipflyMatch && tipflyMatch[1]) processedUrl = `https://oneupload.net/embed-${tipflyMatch[1]}.html`;
+  } else if (name.toLowerCase() === "voe" || processedUrl.includes("jilliandescribecompany.com")) {
+    processedUrl = processedUrl.replace(/^https?:\/\/[^/]+/, "https://voe.sx");
+  }
+  const domainMatch = processedUrl.match(/https?:\/\/(?:www\.)?([^\/]+)/);
+  return { name: domainMatch ? domainMatch[1] : name, url: processedUrl, episode, type };
+}
+
+// Nom de l'hébergeur : attribut data-n en base64 (« Voe », « Vidara »…) quand
+// le lien n'affiche que « Lecteur HD », sinon le texte du lien. La réécriture
+// Voe en dépend.
+function wiflixHostName($span) {
+  const encoded = $span.attr("data-n");
+  if (encoded) {
+    try {
+      const decoded = Buffer.from(encoded, "base64").toString("utf8").trim();
+      if (/^[\w .-]{1,40}$/.test(decoded)) return decoded;
+    } catch { /* texte du lien */ }
+  }
+  return $span.text().trim();
+}
+
 async function extractWiflixPlayers(pageUrl) {
   try {
     let rawHtml = null;
@@ -486,7 +523,17 @@ async function extractWiflixPlayers(pageUrl) {
       return { players: [], releaseYear: null, debugHtml: 'Impossible de charger la page' };
     }
     const $ = cheerio.load(rawHtml);
-    const players = [];
+    // Liens dans l'ordre de la fiche. Un jeton « fx1_ » n'est échangé qu'une
+    // fois l'identité acceptée (completeWiflixPlayers) : un mauvais candidat
+    // ne coûte qu'une requête.
+    const links = [];
+    const addLink = ($link, episode, type) => {
+      const source = wiflixLinkSource($link);
+      // Template dropped the .clichost class (like the movie page) — match any span.
+      const $span = $link.find("span");
+      if (!source || !$span.length) return;
+      links.push({ ...source, name: wiflixHostName($span), episode, type });
+    };
 
     const episodeDivs = $(
       'div[class*="ep"][class*="vf"], div[class*="ep"][class*="vs"]',
@@ -495,95 +542,34 @@ async function extractWiflixPlayers(pageUrl) {
     if (episodeDivs.length > 0) {
       episodeDivs.each((index, element) => {
         const $episodeDiv = $(element);
-        const episodeClass = $episodeDiv.attr("class");
-        const episodeMatch = episodeClass.match(/ep(\d+)(vf|vs)/);
-        if (episodeMatch) {
-          const episodeNumber = parseInt(episodeMatch[1]);
-          const type = episodeMatch[2] === "vf" ? "VF" : "VOSTFR";
-          $episodeDiv.find("a[data-v], a[onclick]").each((linkIndex, linkElement) => {
-            const $link = $(linkElement);
-            const linkUrl = wiflixLinkUrl($link);
-            // Template dropped the .clichost class (like the movie page) — match any span.
-            const $span = $link.find("span");
-            if (linkUrl && $span.length) {
-              if (!isSkippedWiflixHost(linkUrl)) {
-                let processedUrl = linkUrl;
-                const name = $span.text().trim();
-                if (processedUrl.includes("tipfly.xyz")) {
-                  const tipflyMatch = processedUrl.match(
-                    /tipfly\.xyz\/em-?\d+-(.+)/,
-                  );
-                  if (tipflyMatch && tipflyMatch[1])
-                    processedUrl = `https://oneupload.net/embed-${tipflyMatch[1]}.html`;
-                } else if (
-                  name.toLowerCase() === "voe" ||
-                  processedUrl.includes("jilliandescribecompany.com")
-                ) {
-                  processedUrl = processedUrl.replace(
-                    /^https?:\/\/[^/]+/,
-                    "https://voe.sx",
-                  );
-                }
-                const domainMatch = processedUrl.match(
-                  /https?:\/\/(?:www\.)?([^\/]+)/,
-                );
-                const domainName = domainMatch ? domainMatch[1] : name;
-                players.push({
-                  name: domainName,
-                  url: processedUrl,
-                  episode: episodeNumber,
-                  type,
-                });
-              }
-            }
-          });
-        }
+        const episodeMatch = ($episodeDiv.attr("class") || "").match(/ep(\d+)(vf|vs)/);
+        if (!episodeMatch) return;
+        const episodeNumber = parseInt(episodeMatch[1]);
+        const type = episodeMatch[2] === "vf" ? "VF" : "VOSTFR";
+        $episodeDiv.find("a[data-v], a[onclick]").each((linkIndex, linkElement) => {
+          addLink($(linkElement), episodeNumber, type);
+        });
       });
     } else {
-      const filmLinks = $(".tabs-sel a[data-v], .tabs-sel a[onclick]");
-      filmLinks.each((index, element) => {
+      $(".tabs-sel a[data-v], .tabs-sel a[onclick]").each((index, element) => {
         const $link = $(element);
-        const linkUrl = wiflixLinkUrl($link);
-        const $span = $link.find("span");
-        if (linkUrl && $span.length) {
-          if (!isSkippedWiflixHost(linkUrl)) {
-            let processedUrl = linkUrl;
-            const name = $span.text().trim();
-            let type = "VF";
-            if (name.toLowerCase().includes("vostfr")) type = "VOSTFR";
-            if (processedUrl.includes("tipfly.xyz")) {
-              const tipflyMatch = processedUrl.match(
-                /tipfly\.xyz\/em-?\d+-(.+)/,
-              );
-              if (tipflyMatch && tipflyMatch[1])
-                processedUrl = `https://oneupload.net/embed-${tipflyMatch[1]}.html`;
-            } else if (
-              name.toLowerCase() === "voe" ||
-              processedUrl.includes("jilliandescribecompany.com")
-            ) {
-              processedUrl = processedUrl.replace(
-                /^https?:\/\/[^/]+/,
-                "https://voe.sx",
-              );
-            }
-            const domainMatch = processedUrl.match(
-              /https?:\/\/(?:www\.)?([^\/]+)/,
-            );
-            const domainName = domainMatch ? domainMatch[1] : name;
-            players.push({
-              name: domainName,
-              url: processedUrl,
-              episode: 1,
-              type,
-            });
-          }
-        }
+        const label = $link.find("span").text().toLowerCase();
+        addLink($link, 1, label.includes("vostfr") ? "VOSTFR" : "VF");
       });
     }
 
+    const players = [];
+    for (const link of links) {
+      if (link.token) continue;
+      const player = wiflixPlayer(link.url, link.name, link.episode, link.type);
+      if (player) players.push(player);
+    }
+    const tokenCount = links.filter((link) => link.token).length;
+
     // Le DOM déjà chargé évite une seconde analyse de la fiche.
     const identity = parseSourceIdentity($);
-    return { players, releaseYear: identity.year, identity, debugHtml: players.length === 0 ? rawHtml : null };
+    return { players, links, tokenCount, pageUrl, pageKey: wiflixPageKey(rawHtml),
+      releaseYear: identity.year, identity, debugHtml: links.length === 0 ? rawHtml : null };
   } catch (error) {
     return {
       players: [],
@@ -591,6 +577,82 @@ async function extractWiflixPlayers(pageUrl) {
       debugHtml: error.response?.data || error.message || null,
     };
   }
+}
+
+// === Jetons de lecteur « fx1_ » (fiches depuis le 2026-11-22) ===
+// La fiche ne porte plus l'URL du lecteur mais un jeton, différent à chaque
+// chargement. Le site l'échange par POST /ajax_player.php (v = jeton, k = clé
+// de la page, b = 1 hors navigateur automatisé) contre {"u": URL}.
+const WIFLIX_TOKEN_PREFIX = "fx1_";
+const WIFLIX_TOKEN_CONCURRENCY = 4;
+
+// Clé de la page (window._fx_k) : tableau _a XOR _m, partie avant « | ».
+function wiflixPageKey(html) {
+  const match = /var _a=\[([\d,\s]+)\],\s*_m=(\d+)/.exec(html);
+  if (!match) return "";
+  const mask = Number(match[2]);
+  const decoded = match[1].split(",").map((code) => String.fromCharCode(Number(code) ^ mask)).join("");
+  return decoded.split("|")[0];
+}
+
+async function resolveWiflixToken(token, pageUrl, pageKey) {
+  const origin = new URL(pageUrl).origin;
+  const res = await makeWiflixRequest(`${origin}/ajax_player.php`, {
+    method: "POST",
+    timeout: 15000,
+    responseType: "text",
+    minBodyLength: 1,
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Referer": pageUrl,
+      "Origin": origin,
+      accept: "*/*",
+    },
+    data: `v=${encodeURIComponent(token)}&k=${encodeURIComponent(pageKey || "")}&b=1`,
+  });
+  let url = null;
+  try { url = JSON.parse(res.data)?.u; } catch { /* réponse non JSON */ }
+  return typeof url === "string" && /^https?:\/\//i.test(url) ? url : null;
+}
+
+// Échange les jetons d'une fiche dont l'identité est acceptée, puis range les
+// lecteurs dans l'ordre de la fiche. Un jeton refusé est sauté. Le débit
+// global atteint, ou aucun jeton échangé sans autre lecteur, est une panne :
+// l'appelant garde l'ancien cache au lieu d'écrire un « introuvable ».
+async function completeWiflixPlayers(extraction) {
+  if (!extraction.tokenCount) return { ok: true };
+  const resolved = new Map();
+  const queue = extraction.links.filter((link) => link.token);
+  let rateLimited = false;
+  let failed = 0;
+  const worker = async () => {
+    while (queue.length && !rateLimited) {
+      const link = queue.shift();
+      try {
+        const url = await resolveWiflixToken(link.token, extraction.pageUrl, extraction.pageKey);
+        if (url) resolved.set(link, url);
+        else failed++;
+      } catch (error) {
+        if (isWiflixRateLimited(error)) rateLimited = true;
+        failed++;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(WIFLIX_TOKEN_CONCURRENCY, queue.length) }, worker));
+  refreshStep('player_tokens', { url: extraction.pageUrl, tokens: extraction.tokenCount,
+    resolved: resolved.size, failed, rateLimited });
+  if (rateLimited) return { ok: false, rateLimited: true };
+  if (!resolved.size && !extraction.players.length) return { ok: false };
+
+  const players = [];
+  for (const link of extraction.links) {
+    const url = link.token ? resolved.get(link) : link.url;
+    const player = url ? wiflixPlayer(url, link.name, link.episode, link.type) : null;
+    if (player) players.push(player);
+  }
+  extraction.players = players;
+  extraction.tokenCount = 0;
+  return { ok: true };
 }
 
 // === Data Fetching ===
@@ -639,7 +701,12 @@ async function rereadKnownWiflixPage(known, verify, triedUrls) {
   }
   const identity = await verify(extraction.identity);
   refreshStep('known_page_identity', { url: known.url, ...identity });
-  return identity.accepted && extraction.players.length ? { extraction, identity } : null;
+  if (!identity.accepted) return null;
+  const completion = await completeWiflixPlayers(extraction);
+  if (!completion.ok) {
+    throw wiflixUnavailable('Lecteurs de la fiche Wiflix connue temporairement indisponibles', completion.rateLimited);
+  }
+  return extraction.players.length ? { extraction, identity } : null;
 }
 
 // Recherches d'une actualisation : 6 au plus (8 avant), dont 3 pour la passe
@@ -684,7 +751,10 @@ async function lookupWiflixPage(verifier, triedUrls, season = null) {
         }
         const identity = await verifier.verify(extraction.identity, season === null ? undefined : { season });
         refreshStep('candidate_identity', { url: candidate.url, title: candidate.title, ...identity });
-        if (identity.accepted && extraction.players.length) return { url: candidate.url, extraction, identity };
+        if (!identity.accepted) continue;
+        const completion = await completeWiflixPlayers(extraction);
+        if (!completion.ok) return { unavailable: true, rateLimited: completion.rateLimited === true };
+        if (extraction.players.length) return { url: candidate.url, extraction, identity };
       }
     }
   }

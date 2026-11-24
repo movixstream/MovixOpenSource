@@ -27,6 +27,10 @@ import { getTmdbId, encodeId } from '../../utils/idEncoder';
 import { useAntiSpoilerSettings } from '../../hooks/useAntiSpoilerSettings';
 import { useWrappedTracker } from '../../hooks/useWrappedTracker';
 import { useTmdbImages, withTmdbImageSize } from '../../hooks/useTmdbImages';
+import WatchLoadingScreen from '@/components/watch/loading/WatchLoadingScreen';
+import WatchNotFoundScreen from '@/components/watch/loading/WatchNotFoundScreen';
+import { useSourceRadar } from '@/components/watch/loading/useSourceRadar';
+import type { RadarLinkInput } from '@/components/watch/loading/sourceRadar';
 import { isUserVip, getVipHeaders } from '../../utils/authUtils';
 import { serverResolveRequest } from '../../utils/serverResolveRequest';
 import { isExtensionAvailable } from '../../utils/extensionProxy';
@@ -42,6 +46,7 @@ import {
 } from '../../utils/hlsAutoFallbackGuard';
 import { resolveKisskhTv } from '../../services/kisskhService';
 import SwiftfluxGate from '../../components/SwiftfluxGate';
+import { useSwiftfluxTokenPrefetch } from '@/hooks/useSwiftfluxTokenPrefetch';
 import {
   readSwiftflux,
   type SwiftfluxEntry,
@@ -262,6 +267,29 @@ interface EpisodeInfo {
   still_path?: string | null;
   vote_average?: number;
 }
+
+/** Lecteur tel qu'un site le renvoie, lu prudemment pour le radar. */
+type RadarRawPlayer = { url?: string; link?: string; player?: string; name?: string; label?: string; server?: string; decoded_url?: string; clone_url?: string };
+type RadarEpisodeLists = Record<string, RadarRawPlayer[] | undefined>;
+
+// 1jour1film n'est pas activé pour le moment : la page ne l'interroge plus.
+// Repasser à `true` suffit à le rallumer (requête, extraction, menu).
+const J1F_ENABLED = false;
+
+// Sites montrés par le radar de l'écran de chargement, dans l'ordre affiché.
+const TV_RADAR_SITES = [
+  { id: 'movix', label: 'Movix', admin: true },
+  { id: 'fstream', label: 'FStream' },
+  { id: 'swiftflow', label: 'SwiftFlow' },
+  { id: 'frembed', label: 'Frembed' },
+  { id: 'coflix', label: 'Multi' },
+  { id: 'wiflix', label: 'Lynx' },
+  { id: 'viper', label: 'Viper' },
+  { id: 'vox', label: 'Vox' },
+  { id: 'omega', label: 'Omega' },
+  { id: 'purstream', label: 'Bravo' },
+  { id: 'kisskh', label: 'KissKH' },
+];
 
 type PlayerSourceType = 'darkino' | 'mp4' | 'm3u8' | 'frembed' | 'custom' | 'vostfr' | 'omega' | 'coflix' | 'fstream' | 'wiflix' | 'j1f' | 'swiftflow' | 'viper' | 'vox' | string | number; // Allow string for embed types
 
@@ -511,13 +539,20 @@ const WatchTv: React.FC = () => {
   const [loadingText, setLoadingText] = useState(t('watch.loadingSources'));
   const [showTitle, setShowTitle] = useState<string>('');
   const [episodeTitle, setEpisodeTitle] = useState<string>('');
+  // Genres et note de la série pour l'écran de chargement.
+  const [loadingDetails, setLoadingDetails] = useState<{ genres: string[]; rating: number | null }>({ genres: [], rating: null });
   const [, setReleaseYear] = useState<number | null>(null);
   const [backdropPath, setBackdropPath] = useState<string | null>(null);
   const [, setEpisodeStillPath] = useState<string | null>(null);
   const [showPosterPath, setShowPosterPath] = useState<string | null>(null); // Store poster for progress saving
   // Poster localisé (langue d'interface > EN > sans langue) via l'endpoint
   // /images — même logique que les cards, cache de session partagé.
-  const { posterUrl: localizedShowPosterUrl } = useTmdbImages('tv', id ? Number(id) : undefined);
+  const { posterUrl: localizedShowPosterUrl, logoUrl } = useTmdbImages('tv', id ? Number(id) : undefined);
+  // Radar de l'écran de chargement : sites interrogés, lecteurs trouvés et
+  // extractions en cours, plus la coupure du bouton « Lancer maintenant ».
+  const radar = useSourceRadar();
+  // Vérification Turnstile invisible de SwiftFlux, faite pendant le chargement.
+  const swiftfluxPrefetch = useSwiftfluxTokenPrefetch();
   const playerPoster = localizedShowPosterUrl
     ? withTmdbImageSize(localizedShowPosterUrl, 'w500')
     : (showPosterPath ? `https://image.tmdb.org/t/p/w500${showPosterPath}` : undefined);
@@ -852,6 +887,8 @@ const WatchTv: React.FC = () => {
     adType // Added back
   } = useAdFreePopup();
   const [adPopupTriggered, setAdPopupTriggered] = useState(false);
+  // La popup pub attend que l'écran de chargement soit parti.
+  const [loadingScreenOpen, setLoadingScreenOpen] = useState(true);
   const [adPopupBypass, setAdPopupBypass] = useState(false);
   // Ajout de l'état pour savoir si l'utilisateur a cliqué sur la pub
   const [hasClickedAd, setHasClickedAd] = useState(false);
@@ -867,14 +904,6 @@ const WatchTv: React.FC = () => {
     } : undefined,
     isActive: !isLoading && !!id,
   });
-
-  // Function to update VIP retry message
-  const updateVipRetryMessage = (message: string) => {
-    if (isLoading) { // Only show retry messages during initial load
-      setVipRetryMessage(message);
-      setLoadingText(message);
-    }
-  };
 
   // Function to handle navigation to the next episode
   const handleNextEpisodeNav = (targetSeason: number, targetEpisode: number) => {
@@ -1202,6 +1231,7 @@ const WatchTv: React.FC = () => {
     const initialFetch = async () => {
       setIsLoading(true);
       setLoadingError(false); // Reset error on new fetch
+      radar.reset(TV_RADAR_SITES.filter((site) => site.id !== 'purstream' || canUseBravo));
 
       try {
         // Fetch show information and episode details
@@ -1225,6 +1255,13 @@ const WatchTv: React.FC = () => {
         setReleaseYear(new Date(show.first_air_date).getFullYear());
         setBackdropPath(show.backdrop_path);
         setShowPosterPath(show.poster_path);
+        {
+          const voteAverage = Number(show.vote_average) || 0;
+          setLoadingDetails({
+            genres: Array.isArray(show.genres) ? show.genres.map((genre: { name?: string }) => genre?.name ?? '').filter(Boolean) : [],
+            rating: voteAverage > 0 && (Number(show.vote_count) || 0) >= 20 ? voteAverage : null,
+          });
+        }
 
         // Set episode info
         const episode = tvmazeEpisode ?? tmdbEpisode;
@@ -1313,7 +1350,7 @@ const WatchTv: React.FC = () => {
         const releaseYearData = new Date(show.first_air_date).getFullYear();
 
         // ========== INITIATE ALL ASYNCHRONOUS SOURCE CHECKS (NON-BLOCKING) ==========
-        const kisskhPromise = (async () => {
+        const kisskhPromise = radar.race((async () => {
           try {
             const resolution = await resolveKisskhTv(
               parseInt(id, 10),
@@ -1338,21 +1375,20 @@ const WatchTv: React.FC = () => {
               setLoadingKisskh(false);
             }
           }
-        })();
-
-        const darkinoPromise = checkDarkinoAvailability(
-          show.name,
-          releaseYearData,
-          seasonNumber,
-          episodeNumber,
-          id!,
-          updateVipRetryMessage
-        ).catch(error => {
-          console.error('Error checking Darkino availability:', error);
-          return { available: false, sources: [] as any[], darkinoId: null };
+        })(), null).then((data) => {
+          radar.answer('kisskh', Array.isArray(data?.sources)
+            ? data.sources.filter((src) => src?.url).map((src) => ({ url: src.url, name: src.label, state: 'ready' as const }))
+            : []);
+          return data;
         });
 
-        const customLinksPromise = (async () => {
+        // Darkino n'existe plus : la page ne l'interroge plus. Le reste du code
+        // le traite comme « indisponible ».
+        void releaseYearData;
+        const darkinoPromise: ReturnType<typeof checkDarkinoAvailability> = Promise.resolve({ available: false, sources: [], darkinoId: null });
+        setLoadingDarkino(false);
+
+        const customLinksPromise = radar.race((async () => {
           try {
             // Fetch the full result including mp4Links
             return await checkCustomTVLink(id!, seasonNumber, episodeNumber);
@@ -1363,9 +1399,18 @@ const WatchTv: React.FC = () => {
           } finally {
             setLoadingCustom(false);
           }
-        })();
+        })(), { isAvailable: false, customLinks: [] as string[], mp4Links: [] as { url: string; label?: string; language?: string; isVip?: boolean }[] }).then((data) => {
+          const custom: RadarLinkInput[] = (data.customLinks || [])
+            .filter((url: unknown): url is string => typeof url === 'string' && !!url)
+            .map((url: string) => ({ url }));
+          const mp4: RadarLinkInput[] = (data.mp4Links || [])
+            .filter((link) => !!link?.url)
+            .map((link) => ({ url: link.url, host: 'MP4 direct', lang: `${link.language ?? ''} ${link.label ?? ''}`, state: 'ready' as const }));
+          radar.answer('movix', [...mp4, ...custom]);
+          return data;
+        });
 
-        const frembedAvailabilityPromise = (async () => {
+        const frembedAvailabilityPromise = radar.race((async () => {
           try {
             return await checkFrembedAvailability(id!, seasonNumber, episodeNumber);
           } catch (error) {
@@ -1374,9 +1419,14 @@ const WatchTv: React.FC = () => {
           } finally {
             setLoadingFrembed(false);
           }
-        })();
+        })(), false).then((data) => {
+          radar.answer('frembed', data
+            ? [{ url: `frembed://tv/${id}/${seasonNumber}/${episodeNumber}`, host: 'Frembed', lang: 'VF', state: 'embed' }]
+            : []);
+          return data;
+        });
 
-        const coflixPromise = (async () => {
+        const coflixPromise = radar.race((async () => {
           try {
             // Résolution serveur des m3u8 uniquement en méthode serveur.
             // Réservé à la lecture — la navigation ne déclenche pas d'extraction.
@@ -1389,9 +1439,20 @@ const WatchTv: React.FC = () => {
           } finally {
             setLoadingCoflix(false);
           }
-        })();
+        })(), null).then((data) => {
+          const coflixLinks: RadarRawPlayer[] = data?.current_episode?.player_links ?? data?.player_links ?? [];
+          const coflixRadar: RadarLinkInput[] = Array.isArray(coflixLinks)
+            ? coflixLinks.map((p) => ({ url: getCoflixPreferredUrl(p), name: typeof p?.player === 'string' ? p.player : '' }))
+            : [];
+          const coflixIframe = data?.current_episode?.iframe_src ?? data?.iframe_src;
+          if (coflixRadar.length === 0 && typeof coflixIframe === 'string' && coflixIframe) {
+            coflixRadar.push({ url: coflixIframe, host: 'Coflix', state: 'embed' });
+          }
+          radar.answer('coflix', coflixRadar);
+          return data;
+        });
 
-        const omegaPromise = (async () => {
+        const omegaPromise = radar.race((async () => {
           let omegaDataResult = null;
           try {
             // Get IMDB ID for the show
@@ -1412,10 +1473,15 @@ const WatchTv: React.FC = () => {
             setLoadingOmega(false);
           }
           return omegaDataResult;
-        })();
+        })(), null).then((data) => {
+          radar.answer('omega', data && checkOmegaAvailability(data, seasonNumber, episodeNumber)
+            ? extractOmegaPlayers(data, seasonNumber, episodeNumber).map((p) => ({ url: p.link, name: p.player }))
+            : []);
+          return data;
+        });
 
         // ========== CHECK PURSTREAM (BRAVO) SOURCE ==========
-        const purstreamPromise = (async () => {
+        const purstreamPromise = radar.race((async () => {
           try {
             const purstreamResponse = await axios.get(`${MAIN_API}/api/purstream/tv/${id}/stream`, {
               params: { season: seasonNumber, episode: episodeNumber },
@@ -1426,10 +1492,15 @@ const WatchTv: React.FC = () => {
             console.error('Error fetching PurStream TV sources:', error);
             return null;
           }
-        })();
+        })(), null).then((data) => {
+          radar.answer('purstream', canUseBravo && Array.isArray(data?.sources)
+            ? data.sources.filter((src: RadarRawPlayer) => src?.url).map((src: RadarRawPlayer) => ({ url: src.url ?? '', name: src.name, state: 'ready' as const }))
+            : []);
+          return data;
+        });
 
         // ========== CHECK FSTREAM SOURCE ==========
-        const fstreamPromise = (async () => {
+        const fstreamPromise = radar.race((async () => {
           try {
             // Méthode serveur : clé VIP + `resolve=1`, le serveur résout les
             // m3u8 du SEUL épisode demandé (`?episode=`) et les renvoie
@@ -1444,11 +1515,29 @@ const WatchTv: React.FC = () => {
           } finally {
             setLoadingFstream(false);
           }
-        })();
+        })(), null).then((data) => {
+          // Fsvid n'est jouable qu'en VIP ou avec l'extension : sinon le menu ne
+          // le montre pas, le radar non plus.
+          const fsvidPlayable = isUserVip() || isExtensionAvailable();
+          const fstreamRadar: RadarLinkInput[] = [];
+          const fstreamEpisode = data?.success ? data.episodes?.[episodeNumber.toString()] : null;
+          if (fstreamEpisode?.languages) {
+            ['VF', 'VOSTFR', 'VOENG', 'Default'].forEach((category) => {
+              ((fstreamEpisode.languages as RadarEpisodeLists)[category] || []).forEach((player) => {
+                const url = typeof player?.url === 'string' ? player.url : '';
+                const isFsvid = url.toLowerCase().includes('fsvid');
+                if (!url || (isFsvid && !fsvidPlayable)) return;
+                fstreamRadar.push({ url, name: isFsvid ? 'Fsvid' : player?.player, lang: category });
+              });
+            });
+          }
+          radar.answer('fstream', fstreamRadar);
+          return data;
+        });
 
         // ========== CHECK WIFLIX (LYNX) SOURCE ==========
         const lynxViperDisabled = LYNX_VIPER_DISABLED_TV_IDS.has(String(id));
-        const wiflixPromise = (async () => {
+        const wiflixPromise = radar.race((async () => {
           try {
             if (lynxViperDisabled) return null;
             const wiflixResponse = await axios.get(`${MAIN_API}/api/wiflix/tv/${id}/${seasonNumber}`,
@@ -1460,11 +1549,24 @@ const WatchTv: React.FC = () => {
           } finally {
             setLoadingWiflix(false);
           }
-        })();
+        })(), null).then((data) => {
+          const wiflixRadar: RadarLinkInput[] = [];
+          const wiflixRadarEpisode = data?.success ? data.episodes?.[episodeNumber.toString()] : null;
+          if (wiflixRadarEpisode) {
+            (['vf', 'vostfr'] as const).forEach((category) => {
+              ((wiflixRadarEpisode as RadarEpisodeLists)[category] || []).forEach((player) => {
+                wiflixRadar.push({ url: player?.url ?? '', name: player?.name, lang: category });
+              });
+            });
+          }
+          radar.answer('wiflix', wiflixRadar);
+          return data;
+        });
 
         // ========== CHECK J1F (1JOUR1FILM) SOURCE ==========
-        const j1fPromise = (async () => {
+        const j1fPromise = radar.race((async () => {
           try {
+            if (!J1F_ENABLED) return null;
             const j1fResponse = await axios.get(`${MAIN_API}/api/j1f/tv/${id}/season/${seasonNumber}`,
               serverResolveRequest({ episode: episodeNumber }));
             return j1fResponse.data;
@@ -1474,10 +1576,12 @@ const WatchTv: React.FC = () => {
           } finally {
             setLoadingJ1f(false);
           }
-        })();
+        })(), null).then((data) => {
+          return data;
+        });
 
         // ========== CHECK SWIFTFLOW SOURCE ==========
-        const swiftflowPromise = (async () => {
+        const swiftflowPromise = radar.race((async () => {
           try {
             const swiftflowResponse = await axios.get(`${MAIN_API}/api/swiftflow/tv/${id}/season/${seasonNumber}`,
               serverResolveRequest({ episode: episodeNumber }));
@@ -1488,10 +1592,37 @@ const WatchTv: React.FC = () => {
           } finally {
             setLoadingSwiftflow(false);
           }
-        })();
+        })(), null).then((data) => {
+          const swiftflowRadar: RadarLinkInput[] = [];
+          // Le lecteur iframe de SwiftFlow est le même fichier que SwiftFlux :
+          // une seule ligne dans le radar quand SwiftFlux est là.
+          const swiftflowRadarEpisode = data?.success && readSwiftflux(data).entries.length === 0
+            ? data.episodes?.[episodeNumber.toString()]
+            : null;
+          if (swiftflowRadarEpisode) {
+            (['vf', 'vostfr'] as const).forEach((category) => {
+              ((swiftflowRadarEpisode as RadarEpisodeLists)[category] || []).forEach((player) => {
+                swiftflowRadar.push({ url: player?.url ?? '', name: player?.label, lang: category });
+              });
+            });
+          }
+          readSwiftflux(data).entries.forEach((entry) => swiftflowRadar.unshift({
+            url: `swiftflux://tv/${id}/${seasonNumber}/${episodeNumber}/${entry.index}`,
+            host: 'SwiftFlux',
+            lang: `${entry.language ?? ''} ${entry.label ?? ''}`,
+            state: 'verifying',
+          }));
+          radar.answer('swiftflow', swiftflowRadar);
+          const swiftfluxUrls = swiftflowRadar.filter((link) => link.host === 'SwiftFlux').map((link) => link.url);
+          if (swiftfluxUrls.length > 0) {
+            // Réussie ou non, le lecteur reste jouable (case visible en plan B).
+            swiftfluxPrefetch.start(() => swiftfluxUrls.forEach((url) => radar.setState(url, 'ready')));
+          }
+          return data;
+        });
 
         // ========== CHECK VIPER SOURCE ==========
-        const viperPromise = (async () => {
+        const viperPromise = radar.race((async () => {
           try {
             if (lynxViperDisabled) return null;
             const viperResponse = await axios.get(`${MAIN_API}/api/cpasmal/tv/${id}/${seasonNumber}/${episodeNumber}`,
@@ -1503,10 +1634,16 @@ const WatchTv: React.FC = () => {
           } finally {
             setLoadingViper(false);
           }
-        })();
+        })(), null).then((data) => {
+          const viperRadar: RadarLinkInput[] = [];
+          (data?.links?.vf || []).forEach((link: RadarRawPlayer) => viperRadar.push({ url: link.url ?? '', name: link.server, lang: 'VF' }));
+          (data?.links?.vostfr || []).forEach((link: RadarRawPlayer) => viperRadar.push({ url: link.url ?? '', name: link.server, lang: 'VOSTFR' }));
+          radar.answer('viper', viperRadar);
+          return data;
+        });
 
         // ========== CHECK VOX SOURCE ==========
-        const voxPromise = (async () => {
+        const voxPromise = radar.race((async () => {
           try {
             return await checkVoxAvailability(id!, seasonNumber, episodeNumber);
           } catch (error) {
@@ -1515,7 +1652,12 @@ const WatchTv: React.FC = () => {
           } finally {
             setLoadingVox(false);
           }
-        })();
+        })(), null).then((data) => {
+          radar.answer('vox', data?.success && Array.isArray(data.data)
+            ? data.data.map((source: RadarRawPlayer) => ({ url: source.link ?? '', name: source.name }))
+            : []);
+          return data;
+        });
 
         // ========== AWAIT ALL SOURCE CHECKS TO COMPLETE ==========
         const [
@@ -1548,6 +1690,23 @@ const WatchTv: React.FC = () => {
           kisskhPromise,
         ]);
 
+        // « Lancer maintenant » : les sources encore en route ont rendu leur
+        // repli. Leurs drapeaux de chargement s'éteignent ici, sinon l'écran
+        // attendrait quand même la plus lente.
+        if (radar.getSnapshot().cutoff) {
+          setLoadingCoflix(false);
+          setLoadingOmega(false);
+          setLoadingCustom(false);
+          setLoadingFrembed(false);
+          setLoadingFstream(false);
+          setLoadingWiflix(false);
+          setLoadingJ1f(false);
+          setLoadingSwiftflow(false);
+          setLoadingViper(false);
+          setLoadingVox(false);
+          setLoadingKisskh(false);
+        }
+
         // ========== TRAITEMENT DES RÉSULTATS SWIFTFLUX ==========
         // Même réponse que SwiftFlow : l'appel amont rend l'URL du MP4 de
         // l'épisode en même temps que de quoi construire l'iframe. Pas de
@@ -1578,17 +1737,10 @@ const WatchTv: React.FC = () => {
         if (rawOmegaData) {
           isOmegaAvailable = checkOmegaAvailability(rawOmegaData, seasonNumber, episodeNumber);
           if (isOmegaAvailable) {
+            // Les extractions supervideo / dropload sont faites une seule fois
+            // plus bas : ce bloc les lançait une première fois, en série et
+            // pour rien (résultats jetés).
             processedOmegaDataForState = rawOmegaData;
-            // Ajout: si supervideo ou dropload, tenter d'extraire le m3u8
-            const omegaPlayers = extractOmegaPlayers(rawOmegaData, seasonNumber, episodeNumber);
-            const supervideo = omegaPlayers.find((p: any) => p.player && p.player.toLowerCase().includes('supervideo'));
-            if (supervideo) {
-              await extractM3u8FromEmbed(supervideo, MAIN_API);
-            }
-            const dropload = omegaPlayers.find((p: any) => p.player && p.player.toLowerCase().includes('dropload'));
-            if (dropload) {
-              await extractM3u8FromEmbed(dropload, MAIN_API);
-            }
           } else {
             console.log(`Omega source not available for S${seasonNumber}E${episodeNumber}`);
           }
@@ -1715,7 +1867,18 @@ const WatchTv: React.FC = () => {
           }
 
           if (omegaExtractionPromises.length > 0) {
-            const omegaResults = await Promise.all(omegaExtractionPromises);
+            const omegaUrls: Record<string, string | undefined> = {
+              supervideo: supervideo?.link,
+              dropload: dropload?.link,
+            };
+            const omegaResults = await Promise.all(omegaExtractionPromises.map((promise) => radar.race(
+              promise.then((entry) => {
+                const url = omegaUrls[entry.type];
+                if (url) radar.setState(url, entry.result?.success ? 'ready' : 'failed');
+                return entry;
+              }),
+              null,
+            ))).then((entries) => entries.filter((entry): entry is NonNullable<typeof entry> => entry !== null));
             omegaResults.forEach(({ type, result, label }) => {
               if (type === 'supervideo' && result?.success && result.hlsUrl) {
                 finalHlsSources = [...finalHlsSources, { url: result.hlsUrl, label }];
@@ -1752,7 +1915,13 @@ const WatchTv: React.FC = () => {
               return null;
             });
 
-            const droploadResults = await Promise.all(droploadPromises);
+            const droploadResults = await Promise.all(droploadPromises.map((promise, index) => radar.race(
+              promise.then((entry) => {
+                radar.setState(droploadLinks[index], entry ? 'ready' : 'failed');
+                return entry;
+              }),
+              null,
+            )));
             const validDroploadResults = droploadResults.filter(result => result !== null);
             finalHlsSources = [...finalHlsSources, ...validDroploadResults];
             console.log(`? Added ${validDroploadResults.length} Firebase Dropload HLS sources`);
@@ -1776,6 +1945,7 @@ const WatchTv: React.FC = () => {
             {
               origin: 'custom',
               context: { category: 'moviesTv', topLevel: 'custom' },
+              ...radar.pass('movix'),
             },
           )
           : emptyPass;
@@ -1799,6 +1969,7 @@ const WatchTv: React.FC = () => {
             {
               origin: 'coflix',
               context: { category: 'moviesTv', topLevel: 'coflix' },
+              ...radar.pass('coflix'),
             },
           );
         }
@@ -1945,7 +2116,14 @@ const WatchTv: React.FC = () => {
           }
 
           if (fstreamExtractionPromises.length > 0) {
-            fstreamHlsPromise = Promise.all(fstreamExtractionPromises).then((fstreamExtractionResults) => {
+            fstreamHlsPromise = Promise.all(fstreamExtractionPromises.map((promise) => radar.race(
+              promise.then((entry) => {
+                radar.setState(entry.originalSource.url, entry.result?.success ? 'ready' : 'failed');
+                return entry;
+              }),
+              null,
+            ))).then((trackedResults) => {
+            const fstreamExtractionResults = trackedResults.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
             // Séparer les sources fsvid, vidzy et uqload pour les ordonner correctement
             const fsvidHlsSources: { url: string; label: string; category: string }[] = [];
             const vidzyHlsSources: { url: string; label: string; category: string }[] = [];
@@ -2074,6 +2252,7 @@ const WatchTv: React.FC = () => {
           ? runExtractionPass(j1fProcessedSources, MAIN_API, {
             origin: 'j1f',
             context: { category: 'moviesTv', topLevel: 'j1f' },
+            ...radar.pass('j1f'),
           })
           : emptyPass;
         console.log('?? [WatchTv] 1jour1film TV sources set:', j1fProcessedSources.length);
@@ -2113,6 +2292,7 @@ const WatchTv: React.FC = () => {
           ? runExtractionPass(swiftflowProcessedSources, MAIN_API, {
             origin: 'swiftflow',
             context: { category: 'moviesTv', topLevel: 'swiftflow' },
+            ...radar.pass('swiftflow'),
           })
           : emptyPass;
         console.log('[WatchTv] SwiftFlow TV sources set:', swiftflowProcessedSources.length);
@@ -2125,6 +2305,7 @@ const WatchTv: React.FC = () => {
           ? runExtractionPass(wiflixProcessedSources, MAIN_API, {
             origin: 'wiflix',
             context: { category: 'moviesTv', topLevel: 'wiflix' },
+            ...radar.pass('wiflix'),
           })
           : emptyPass;
 
@@ -2164,6 +2345,7 @@ const WatchTv: React.FC = () => {
             viperPassPromise = runExtractionPass(viperProcessedSources, MAIN_API, {
               origin: 'viper',
               context: { category: 'moviesTv', topLevel: 'viper' },
+              ...radar.pass('viper'),
             });
           }
         } else {
@@ -2189,6 +2371,7 @@ const WatchTv: React.FC = () => {
               {
                 origin: 'vox',
                 context: { category: 'moviesTv', topLevel: 'vox' },
+                ...radar.pass('vox'),
               },
             );
           }
@@ -2250,6 +2433,7 @@ const WatchTv: React.FC = () => {
 
         // =========== FIN DES EXTRACTIONS ===========
         console.log('? Extractions M3U8 terminées');
+        radar.settle();
         setLoadingExtractions(false);
 
         // Check for Sibnet links for anime
@@ -3783,7 +3967,7 @@ const WatchTv: React.FC = () => {
   // Normal/auto replace the whole view with the popup (dialog/auto over the gated
   // black screen). Click-anywhere falls through so the player loads behind the
   // transparent catcher, which is rendered as an overlay in the main return.
-  if (showAdFreePopup && adPopupTriggered && !adPopupBypass && getAdPopupMode() !== 'click-anywhere') {
+  if (showAdFreePopup && adPopupTriggered && !adPopupBypass && !loadingScreenOpen && getAdPopupMode() !== 'click-anywhere') {
     return (
       <div className="fixed inset-0 bg-black">
         {!shouldLoadIframe && !hasClickedAd && <AdWaitingScreen />}
@@ -3799,8 +3983,11 @@ const WatchTv: React.FC = () => {
       </div>
     );
   }
-  // Si la popup doit être affichée mais n'est pas encore montrée, attendre
-  if (adPopupTriggered && !shouldLoadIframe && !hasClickedAd) {
+  // Si la popup doit être affichée mais n'est pas encore montrée, attendre.
+  // Jamais tant que l'écran de chargement est là : ce retour le démonterait
+  // avant qu'il ne signale son départ, et la popup (qui attend ce départ) ne
+  // viendrait jamais — écran noir.
+  if (adPopupTriggered && !shouldLoadIframe && !hasClickedAd && !loadingScreenOpen) {
     return <AdWaitingScreen />;
   }
 
@@ -3921,54 +4108,6 @@ const WatchTv: React.FC = () => {
 
   return (
     <div style={{ minHeight: 'calc(var(--vh, 1vh) * 100)', overflow: 'hidden' }} className="w-full bg-black text-white overflow-hidden fixed inset-0">
-      <style dangerouslySetInnerHTML={{
-        __html: `
-          .loading-container {
-            --uib-size: 35px;
-            --uib-color: white;
-            --uib-speed: 1s;
-            --uib-stroke: 3.5px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            width: var(--uib-size);
-            height: calc(var(--uib-size) * 0.9);
-          }
-
-          .loading-bar {
-            width: var(--uib-stroke);
-            height: 100%;
-            background-color: var(--uib-color);
-            border-radius: calc(var(--uib-stroke) / 2);
-            transition: background-color 0.3s ease;
-          }
-
-          .loading-bar:nth-child(1) {
-            animation: grow var(--uib-speed) ease-in-out calc(var(--uib-speed) * -0.45) infinite;
-          }
-
-          .loading-bar:nth-child(2) {
-            animation: grow var(--uib-speed) ease-in-out calc(var(--uib-speed) * -0.3) infinite;
-          }
-
-          .loading-bar:nth-child(3) {
-            animation: grow var(--uib-speed) ease-in-out calc(var(--uib-speed) * -0.15) infinite;
-          }
-
-          .loading-bar:nth-child(4) {
-            animation: grow var(--uib-speed) ease-in-out infinite;
-          }
-
-          @keyframes grow {
-            0%, 100% {
-              transform: scaleY(0.3);
-            }
-            50% {
-              transform: scaleY(1);
-            }
-          }
-        `
-      }} />
       <div
         hidden
         data-premid-watch-context=""
@@ -3982,43 +4121,36 @@ const WatchTv: React.FC = () => {
         data-premid-source-label={embedType || selectedSource || undefined}
         data-premid-source-detail={preMidSourceDetail}
       />
+      <WatchLoadingScreen
+        loading={isLoading}
+        backdropUrl={backdropPath ? `https://image.tmdb.org/t/p/w1280${backdropPath}` : null}
+        logoUrl={logoUrl}
+        title={showTitle}
+        meta={t('watch.loadingScreen.episodeMeta', { season: seasonNumber, episode: episodeNumber })}
+        subtitle={episodeTitle || null}
+        genres={loadingDetails.genres}
+        rating={loadingDetails.rating}
+        statusText={vipRetryMessage || (loadingText !== t('watch.loadingSources') ? loadingText : null)}
+        radar={radar}
+        onBack={() => navigate(-1)}
+        onVisibleChange={setLoadingScreenOpen}
+      />
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center h-full bg-black">
-          <div className="loading-container">
-            <div className="loading-bar"></div>
-            <div className="loading-bar"></div>
-            <div className="loading-bar"></div>
-            <div className="loading-bar"></div>
-          </div>
-          <div className="text-white text-xl font-medium mt-6">{vipRetryMessage || loadingText}</div>
-        </div>
+        <div className="h-full bg-black" />
       ) : onlyVostfrAvailable ? (
-        <div className="h-full bg-black text-white flex flex-col items-center justify-center p-4">
-          <div className="max-w-2xl w-full bg-gray-900/95 rounded-xl p-8 text-center shadow-2xl border border-gray-800">
-            <div className="mb-6">
-              <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-16 w-16 text-yellow-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              <h2 className="text-2xl font-bold text-white mb-2">{t('watch.contentNotFoundInSources')}</h2>
-              <p className="text-gray-300 mb-6">
-                {t('watch.episodeNotFoundDesc')}
-              </p>
-              <div className="flex justify-center gap-4">
-                <button
-                  onClick={() => navigate(`/tv/${encodeId(id!)}`)}
-                  className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-all duration-200 shadow-lg"
-                >
-                  {t('watch.back')}
-                </button>
-                <button
-                  onClick={handleLoadVostfr}
-                  className="px-6 py-3 bg-red-800 hover:bg-red-700 text-white rounded-lg transition-all duration-200 shadow-lg"
-                >
-                  {t('watch.chooseVostfrPlayer')}
-                </button>
-              </div>
-            </div>
-          </div>
+        <div className="h-full bg-black text-white">
+          <WatchNotFoundScreen
+            kind="episode"
+            backdropUrl={backdropPath ? `https://image.tmdb.org/t/p/w1280${backdropPath}` : null}
+            logoUrl={logoUrl}
+            title={showTitle}
+            meta={t('watch.loadingScreen.episodeMeta', { season: seasonNumber, episode: episodeNumber })}
+            subtitle={episodeTitle || null}
+            genres={loadingDetails.genres}
+            rating={loadingDetails.rating}
+            onBack={() => navigate(`/tv/${encodeId(id!)}`)}
+            onChooseVo={handleLoadVostfr}
+          />
 
           {/* Source Selection Menu */}
           <PlayerOverlayPortal>
@@ -4032,8 +4164,8 @@ const WatchTv: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10001] bg-black/60 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10002]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10002]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -4184,7 +4316,7 @@ const WatchTv: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.2 }}
-                className="fixed top-16 right-4 md:right-4 left-4 md:left-auto z-[11000] bg-black/95 border border-gray-800 rounded-lg shadow-2xl md:w-96 w-auto max-h-[80vh] overflow-hidden flex flex-col"
+                className="fixed top-16 right-4 md:right-4 left-4 md:left-auto z-[11000] bg-black border border-gray-800 rounded-lg shadow-2xl md:w-96 w-auto max-h-[80vh] overflow-hidden flex flex-col"
               >
                 <div className="p-4 border-b border-gray-800 flex justify-between items-center">
                   <h3 className="text-lg font-semibold text-white">{showTitle}</h3>
@@ -4384,8 +4516,8 @@ const WatchTv: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10001] bg-black/60 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10002]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10002]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -4526,8 +4658,8 @@ const WatchTv: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10001] bg-black/60 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10002]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10002]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -4658,7 +4790,7 @@ const WatchTv: React.FC = () => {
       {/* Click-anywhere: transparent catcher overlaid on the preloaded player.
           Normal/auto already returned the popup above, so this renders only for
           click-anywhere. */}
-      {showAdFreePopup && adPopupTriggered && !adPopupBypass && (
+      {showAdFreePopup && adPopupTriggered && !adPopupBypass && !loadingScreenOpen && (
         <AdFreePlayerAds onClose={handlePopupClose} onAccept={handlePopupAccept} adType={adType} onAdClick={() => setHasClickedAd(true)} />
       )}
 
@@ -4682,6 +4814,7 @@ const WatchTv: React.FC = () => {
             setSelectedSource('swiftflux');
             setSwiftfluxGateOpen(false);
           }}
+          takePrefetchedToken={swiftfluxPrefetch.take}
           onClose={() => setSwiftfluxGateOpen(false)}
         />
       )}

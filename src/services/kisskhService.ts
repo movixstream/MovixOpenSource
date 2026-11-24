@@ -331,7 +331,9 @@ async function readBoundedResponse(response: Response, maxBytes: number): Promis
       chunks.push(value);
     }
   } finally {
-    reader.releaseLock();
+    // Pale Moon lève « The ReadableStream reader was released » ici quand le
+    // flux est déjà fermé : le verrou est alors déjà rendu.
+    try { reader.releaseLock(); } catch { /* déjà libéré */ }
   }
 
   const output = new Uint8Array(total);

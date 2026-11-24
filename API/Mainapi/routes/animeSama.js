@@ -99,6 +99,9 @@ let deps = {
   // Index du catalogue (utils/animeSamaIndex.js) : œuvre par ID TMDB, liste du
   // catalogue, planning. Sans lui, ces routes répondent vide.
   animeIndex: null,
+  // Page Animes calculée par le serveur (utils/animeHome.js). Sans elle,
+  // /anime/home répond « en attente » et le site interroge TMDB lui-même.
+  animeHome: null,
   // Une œuvre jamais lue, demandée par son ID TMDB : la réponse attend au plus
   // ce délai la première lecture du site.
   firstScanWaitMs: 12000,
@@ -1498,6 +1501,26 @@ router.get('/catalogue/genres', async (req, res) => {
   } catch (error) {
     logIndexFailure(error);
     return res.json({ genres: [] });
+  }
+});
+
+// Page Animes du site (`language` = langue TMDB, ex. fr-FR) : œuvres TMDB sans
+// celles pour adultes, affiches des genres et rangées du catalogue, calculées
+// une fois par langue. 202 tant que le premier calcul n'est pas fini.
+router.get('/home', async (req, res) => {
+  const pending = status => {
+    res.set('Cache-Control', 'no-store');
+    return res.status(status).json({ pending: true });
+  };
+  if (typeof deps.animeHome?.read !== 'function') return pending(503);
+  try {
+    const result = await deps.animeHome.read(req.query.language);
+    if (result.status !== 'ready') return pending(202);
+    res.set('Cache-Control', 'public, max-age=300');
+    return res.json(result.data);
+  } catch (error) {
+    console.warn(`[AnimeHome] lecture impossible : ${error.message}`);
+    return pending(503);
   }
 });
 

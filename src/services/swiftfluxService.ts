@@ -62,6 +62,8 @@ export interface ResolveSwiftfluxParams {
   episode?: number;
   index?: number;
   turnstileToken: string;
+  /** Widget d'où vient le jeton : invisible d'abord, case visible en plan B. */
+  turnstileKind?: 'visible' | 'invisible';
 }
 
 /**

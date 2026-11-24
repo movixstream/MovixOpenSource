@@ -40,8 +40,9 @@ const HOSTER_PATTERNS = Object.freeze({
         '(?:lukesitturn|mariatheserepublican|marissasharecareer|matriculant401merited|matthewhotelscience|maxfinishseveral|metagnathtuggers|michaelapplysome|mikaylaarealike|nathanfromsubject|nectareousoverelate|nonesnanking|ogladaj|pamelachangemission|paulkitchendark|preferciseaccurate)\\.',
         '(?:prepareddare|ralphysuccessfull|realfinanceblogcenter|rebeccaneverbase|rebeccapracticeloss|reputationsheriffkennethsand|richardsignfish|roberteachfinal|robertordercharacter|robertplacespace|sandratableother|sandrataxeight|scatch176duplicities|sethniceletter|shannonpersonalcost|simpulumlamerop|smoki)\\.',
         '(?:stevenfamilyedge|stevenimaginelittle|strawberriesporail|telyn610zoanthropy|timberwoodanotia|timmaybealready|toddpartneranimal|toxitabellaeatrebates306|tracylocalschool|uptodatefinishconferenceroom|valeronevijao|walterprettytheir|wolfdyslectic|yodelswartlike)\\.',
-        // Domaines VOE des lecteurs d'anime-sama (table `lecteursInfos`, 2026-10-19).
-        '(?:claireguessthousand|derricknationtop|jamesbornmain|jeremyparticipantanything|megankiddifference|teresapoliticallearn)\\.',
+        // Domaines VOE des lecteurs d'anime-sama (table `lecteursInfos`, 2026-10-19 ;
+        // caseyseemavoid et arianathankspecial ajoutés le 2026-11-24).
+        '(?:arianathankspecial|caseyseemavoid|claireguessthousand|derricknationtop|jamesbornmain|jeremyparticipantanything|megankiddifference|teresapoliticallearn)\\.',
     ],
     // `ansembed` sert le lecteur Vidmoly sous un autre nom : même extracteur.
     vidmoly: ['vidmoly', 'ansembed'],

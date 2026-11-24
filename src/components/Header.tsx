@@ -252,7 +252,11 @@ const Header: React.FC = () => {
   // Click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
+      // Firefox Android peut viser un nœud texte ou le document, sans
+      // closest() (GlitchTip 8857756) : on remonte à l'élément parent.
+      const raw = event.target as Node | null;
+      const target = (raw instanceof Element ? raw : raw?.parentElement) as HTMLElement | null;
+      if (!target) return;
       if (autocompleteRef.current && !autocompleteRef.current.contains(target)
         && !searchInputRef.current?.contains(target)
         && !mobileSearchInputRef.current?.contains(target)) {
@@ -750,7 +754,7 @@ const Header: React.FC = () => {
       <AnimatePresence>
         {isMobileSearchOpen && (
           <motion.div
-            className="md:hidden fixed inset-x-0 top-0 z-[11002] bg-black/95 p-4"
+            className="md:hidden fixed inset-x-0 top-0 z-[11002] bg-black p-4"
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
@@ -785,7 +789,7 @@ const Header: React.FC = () => {
         {showAutocomplete && ageFilteredAutocomplete.length > 0 && (
           <motion.div
             ref={autocompleteRef}
-            className="bg-black/95 border border-white/15 rounded-xl shadow-2xl z-[12000] overflow-hidden"
+            className="bg-black border border-white/15 rounded-xl shadow-2xl z-[12000] overflow-hidden"
             style={dropdownStyle}
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}

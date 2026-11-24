@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSocialPreviewResponse } from '../functions/_lib/socialPreview.js';
+import { SECURITY_HEADERS } from '../functions/_lib/securityHeaders.js';
 import { registerGracefulShutdown } from './gracefulShutdown.js';
 import { isVersionedAsset, startAssetHistory } from './asset-history.mjs';
 
@@ -52,6 +53,11 @@ app.use('/*', async (c, next) => {
   await next();
   const path = new URL(c.req.url).pathname;
   const status = c.res.status;
+
+  // Sur toutes les réponses, erreurs comprises : avant les `return` ci-dessous.
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+    if (!c.res.headers.has(name)) c.header(name, value);
+  }
 
   // Les erreurs et la sonde ne doivent jamais être conservées par un cache.
   // Ces exceptions passent avant le garde-fou des headers pour rester

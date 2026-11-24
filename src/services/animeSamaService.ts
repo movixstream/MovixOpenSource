@@ -169,6 +169,57 @@ export const fetchAnimeCatalogue = async (query: AnimeCatalogueQuery = {}): Prom
   }
 };
 
+/** Œuvre TMDB de la page Animes (champs gardés par le serveur). */
+export interface AnimeHomeShow {
+  id: number;
+  name: string;
+  overview: string;
+  poster_path: string;
+  backdrop_path: string;
+  vote_average: number;
+  vote_count?: number;
+  popularity?: number;
+  first_air_date: string;
+  genre_ids?: number[];
+  media_type?: 'tv';
+}
+
+export interface AnimeHomePayload {
+  language: string;
+  updatedAt: number;
+  /** Œuvres triées par popularité, sans celles réservées aux adultes. */
+  shows: AnimeHomeShow[];
+  /** Affiches des tuiles « Parcourir par genre », par ID de genre TMDB. */
+  genrePosters: Record<number, string[]>;
+  /** Rangées du catalogue de la source anime : en cours, et doublées en VF. */
+  siteRows: { airing: AnimeHomeShow[]; dubbed: AnimeHomeShow[] };
+}
+
+/**
+ * Page Animes calculée par le serveur, une fois par langue TMDB. `null` tant
+ * qu'il ne l'a pas (premier calcul en cours, route absente, panne) : la page
+ * interroge alors TMDB elle-même.
+ */
+export const fetchAnimeHome = async (language: string): Promise<AnimeHomePayload | null> => {
+  try {
+    const response = await axios.get(`${MAIN_API}/anime/home`, { params: { language }, timeout: 12000 });
+    const data = response.status === 200 ? (response.data as Partial<AnimeHomePayload> | undefined) : undefined;
+    if (!data || !Array.isArray(data.shows) || data.shows.length === 0) return null;
+    return {
+      language: data.language ?? language,
+      updatedAt: Number(data.updatedAt) || 0,
+      shows: data.shows,
+      genrePosters: data.genrePosters ?? {},
+      siteRows: {
+        airing: Array.isArray(data.siteRows?.airing) ? data.siteRows.airing : [],
+        dubbed: Array.isArray(data.siteRows?.dubbed) ? data.siteRows.dubbed : [],
+      },
+    };
+  } catch {
+    return null;
+  }
+};
+
 /** Genres du catalogue indexé, du plus fourni au moins fourni. */
 export const fetchAnimeCatalogueGenres = async (): Promise<Array<{ name: string; count: number }>> => {
   try {

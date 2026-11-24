@@ -67,6 +67,11 @@ function intOrNull(value) {
   return Number.isInteger(n) ? n : null;
 }
 
+// Un `?` par valeur d'une liste IN : les valeurs restent des paramètres.
+function placeholders(values) {
+  return values.map(() => '?').join(', ');
+}
+
 // Plus récente (ou égale) que la ligne en base : seule une telle écriture
 // déplace le pointeur, change `finished` ou fait réapparaître le titre.
 const IS_NEWER = 'VALUES(last_watched_at) >= last_watched_at';
@@ -463,6 +468,91 @@ function createHistoryStore({ pool, mediaStore, now = () => Date.now() }) {
     return titleDetails(overview, mediaType, tmdbId);
   }
 
+  // Temps des lecteurs web des films demandés, une ligne par film. Même
+  // propriétaire que VIEWING_SQL ; `content_id` est un texte, comparé à des
+  // textes pour garder l'index. Table absente ou en panne → aucun temps.
+  async function movieViewingRows(owner, tmdbIds) {
+    try {
+      const [rows] = await pool.query(
+        `SELECT content_id, SUM(watch_duration) AS seconds
+        FROM wrapped_viewing_data
+        WHERE user_id = ? AND profile_id <=> ? AND content_type = 'movie' AND content_id IN (${placeholders(tmdbIds)})
+        GROUP BY content_id`,
+        [owner.userId, owner.profileId, ...tmdbIds.map(String)],
+      );
+      return (Array.isArray(rows) ? rows : []).map((row) => ({ content_type: 'movie', content_id: row.content_id, seconds: row.seconds }));
+    } catch (error) {
+      logError('temps des lecteurs web indisponible', error);
+      return [];
+    }
+  }
+
+  // Durée des films à estimer, lue dans le cache TMDB en base (toutes
+  // langues : la durée n'en dépend pas). Jamais demandée à TMDB ici : un film
+  // sans durée en base n'est pas estimé. Erreur → aucune durée.
+  async function cachedMovieRuntimes(tmdbIds) {
+    const media = new Map();
+    if (tmdbIds.length === 0) return media;
+    try {
+      const [rows] = await pool.query(
+        `SELECT tmdb_id, runtime_minutes
+        FROM tmdb_media
+        WHERE media_type = 'movie' AND tmdb_id IN (${placeholders(tmdbIds)}) AND runtime_minutes > 0`,
+        tmdbIds,
+      );
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const minutes = Number(row.runtime_minutes);
+        if (Number.isInteger(minutes) && minutes > 0) media.set(`movie:${Number(row.tmdb_id)}`, { runtimeMinutes: minutes });
+      }
+    } catch (error) {
+      logError('durées des films en base indisponibles', error);
+    }
+    return media;
+  }
+
+  /**
+   * Avancement de plusieurs films en une fois (GET /history/titles, page
+   * d'une saga) : même classement et même sens des champs que `getTitle`
+   * pour un film. Le nombre de lectures ne dépend pas du nombre de films :
+   * historique, positions, marques et temps des lecteurs web en `IN (…)`
+   * (`query`, voir progressFor), puis la durée en base des seuls films à
+   * estimer. Aucun appel à TMDB. Film inconnu du profil → absent.
+   * @param {number[]} tmdbIds - identifiants TMDB, sans doublon
+   * @returns {Promise<{ mediaType: 'movie', tmdbId: number, status: string, markedWatched: boolean,
+   *   estimated: boolean, position: number|null, duration: number|null }[]>} dans l'ordre demandé
+   */
+  async function getMovieTitles(owner, tmdbIds) {
+    if (!Array.isArray(tmdbIds) || tmdbIds.length === 0) return [];
+    const where = `${OWNER_WHERE} AND media_type = 'movie' AND tmdb_id IN (${placeholders(tmdbIds)})`;
+    const params = [...ownerParams(owner), ...tmdbIds];
+    const [[historyRows], [progressRows], [markRows], viewingRows] = await Promise.all([
+      pool.query(`SELECT media_type, tmdb_id, season, episode, finished, last_watched_at FROM watch_history WHERE ${where}`, params),
+      pool.query(`SELECT media_type, tmdb_id, season, episode, position_sec, duration_sec FROM watch_progress WHERE ${where}`, params),
+      pool.query(`SELECT media_type, tmdb_id, season, episode, marked_at FROM watch_marks WHERE ${where}`, params),
+      movieViewingRows(owner, tmdbIds),
+    ]);
+    const index = buildIndex({ historyRows, progressRows, markRows, viewingRows });
+    // Films à estimer seulement : temps de lecteur web sans position exacte.
+    const media = await cachedMovieRuntimes(lookupsFor(index).mediaItems.map((item) => item.tmdbId));
+    const overview = classify(index, { media });
+
+    const titles = [];
+    for (const tmdbId of tmdbIds) {
+      const title = titleDetails(overview, 'movie', tmdbId);
+      if (!title) continue;
+      titles.push({
+        mediaType: 'movie',
+        tmdbId: title.tmdbId,
+        status: title.status,
+        markedWatched: title.markedWatched,
+        estimated: title.estimated,
+        position: title.position,
+        duration: title.duration,
+      });
+    }
+    return titles;
+  }
+
   /** Toutes les positions d'un titre (un film : une seule, saison/épisode 0/0). */
   async function listProgress(owner, mediaType, tmdbId) {
     const [rows] = await pool.execute(
@@ -623,6 +713,7 @@ function createHistoryStore({ pool, mediaStore, now = () => Date.now() }) {
     listContinue,
     listHistory,
     getTitle,
+    getMovieTitles,
     listProgress,
     hide: forgetting(hide),
     hideAll: forgetting(hideAll),

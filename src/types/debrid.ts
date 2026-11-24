@@ -1,4 +1,4 @@
-export type DebridProvider = 'deepbrid' | 'realdebrid' | 'bestdebrid' | 'debridr';
+export type DebridProvider = 'deepbrid' | 'realdebrid' | 'debridr';
 
 export interface DebridResult {
   link: string;

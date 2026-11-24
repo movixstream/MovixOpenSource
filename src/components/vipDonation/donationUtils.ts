@@ -6,7 +6,9 @@ import type {
   VipDonationMethodId,
   VipDonationSettings
 } from '@/services/vipDonationsService';
+import { VIP_GIFT_CARD_IDS } from '@/services/vipDonationsService';
 import {
+  VIP_GIFT_CARD_NAMES,
   getVipDonationContactLinks,
   getVipDurationLabel,
   getVipMonthsForAmount
@@ -23,6 +25,23 @@ export const ALL_DONATION_METHODS_AVAILABLE: VipDonationAvailability = {
   btc: true,
   ltc: true
 };
+
+// Cartes cadeaux cochées dans l'admin, en liste lisible (« Paysafecard ou Eneba »).
+export function formatEnabledGiftCards(locale: string, settings: VipDonationSettings): string {
+  const names = VIP_GIFT_CARD_IDS
+    .filter((id) => settings.giftCards[id]?.enabled)
+    .map((id) => VIP_GIFT_CARD_NAMES[id]);
+  // Intl.ListFormat manque dans la lib TypeScript du projet (ES2020).
+  const ListFormat = (Intl as unknown as {
+    ListFormat?: new (locale: string, options: { style: string; type: string }) => { format: (items: string[]) => string };
+  }).ListFormat;
+  try {
+    if (ListFormat) return new ListFormat(locale, { style: 'long', type: 'disjunction' }).format(names);
+  } catch {
+    // Locale refusée : repli plus bas.
+  }
+  return names.join(', ');
+}
 
 export function getVisibleDonationMethods(
   settings: VipDonationSettings,

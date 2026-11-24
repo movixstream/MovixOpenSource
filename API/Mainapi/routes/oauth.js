@@ -85,6 +85,21 @@ const oauthTokenLimiter = rateLimit({
   message: { error: 'too_many_requests', error_description: 'Trop de requêtes de token, réessayez dans un instant.' },
 });
 
+// Même plafond que la route publique /vip/invoices/:publicId/check : chaque
+// appel interroge la blockchain, et sans limite une app pouvait en lancer
+// autant qu'elle voulait en parallèle.
+const oauthInvoiceCheckLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 180,
+  keyGenerator: oauthRateLimitKey,
+  store: createRedisRateLimitStore({ prefix: 'rate-limit:oauth:invoice-check:' }),
+  passOnStoreError: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { xForwardedForHeader: false, ip: false },
+  message: { error: 'too_many_requests', error_description: 'Trop de vérifications de facture, réessayez plus tard.' },
+});
+
 const OAUTH_SCOPE_IMPLICATIONS = {
   'profile.list': ['profile.read'],
   'profile.manage': ['profile.read', 'profile.list'],
@@ -935,7 +950,7 @@ router.get('/vip/invoices/:publicId', setNoStore, async (req, res) => {
   }
 });
 
-router.post('/vip/invoices/:publicId/check', setNoStore, async (req, res) => {
+router.post('/vip/invoices/:publicId/check', setNoStore, oauthInvoiceCheckLimiter, async (req, res) => {
   try {
     const tokenRecord = await getOauthTokenAuth(req, ['vip.manage']);
     const pool = getPool();

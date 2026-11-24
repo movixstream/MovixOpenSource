@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
+import WatchLoadingScreen from '@/components/watch/loading/WatchLoadingScreen';
+import { useTmdbImages } from '@/hooks/useTmdbImages';
 import { useTranslation } from 'react-i18next';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -230,10 +232,14 @@ const WatchAnime: React.FC = () => {
 
   // Basic state
   const [loading, setLoading] = useState<boolean>(true);
+  // La popup pub attend que l'écran de chargement soit parti.
+  const [loadingScreenOpen, setLoadingScreenOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [contentCert, setContentCert] = useState<string>('');
   const [isBlocked, setIsBlocked] = useState(false);
   const [showDetails, setShowDetails] = useState<AnimeShow | null>(null);
+  // Logo du titre pour l'écran de chargement (cache de session partagé).
+  const { logoUrl } = useTmdbImages('tv', id ? Number(id) : undefined);
   const [episodeDetails] = useState<EpisodeDetails | null>(null);
 
   // Anime specific state
@@ -853,6 +859,21 @@ const WatchAnime: React.FC = () => {
             id: `oneupload-${streamingLink.language}-${playerUrlString}`
           });
         }
+        // Voe et Uqload : anime-sama sert Voe sous des domaines aléatoires
+        // (caseyseemavoid…) ; sans ce cas, le menu affichait « Caseyseemavoid »
+        // et la source n'avait pas de `hosterId` pour le tri.
+        else if (hoster === 'voe' || hoster === 'uqload') {
+          const displayName = getHosterDisplayName(playerUrlString, hoster);
+          sources.push({
+            language: streamingLink.language,
+            quality: 'Auto',
+            url: playerUrlString,
+            player: displayName,
+            hosterId: hoster,
+            label: `${streamingLink.language.toUpperCase()} - ${displayName}`,
+            id: `${hoster}-${streamingLink.language}-${playerUrlString}`
+          });
+        }
         else {
           // Hoster non reconnu par le registre : nom dérivé du domaine.
           let playerName = "Unknown";
@@ -897,7 +918,8 @@ const WatchAnime: React.FC = () => {
     // =========== EXTRACTION M3U8 (passe générique) ===========
     // Anime-sama ne tentait que Vidmoly et Sibnet ; `runExtractionPass` route
     // chaque lecteur vers l'extracteur qui lui correspond, donc voe, uqload,
-    // doodstream, vidzy, fsvid et seekstreaming sont couverts d'office.
+    // doodstream, vidzy, fsvid et seekstreaming sont couverts d'office — à
+    // condition d'être dans `hosterOrder` de la catégorie anime (filtre plus bas).
     // OneUpload reste volontairement sans extracteur (faille SSRF).
     const embedSources = [...sources];
     if (embedSources.length > 0) {
@@ -1319,54 +1341,6 @@ const WatchAnime: React.FC = () => {
 
   return (
     <div style={{ minHeight: 'calc(var(--vh, 1vh) * 100)', overflow: 'hidden' }} className="w-full bg-gray-900 text-white overflow-hidden fixed inset-0">
-      <style dangerouslySetInnerHTML={{
-        __html: `
-          .loading-container {
-            --uib-size: 35px;
-            --uib-color: white;
-            --uib-speed: 1s;
-            --uib-stroke: 3.5px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            width: var(--uib-size);
-            height: calc(var(--uib-size) * 0.9);
-          }
-
-          .loading-bar {
-            width: var(--uib-stroke);
-            height: 100%;
-            background-color: var(--uib-color);
-            border-radius: calc(var(--uib-stroke) / 2);
-            transition: background-color 0.3s ease;
-          }
-
-          .loading-bar:nth-child(1) {
-            animation: grow var(--uib-speed) ease-in-out calc(var(--uib-speed) * -0.45) infinite;
-          }
-
-          .loading-bar:nth-child(2) {
-            animation: grow var(--uib-speed) ease-in-out calc(var(--uib-speed) * -0.3) infinite;
-          }
-
-          .loading-bar:nth-child(3) {
-            animation: grow var(--uib-speed) ease-in-out calc(var(--uib-speed) * -0.15) infinite;
-          }
-
-          .loading-bar:nth-child(4) {
-            animation: grow var(--uib-speed) ease-in-out infinite;
-          }
-
-          @keyframes grow {
-            0%, 100% {
-              transform: scaleY(0.3);
-            }
-            50% {
-              transform: scaleY(1);
-            }
-          }
-        `
-      }} />
       <div
         hidden
         data-premid-watch-context=""
@@ -1378,6 +1352,21 @@ const WatchAnime: React.FC = () => {
         data-premid-source-label={selectedSource?.player || undefined}
         data-premid-source-detail={selectedSource?.label || undefined}
       />
+      {id && (
+        <WatchLoadingScreen
+          loading={loading}
+          backdropUrl={showDetails?.backdrop_path ? `https://image.tmdb.org/t/p/w1280${showDetails.backdrop_path}` : null}
+          logoUrl={logoUrl}
+          title={showDetails?.name ?? ''}
+          meta={t('watch.loadingScreen.episodeMeta', { season, episode })}
+          subtitle={episodeDetails?.name ?? null}
+          statusText={extractionProgress
+            || (loadingVidmolyExtraction ? t('watch.extractionPlayer', { player: 'Vidmoly' })
+              : loadingSibnetExtraction ? t('watch.extractionPlayer', { player: 'Sibnet' }) : null)}
+          onBack={() => navigate(-1)}
+          onVisibleChange={setLoadingScreenOpen}
+        />
+      )}
       {!id ? (
         <div className="flex items-center justify-center h-full">
           <div className="max-w-2xl mx-auto bg-gray-800 p-8 rounded-xl shadow-2xl">
@@ -1396,34 +1385,7 @@ const WatchAnime: React.FC = () => {
           </div>
         </div>
       ) : loading ? (
-        <div className="flex flex-col items-center justify-center h-full bg-black">
-          <div className="loading-container">
-            <div className="loading-bar"></div>
-            <div className="loading-bar"></div>
-            <div className="loading-bar"></div>
-            <div className="loading-bar"></div>
-          </div>
-          <div className="text-white text-xl font-medium mt-6">{t('watch.loadingEpisode')}</div>
-          {extractionProgress && (
-            <div className="text-gray-300 text-sm mt-2">{extractionProgress}</div>
-          )}
-          {(loadingVidmolyExtraction || loadingSibnetExtraction) && (
-            <div className="mt-4 space-y-2">
-              {loadingVidmolyExtraction && (
-                <div className="flex items-center gap-2 text-blue-400 text-sm">
-                  <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-                  {t('watch.extractionPlayer', { player: 'Vidmoly' })}
-                </div>
-              )}
-              {loadingSibnetExtraction && (
-                <div className="flex items-center gap-2 text-green-400 text-sm">
-                  <div className="w-3 h-3 border-2 border-green-400 border-t-transparent rounded-full animate-spin"></div>
-                  {t('watch.extractionPlayer', { player: 'Sibnet' })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <div className="h-full bg-black" />
       ) : error ? (
         <div className="flex items-center justify-center h-full">
           <div className="max-w-2xl mx-auto bg-gray-800 p-8 rounded-xl shadow-2xl">
@@ -1588,7 +1550,7 @@ const WatchAnime: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.2 }}
-                className="absolute top-14 right-4 md:right-4 left-4 md:left-auto z-[11000] bg-black/95 border border-gray-800 rounded-lg shadow-2xl md:w-96 w-auto max-h-[80vh] overflow-hidden flex flex-col"
+                className="absolute top-14 right-4 md:right-4 left-4 md:left-auto z-[11000] bg-black border border-gray-800 rounded-lg shadow-2xl md:w-96 w-auto max-h-[80vh] overflow-hidden flex flex-col"
               >
                 <div className="p-4 border-b border-gray-800 flex justify-between items-center">
                   <h3 className="text-lg font-semibold text-white">{showDetails?.name}</h3>
@@ -1741,10 +1703,10 @@ const WatchAnime: React.FC = () => {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 300 }}
                   transition={{ duration: 0.3, ease: 'easeOut' }}
-                  className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto pointer-events-auto"
+                  className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto pointer-events-auto"
                   data-lenis-prevent
                 >
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.sourcesAndLanguages')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -1945,7 +1907,7 @@ const WatchAnime: React.FC = () => {
       )}
 
       {/* Ad Free Player Ads Popup */}
-      <AdFreePlayerAds />
+      {!loadingScreenOpen && <AdFreePlayerAds />}
     </div>
   );
 };

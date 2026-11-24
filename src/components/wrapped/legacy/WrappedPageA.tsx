@@ -3204,13 +3204,13 @@ const WrappedPage: React.FC<{ data: WrappedData; onClose: () => void }> = ({ dat
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(168,85,247,0.2),transparent_50%)]" />
                 <div className="relative z-10 mx-auto flex w-full max-w-md flex-col items-center px-6 sm:px-0">
                     {/* Skeleton d'une slide : icône + titre + carte (largeurs relatives pour mobile) */}
-                    <div className="mb-6 h-20 w-20 animate-pulse rounded-3xl bg-white/10 sm:mb-8 sm:h-28 sm:w-28 md:h-36 md:w-36" />
-                    <div className="mb-3 h-7 w-3/5 max-w-[16rem] animate-pulse rounded-xl bg-white/10 sm:h-9" />
-                    <div className="mb-6 h-4 w-2/5 max-w-[11rem] animate-pulse rounded-lg bg-white/5 sm:mb-8 sm:h-5" />
+                    <div className="mb-6 h-20 w-20 animate-pulse-soft rounded-3xl bg-white/10 sm:mb-8 sm:h-28 sm:w-28 md:h-36 md:w-36" />
+                    <div className="mb-3 h-7 w-3/5 max-w-[16rem] animate-pulse-soft rounded-xl bg-white/10 sm:h-9" />
+                    <div className="mb-6 h-4 w-2/5 max-w-[11rem] animate-pulse-soft rounded-lg bg-white/5 sm:mb-8 sm:h-5" />
                     <div className="w-full space-y-3 rounded-[1.5rem] border border-white/10 bg-white/5 p-5 sm:p-6">
-                        <div className="h-4 w-full animate-pulse rounded bg-white/10" />
-                        <div className="h-4 w-5/6 animate-pulse rounded bg-white/10" />
-                        <div className="h-4 w-2/3 animate-pulse rounded bg-white/10" />
+                        <div className="h-4 w-full animate-pulse-soft rounded bg-white/10" />
+                        <div className="h-4 w-5/6 animate-pulse-soft rounded bg-white/10" />
+                        <div className="h-4 w-2/3 animate-pulse-soft rounded bg-white/10" />
                     </div>
                     <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="mt-8 text-sm font-medium text-purple-300">
                         {t('wrapped.analyzingYear')}

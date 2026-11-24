@@ -1,9 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, Sparkles, Tags, Type } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 
 import { regionLabel, type AlternateTitle } from '../utils/tmdbMetadata';
+import { cn } from '@/lib/utils';
+import { DETAILS_FOCUS, DETAILS_PRESS } from './details/layout';
+import { DETAILS_EASE_OUT, DetailsCollapse } from './details/motion';
 
 /**
  * La fin de l'onglet Détails : thèmes, titres alternatifs, mots-clés.
@@ -37,18 +40,34 @@ const PILL_HOVER = {
  */
 const stagger = (index: number): number => 0.1 + Math.min(index, 12) * 0.04;
 
+/** Habillage des nouvelles fiches : pastilles, cartes et intertitres de la section Détails. */
+const DETAILS_PILL = 'inline-flex min-h-9 items-center rounded-full border border-white/[.18] px-3.5 text-sm font-medium text-white';
+const DETAILS_CARD = 'rounded-xl border border-white/10 bg-white/5 p-3';
+const DETAILS_HEADING = 'mb-3 flex items-center gap-2 text-base font-semibold text-white';
+const DETAILS_ICON = 'size-[18px] flex-none text-white opacity-70';
+
+/** Apparition échelonnée des nouvelles fiches : 30 ms d'écart, plafonnée à 12 éléments. */
+const detailsStagger = (index: number): number => Math.min(index, 12) * 0.03;
+
 interface DetailExtraMetadataProps {
   themes: string[];
   alternateTitles: AlternateTitle[];
   keywords: string[];
+  /**
+   * `details` : habillage des nouvelles fiches (pastilles et cartes de la
+   * section Détails, ouverture en hauteur). Par défaut : celui des anciennes.
+   */
+  variant?: 'legacy' | 'details';
 }
 
 const DetailExtraMetadata: React.FC<DetailExtraMetadataProps> = ({
   themes,
   alternateTitles,
   keywords,
+  variant = 'legacy',
 }) => {
   const { t, i18n } = useTranslation();
+  const reduceMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const locale = i18n.language || 'fr';
 
@@ -74,6 +93,99 @@ const DetailExtraMetadata: React.FC<DetailExtraMetadataProps> = ({
   }, [alternateTitles, locale]);
 
   if (themes.length === 0 && hiddenCount === 0) return null;
+
+  if (variant === 'details') {
+    /** Pastille qui monte de 4 px en apparaissant, sans délai de départ. */
+    const pillMotion = (index: number) => ({
+      initial: reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(4px)' },
+      animate: reduceMotion ? { opacity: 1 } : { opacity: 1, transform: 'translateY(0px)' },
+      transition: { duration: 0.24, ease: DETAILS_EASE_OUT, delay: reduceMotion ? 0 : detailsStagger(index) },
+    });
+
+    return (
+      <div className="mt-8 space-y-8">
+        {themes.length > 0 && (
+          <div>
+            <h3 className={DETAILS_HEADING}>
+              <Sparkles aria-hidden="true" className={DETAILS_ICON} />
+              {t('details.themesLabel')}
+            </h3>
+            <ul className="flex flex-wrap gap-2">
+              {themes.map((theme) => <li key={theme} className={DETAILS_PILL}>{theme}</li>)}
+            </ul>
+          </div>
+        )}
+
+        {hiddenCount > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setOpen((current) => !current)}
+              aria-expanded={open}
+              aria-controls="titres-mots-cles"
+              className={cn(
+                'inline-flex h-11 items-center gap-2 rounded-[10px] border px-3.5 text-sm font-medium text-white',
+                open ? 'border-white/30 bg-white/[.2]' : 'border-white/[.22] bg-white/[.14] hover:bg-white/[.22]',
+                DETAILS_PRESS,
+                DETAILS_FOCUS,
+              )}
+            >
+              <ChevronDown
+                aria-hidden="true"
+                className={cn('size-4 opacity-80 transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none', open && 'rotate-180')}
+              />
+              {t('details.showAllTitlesAndKeywords')}
+              <span className="rounded-full bg-white/15 px-2 py-0.5 text-xs tabular-nums">{hiddenCount}</span>
+            </button>
+
+            <DetailsCollapse open={open}>
+              <div id="titres-mots-cles" className="space-y-8 pt-6">
+                {alternateTitles.length > 0 && (
+                  <div>
+                    <h3 className={DETAILS_HEADING}>
+                      <Type aria-hidden="true" className={DETAILS_ICON} />
+                      {t('details.alternateTitles')}
+                      <span className="text-sm font-normal text-white/55 tabular-nums">{alternateTitles.length}</span>
+                    </h3>
+                    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {titlesByRegion.map(([region, entries], index) => (
+                        <motion.li key={region} className={DETAILS_CARD} {...pillMotion(index)}>
+                          <p className="mb-1 text-[13px] text-white/55">
+                            {region === '??' ? t('details.alternateTitleUnknownRegion') : regionLabel(region, locale)}
+                          </p>
+                          {entries.map((entry, entryIndex) => (
+                            <p key={`${entry.title}-${entryIndex}`} className="text-sm font-medium text-white">
+                              {entry.title}
+                              {entry.kind && <span className="ml-2 font-normal text-white/55">({entry.kind})</span>}
+                            </p>
+                          ))}
+                        </motion.li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {keywords.length > 0 && (
+                  <div>
+                    <h3 className={DETAILS_HEADING}>
+                      <Tags aria-hidden="true" className={DETAILS_ICON} />
+                      {t('details.keywordsLabel')}
+                      <span className="text-sm font-normal text-white/55 tabular-nums">{keywords.length}</span>
+                    </h3>
+                    <ul className="flex flex-wrap gap-2">
+                      {keywords.map((keyword, index) => (
+                        <motion.li key={keyword} className={DETAILS_PILL} {...pillMotion(index)}>{keyword}</motion.li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </DetailsCollapse>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <>

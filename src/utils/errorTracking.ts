@@ -16,7 +16,11 @@
 //
 // Rien n'est envoyé depuis `npm run dev` ni sans VITE_GLITCHTIP_DSN.
 
-import * as Sentry from '@sentry/react';
+// Le SDK (~130 Ko minifiés) est chargé à part, par un import() lancé dès
+// main.tsx : il ne bloque plus le premier affichage. Les crashs remontés par
+// ErrorBoundary avant son arrivée sont mis en file. Seules les erreurs
+// globales des toutes premières millisecondes peuvent passer inaperçues.
+import type * as SentrySdk from '@sentry/react';
 import type { ErrorEvent, StackFrame } from '@sentry/react';
 import type { ErrorInfo } from 'react';
 import { isChunkLoadError } from '../routing/lazyWithRetry';
@@ -30,7 +34,21 @@ const readEnv = (value: string | undefined): string => (value ?? '').trim();
 const MAX_EVENTS_PER_PAGE_LOAD = 5;
 
 let sentEvents = 0;
+/** Suivi demandé (build de prod avec DSN), SDK chargé ou non. */
 let enabled = false;
+let sdk: typeof SentrySdk | null = null;
+const pendingCaptures: Array<(loaded: typeof SentrySdk) => void> = [];
+
+/** Identifiant d'événement au format Sentry (32 caractères hexadécimaux). */
+const createEventId = (): string => {
+  const bytes = new Uint8Array(16);
+  try {
+    crypto.getRandomValues(bytes);
+  } catch {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
 
 /**
  * Erreurs « récupérables » : pas un bug du code, un rechargement suffit.
@@ -385,7 +403,18 @@ const readRecentAssetLoads = () => {
 export const initErrorTracking = (): void => {
   const dsn = readEnv(import.meta.env.VITE_GLITCHTIP_DSN);
   if (!dsn || !import.meta.env.PROD) return;
+  enabled = true;
 
+  import('@sentry/react')
+    .then((Sentry) => startSdk(Sentry, dsn))
+    .catch(() => {
+      // SDK injoignable (réseau, bloqueur) : le site marche sans suivi.
+      enabled = false;
+      pendingCaptures.length = 0;
+    });
+};
+
+const startSdk = (Sentry: typeof SentrySdk, dsn: string): void => {
   // Seules les erreurs levées depuis un chunk du build passent : /assets/ sur
   // l'origine de la page, miroirs compris. Tout ce qu'un tiers injecte dans la
   // page — script Cloudflare (Bot Fight Mode), lecteur JSON-LD de Safari 18,
@@ -465,7 +494,8 @@ export const initErrorTracking = (): void => {
     },
   });
 
-  enabled = true;
+  sdk = Sentry;
+  for (const capture of pendingCaptures.splice(0)) capture(Sentry);
 
   // Test de la chaîne en prod depuis la console : `window.__movixTestCrash()`.
   // Capture explicite (mechanism handled), donc exemptée du filtre par cadre
@@ -477,11 +507,19 @@ export const initErrorTracking = (): void => {
 /**
  * Remonte un crash rattrapé par ErrorBoundary, avec la pile de composants.
  * Renvoie l'identifiant de l'événement (affiché à l'utilisateur, utile au
- * support), ou null si le suivi est coupé (dev, DSN absent).
+ * support), ou null si le suivi est coupé (dev, DSN absent). L'identifiant est
+ * créé ici, pour pouvoir l'afficher même si le SDK n'est pas encore chargé.
  */
 export const captureCrash = (error: unknown, errorInfo: ErrorInfo): string | null => {
   if (!enabled) return null;
-  return Sentry.captureReactException(error, errorInfo, {
-    mechanism: { handled: true, type: 'auto.function.react.error_boundary' },
-  });
+  const eventId = createEventId();
+  const send = (Sentry: typeof SentrySdk) => {
+    Sentry.captureReactException(error, errorInfo, {
+      event_id: eventId,
+      mechanism: { handled: true, type: 'auto.function.react.error_boundary' },
+    });
+  };
+  if (sdk) send(sdk);
+  else if (pendingCaptures.length < MAX_EVENTS_PER_PAGE_LOAD) pendingCaptures.push(send);
+  return eventId;
 };

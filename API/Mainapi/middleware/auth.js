@@ -11,7 +11,14 @@ const { redis } = require('../config/redis');
 const { readAccountData } = require('../utils/accountDataCache');
 const { createSessionActivityUpdater } = require('../utils/sessionActivity');
 const { getUserDataFilePath } = require('../utils/syncPolicy');
-const AUTH_METHODS = ['discord', 'google', 'bip39'];
+// 'tv' : session ouverte par la liaison d'une TV (routes/tvLink.js). Elle ne
+// compte comme aucun fournisseur, donc ne peut pas gérer les liaisons du
+// compte (sinon un jeton TV volé permettait de lier son propre Discord).
+const AUTH_METHODS = ['discord', 'google', 'bip39', 'tv'];
+const TV_SESSION_USER_AGENT = 'Movix TV';
+// Une session inutilisée pendant un an n'est plus acceptée : le JWT n'a pas
+// d'expiration propre, c'est la session qui en porte une.
+const SESSION_MAX_IDLE_DAYS = 365;
 const USER_DATA_DIR = path.join(__dirname, '..', 'data');
 const GUESTS_DIR = path.join(USER_DATA_DIR, 'guests');
 const USERS_DIR = path.join(USER_DATA_DIR, 'users');
@@ -28,6 +35,15 @@ const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   console.error("FATAL: JWT_SECRET is not defined in .env");
   process.exit(1);
+}
+// La valeur d'exemple de .env.example est publique : avec elle, n'importe qui
+// pourrait signer un jeton.
+if (/^YOUR_/i.test(JWT_SECRET.trim())) {
+  console.error("FATAL: JWT_SECRET garde la valeur d'exemple de .env.example");
+  process.exit(1);
+}
+if (JWT_SECRET.length < 32) {
+  console.warn('[AUTH] JWT_SECRET fait moins de 32 caractères : utilisez une valeur aléatoire plus longue.');
 }
 
 function issueJwt(userType, userId, sessionId, authMethod = null) {
@@ -160,7 +176,7 @@ async function validateAuthRequest(req) {
     const token = authHeader.split(' ')[1];
     const payload = jwt.verify(token, JWT_SIGNING_KEY, { algorithms: ['HS256'] });
     const { userType, sub: userId, sessionId } = payload;
-    const authMethod = AUTH_METHODS.includes(payload?.authMethod)
+    let authMethod = AUTH_METHODS.includes(payload?.authMethod)
       ? payload.authMethod
       : (userType === 'bip39' ? 'bip39' : null);
     if (!['oauth', 'bip39'].includes(userType) || !userId || !sessionId) return null;
@@ -184,11 +200,18 @@ async function validateAuthRequest(req) {
         }
 
         const [rows] = await pool.execute(
-          'SELECT id FROM user_sessions WHERE id = ? AND user_id = ? AND user_type = ?',
+          `SELECT id, user_agent FROM user_sessions
+            WHERE id = ? AND user_id = ? AND user_type = ?
+              AND accessed_at > (NOW() - INTERVAL ${SESSION_MAX_IDLE_DAYS} DAY)`,
           [sessionId, userId, userType]
         );
         dbAnswered = true;
         hasSession = rows.length > 0;
+        // Les jetons TV émis avant le marqueur 'tv' n'ont pas d'authMethod et
+        // passaient pour une connexion bip39 : on les reconnaît par la session.
+        if (hasSession && rows[0].user_agent === TV_SESSION_USER_AGENT) {
+          authMethod = 'tv';
+        }
 
         if (hasSession) {
           break; // Session trouvée, sortir de la boucle
@@ -286,8 +309,9 @@ async function isAdmin(req, res, next) {
       return res.status(403).json({ success: false, error: 'Accès refusé - Droits admin requis' });
     }
 
-    // Ajouter les infos admin à la requête (avec le rôle)
-    req.admin = { userId, userType, adminId: rows[0].id, role };
+    // Ajouter les infos admin à la requête (avec le rôle). `isOwner` vient de
+    // la colonne `is_owner` (absente sur une base pas encore migrée → false).
+    req.admin = { userId, userType, adminId: rows[0].id, role, isOwner: role === 'admin' && Number(rows[0].is_owner) === 1 };
     next();
   } catch (error) {
     console.error('❌ Admin verification error:', error);
@@ -374,7 +398,7 @@ async function isUploaderOrAdmin(req, res, next) {
     }
 
     // Ajouter les infos admin à la requête (avec le rôle)
-    req.admin = { userId, userType, adminId: rows[0].id, role };
+    req.admin = { userId, userType, adminId: rows[0].id, role, isOwner: role === 'admin' && Number(rows[0].is_owner) === 1 };
     next();
   } catch (error) {
     console.error('❌ Admin/Uploader verification error:', error);

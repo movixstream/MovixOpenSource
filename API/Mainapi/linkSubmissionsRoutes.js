@@ -364,6 +364,15 @@ function createLinkSubmissionsRouter(mysqlPool, redis) {
             if (!tmdb_id || media_type !== 'tv') return res.status(400).json({ error: 'tmdb_id et media_type=tv sont requis' });
             if (!episode_urls || typeof episode_urls !== 'object' || Object.keys(episode_urls).length === 0) return res.status(400).json({ error: 'episode_urls requis (objet {episode_number: url})' });
             if (season_number === undefined || season_number === null) return res.status(400).json({ error: 'season_number requis' });
+            // Une saison ne dépasse pas quelques centaines d'épisodes : sans
+            // plafond, un seul envoi pouvait lancer des milliers de requêtes.
+            const MAX_BULK_EPISODES = 300;
+            if (Object.keys(episode_urls).length > MAX_BULK_EPISODES) return res.status(400).json({ error: `${MAX_BULK_EPISODES} épisodes au plus par envoi` });
+            if (!/^\d{1,10}$/.test(String(tmdb_id))) return res.status(400).json({ error: 'tmdb_id invalide' });
+            if (!/^\d{1,4}$/.test(String(season_number))) return res.status(400).json({ error: 'season_number invalide' });
+            for (const ep of Object.keys(episode_urls)) {
+                if (!/^\d{1,5}$/.test(ep)) return res.status(400).json({ error: `Numéro d'épisode invalide : ${String(ep).slice(0, 20)}` });
+            }
 
             // Validate all URLs
             for (const [ep, url] of Object.entries(episode_urls)) {

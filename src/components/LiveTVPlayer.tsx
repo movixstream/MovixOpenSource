@@ -2630,7 +2630,7 @@ const LiveTVPlayer: React.FC<LiveTVPlayerProps> = ({
                         role="region"
                         aria-label={hasStreamedChoices ? t('liveTV.streamedServers') : t('liveTV.server')}
                         onKeyDown={event => { if (event.key !== 'Escape') event.stopPropagation(); }}
-                        className={`absolute inset-y-0 right-0 z-[10002] flex max-w-[90vw] flex-col border-l border-gray-800 ${hasStreamedChoices ? 'w-80 bg-neutral-950' : 'w-[280px] bg-black/95'}`}
+                        className={`absolute inset-y-0 right-0 z-[10002] flex max-w-[90vw] flex-col border-l border-gray-800 ${hasStreamedChoices ? 'w-80 bg-neutral-950' : 'w-[280px] bg-black'}`}
                     >
                         {/* Header */}
                         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">

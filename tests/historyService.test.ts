@@ -435,6 +435,124 @@ test('fetchTitleHistory nettoie le titre : champs absents → false/null, épiso
   assert.deepEqual(notTitle, { ok: true, title: null });
 });
 
+// --- Plusieurs films en un appel : GET /api/history/titles ---------------------------
+
+// Film tel que le rend la route, puis tel que le service le complète.
+const movieEntry = (tmdbId: number, overrides: Record<string, unknown> = {}) => ({
+  mediaType: 'movie', tmdbId, status: 'finished', markedWatched: true, estimated: false, position: null, duration: null, ...overrides,
+});
+const movieTitle = (tmdbId: number, overrides: Record<string, unknown> = {}) => ({
+  ...movieEntry(tmdbId, overrides), animeMode: false, season: null, episode: null, episodesWatched: null, episodesTotal: null, episodes: [],
+});
+
+// Faux serveur : répond à chaque paquet avec les films qu'il connaît.
+function loadTitlesService(known: (id: number) => boolean = () => true, storage: Record<string, string> = LOGGED_IN) {
+  const loaded: ReturnType<typeof loadService> = loadService(storage, async () => {
+    const ids = String(loaded.calls[loaded.calls.length - 1].config.params?.ids).split(',').map(Number);
+    return { status: 200, data: { complete: true, titles: ids.filter(known).map((id) => movieEntry(id)) } };
+  });
+  return loaded;
+}
+
+test('fetchTitlesHistory envoie profil, type, identifiants, langue et jeton ; rend les films par identifiant, inconnus absents', async () => {
+  const { service, calls } = loadTitlesService((id) => id !== 404);
+  const result = await service.fetchTitlesHistory({ type: 'movie', ids: [550, 404, 13], language: 'en-US' });
+  assert.deepEqual(result, { ok: true, titles: new Map([[550, movieTitle(550)], [13, movieTitle(13)]]) });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://api.test/api/history/titles');
+  assert.deepEqual(calls[0].config.params, { profileId: 'profil-1', type: 'movie', ids: '550,404,13', language: 'en-US' });
+  assert.equal(calls[0].config.headers?.Authorization, 'Bearer jeton');
+  assert.equal(calls[0].config.timeout, 5000);
+
+  // Langue absente ou inconnue : pas envoyée.
+  await service.fetchTitlesHistory({ type: 'movie', ids: [550] });
+  await service.fetchTitlesHistory({ type: 'movie', ids: [550], language: 'de-DE' });
+  assert.deepEqual(calls[1].config.params, { profileId: 'profil-1', type: 'movie', ids: '550' });
+  assert.deepEqual(calls[2].config.params, { profileId: 'profil-1', type: 'movie', ids: '550' });
+});
+
+test('fetchTitlesHistory : invité → « unauthenticated », historique coupé ou liste vide → aucun film ; jamais de requête', async () => {
+  for (const storage of [{}, { auth_token: 'jeton' }, { selected_profile_id: 'profil-1' }]) {
+    const guest = loadTitlesService(() => true, storage);
+    assert.deepEqual(await guest.service.fetchTitlesHistory({ type: 'movie', ids: [550] }), { ok: false, reason: 'unauthenticated' });
+    assert.equal(guest.calls.length, 0);
+  }
+  const disabled = loadTitlesService(() => true, { ...LOGGED_IN, settings_disable_history: 'true' });
+  assert.deepEqual(await disabled.service.fetchTitlesHistory({ type: 'movie', ids: [550] }), { ok: true, titles: new Map() });
+  assert.equal(disabled.calls.length, 0);
+  const empty = loadTitlesService();
+  assert.deepEqual(await empty.service.fetchTitlesHistory({ type: 'movie', ids: [] }), { ok: true, titles: new Map() });
+  assert.deepEqual(await empty.service.fetchTitlesHistory({ type: 'movie', ids: [0, -3, 1.5, Number.NaN, 99999999999] }), { ok: true, titles: new Map() });
+  assert.equal(empty.calls.length, 0);
+});
+
+test('fetchTitlesHistory : doublons et identifiants invalides écartés, paquets de 60', async () => {
+  const { service, calls } = loadTitlesService((id) => id % 2 === 0);
+  await service.fetchTitlesHistory({ type: 'movie', ids: [550, 13, 550, 0, -1, 2.5, 13] });
+  assert.equal(calls[0].config.params?.ids, '550,13');
+
+  const ids = Array.from({ length: 130 }, (_, index) => index + 1);
+  const result = await service.fetchTitlesHistory({ type: 'movie', ids });
+  assert.deepEqual(calls.slice(1).map((call) => String(call.config.params?.ids).split(',').length), [60, 60, 10]);
+  assert.equal(String(calls[2].config.params?.ids).split(',')[0], '61');
+  assert.ok(result.ok);
+  // Les trois paquets réunis : les 65 films pairs.
+  assert.equal(result.titles.size, 65);
+  assert.deepEqual(result.titles.get(130), movieTitle(130));
+  assert.equal(result.titles.has(129), false);
+});
+
+test('fetchTitlesHistory : route absente (404), réseau, import pas fini, réponse mal formée → ok: false ; un paquet en échec suffit', async () => {
+  const reason = async (answer: Answer) => {
+    const result = await loadService(LOGGED_IN, answer).service.fetchTitlesHistory({ type: 'movie', ids: [550, 13] });
+    return result.ok ? null : result.reason;
+  };
+  // Serveur pas encore déployé : Express répond 404 sans code de profil.
+  assert.equal(await reason(httpError(404, '<html>Cannot GET /api/history/titles</html>')), 'unavailable');
+  assert.equal(await reason(httpError(400, { code: 'TOO_MANY_IDS' })), 'unavailable');
+  assert.equal(await reason(httpError(429)), 'unavailable');
+  assert.equal(await reason(httpError(500)), 'unavailable');
+  assert.equal(await reason(new Error('réseau')), 'network');
+  assert.equal(await reason(httpError(401)), 'unauthenticated');
+  assert.equal(await reason(httpError(404, { success: false, code: 'PROFILE_NOT_FOUND' })), 'unauthenticated');
+  assert.equal(await reason({ status: 200, data: { complete: false, titles: [] } }), 'incomplete');
+  for (const data of [null, '<html>', { complete: true }, { complete: true, titles: 'non' }, { titles: [] }]) {
+    assert.equal(await reason({ status: 200, data }), 'unavailable');
+  }
+
+  // 61 films : le second paquet échoue, rien n'est rendu à moitié.
+  const loaded: ReturnType<typeof loadService> = loadService(LOGGED_IN, async () => {
+    if (loaded.calls.length > 1) throw httpError(500);
+    return { status: 200, data: { complete: true, titles: [movieEntry(1)] } };
+  });
+  const ids = Array.from({ length: 61 }, (_, index) => index + 1);
+  assert.deepEqual(await loaded.service.fetchTitlesHistory({ type: 'movie', ids }), { ok: false, reason: 'unavailable' });
+  assert.equal(loaded.calls.length, 2);
+});
+
+test('fetchTitlesHistory nettoie chaque film : champs absents → false/null, entrées invalides ou d’un autre type écartées', async () => {
+  const titles = [
+    null, 'texte', { mediaType: 'movie' }, movieEntry(0), { ...movieEntry(1399), mediaType: 'tv' },
+    { mediaType: 'movie', tmdbId: 550, status: 'bizarre', markedWatched: 'oui', position: 'x' },
+    movieEntry(13, { status: 'in_progress', markedWatched: false, estimated: true, position: 1800, duration: 7200 }),
+  ];
+  const result = await loadService(LOGGED_IN, { status: 200, data: { complete: true, titles } }).service.fetchTitlesHistory({ type: 'movie', ids: [550, 13, 1399] });
+  assert.deepEqual(result, {
+    ok: true,
+    titles: new Map([
+      [550, movieTitle(550, { status: 'not_started', markedWatched: false, position: null })],
+      [13, movieTitle(13, { status: 'in_progress', markedWatched: false, estimated: true, position: 1800, duration: 7200 })],
+    ]),
+  });
+});
+
+test('serverHistoryProfile : profil du compte connecté, null pour un invité ou si l’historique est coupé', () => {
+  assert.equal(loadService(LOGGED_IN).service.serverHistoryProfile(), 'profil-1');
+  assert.equal(loadService({}).service.serverHistoryProfile(), null);
+  assert.equal(loadService({ auth_token: 'jeton' }).service.serverHistoryProfile(), null);
+  assert.equal(loadService({ ...LOGGED_IN, settings_disable_history: 'true' }).service.serverHistoryProfile(), null);
+});
+
 test('deleteTitleHistory : DELETE /api/history/title/{type}/{id} avec le profil ; false si invité ou erreur', async () => {
   const { service, calls } = loadService(LOGGED_IN, { status: 204 });
   assert.equal(await service.deleteTitleHistory('tv', 1399), true);

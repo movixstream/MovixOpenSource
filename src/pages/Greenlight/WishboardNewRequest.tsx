@@ -1069,7 +1069,7 @@ const WishboardNewRequest: React.FC = () => {
 
 
                 {/* Mobile Bottom Bar - Action Button Only */}
-                <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-white/10 bg-black/95 p-4 flex flex-col gap-2">
+                <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-white/10 bg-black p-4 flex flex-col gap-2">
                     <Button
                         onClick={() => {
                             if (step === 1 && contentType) {

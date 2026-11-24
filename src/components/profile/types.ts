@@ -36,10 +36,9 @@ export interface WatchItem {
   itemCount?: number;
   isVip?: boolean;
   source?: string;
-  liveTvKind?: 'channel' | 'iptv';
+  liveTvKind?: 'channel';
   liveTvTargetId?: string;
   liveTvCatalogId?: string;
-  liveTvCategoryId?: string;
 }
 
 export interface CustomListItem {
@@ -74,7 +73,6 @@ export interface LiveTVFavorite {
   name: string;
   poster?: string | null;
   addedAt: string;
-  kind: 'channel' | 'iptv';
+  kind: 'channel';
   catalogId?: string;
-  categoryId?: string;
 }

@@ -64,7 +64,9 @@ export function TvDemoVideo({ calm }: TvDemoVideoProps) {
     if (!video || failed) return;
     const wantsPlay = userChoice === 'play' || (userChoice === null && !calm);
     if (wantsPlay && inView) {
-      video.play().catch(() => setPlaying(false));
+      // play() ne rend pas toujours une promesse (Safari iOS, GlitchTip 8694393).
+      const playing = video.play();
+      if (playing && typeof playing.catch === 'function') playing.catch(() => setPlaying(false));
     } else if (!video.paused) {
       video.pause();
     }

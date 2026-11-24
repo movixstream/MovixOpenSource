@@ -377,7 +377,7 @@ const WishboardPage: React.FC = () => {
                     {/* Main Content Column */}
                     <div className="flex-1 order-2 lg:order-1">
                         {/* Filters Bar */}
-                        <div className="sticky top-24 z-20 mb-6 -mx-2 px-2 py-4 bg-black/95 border-y border-white/5 lg:rounded-2xl lg:border lg:mx-0 lg:px-4">
+                        <div className="sticky top-24 z-20 mb-6 -mx-2 px-2 py-4 bg-black border-y border-white/5 lg:rounded-2xl lg:border lg:mx-0 lg:px-4">
                             <WishboardFilters
                                 searchQuery={searchQuery}
                                 onSearchChange={setSearchQuery}
@@ -394,7 +394,7 @@ const WishboardPage: React.FC = () => {
                         {loading ? (
                             <div className="flex flex-col items-center justify-center py-32 space-y-4">
                                 <Loader2 className="h-10 w-10 animate-spin text-green-500" />
-                                <p className="text-white/30 animate-pulse">{t('greenlight.searchingGems')}</p>
+                                <p className="text-white/30 animate-pulse-soft">{t('greenlight.searchingGems')}</p>
                             </div>
                         ) : requests.length === 0 ? (
                             <motion.div

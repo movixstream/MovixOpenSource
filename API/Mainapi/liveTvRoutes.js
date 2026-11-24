@@ -2261,31 +2261,11 @@ router.get("/stream/:type/:channelId", async (req, res) => {
     }
     req.vipStatus = isVip;
 
-    // Block VIP-only sources immediately if not VIP.
-    // Matches (match_/matches_) are free: the IP-locked native stream is resolved
-    // client-side by the extension/userscript (RESOLVE_FCTV), and free users without
-    // it fall back to the embed player (see the match_ branch below). Only IPTV is
-    // strictly VIP.
-    if (channelId.startsWith("iptv_") && !isVip.vip) {
-      return res.status(403).json({ error: "Réservé aux membres VIP" });
-    }
-
-    // IPTV Xtream — return proxified m3u8 URL directly
-    if (channelId.startsWith("iptv_")) {
-      const streamId = channelId.replace("iptv_", "");
-      const directUrl = `${XTREAM_URL}/live/${XTREAM_USER}/${XTREAM_PASS}/${streamId}.m3u8`;
-      const proxiedUrl = buildIptvStreamUrl(directUrl);
-      return res.json({
-        streams: [
-          {
-            url: proxiedUrl,
-            title: "IPTV Stream",
-            behaviorHints: { notWebReady: false },
-          },
-        ],
-      });
-    }
-
+    // Les matchs (match_/matches_) sont gratuits : le flux natif lié à l'IP est
+    // résolu côté client par l'extension ou le userscript (RESOLVE_FCTV), et
+    // les gratuits sans extension retombent sur le lecteur intégré. L'ancienne
+    // source IPTV Web (préfixe iptv_) a été retirée : elle tombe sur le 410
+    // ci-dessous comme les autres sources supprimées.
     if (!["tvmio-", "streamed_", "northlive_", "vavoo_", "match_"].some(prefix => channelId.startsWith(prefix))) {
       return res.status(410).json({ error: "Cette source Live TV a été retirée", code: "source_removed", streams: [] });
     }
@@ -2647,151 +2627,6 @@ router.get("/fctv/playlist", async (req, res) => {
 // Ancienne route TV Direct : aucune requête vers le fournisseur retiré.
 router.get("/resolve/:playId", (req, res) => {
   res.status(410).json({ error: "Cette source Live TV a été retirée", code: "source_removed" });
-});
-
-// === IPTV WEB (Xtream API) — VIP ONLY ===
-const XTREAM_URL = (process.env.XTREAM_URL || "").replace(/\/+$/, "");
-const XTREAM_USER = process.env.XTREAM_USER || "";
-const XTREAM_PASS = process.env.XTREAM_PASS || "";
-const IPTV_STREAM_PROXY = (
-  process.env.IPTV_STREAM_PROXY || "http://localhost:25569/proxy"
-).replace(/\/+$/, "");
-
-/**
- * URL IPTV proxifiée et signée.
- *
- * La forme est `.../proxy/<url amont>` : proxiesembed tente d'abord son décodage
- * XOR, échoue, puis retombe sur l'URL brute. On signe donc la route `/proxy`
- * avec l'URL amont comme cible, exactement ce que le handler reconstruit.
- */
-function buildIptvStreamUrl(directUrl) {
-  const proxiedUrl = `${IPTV_STREAM_PROXY}/${directUrl}`;
-  if (!signingConfigured()) {
-    console.error("[IPTV] MEDIA_SIGNING_SECRET absent — URL de flux non signée");
-    return proxiedUrl;
-  }
-  return appendSignature(proxiedUrl, "/proxy", directUrl);
-}
-
-// Cache catégories IPTV en mémoire (change rarement)
-let iptvCategoriesCache = null;
-let iptvCategoriesCacheTime = 0;
-const IPTV_CATEGORIES_TTL = 30 * 60 * 1000; // 30 min
-
-// Auto-clear IPTV cache after TTL to free memory when not actively used
-setInterval(() => {
-  if (
-    iptvCategoriesCache &&
-    Date.now() - iptvCategoriesCacheTime > IPTV_CATEGORIES_TTL
-  ) {
-    iptvCategoriesCache = null;
-  }
-}, IPTV_CATEGORIES_TTL).unref();
-
-/**
- * GET /api/livetv/iptv/categories
- * Récupère les catégories live de l'API Xtream (VIP only)
- */
-router.get("/iptv/categories", requireVip, async (req, res) => {
-  try {
-    const now = Date.now();
-    if (
-      iptvCategoriesCache &&
-      now - iptvCategoriesCacheTime < IPTV_CATEGORIES_TTL
-    ) {
-      return res.json(iptvCategoriesCache);
-    }
-
-    const response = await axios.get(`${XTREAM_URL}/player_api.php`, {
-      params: {
-        username: XTREAM_USER,
-        password: XTREAM_PASS,
-        action: "get_live_categories",
-      },
-      timeout: 15000,
-    });
-
-    const categories = (response.data || []).map((cat) => ({
-      category_id: cat.category_id,
-      category_name: cat.category_name,
-      parent_id: cat.parent_id || 0,
-    }));
-
-    iptvCategoriesCache = { categories };
-    iptvCategoriesCacheTime = now;
-
-    res.json({ categories });
-  } catch (error) {
-    console.error("[IPTV] Erreur get_live_categories:", error.message);
-    res
-      .status(500)
-      .json({ error: "Erreur lors de la récupération des catégories IPTV" });
-  }
-});
-
-/**
- * GET /api/livetv/iptv/streams/:categoryId
- * Récupère les chaînes d'une catégorie Xtream (VIP only)
- * Pas de logos: le proxy d'images a été retiré (SSRF).
- */
-router.get("/iptv/streams/:categoryId", requireVip, async (req, res) => {
-  const { categoryId } = req.params;
-
-  try {
-    const response = await axios.get(`${XTREAM_URL}/player_api.php`, {
-      params: {
-        username: XTREAM_USER,
-        password: XTREAM_PASS,
-        action: "get_live_streams",
-        category_id: categoryId,
-      },
-      timeout: 15000,
-    });
-
-    const streams = (response.data || []).map((stream) => ({
-      stream_id: stream.stream_id,
-      name: stream.name,
-      stream_icon: null,
-      epg_channel_id: stream.epg_channel_id || null,
-      category_id: stream.category_id,
-    }));
-
-    res.json({ streams });
-  } catch (error) {
-    console.error(
-      `[IPTV] Erreur get_live_streams cat=${categoryId}:`,
-      error.message,
-    );
-    res
-      .status(500)
-      .json({ error: "Erreur lors de la récupération des chaînes IPTV" });
-  }
-});
-
-/**
- * GET /api/livetv/iptv/stream-url/:streamId
- * Construit l'URL m3u8 proxifiée pour un stream Xtream (VIP only)
- */
-router.get("/iptv/stream-url/:streamId", requireVip, async (req, res) => {
-  const { streamId } = req.params;
-
-  try {
-    const directUrl = `${XTREAM_URL}/live/${XTREAM_USER}/${XTREAM_PASS}/${streamId}.m3u8`;
-    const proxiedUrl = buildIptvStreamUrl(directUrl);
-
-    res.json({
-      streams: [
-        {
-          url: proxiedUrl,
-          title: "IPTV Stream",
-          behaviorHints: { notWebReady: false },
-        },
-      ],
-    });
-  } catch (error) {
-    console.error(`[IPTV] Erreur stream-url ${streamId}:`, error.message);
-    res.status(500).json({ error: "Erreur lors de la construction de l'URL" });
-  }
 });
 
 // Only slot zero receives NORTHLIVE_REFRESH_OWNER=1 from server.js. Readers

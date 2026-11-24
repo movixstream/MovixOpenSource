@@ -48,7 +48,6 @@ const SECTIONS: CostSection[] = [
     key: 'sources',
     items: [
       { key: 'debrid', amount: 20, currency: 'EUR', period: 'month', approximate: true },
-      { key: 'iptv', amount: 10, currency: 'EUR', period: 'month' },
     ],
   },
 ];

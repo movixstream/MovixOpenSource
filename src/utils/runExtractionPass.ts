@@ -20,7 +20,10 @@
 // disponible sur TOUS les agrégateurs, sans toucher aux pages Watch.
 
 import {
+  detectSupportedEmbeds,
   extractM3u8OnDetection,
+  usesExtensionExtraction,
+  type ExtractionProgress,
   type PlayerInfo,
 } from './extractM3u8';
 import { expandSeekStreamingSources } from './seekStreamingCandidates';
@@ -89,6 +92,19 @@ export interface ExtractionPassOptions {
    * désordonner la sélection automatique. Omettre = tous les hosters.
    */
   allowedHosters?: readonly string[];
+  /**
+   * Suivi lecteur par lecteur (radar de l'écran de chargement). Appelé au
+   * début et à la fin de chaque extraction, et une fois par résultat final
+   * quand l'extension rend tout d'un bloc.
+   */
+  onProgress?: (progress: ExtractionProgress) => void;
+  /** Fin de la passe, résultats rendus ou non. */
+  onDone?: () => void;
+  /**
+   * Bouton « Lancer maintenant » : dès que cette promesse se résout, la passe
+   * rend ce qui est déjà extrait sans attendre les hébergeurs lents.
+   */
+  cutoff?: Promise<void>;
 }
 
 /**
@@ -155,7 +171,10 @@ export async function runExtractionPass(
   options: ExtractionPassOptions,
 ): Promise<ExtractionPassResult> {
   const empty: ExtractionPassResult = { hls: [], file: [] };
-  if (!sources || sources.length === 0) return empty;
+  if (!sources || sources.length === 0) {
+    options.onDone?.();
+    return empty;
+  }
 
   // Dédup des URLs en entrée : un agrégateur peut lister le même lecteur dans
   // plusieurs catégories, et on ne veut pas payer deux fois l'extraction.
@@ -187,7 +206,10 @@ export async function runExtractionPass(
       `[extraction-pass][${options.origin}] ${skipped} lecteur(s) hors périmètre, laissé(s) en embed`,
     );
   }
-  if (byUrl.size === 0) return empty;
+  if (byUrl.size === 0) {
+    options.onDone?.();
+    return empty;
+  }
 
   /** Retrouve la source d'origine malgré une éventuelle réécriture de domaine. */
   const findOriginal = (url: string): ExtractionPassSource | undefined => {
@@ -203,13 +225,41 @@ export async function runExtractionPass(
     label: source.label,
   }));
 
-  let results;
+  // Résultats finals déjà reçus : c'est ce que rend une passe coupée par le
+  // bouton « Lancer maintenant ».
+  const finished = new Map<string, ExtractionProgress>();
+  const onProgress = (progress: ExtractionProgress) => {
+    if (progress.status === 'success' || progress.status === 'error') {
+      finished.set(progress.url, { ...progress });
+    }
+    options.onProgress?.(progress);
+  };
+
+  // L'extension rend tout d'un bloc, sans dire ce qu'elle commence : le radar
+  // apprend ici quels lecteurs partent en extraction.
+  if (options.onProgress && usesExtensionExtraction()) {
+    const startedAt = Date.now();
+    for (const embed of detectSupportedEmbeds(players, options.context)) {
+      options.onProgress({ type: embed.type, url: embed.url, status: 'extracting', timestamp: startedAt });
+    }
+  }
+
+  let results: ExtractionProgress[];
   try {
-    results = await extractM3u8OnDetection(players, MAIN_API, undefined, options.context);
+    const extraction = extractM3u8OnDetection(players, MAIN_API, onProgress, options.context);
+    results = options.cutoff
+      ? await Promise.race([extraction, options.cutoff.then(() => Array.from(finished.values()))])
+      : await extraction;
   } catch (error) {
     console.error(`[extraction-pass][${options.origin}] échec global de la passe:`, error);
+    options.onDone?.();
     return empty;
   }
+  // L'extension rend tout d'un bloc, sans passer par `onProgress`.
+  for (const progress of results) {
+    if (!finished.has(progress.url)) options.onProgress?.(progress);
+  }
+  options.onDone?.();
 
   const hls: ExtractedPlayableSource[] = [];
   const file: ExtractedPlayableSource[] = [];

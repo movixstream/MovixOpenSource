@@ -1502,7 +1502,7 @@ const DownloadPage: React.FC = () => {
                 <div className="flex items-center gap-4 text-sm">
                   <div className="flex items-center gap-1">
                     <Star className="w-4 h-4 text-yellow-500" />
-                    <span>{tmdbDetails.vote_average.toFixed(1)}</span>
+                    <span>{Number(tmdbDetails.vote_average ?? 0).toFixed(1)}</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <Calendar className="w-4 h-4 text-gray-400" />

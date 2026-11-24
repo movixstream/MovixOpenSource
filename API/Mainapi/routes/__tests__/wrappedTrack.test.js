@@ -52,7 +52,7 @@ function fakePool() {
 
 // `realBudget` : vrai plafond au temps réel (utils/wrappedTimeBudget.js, sans
 // Redis) ; sinon toute durée annoncée est acceptée, pour tester le SQL seul.
-async function fixture({ profiles = [{ id: 'profile-one' }], realBudget = false, redis = null } = {}) {
+async function fixture({ profiles = [{ id: 'profile-one' }], realBudget = false, redis = null, sessionRevoked = false } = {}) {
   const filename = path.resolve(__dirname, '../../wrappedRoutes.js');
   const localRequire = createRequire(filename);
   const module = { exports: {} };
@@ -61,6 +61,8 @@ async function fixture({ profiles = [{ id: 'profile-one' }], realBudget = false,
   const budgetModule = localRequire('./utils/wrappedTimeBudget');
   budgetModule.resetWrappedTimeBudgetMemory();
   const stubs = {
+    // Session toujours valide ici ; la révocation est testée dans wrappedTrack.
+    './middleware/auth': { getAuthIfValid: async () => (sessionRevoked ? null : { userId: 'user', userType: 'oauth' }) },
     './utils/wrappedTimeBudget': realBudget
       ? budgetModule
       : { takeWrappedTime: async ({ requestedSeconds }) => requestedSeconds },
@@ -270,4 +272,11 @@ test('wrapped/track : la limite de requêtes suit le compte, pas le profil envoy
   }
   assert.equal((await f.track({ type: 'page', pageName: 'home', duration: 5 })).statusCode, 429);
   assert.deepEqual([...counters.keys()], ['wrapped:rl:track:oauth:user']);
+});
+
+test('wrapped/track : une session supprimée est refusée même avec un jeton bien signé', async () => {
+  const f = await fixture({ sessionRevoked: true });
+  const res = await f.track({ type: 'viewing', contentType: 'movie', contentId: '603', duration: 60, hourOfDay: 21 });
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(f.pool.queries, []);
 });

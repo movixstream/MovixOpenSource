@@ -64,6 +64,12 @@ html[data-no-blur] [style*="backdrop-filter"] {
   background-color: rgba(10, 10, 15, 0.95) !important;
 }
 
+/* Coulure floue du bas de la grande image des fiches : un décor, le voile noir
+   fait le fondu sans elle. */
+html[data-no-blur] [data-details-hero-soft] {
+  display: none !important;
+}
+
 /* ════════════════════════════════════════════════════════════════════════════
    TRANSITIONS (data-no-transitions)
    - Coupe transitions CSS sur tout l'arbre

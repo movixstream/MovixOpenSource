@@ -94,6 +94,21 @@ const clingingCat = (duration: number): Keyframe[] => {
 
 const translate = (x: number, y: number) => `translate3d(${x}px, ${y}px, 0)`;
 
+/**
+ * `Animation.finished` n'existe qu'à partir de Chrome 84 : les vieux
+ * navigateurs (Chrome 80 des boîtiers Android) n'ont que `onfinish`
+ * (GlitchTip « Cannot read property 'then' of undefined »).
+ */
+const animationFinished = (animation: Animation): Promise<void> => {
+  if (animation.finished && typeof animation.finished.then === 'function') {
+    return animation.finished.then(() => undefined);
+  }
+  return new Promise((resolve, reject) => {
+    animation.onfinish = () => resolve();
+    animation.oncancel = () => reject(new Error('animation cancelled'));
+  });
+};
+
 // ─── Passage sur mobile ──────────────────────────────────────────────────────
 
 /** Retournée (facing −1), elle regarde à gauche : ses angles s'inversent. */
@@ -212,6 +227,28 @@ const makeBurst = (id: number, x: number, y: number, bottom: number): CandyBurst
   return { id, x, y, candies };
 };
 
+/** Chute puis glissement d'un bonbon (voir CandyBurst). */
+const makeCandyAnimations = (element: HTMLElement, candy: CandyBurstData['candies'][number], i: number): Animation[] => {
+  const fall = element.children[i] as HTMLElement | undefined;
+  const spin = fall?.firstElementChild as HTMLElement | null | undefined;
+  if (!fall || !spin) return [];
+  const timing: KeyframeAnimationOptions = { duration: candy.duration, delay: candy.delay, fill: 'backwards' };
+  // Il sort petit et grossit en 140 ms, comme éjecté.
+  const pop = Math.min(0.12, 140 / candy.duration);
+  return [
+    fall.animate([
+      { offset: 0, transform: 'translate3d(0, 0, 0)', easing: RISE_EASING },
+      { offset: candy.apex, transform: `translate3d(0, ${-candy.rise}px, 0)`, easing: FALL_EASING },
+      { offset: 1, transform: `translate3d(0, ${candy.drop}px, 0)` },
+    ], timing),
+    spin.animate([
+      { offset: 0, opacity: 0, transform: 'translate3d(0, 0, 0) rotate(0deg) scale(0.35)' },
+      { offset: pop, opacity: 1, transform: `translate3d(${candy.drift * pop}px, 0, 0) rotate(${candy.spin * pop}deg) scale(1)` },
+      { offset: 1, opacity: 1, transform: `translate3d(${candy.drift}px, 0, 0) rotate(${candy.spin}deg) scale(1)` },
+    ], timing),
+  ];
+};
+
 /**
  * Bonbons d'un clic. Chacun a deux <span> animés : la chute (verticale) et,
  * dedans, le glissement de côté avec la rotation, pour que chaque mouvement
@@ -224,27 +261,17 @@ const CandyBurst = memo(function CandyBurst({ burst, onDone }: { burst: CandyBur
   useLayoutEffect(() => {
     const element = root.current;
     if (!element || typeof element.animate !== 'function') return undefined;
-    const animations = burst.candies.flatMap((candy, i) => {
-      const fall = element.children[i] as HTMLElement;
-      const spin = fall.firstElementChild as HTMLElement;
-      const timing: KeyframeAnimationOptions = { duration: candy.duration, delay: candy.delay, fill: 'backwards' };
-      // Il sort petit et grossit en 140 ms, comme éjecté.
-      const pop = Math.min(0.12, 140 / candy.duration);
-      return [
-        fall.animate([
-          { offset: 0, transform: 'translate3d(0, 0, 0)', easing: RISE_EASING },
-          { offset: candy.apex, transform: `translate3d(0, ${-candy.rise}px, 0)`, easing: FALL_EASING },
-          { offset: 1, transform: `translate3d(0, ${candy.drop}px, 0)` },
-        ], timing),
-        spin.animate([
-          { offset: 0, opacity: 0, transform: 'translate3d(0, 0, 0) rotate(0deg) scale(0.35)' },
-          { offset: pop, opacity: 1, transform: `translate3d(${candy.drift * pop}px, 0, 0) rotate(${candy.spin * pop}deg) scale(1)` },
-          { offset: 1, opacity: 1, transform: `translate3d(${candy.drift}px, 0, 0) rotate(${candy.spin}deg) scale(1)` },
-        ], timing),
-      ];
-    });
+    // Safari lève parfois « TypeError: Type error » sur ces images clés
+    // (GlitchTip 8698788) : sans animation, la gerbe disparaît tout de suite.
+    let animations: Animation[];
+    try {
+      animations = burst.candies.flatMap((candy, i) => makeCandyAnimations(element, candy, i));
+    } catch {
+      onDone(burst.id);
+      return undefined;
+    }
     let live = true;
-    void Promise.all(animations.map((animation) => animation.finished)).then(
+    void Promise.all(animations.map(animationFinished)).then(
       () => { if (live) onDone(burst.id); },
       () => undefined,
     );
@@ -354,7 +381,7 @@ export const HalloweenWitchFlight = memo(function HalloweenWitchFlight() {
       state.excited?.setAttribute(PASS_ATTR, '');
       state.calm = window.setTimeout(calmDown, PUMPKINS_EXCITED_MS);
       // Attrapée en route, c'est la fuite (onPointerDown) qui la retire.
-      flight.animations[0].finished.then(() => {
+      animationFinished(flight.animations[0]).then(() => {
         if (state.flight !== flight) return;
         land();
         later(MOBILE_EVERY_MS - flight.total);

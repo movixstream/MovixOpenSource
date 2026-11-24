@@ -543,7 +543,7 @@ const SourceQualityMeta = ({ qualityLabel, isActive = false }: { qualityLabel: s
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 6 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="pointer-events-none absolute left-0 top-full z-[120] mt-2 w-64 rounded-lg border border-white/10 bg-black/95 px-3 py-2 text-left text-[10px] leading-relaxed text-gray-100 shadow-2xl"
+            className="pointer-events-none absolute left-0 top-full z-[120] mt-2 w-64 rounded-lg border border-white/10 bg-black px-3 py-2 text-left text-[10px] leading-relaxed text-gray-100 shadow-2xl"
           >
             {t('watch.estimatedBitrateTooltip')}
           </motion.span>
@@ -609,9 +609,15 @@ const isMP4Source = (url: string): boolean => {
     }
   }
 
-  // Check for UQLOAD proxified URLs - these are treated as MP4 streams
-  // Format: proxy/https%3A%2F%2Fuqload.is%2Fembed-...
-  if (lowerUrl.includes('proxy') && lowerUrl.includes('uqload')) {
+  // Liens Uqload passés par un proxy : MP4 jadis, mais Uqload sert aussi du
+  // HLS (`strmN.uqload.*/hls2/…/master.m3u8`). Un manifeste remis à la balise
+  // <video> échoue sur Firefox (« Content-Type application/vnd.apple.mpegurl
+  // not supported ») : il doit passer par hls.js.
+  if (
+    lowerUrl.includes('proxy')
+    && lowerUrl.includes('uqload')
+    && !lowerUrl.includes('.m3u8')
+  ) {
     return true;
   }
 
@@ -11410,7 +11416,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
           }}
         >
           {/* Cast Banner at the top */}
-          <div className="relative z-20 w-full flex-none bg-black/95 shadow-lg">
+          <div className="relative z-20 w-full flex-none bg-black shadow-lg">
             <div className="flex min-h-14 items-center justify-between px-3 py-1.5 sm:px-5 sm:py-2">
               <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-none text-red-500 sm:h-6 sm:w-6" viewBox="0 0 24 24" fill="currentColor">
@@ -11736,7 +11742,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
           }}
         >
           {/* PiP Banner at the top */}
-          <div className="absolute top-0 left-0 right-0 z-20 bg-black/95 shadow-lg">
+          <div className="absolute top-0 left-0 right-0 z-20 bg-black shadow-lg">
             <div className="flex items-center justify-between px-6 py-3">
               <div className="flex items-center gap-3">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
@@ -11787,7 +11793,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
           </div>
 
           {/* Basic Controls */}
-          <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/95">
+          <div className="absolute bottom-0 left-0 right-0 z-20 bg-black">
             <div className="flex items-center justify-center gap-6 px-6 py-6">
               <button
                 onClick={() => skipTime(-10)}
@@ -12041,7 +12047,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             className="absolute inset-0 flex items-center justify-end pr-[15%] z-50 pointer-events-none"
           >
             <motion.div
-              className="bg-black/95 rounded-3xl p-5 md:p-6 flex flex-col items-center shadow-2xl border border-white/30 min-w-[110px] md:min-w-[130px]"
+              className="bg-black rounded-3xl p-5 md:p-6 flex flex-col items-center shadow-2xl border border-white/30 min-w-[110px] md:min-w-[130px]"
               animate={{
                 scale: [1, 1.05, 1],
               }}
@@ -12084,7 +12090,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             className="absolute inset-0 flex items-center justify-start pl-[15%] z-50 pointer-events-none"
           >
             <motion.div
-              className="bg-black/95 rounded-3xl p-5 md:p-6 flex flex-col items-center shadow-2xl border border-white/30 min-w-[110px] md:min-w-[130px]"
+              className="bg-black rounded-3xl p-5 md:p-6 flex flex-col items-center shadow-2xl border border-white/30 min-w-[110px] md:min-w-[130px]"
               animate={{
                 scale: [1, 1.05, 1],
               }}
@@ -12849,7 +12855,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 10 }}
-                      className="absolute bottom-full right-0 mb-2 bg-black/95 border border-gray-700 rounded-lg shadow-xl p-3 min-w-[250px] z-50 cast-menu"
+                      className="absolute bottom-full right-0 mb-2 bg-black border border-gray-700 rounded-lg shadow-xl p-3 min-w-[250px] z-50 cast-menu"
                     >
                       <div className="text-white text-sm font-medium mb-2">
                         {canRequestAirPlay && !castAvailable ? t('watch.airplayTo') :
@@ -13293,7 +13299,7 @@ const HLSPlayer = forwardRef<HLSPlayerRef, HLSPlayerProps>(({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.2 }}
-            className="absolute top-16 right-4 left-4 md:left-auto z-[12000] bg-black/95 border border-gray-800 rounded-lg shadow-2xl md:w-96 w-auto max-h-[80vh] flex flex-col"
+            className="absolute top-16 right-4 left-4 md:left-auto z-[12000] bg-black border border-gray-800 rounded-lg shadow-2xl md:w-96 w-auto max-h-[80vh] flex flex-col"
             data-lenis-prevent
           >
             <div className="p-4 border-b border-gray-800 flex justify-between items-center">

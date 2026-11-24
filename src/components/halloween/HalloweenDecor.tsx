@@ -103,6 +103,9 @@ const loadTexture = (src: string) => {
  * et rien n'est repeint entre deux changements de teinte.
  */
 const paintFog = async (canvas: HTMLCanvasElement, work: HTMLCanvasElement, image: HTMLImageElement, color: string) => {
+  // Texture pas encore décodée : un canvas de largeur 0 fait échouer
+  // createImageBitmap (GlitchTip « Passed-in canvas has width 0 »).
+  if (!image.naturalWidth || !image.naturalHeight) return;
   const width = image.naturalWidth * 2;
   if (work.width !== width) work.width = width;
   if (work.height !== image.naturalHeight) work.height = image.naturalHeight;
@@ -124,7 +127,11 @@ const paintFog = async (canvas: HTMLCanvasElement, work: HTMLCanvasElement, imag
 
   const renderer = typeof createImageBitmap === 'function' ? canvas.getContext('bitmaprenderer') : null;
   if (renderer) {
-    renderer.transferFromImageBitmap(await createImageBitmap(work));
+    // Safari et Chrome refusent parfois le canvas de travail (« can't be
+    // rendered », mémoire graphique pleine) : la nappe reste alors vide au
+    // lieu de remonter une erreur (GlitchTip 8576537).
+    const bitmap = await createImageBitmap(work).catch(() => null);
+    if (bitmap) renderer.transferFromImageBitmap(bitmap);
     return;
   }
   // Navigateur sans bitmaprenderer : copie dans le canvas affiché.
@@ -183,7 +190,9 @@ const useFogTint = (pageKind: HalloweenPageKind) => {
           work = document.createElement('canvas');
           works.set(layer.name, work);
         }
-        await paintFog(canvas, work, image, color);
+        // Canvas en erreur (Firefox « already in error state ») : cette nappe
+        // garde son image, les autres continuent.
+        await paintFog(canvas, work, image, color).catch(() => undefined);
         if (cancelled) return;
       }
       const fading = at - state.start < PAGE_FADE_MS;

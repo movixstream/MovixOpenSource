@@ -157,6 +157,7 @@ setInterval(() => {
 function invalidateVipCache(accessKey) {
     if (accessKey) {
         vipCache.delete(accessKey.trim());
+        publishVipCacheInvalidation(accessKey.trim());
     }
 }
 
@@ -165,6 +166,51 @@ function invalidateVipCache(accessKey) {
  */
 function invalidateAllVipCache() {
     vipCache.clear();
+    publishVipCacheInvalidation('*');
+}
+
+// ─── Invalidation entre processus du cluster (Redis pub/sub) ─────────────
+// Chaque processus du cluster (server.js) a son propre cache. Sans diffusion,
+// une clé révoquée restait acceptée jusqu'à 5 min par les autres processus.
+// Redis est chargé à la demande : les tests chargent ce module sans Redis.
+const VIP_CACHE_CHANNEL = 'vip:cache:invalidate';
+let vipCacheSubscriber = null;
+
+function getRedis() {
+    try {
+        return require('./config/redis').redis || null;
+    } catch {
+        return null;
+    }
+}
+
+function publishVipCacheInvalidation(message) {
+    // Rien à diffuser tant que l'abonné n'est pas lancé (tests, scripts).
+    if (!vipCacheSubscriber) return;
+    const redis = getRedis();
+    if (!redis) return;
+    Promise.resolve()
+        .then(() => redis.publish(VIP_CACHE_CHANNEL, message))
+        .catch((err) => console.warn("[checkVip] diffusion de l'invalidation impossible:", err.message));
+}
+
+/** À appeler une fois par processus au démarrage. */
+function startVipCacheSubscriber() {
+    if (vipCacheSubscriber) return;
+    const redis = getRedis();
+    if (!redis || typeof redis.duplicate !== 'function') return;
+    vipCacheSubscriber = redis.duplicate();
+    vipCacheSubscriber.on('error', (err) => {
+        console.error('[checkVip] abonné du cache VIP en erreur:', err.message);
+    });
+    vipCacheSubscriber.on('message', (channel, message) => {
+        if (channel !== VIP_CACHE_CHANNEL) return;
+        if (message === '*') vipCache.clear();
+        else vipCache.delete(message);
+    });
+    vipCacheSubscriber.subscribe(VIP_CACHE_CHANNEL, (err) => {
+        if (err) console.error('[checkVip] abonnement au cache VIP impossible:', err.message);
+    });
 }
 
 module.exports = {
@@ -172,5 +218,6 @@ module.exports = {
     vipMiddleware,
     requireVip,
     invalidateVipCache,
-    invalidateAllVipCache
+    invalidateAllVipCache,
+    startVipCacheSubscriber
 };

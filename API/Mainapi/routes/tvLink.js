@@ -180,21 +180,25 @@ async function requireSiteAuth(req, res) {
   return auth;
 }
 
-async function isWrongCodeLimited(auth) {
-  const count = await withRedis((client) => client.get(KEY_FAIL(auth.userType, auth.userId)));
-  return Number(count || 0) >= MAX_WRONG_CODES;
-}
-
-async function recordWrongCode(auth) {
+// Chaque essai réserve sa place AVANT de lire le code (INCR atomique) : lire
+// le compteur puis l'augmenter laissait passer toutes les requêtes lancées en
+// même temps avant le blocage. Un bon code rend sa place.
+async function takeCodeAttempt(auth) {
   const key = KEY_FAIL(auth.userType, auth.userId);
-  await withRedis(async (client) => {
-    const count = Number(await client.incr(key));
-    if (count === 1) {
-      await client.expire(key, WRONG_CODE_WINDOW_SECONDS);
-    } else if (Number(await client.ttl(key)) < 0) {
+  const count = await withRedis(async (client) => {
+    const next = Number(await client.incr(key));
+    if (next === 1 || Number(await client.ttl(key)) < 0) {
       await client.expire(key, WRONG_CODE_WINDOW_SECONDS);
     }
+    return next;
   });
+  return count <= MAX_WRONG_CODES;
+}
+
+async function refundCodeAttempt(auth) {
+  try {
+    await withRedis((client) => client.decr(KEY_FAIL(auth.userType, auth.userId)));
+  } catch { /* le compteur expirera de lui-même */ }
 }
 
 /**
@@ -302,14 +306,14 @@ router.get('/info', siteRateLimit, async (req, res) => {
   try {
     const auth = await requireSiteAuth(req, res);
     if (!auth) return undefined;
-    if (await isWrongCodeLimited(auth)) return res.status(429).json({ error: 'too_many_attempts' });
+    if (!(await takeCodeAttempt(auth))) return res.status(429).json({ error: 'too_many_attempts' });
 
     const userCode = normalizeUserCode(req.query?.code);
     const link = userCode ? await findPendingLink(userCode) : null;
     if (!link) {
-      await recordWrongCode(auth);
       return res.status(404).json({ error: 'code_invalid' });
     }
+    await refundCodeAttempt(auth);
 
     return res.status(200).json({
       deviceName: link.entry.deviceName || DEFAULT_DEVICE_NAME,
@@ -325,15 +329,15 @@ router.post('/confirm', siteRateLimit, async (req, res) => {
   try {
     const auth = await requireSiteAuth(req, res);
     if (!auth) return undefined;
-    if (await isWrongCodeLimited(auth)) return res.status(429).json({ error: 'too_many_attempts' });
+    if (!(await takeCodeAttempt(auth))) return res.status(429).json({ error: 'too_many_attempts' });
 
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const userCode = normalizeUserCode(body.userCode);
     const link = userCode ? await findPendingLink(userCode) : null;
     if (!link) {
-      await recordWrongCode(auth);
       return res.status(404).json({ error: 'code_invalid' });
     }
+    await refundCodeAttempt(auth);
 
     let profileId;
     try {

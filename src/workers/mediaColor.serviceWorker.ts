@@ -8,7 +8,7 @@ import {
 } from '@/utils/mediaColors'
 
 export const TMDB_IMAGE_CACHE_NAME = 'movix-tmdb-images-v3'
-export const MEDIA_COLOR_CACHE_NAME = 'movix-media-colors-v1'
+export const MEDIA_COLOR_CACHE_NAME = 'movix-media-colors-v2'
 
 const TMDB_IMAGE_HOST = 'image.tmdb.org'
 const TMDB_IMAGE_PATH_RE = /^\/t\/p\/[^/]+\/[^/]+$/

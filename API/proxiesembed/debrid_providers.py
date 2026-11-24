@@ -1,6 +1,6 @@
 """Liste des débrideurs présentés par l'interface Movix."""
 
-DEBRID_PROVIDERS = ('deepbrid', 'realdebrid', 'bestdebrid', 'debridr')
+DEBRID_PROVIDERS = ('deepbrid', 'realdebrid', 'debridr')
 DEFAULT_DEBRID_PROVIDERS = 'deepbrid'
 
 

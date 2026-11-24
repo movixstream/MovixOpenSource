@@ -75,7 +75,11 @@ function injectPublicConfig(): Plugin {
       .filter(Boolean)
     const configUrl =
       process.env.VITE_MIRRORS_CONFIG_URL || 'https://rentry.co/movix'
+    // Date du build (AAAA-MM-JJ) pour les <lastmod> du sitemap : les pages
+    // listées sont des catalogues qui changent à chaque déploiement.
+    const buildDate = new Date().toISOString().slice(0, 10)
     return source
+      .replace(/__MOVIX_BUILD_DATE__/g, buildDate)
       .replace(/__MOVIX_DEFAULT_MIRRORS__/g, JSON.stringify(mirrors))
       .replace(/__MOVIX_CONFIG_URL__/g, JSON.stringify(configUrl))
       .replace(/__MOVIX_SITE_URL__/g, () => {
@@ -196,7 +200,9 @@ export default defineConfig(({ mode, command }) => {
   const glitchtipAuthToken = command === 'build' ? (buildEnv.GLITCHTIP_AUTH_TOKEN || '').trim() : ''
 
   return {
-    logLevel: 'warn',
+    // Build discret (warnings seulement) ; en dev, garder le niveau « info »
+    // pour afficher les adresses Local / Network au démarrage.
+    logLevel: command === 'build' ? 'warn' : 'info',
     plugins: [
       react(),
       injectPublicConfig(),

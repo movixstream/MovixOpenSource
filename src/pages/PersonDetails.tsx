@@ -1,349 +1,370 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { PrefetchLink as Link } from '@/routing/PrefetchLink';
-import axios from 'axios';
-import { motion } from 'framer-motion';
-import { ExternalLink, Clock, Star } from 'lucide-react';
-import { TMDB_API_KEY } from '../config/config';
+import { MotionConfig } from 'framer-motion';
+import { Check, ChevronDown, ChevronUp, Film, Share, UserRound } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { getTmdbLanguage } from '../i18n';
-import AgeRestrictedMedia from '../components/AgeRestrictedMedia';
+import SEO from '@/components/SEO';
+import ShareButtons from '@/components/ShareButtons';
+import { buildSiteUrl } from '@/config/runtime';
+import { useAgeRestrictedContent } from '@/hooks/useAgeRestrictedContent';
+import { useSagaProgress } from '@/hooks/useSagaProgress';
+import { cn } from '@/lib/utils';
+import {
+  DETAILS_FOCUS, DETAILS_GRID,
+  DetailsActionButton, DetailsActionRow, DetailsBarIconButton, DetailsButton, DetailsFacts, DetailsHero,
+  DetailsLinkButton, DetailsMetaLine, DetailsPill, DetailsSection, DetailsSectionHeader, DetailsSectionNav,
+  DetailsSynopsis, DetailsTitle, DetailsTmdbNote,
+  detailsHeroImages, formatDetailsLongDate, scrollToDetailsSection, useDetailsImageSizing,
+  type DetailsSectionLink,
+} from '@/components/details';
+import {
+  PersonDetailsSkeleton, PersonFilmography, PersonKnownFor,
+  ageInYears, pickKnownFor, personGenderContext, personProfessionLabel, usePersonDetails,
+  type PersonExternalIds,
+} from '@/components/details/person';
 
-interface Person {
-  id: number;
-  name: string;
-  profile_path: string | null;
-  biography: string;
-  birthday: string | null;
-  deathday: string | null;
-  place_of_birth: string | null;
-  known_for_department: string;
+/** Ancres des sections : cibles de la barre de sections. */
+const SECTION = {
+  about: 'apropos',
+  knownFor: 'connu-pour',
+  filmography: 'filmographie',
+} as const;
+
+/** Biographie repliée dès 768 px au-delà de cette longueur (en caractères). */
+const BIO_FOLD_AT = 1100;
+/** Repliée, elle montre ses premiers paragraphes jusqu'à environ cette longueur. */
+const BIO_PREVIEW = 650;
+
+/** Autres noms en alphabet latin (TMDB mêle chinois, russe, coréen…), sans le nom affiché. */
+const LATIN_NAME = /^[\p{Script=Latin}\p{M}\s.'’-]+$/u;
+
+/** Liens externes de la fiche, dans cet ordre. */
+function externalLinks(personId: number, ids: PersonExternalIds, imdbId: string | null) {
+  const imdb = ids.imdb_id || imdbId;
+  return [
+    { key: 'tmdb', label: 'TMDB', href: `https://www.themoviedb.org/person/${personId}` },
+    imdb && { key: 'imdb', label: 'IMDb', href: `https://www.imdb.com/name/${encodeURIComponent(imdb)}/` },
+    ids.instagram_id && { key: 'instagram', label: 'Instagram', href: `https://www.instagram.com/${encodeURIComponent(ids.instagram_id)}/` },
+    ids.twitter_id && { key: 'x', label: 'X', href: `https://x.com/${encodeURIComponent(ids.twitter_id)}` },
+    ids.tiktok_id && { key: 'tiktok', label: 'TikTok', href: `https://www.tiktok.com/@${encodeURIComponent(ids.tiktok_id)}` },
+    ids.facebook_id && { key: 'facebook', label: 'Facebook', href: `https://www.facebook.com/${encodeURIComponent(ids.facebook_id)}` },
+  ].filter((link): link is { key: string; label: string; href: string } => Boolean(link));
 }
 
-interface Credit {
-  id: number;
-  title?: string;
-  name?: string;
-  poster_path: string | null;
-  character?: string;
-  job?: string;
-  media_type: 'movie' | 'tv';
-  release_date?: string;
-  first_air_date?: string;
-  vote_average: number;
+/** Portrait du haut de page ; sans photo, l'initiale. */
+function PersonPortrait({ name, url }: { name: string; url: string | null }) {
+  const [failed, setFailed] = useState(false);
+  const box = 'block aspect-[4/5] w-[104px] flex-none overflow-hidden rounded-2xl shadow-[0_18px_48px_rgb(0_0_0/0.55)] ring-1 ring-inset ring-white/15 md:w-[160px] 2xl:w-[184px]';
+  if (!url || failed) {
+    return (
+      <span aria-hidden="true" className={cn(box, 'flex items-center justify-center bg-white/10 text-4xl font-semibold text-white md:text-6xl')}>
+        {name.trim().charAt(0).toUpperCase()}
+      </span>
+    );
+  }
+  return (
+    <span className={cn(box, 'relative bg-white/[.06]')}>
+      <img
+        src={url}
+        alt={name}
+        decoding="async"
+        draggable={false}
+        onError={() => setFailed(true)}
+        className="absolute inset-0 h-full w-full object-cover"
+      />
+    </span>
+  );
 }
 
-const PersonDetails: React.FC = () => {
+const PersonDetails = (): JSX.Element => {
   const { t, i18n } = useTranslation();
   const { id } = useParams<{ id: string }>();
-  const [person, setPerson] = useState<Person | null>(null);
-  const [credits, setCredits] = useState<Credit[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const timelineRef = useRef<HTMLDivElement>(null);
-  const DEFAULT_IMAGE = 'data:image/svg+xml;utf8,<svg width="300" height="450" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450" preserveAspectRatio="xMidYMid meet"><rect width="100%" height="100%" fill="%23374151"/><g transform="translate(150,225)"><circle cx="0" cy="-50" r="40" fill="%236B7280"/><path d="M-60,20 Q-60,-10 -40,-20 Q-20,-25 0,-25 Q20,-25 40,-20 Q60,-10 60,20 L60,100 Q60,120 40,120 L-40,120 Q-60,120 -60,100 Z" fill="%236B7280"/></g><text x="50%" y="90%" fill="%239CA3AF" font-size="16" font-family="Arial, sans-serif" text-anchor="middle"></text></svg>';
+  const sizing = useDetailsImageSizing();
+  const { person, credits, externalIds, biographyInEnglish, loading, error } = usePersonDetails(id);
+  // Filtre d'âge du profil : un titre interdit ne paraît nulle part sur la page.
+  const { items: allowedCredits, isFiltering } = useAgeRestrictedContent(credits);
+  const movieIds = useMemo(
+    () => allowedCredits.filter((credit) => credit.media_type === 'movie').map((credit) => credit.id),
+    [allowedCredits],
+  );
+  // Même suivi que les sagas : stockage local, puis l'historique du serveur.
+  const progress = useSagaProgress(movieIds);
+  const knownForDepartment = person?.known_for_department ?? null;
+  const knownFor = useMemo(() => pickKnownFor(allowedCredits, knownForDepartment), [allowedCredits, knownForDepartment]);
+  const [filmographyCount, setFilmographyCount] = useState<number | null>(null);
+  const [bioExpanded, setBioExpanded] = useState(false);
 
-  const DEFAULT_POSTER_IMAGE = 'data:image/svg+xml;utf8,<svg width="185" height="278" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 185 278" preserveAspectRatio="xMidYMid meet"><rect width="100%" height="100%" fill="%23374151"/><g transform="translate(92.5,139)"><rect x="-30" y="-40" width="60" height="45" rx="5" fill="%236B7280"/><circle cx="-15" cy="-15" r="8" fill="%23374151"/><circle cx="15" cy="-15" r="8" fill="%23374151"/><path d="M-25,10 L25,10 L20,25 L-20,25 Z" fill="%236B7280"/></g><text x="50%" y="85%" fill="%239CA3AF" font-size="12" font-family="Arial, sans-serif" text-anchor="middle"></text></svg>';
-
-  useEffect(() => {
-    const fetchPersonData = async () => {
-      setLoading(true);
-      
-      try {
-        // Fetch person details
-        const personResponse = await axios.get(`https://api.themoviedb.org/3/person/${id}`, {
-          params: {
-            api_key: TMDB_API_KEY,
-            language: getTmdbLanguage()
-          }
-        });
-        
-        // Fetch combined credits
-        const creditsResponse = await axios.get(`https://api.themoviedb.org/3/person/${id}/combined_credits`, {
-          params: {
-            api_key: TMDB_API_KEY,
-            language: getTmdbLanguage()
-          }
-        });
-        
-        setPerson(personResponse.data);
-        
-        // Sort credits by release date (most recent first)
-        const sortedCredits = creditsResponse.data.cast.concat(creditsResponse.data.crew)
-          .filter((credit: any) => credit.poster_path) // Filter out entries without posters
-          .sort((a: any, b: any) => {
-            const dateA = a.release_date || a.first_air_date || '';
-            const dateB = b.release_date || b.first_air_date || '';
-            return dateB.localeCompare(dateA);
-          });
-        
-        setCredits(sortedCredits);
-      } catch (err) {
-        console.error('Error fetching person data:', err);
-        setError(t('details.loadError'));
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    if (id) {
-      fetchPersonData();
-    }
-  }, [id]);
-
-  // Group credits by year
-  const creditsByYear = credits.reduce<Record<string, Credit[]>>((acc, credit) => {
-    const date = credit.release_date || credit.first_air_date || '';
-    const year = date.slice(0, 4);
-    
-    if (!year) return acc;
-    
-    if (!acc[year]) {
-      acc[year] = [];
-    }
-    
-    acc[year].push(credit);
-    return acc;
-  }, {});
-
-  const years = Object.keys(creditsByYear).sort((a, b) => b.localeCompare(a));
-  
-  const scrollLeft = () => {
-    if (timelineRef.current) {
-      timelineRef.current.scrollBy({ left: -300, behavior: 'smooth' });
-    }
-  };
-  
-  const scrollRight = () => {
-    if (timelineRef.current) {
-      timelineRef.current.scrollBy({ left: 300, behavior: 'smooth' });
-    }
-  };
-
-  // Format date for display
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return t('common.unknown');
-    
-    try {
-      const date = new Date(dateString);
-      return new Intl.DateTimeFormat(i18n.language, {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      }).format(date);
-    } catch {
-      return dateString;
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-purple-500"></div>
-      </div>
-    );
-  }
-
+  // La route n'a pas de marge haute (l'image passe sous l'en-tête) : les
+  // écrans sans image la remettent eux-mêmes.
+  if (loading || (credits.length > 0 && isFiltering)) return <PersonDetailsSkeleton />;
   if (error || !person) {
+    const failed = error === 'failed';
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4">{t('common.error')}</h2>
-          <p>{error || t('details.personNotFound')}</p>
-        </div>
+      <div className="min-h-screen bg-black px-4 pb-24 pt-32 text-center text-white">
+        <UserRound className="mx-auto mb-4 size-16 text-white opacity-40" aria-hidden="true" />
+        <h1 className="mb-3 text-2xl font-bold">{failed ? t('common.error') : t('details.person.notFoundTitle')}</h1>
+        <p className="mx-auto mb-8 max-w-[44ch] text-white/60">{failed ? t('details.loadError') : t('details.personNotFound')}</p>
+        <DetailsLinkButton to="/" variant="primary" size="compact">{t('details.person.backHome')}</DetailsLinkButton>
       </div>
     );
   }
+
+  const language = i18n.language;
+  const context = personGenderContext(person.gender);
+  const profession = personProfessionLabel(person.known_for_department, person.gender, t);
+  const deceased = Boolean(person.deathday);
+  const age = ageInYears(person.birthday, person.deathday ?? new Date());
+  const birthLong = formatDetailsLongDate(person.birthday, language);
+  const deathLong = formatDetailsLongDate(person.deathday, language);
+  const birthYear = person.birthday?.slice(0, 4) ?? null;
+  const deathYear = person.deathday?.slice(0, 4) ?? null;
+  const biography = person.biography;
+
+  // Grande image : celle du titre le plus connu, sinon de n'importe quel titre.
+  const backdropPath = knownFor.find((credit) => credit.backdropPath)?.backdropPath
+    ?? [...allowedCredits].sort((a, b) => b.voteCount - a.voteCount).find((credit) => credit.backdropPath)?.backdropPath
+    ?? null;
+  const hero = detailsHeroImages(sizing, { backdrop: backdropPath });
+  const portraitUrl = sizing.profileUrl(person.profile_path, 184);
+
+  const movieCount = movieIds.length;
+  const seriesCount = allowedCredits.length - movieCount;
+  const otherNames = person.also_known_as
+    .map((name) => name.trim())
+    .filter((name, index, list) => name && name !== person.name && LATIN_NAME.test(name) && list.indexOf(name) === index)
+    .slice(0, 3);
+  const links = externalLinks(person.id, externalIds, person.imdb_id);
+
+  // Biographie de la section « À propos » : paragraphes, repliée si longue.
+  const paragraphs = biography.split(/\n+/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  const bioFolds = biography.length > BIO_FOLD_AT;
+  let previewLength = 0;
+  const shownParagraphs = !bioFolds || bioExpanded ? paragraphs : paragraphs.filter((paragraph, index) => {
+    const keep = index === 0 || previewLength < BIO_PREVIEW;
+    previewLength += paragraph.length;
+    return keep;
+  });
+
+  const shareUrl = buildSiteUrl(`/person/${person.id}`);
+  const seoDescription = biography
+    ? `${biography.slice(0, 157).trim()}${biography.length > 157 ? '…' : ''}`
+    : t('details.person.seoDescription', { name: person.name });
+  const shareTrigger = (render: (open: () => void) => JSX.Element) => (
+    <ShareButtons
+      title={person.name}
+      description={seoDescription}
+      imageUrl={person.profile_path ? `https://image.tmdb.org/t/p/original${person.profile_path}` : undefined}
+      url={shareUrl}
+      renderTrigger={(open) => render(() => open())}
+    />
+  );
+
+  const sections: DetailsSectionLink[] = [
+    { id: SECTION.about, label: t('details.person.about') },
+    ...(knownFor.length > 0 ? [{ id: SECTION.knownFor, label: t('details.person.knownFor', { context }) }] : []),
+    ...(allowedCredits.length > 0 ? [{ id: SECTION.filmography, label: t('details.filmography') }] : []),
+  ];
 
   return (
-    <div className="pt-20 pb-16 bg-black text-white min-h-screen">
-      <div className="container mx-auto px-4 max-w-7xl">
-        {/* Hero section */}
-        <div className="flex flex-col md:flex-row gap-8 mb-12">
-          {/* Profile image */}
-          <motion.div 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.6 }}
-            className="w-full md:w-1/3 lg:w-1/4"
-          >
-            <div className="rounded-xl overflow-hidden shadow-2xl bg-gradient-to-br from-purple-900/50 to-blue-900/50 p-1">
-              <img
-                src={person.profile_path
-                  ? `https://image.tmdb.org/t/p/w500${person.profile_path}`
-                  : DEFAULT_IMAGE}
-                alt={person.name}
-                className="w-full h-auto rounded-lg object-cover"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  if (target.src !== DEFAULT_IMAGE) {
-                    target.src = DEFAULT_IMAGE;
-                  }
-                }}
-              />
-            </div>
-            <div className="mt-6 bg-gray-900/50 p-4 rounded-lg space-y-3">
-              <div>
-                <h3 className="text-gray-400 text-sm">{t('details.profession')}</h3>
-                <p className="font-medium">{person.known_for_department}</p>
-              </div>
-              {person.birthday && (
-                <div>
-                  <h3 className="text-gray-400 text-sm">{t('details.birthday')}</h3>
-                  <p className="font-medium">{formatDate(person.birthday)}</p>
-                </div>
+    <MotionConfig reducedMotion="user">
+      <SEO
+        title={`${person.name} - Movix`}
+        description={seoDescription}
+        ogUrl={shareUrl}
+        ogImage={person.profile_path ? `https://image.tmdb.org/t/p/original${person.profile_path}` : undefined}
+        canonical={shareUrl}
+      />
+
+      <div className="relative min-h-screen bg-black pb-24 text-white animate-skeleton-fade motion-reduce:animate-none">
+        <DetailsHero
+          backdropUrl={hero.backdropUrl}
+          media={<PersonPortrait name={person.name} url={portraitUrl} />}
+          pills={(
+            <>
+              {profession && <DetailsPill uppercase>{profession}</DetailsPill>}
+              {!deceased && age !== null && <DetailsPill>{t('details.person.age', { count: age })}</DetailsPill>}
+              {deceased && <DetailsPill>{`${birthYear ?? '?'} – ${deathYear}`}</DetailsPill>}
+              {progress.watchedCount > 0 && (
+                <DetailsPill icon={<Check aria-hidden="true" strokeWidth={3} />}>
+                  {t('details.person.watchedCount', { count: progress.watchedCount, total: progress.total })}
+                </DetailsPill>
               )}
-              {person.deathday && (
-                <div>
-                  <h3 className="text-gray-400 text-sm">{t('details.deathday')}</h3>
-                  <p className="font-medium">{formatDate(person.deathday)}</p>
-                </div>
-              )}
-              {person.place_of_birth && (
-                <div>
-                  <h3 className="text-gray-400 text-sm">{t('details.placeOfBirth')}</h3>
-                  <p className="font-medium">{person.place_of_birth}</p>
-                </div>
-              )}
-              <a 
-                href={`https://www.themoviedb.org/person/${id}`} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-yellow-400 hover:text-yellow-300 transition-colors mt-4"
-              >
-                <span>{t('details.viewOnTMDB')}</span>
-                <ExternalLink size={16} />
-              </a>
-            </div>
-          </motion.div>
-          
-          {/* Bio and details */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            className="w-full md:w-2/3 lg:w-3/4"
-          >
-            <h1 className="text-4xl md:text-5xl font-bold mb-6">{person.name}</h1>
-            
-            <div className="mb-8">
-              <h2 className="text-2xl font-bold mb-4">{t('details.biography')}</h2>
-              {person.biography ? (
-                <p className="text-gray-300 leading-relaxed">{person.biography}</p>
-              ) : (
-                <p className="text-gray-400 italic">{t('details.noBiography')}</p>
-              )}
-            </div>
-          </motion.div>
-        </div>
-        
-        {/* Filmography */}
-        <motion.div
-          initial={{ opacity: 0, y: 40 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.4 }}
-          className="mt-12"
-        >
-          <h2 className="text-3xl font-bold mb-6">{t('details.filmography')}</h2>
-          
-          {/* Magic Scroll Timeline */}
-          <div className="relative">
-            {/* Fixed timeline line - now confined to filmography section */}
-            <div className="absolute left-1/2 top-0 bottom-0 w-1 bg-gradient-to-b from-purple-600 to-blue-600 z-0 transform -translate-x-1/2 opacity-75"></div>
-            
-            {/* Years and credits */}
-            <div className="space-y-32 pb-32">
-              {years.map((year, idx) => (
-                <div key={year} className="relative">
-                  {/* Year node */}
-                  <motion.div 
-                    initial={{ scale: 0, opacity: 0 }}
-                    whileInView={{ scale: 1, opacity: 1 }}
-                    viewport={{ once: false, margin: "-100px 0px -100px 0px" }}
-                    transition={{ type: 'spring', stiffness: 200, damping: 15 }}
-                    className="sticky top-32 left-1/2 w-16 h-16 rounded-full bg-gradient-to-r from-purple-600 to-blue-600 flex items-center justify-center z-10 transform -translate-x-1/2 mb-16 shadow-lg shadow-purple-900/30"
-                  >
-                    <span className="text-white font-bold text-xl">{year}</span>
-                  </motion.div>
-                  
-                  {/* Credits for this year */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl mx-auto">
-                    {creditsByYear[year].map((credit, creditIdx) => (
-                      <AgeRestrictedMedia key={`${credit.id}-${credit.character || credit.job}`} item={credit}>
-                      <motion.div
-                        key={`${credit.id}-${credit.character || credit.job}`}
-                        initial={{ opacity: 0, y: 50 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: false, margin: "-50px 0px" }}
-                        transition={{ delay: creditIdx * 0.1, duration: 0.5 }}
-                      >
-                        <Link 
-                          to={`/${credit.media_type}/${credit.id}`}
-                          className="block"
-                        >
-                          <motion.div 
-                            whileHover={{ 
-                              scale: 1.03, 
-                              boxShadow: "0px 10px 25px rgba(0, 0, 0, 0.3)"
-                            }}
-                            className="bg-gray-900/80 backdrop-blur-sm rounded-lg overflow-hidden flex h-32 transition-all border border-gray-800"
-                          >
-                            <div className="w-24 h-full flex-none">
-                              <img
-                                src={credit.poster_path
-                                  ? `https://image.tmdb.org/t/p/w185${credit.poster_path}`
-                                  : DEFAULT_POSTER_IMAGE}
-                                alt={credit.title || credit.name}
-                                className="w-full h-full object-cover"
-                                onError={(e) => {
-                                  const target = e.target as HTMLImageElement;
-                                  if (target.src !== DEFAULT_POSTER_IMAGE) {
-                                    target.src = DEFAULT_POSTER_IMAGE;
-                                  }
-                                }}
-                              />
-                            </div>
-                            <div className="p-3 flex flex-col justify-between flex-1">
-                              <div>
-                                <h3 className="font-bold text-sm md:text-base">
-                                  {credit.title || credit.name}
-                                </h3>
-                                <p className="text-gray-400 text-xs md:text-sm mt-1">
-                                  {credit.character 
-                                    ? t('details.actorRole', { character: credit.character })
-                                    : t('details.crewRole', { job: credit.job })}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-3 mt-2">
-                                <div className="flex items-center text-xs text-gray-400">
-                                  <Clock size={12} className="mr-1" />
-                                  <span>
-                                    {credit.release_date
-                                      ? new Date(credit.release_date).toLocaleDateString(i18n.language)
-                                      : credit.first_air_date
-                                        ? new Date(credit.first_air_date).toLocaleDateString(i18n.language)
-                                        : t('details.unknownDate')}
-                                  </span>
-                                </div>
-                                <div className="flex items-center text-xs text-yellow-400">
-                                  <Star size={12} className="mr-1" />
-                                  <span>{credit.vote_average.toFixed(1)}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </motion.div>
-                        </Link>
-                      </motion.div>
-                      </AgeRestrictedMedia>
-                    ))}
-                  </div>
-                </div>
+            </>
+          )}
+          title={<DetailsTitle title={person.name} />}
+          meta={(
+            <DetailsMetaLine
+              items={[
+                birthLong && { key: 'born', content: t('details.person.born', { date: birthLong, context }) },
+                deathLong && { key: 'died', content: t('details.person.died', { date: deathLong, context }) },
+                person.place_of_birth && { key: 'place', content: person.place_of_birth, desktopOnly: true },
+              ]}
+            />
+          )}
+          synopsis={biography ? (
+            <DetailsSynopsis text={biography} moreLabel={t('details.readMore')} lessLabel={t('details.collapse')} />
+          ) : null}
+          actions={allowedCredits.length > 0 ? (
+            <DetailsButton
+              variant="primary"
+              size="hero"
+              icon={<Film aria-hidden="true" />}
+              detail={t('details.person.titlesCount', { count: allowedCredits.length })}
+              onClick={() => scrollToDetailsSection(SECTION.filmography)}
+              className="w-full md:w-auto"
+            >
+              {t('details.person.seeFilmography')}
+            </DetailsButton>
+          ) : null}
+          secondaryActions={(
+            <DetailsActionRow columns={3}>
+              {shareTrigger((open) => (
+                <DetailsActionButton icon={Share} label={t('common.share')} aria-haspopup="dialog" onClick={open} />
               ))}
+            </DetailsActionRow>
+          )}
+        />
+
+        <DetailsSectionNav
+          sections={sections}
+          ariaLabel={t('details.sectionsNav')}
+          backdropUrl={hero.backdropUrl}
+          banner={{
+            title: person.name,
+            actions: (
+              <>
+                {allowedCredits.length > 0 && (
+                  <DetailsButton
+                    variant="primary"
+                    size="bar"
+                    icon={<Film aria-hidden="true" />}
+                    onClick={() => scrollToDetailsSection(SECTION.filmography)}
+                  >
+                    {t('details.filmography')}
+                  </DetailsButton>
+                )}
+                {shareTrigger((open) => (
+                  <DetailsBarIconButton icon={Share} label={t('common.share')} aria-haspopup="dialog" onClick={open} />
+                ))}
+              </>
+            ),
+          }}
+        />
+
+        {/* Positionné : passe au-dessus de la coulure de la grande image. */}
+        <div className={`${DETAILS_GRID} relative`}>
+          {/* À propos : biographie complète dès 768 px (avant, elle se lit dans le haut), puis les faits. */}
+          <DetailsSection id={SECTION.about} className="pt-[22px]">
+            <div className="grid gap-9 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] lg:items-start lg:gap-[72px]">
+              <div className="hidden md:block">
+                <DetailsSectionHeader title={t('details.biography')} />
+                {paragraphs.length > 0 ? (
+                  <div id="biographie-texte" className="max-w-[66ch] space-y-4 text-pretty text-[17px] leading-[1.65] text-white/[.88] 2xl:text-[19px]">
+                    {shownParagraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
+                  </div>
+                ) : (
+                  <p className="text-[17px] text-white/55">{t('details.noBiography')}</p>
+                )}
+                {bioFolds && (
+                  <button
+                    type="button"
+                    aria-expanded={bioExpanded}
+                    aria-controls="biographie-texte"
+                    onClick={() => {
+                      if (bioExpanded) scrollToDetailsSection(SECTION.about);
+                      setBioExpanded(!bioExpanded);
+                    }}
+                    className={cn(
+                      'mt-2 inline-flex min-h-11 items-center gap-1 rounded-md text-sm font-semibold text-white transition-opacity duration-200 hover:opacity-80 motion-reduce:transition-none',
+                      DETAILS_FOCUS,
+                    )}
+                  >
+                    {bioExpanded ? t('details.collapse') : t('details.readMore')}
+                    {bioExpanded
+                      ? <ChevronUp className="size-4" aria-hidden="true" />
+                      : <ChevronDown className="size-4" aria-hidden="true" />}
+                  </button>
+                )}
+                {biographyInEnglish && (
+                  <p className="mt-3 text-[13px] text-white/55">{t('details.person.englishBiography')}</p>
+                )}
+                <DetailsTmdbNote mediaType="person" id={String(person.id)} className="mt-5" />
+              </div>
+              <div>
+                <DetailsFacts
+                  items={[
+                    profession && { key: 'profession', label: t('details.profession'), value: profession },
+                    birthLong && {
+                      key: 'birth',
+                      label: t('details.birthday'),
+                      value: !deceased && age !== null ? `${birthLong} (${t('details.person.age', { count: age })})` : birthLong,
+                    },
+                    person.place_of_birth && { key: 'place', label: t('details.placeOfBirth'), value: person.place_of_birth },
+                    deathLong && {
+                      key: 'death',
+                      label: t('details.deathday'),
+                      value: age !== null ? `${deathLong} (${t('details.person.ageAtDeath', { count: age })})` : deathLong,
+                    },
+                    otherNames.length > 0 && { key: 'aka', label: t('details.person.alsoKnownAs'), value: otherNames.join(', ') },
+                    allowedCredits.length > 0 && {
+                      key: 'credits',
+                      label: t('details.person.creditsLabel'),
+                      value: [
+                        movieCount > 0 && t('details.person.movieCount', { count: movieCount }),
+                        seriesCount > 0 && t('details.person.seriesCount', { count: seriesCount }),
+                      ].filter(Boolean).join(' · '),
+                    },
+                    {
+                      key: 'links',
+                      label: t('details.person.links'),
+                      value: (
+                        <span className="inline-flex flex-wrap justify-end gap-x-1">
+                          {links.map((link, index) => (
+                            <span key={link.key}>
+                              {index > 0 && <span aria-hidden="true" className="mr-1 opacity-50">·</span>}
+                              <a
+                                href={link.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={cn('rounded-sm underline-offset-4 hover:underline', DETAILS_FOCUS)}
+                              >
+                                {link.label}
+                              </a>
+                            </span>
+                          ))}
+                        </span>
+                      ),
+                    },
+                  ]}
+                />
+                <DetailsTmdbNote mediaType="person" id={String(person.id)} className="mt-3 md:hidden" />
+              </div>
             </div>
-          </div>
-        </motion.div>
+          </DetailsSection>
+
+          {knownFor.length > 0 && (
+            <DetailsSection id={SECTION.knownFor}>
+              <DetailsSectionHeader title={t('details.person.knownFor', { context })} />
+              <PersonKnownFor credits={knownFor} gender={person.gender} progress={progress.films} />
+            </DetailsSection>
+          )}
+
+          {allowedCredits.length > 0 && (
+            <DetailsSection id={SECTION.filmography}>
+              <DetailsSectionHeader title={t('details.filmography')} count={filmographyCount} />
+              <PersonFilmography
+                credits={allowedCredits}
+                knownForDepartment={knownForDepartment}
+                gender={person.gender}
+                progress={progress.films}
+                onCountChange={setFilmographyCount}
+                sectionId={SECTION.filmography}
+              />
+            </DetailsSection>
+          )}
+        </div>
       </div>
-    </div>
+    </MotionConfig>
   );
 };
 

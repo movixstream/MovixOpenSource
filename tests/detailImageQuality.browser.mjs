@@ -257,11 +257,14 @@ async function fulfillFixtureRoute(route) {
 }
 await context.route('**/*', fulfillFixtureRoute);
 
-const expected = {
-  economy: { poster: '/w500/', backdrop: '/w780/' },
-  auto: { poster: '/w780/', backdrop: '/w1280/' },
-  high: { poster: '/original/', backdrop: '/original/' },
-};
+// Fiches film et série (1280 px, DPR 3) : image du haut au rôle « hero »,
+// galerie de logos sur quatre colonnes de 268 px.
+const expectedHero = { economy: '/w1280/', auto: '/original/', high: '/original/' };
+const expectedLogo = { economy: '/w300/', auto: '/w500/', high: '/w500/' };
+// Fiche série : la carte d'épisode fait 360 px sur trois colonnes. TMDB ne sert
+// les vignettes qu'en 92, 185 et 300 px puis l'original : au-delà d'une fois et
+// demie 300 px physiques, seule la qualité « économie » reste sur 300.
+const expectedEpisodeStill = { economy: '/w300/', auto: '/original/', high: '/original/' };
 const observations = [];
 const expectationFailures = [];
 
@@ -276,47 +279,41 @@ async function openDetails(kind, mode) {
   await page.addInitScript(quality => localStorage.setItem('settings_image_quality', quality), mode);
   const routePath = kind === 'movie' ? '/movie/42' : '/tv/84';
   await page.goto(`http://details.test/?path=${encodeURIComponent(routePath)}`);
-  const title = kind === 'movie' ? movie.title : tv.name;
-  const posterPath = kind === 'movie' ? movie.poster_path : tv.poster_path;
-  const poster = page.locator(`img[alt=${JSON.stringify(title)}]`).first();
-  await poster.waitFor();
-  await page.waitForFunction(selector => {
-    const node = document.querySelector(selector);
-    return node instanceof HTMLImageElement && node.complete && node.naturalWidth > 0;
-  }, `img[alt=${JSON.stringify(title)}]`);
-  const posterUrl = await poster.getAttribute('src');
-  const posterCssWidth = await poster.evaluate(node => node.getBoundingClientRect().width);
-  const backdropStyle = await page.locator('div.fixed.inset-0[aria-hidden="true"]').first().getAttribute('style');
-  assert.ok(posterUrl?.includes(expected[mode].poster), `${kind}/${mode}: poster ${posterUrl}`);
-  assert.ok(posterUrl?.endsWith(posterPath), `${kind}/${mode}: chemin poster`);
-  assert.ok(backdropStyle?.includes(expected[mode].backdrop), `${kind}/${mode}: fond ${backdropStyle}`);
+  // Les deux fiches : plus d'affiche principale ni de fond fixe. La grande
+  // image du haut est un <img> au rôle « hero », comme le HeroSlider.
+  const backdropPath = kind === 'movie' ? movie.backdrop_path : tv.backdrop_path;
+  const hero = page.locator('img[data-details-backdrop]').first();
+  await hero.waitFor();
+  const heroUrl = await hero.getAttribute('src');
+  assert.ok(heroUrl?.includes(expectedHero[mode]), `${kind}/${mode}: image du haut ${heroUrl}`);
+  assert.ok(heroUrl?.endsWith(backdropPath), `${kind}/${mode}: chemin de l'image du haut`);
+  const row = { kind, mode, posterUrl: null, posterCssWidth: null, backdropStyle: heroUrl, errors };
 
-  const row = { kind, mode, posterUrl, posterCssWidth, backdropStyle, errors };
-  if (kind === 'movie') {
-    const imageTab = page.getByRole('button', { name: 'details.imagesTab' }).first();
-    await imageTab.click();
-    await page.getByRole('tab', { name: /details\.posters/ }).click();
-    const galleryPoster = page.locator('img[alt="posters 1"]').first();
-    await galleryPoster.waitFor();
-    await galleryPoster.scrollIntoViewIfNeeded();
-    await page.waitForFunction(() => document.querySelector('img[alt="posters 1"]')?.getAttribute('srcset'));
-    row.galleryPoster = await galleryPoster.evaluate(node => ({
-      src: node.getAttribute('src'),
-      srcset: node.getAttribute('srcset'),
-      sizes: node.getAttribute('sizes'),
-      currentSrc: node.currentSrc,
-    }));
-  } else {
-    const seasonPoster = page.locator('img[alt="Saison 1 Fixture"]').first();
-    await seasonPoster.waitFor();
-    row.seasonPosterUrl = await seasonPoster.getAttribute('src');
-    row.seasonPosterCssWidth = await seasonPoster.evaluate(node => node.getBoundingClientRect().width);
-    const expectedSeason = mode === 'high' ? '/w500/' : '/w342/';
-    expectIncludes(row.seasonPosterUrl, expectedSeason, `tv/${mode}: poster de saison dimensionné sur le conteneur réel`);
+  if (kind === 'tv') {
+    // Fiche série : la saison 1 est ouverte d'office, son épisode en carte de grille.
+    const still = page.locator('img[data-details-episode-still]').first();
+    await still.waitFor();
+    row.episodeStillUrl = await still.getAttribute('src');
+    row.episodeStillCssWidth = await still.evaluate(node => node.getBoundingClientRect().width);
+    assert.ok(row.episodeStillUrl?.endsWith('/episode-still.jpg'), `tv/${mode}: chemin de la vignette d'épisode`);
+    expectIncludes(row.episodeStillUrl, expectedEpisodeStill[mode], `tv/${mode}: vignette d'épisode dimensionnée sur la carte réelle`);
   }
 
-  const imageTabForLogo = page.getByRole('button', { name: 'details.imagesTab' }).first();
-  if (kind === 'tv') await imageTabForLogo.click();
+  // La galerie s'ouvre par la tuile images de la section « Vidéos et images ».
+  const imagesTile = page.getByRole('button', { name: /details\.allImages/ }).first();
+  await imagesTile.click();
+  await page.getByRole('tab', { name: /details\.posters/ }).click();
+  const galleryPoster = page.locator('img[alt="posters 1"]').first();
+  await galleryPoster.waitFor();
+  await galleryPoster.scrollIntoViewIfNeeded();
+  await page.waitForFunction(() => document.querySelector('img[alt="posters 1"]')?.getAttribute('srcset'));
+  row.galleryPoster = await galleryPoster.evaluate(node => ({
+    src: node.getAttribute('src'),
+    srcset: node.getAttribute('srcset'),
+    sizes: node.getAttribute('sizes'),
+    currentSrc: node.currentSrc,
+  }));
+
   await page.getByRole('tab', { name: /details\.logos/ }).click();
   const galleryLogo = page.locator('img[alt="logos 1"]').first();
   await galleryLogo.waitFor();
@@ -326,8 +323,8 @@ async function openDetails(kind, mode) {
     src: node.getAttribute('src'),
     cssWidth: node.getBoundingClientRect().width,
   }));
-  const expectedLogo = mode === 'high' ? '/w500/' : '/w300/';
-  expectIncludes(row.galleryLogo.src, expectedLogo, `${kind}/${mode}: logo galerie dimensionné sur son contenu réel`);
+  // La galerie occupe toute la largeur de la page sur les deux fiches.
+  expectIncludes(row.galleryLogo.src, expectedLogo[mode], `${kind}/${mode}: logo galerie dimensionné sur son contenu réel`);
   assert.deepEqual(errors, [], `${kind}/${mode}: erreurs navigateur`);
   await page.screenshot({ path: path.join(artifactDir, `${kind}-${mode}.png`), fullPage: true });
   observations.push(row);
@@ -342,17 +339,22 @@ async function observeTabletEpisode() {
   page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(() => localStorage.setItem('settings_image_quality', 'auto'));
   await page.goto('http://details.test/?path=%2Ftv%2F84');
-  const seasonPoster = page.locator('img[alt="Saison 1 Fixture"]').first();
-  await seasonPoster.waitFor();
-  await seasonPoster.evaluate(node => node.closest('.cursor-pointer')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  const episodeImage = page.locator('img[alt="Épisode Fixture"]').first();
+  // La saison 1 est ouverte d'office. En grille (deux colonnes de 326 px, soit
+  // 652 px physiques) la vignette dépasse ce que TMDB sert en 300 px.
+  const episodeImage = page.locator('img[data-details-episode-still]').first();
   await episodeImage.waitFor();
   await episodeImage.scrollIntoViewIfNeeded();
-  const observation = await episodeImage.evaluate(node => ({
+  const readImage = () => episodeImage.evaluate(node => ({
     src: node.getAttribute('src'),
     cssWidth: node.getBoundingClientRect().width,
   }));
-  expectIncludes(observation.src, '/w300/', 'tv/auto tablette DPR2 : image épisode dimensionnée sur le conteneur réel');
+  const grid = await readImage();
+  expectIncludes(grid.src, '/original/', 'tv/auto tablette DPR2 : vignette de la grille dimensionnée sur la carte réelle');
+  // En liste la vignette fait 220 px : 300 px suffisent.
+  await page.getByRole('button', { name: 'details.viewList' }).first().click();
+  await page.waitForFunction(() => (document.querySelector('img[data-details-episode-still]')?.getBoundingClientRect().width ?? 999) < 300);
+  const observation = { ...(await readImage()), gridSrc: grid.src, gridCssWidth: grid.cssWidth };
+  expectIncludes(observation.src, '/w300/', 'tv/auto tablette DPR2 : vignette de la liste dimensionnée sur sa largeur réelle');
   assert.deepEqual(errors, [], 'tv/auto tablette : erreurs navigateur');
   await page.screenshot({ path: path.join(artifactDir, 'tv-auto-tablet-episode.png'), fullPage: true });
   await tabletContext.close();
@@ -370,8 +372,8 @@ async function writeAuditReport(status) {
     .map(item => {
       const geometry = kind === 'movie'
         ? `logo ${variant(item.galleryLogo?.src)} à ${item.galleryLogo?.cssWidth?.toFixed(2) ?? '?'} px CSS`
-        : `logo ${variant(item.galleryLogo?.src)} à ${item.galleryLogo?.cssWidth?.toFixed(2) ?? '?'} px CSS, saison ${variant(item.seasonPosterUrl)} à ${item.seasonPosterCssWidth?.toFixed(2) ?? '?'} px CSS`;
-      return `${item.mode}: poster ${variant(item.posterUrl)}, fond ${variant(item.backdropStyle)}, ${geometry}`;
+        : `logo ${variant(item.galleryLogo?.src)} à ${item.galleryLogo?.cssWidth?.toFixed(2) ?? '?'} px CSS, épisode ${variant(item.episodeStillUrl)} à ${item.episodeStillCssWidth?.toFixed(2) ?? '?'} px CSS`;
+      return `${item.mode}: image du haut ${variant(item.backdropStyle)}, ${geometry}`;
     })
     .join(' ; ');
   const report = {
@@ -387,14 +389,14 @@ async function writeAuditReport(status) {
     },
     fixtureData: {
       movie: { id: movie.id, title: movie.title, poster: movie.poster_path, backdrop: movie.backdrop_path },
-      tv: { id: tv.id, title: tv.name, poster: tv.poster_path, backdrop: tv.backdrop_path, seasonPoster: '/season-poster.jpg' },
+      tv: { id: tv.id, title: tv.name, poster: tv.poster_path, backdrop: tv.backdrop_path, episodeStill: '/episode-still.jpg' },
     },
     expected: {
-      primaryPoster: expected,
+      hero: expectedHero,
       galleryPoster: 'economy réduit le srcset; auto et high restent identiques',
-      galleryLogo: { economy: 'w300', auto: 'w300', high: 'w500' },
-      tvSeasonPoster: { economy: 'w342', auto: 'w342', high: 'w500' },
-      tvEpisodeTabletAutoDpr2: 'w300',
+      galleryLogo: expectedLogo,
+      tvEpisodeStill: expectedEpisodeStill,
+      tvEpisodeTabletAutoDpr2: { grille: 'original', liste: 'w300' },
     },
     observed: observations,
     tabletEpisode,
@@ -411,12 +413,12 @@ async function writeAuditReport(status) {
     '- Données : fiches TMDB simulées Dune, réponses réseau interceptées, aucun serveur.',
     '- Rendu : vraies pages et vraie policy image ; `LightModeContext` et composants sans rapport sont stubés.',
     '- CSS : feuille Tailwind du projet compilée pour mesurer les conteneurs réels.',
-    '- Attendu principal : poster/fond economy = w500/w780, auto = w780/w1280, high = original/original sur DPR 3.',
+    '- Attendu principal : image du haut economy = w1280, auto et high = original sur DPR 3.',
     '- Normal : le poster de galerie expose le même `srcset` en auto et high, car le plafond de carte est suffisant.',
     `- Observé Movie à 1280 px/DPR 3 : ${summarizeDetails('movie') || 'non observé'}.`,
     `- Observé TV à 1280 px/DPR 3 : ${summarizeDetails('tv') || 'non observé'}.`,
-    `- Observé épisode TV à 768 px/DPR 2 : ${variant(tabletEpisode?.src)} à ${tabletEpisode?.cssWidth?.toFixed(2) ?? '?'} px CSS.`,
-    `- Vérifications de dimension réelle : ${expectationFailures.length ? expectationFailures.join(' ; ') : 'logos de galerie, saisons et épisode tablette utilisent la taille attendue.'}`,
+    `- Observé épisode TV à 768 px/DPR 2 : grille ${variant(tabletEpisode?.gridSrc)} à ${tabletEpisode?.gridCssWidth?.toFixed(2) ?? '?'} px CSS, liste ${variant(tabletEpisode?.src)} à ${tabletEpisode?.cssWidth?.toFixed(2) ?? '?'} px CSS.`,
+    `- Vérifications de dimension réelle : ${expectationFailures.length ? expectationFailures.join(' ; ') : 'logos de galerie et vignettes d’épisode utilisent la taille attendue.'}`,
     runError ? `- Erreur d’exécution : ${runError}` : '- Erreur d’exécution : aucune.',
     '',
     'Les captures, le bundle autonome dans `fixture/` et `trace.zip` accompagnent ce rapport.',
@@ -433,8 +435,11 @@ try {
   assert.notEqual(movieModes.economy.galleryPoster.srcset, movieModes.auto.galleryPoster.srcset, 'economy réduit le srcset poster galerie');
   assert.equal(movieModes.auto.galleryPoster.srcset, movieModes.high.galleryPoster.srcset, 'high et auto exposent le même srcset poster galerie');
   assert.equal(movieModes.auto.galleryPoster.sizes, movieModes.high.galleryPoster.sizes);
+  const tvModes = Object.fromEntries(observations.filter(item => item.kind === 'tv').map(item => [item.mode, item]));
+  assert.notEqual(tvModes.economy.galleryPoster.srcset, tvModes.auto.galleryPoster.srcset, 'série : economy réduit le srcset poster galerie');
+  assert.equal(tvModes.auto.galleryPoster.srcset, tvModes.high.galleryPoster.srcset, 'série : high et auto exposent le même srcset poster galerie');
   tabletEpisode = await observeTabletEpisode();
-  const prematureSlotRequest = imageRequests.find(url => /\/w(?:45|92)\/(?:movie-logo|tv-logo|season-poster|episode-still)\.jpg$/.test(url));
+  const prematureSlotRequest = imageRequests.find(url => /\/w(?:45|92)\/(?:movie-logo|tv-logo|episode-still)\.jpg$/.test(url));
   if (prematureSlotRequest) expectationFailures.push(`requête lancée avant mesure du conteneur : ${prematureSlotRequest}`);
   await writeAuditReport('terminé');
   console.log(JSON.stringify({ passed: observations.length + 1, artifactDir, expectationFailures, observations, tabletEpisode }, null, 2));

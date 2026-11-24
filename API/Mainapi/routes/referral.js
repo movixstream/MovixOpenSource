@@ -552,7 +552,21 @@ router.post('/referral/rewards/:id/redeem', setNoStore, readLimiter, handle('ré
         );
         const key = keyRows[0];
         const keyExpires = key?.expires_at === null || key?.expires_at === undefined ? null : toNumber(key.expires_at);
-        if (key && key.active && (keyExpires === null || keyExpires > nowMs)) {
+        // Plafond par clé : sans lui, une ferme de faux filleuls versait le
+        // bonus de chaque filleul sur une seule clé (le plafond mensuel ne
+        // vise que le parrain). Au-delà, la récompense crée sa propre clé.
+        let keyUnderCap = false;
+        if (key) {
+          const { settings } = await loadReferralSettings(pool);
+          const [capRows] = await connection.execute(
+            `SELECT COUNT(*) AS total FROM referral_rewards
+              WHERE access_key = ? AND status = 'redeemed'
+                AND redeemed_at > (NOW() - INTERVAL 30 DAY)`,
+            [key.key_value]
+          );
+          keyUnderCap = toNumber(capRows?.[0]?.total) < toNumber(settings.maxRewardsPerMonth) + 1;
+        }
+        if (key && key.active && keyUnderCap && (keyExpires === null || keyExpires > nowMs)) {
           keyValue = key.key_value;
           extended = true;
           // Clé à vie : rien à ajouter.

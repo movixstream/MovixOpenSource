@@ -14,6 +14,8 @@ import { useWrappedTracker } from '../hooks/useWrappedTracker';
 import { getTmdbLanguage } from '../i18n';
 import { readSessionStorage, writeSessionStorage } from '../utils/browserStorage';
 import { getMinimumCarouselCategoryItems, makeExclusiveCategories } from '../utils/exclusiveCategories';
+import { genreSearchHref } from '@/utils/genreSearchLink';
+import { pickGenrePosters } from '@/utils/genreTiles';
 
 // Nombre de sections à charger immédiatement
 const IMMEDIATE_LOAD_COUNT = 2;
@@ -302,26 +304,26 @@ const Movies: React.FC = () => {
   const observer = useRef<IntersectionObserver>();
   const [isTop10CardHovered, setIsTop10CardHovered] = React.useState(false);
   const top10RowRef = React.useRef<HTMLDivElement>(null);
-  const [genreItems, setGenreItems] = useState<{ id: number; name: string; route: string; imageUrl?: string }[]>([
-    { id: 28, name: 'Action', route: '/genre/movie/28' },
-    { id: 12, name: 'Aventure', route: '/genre/movie/12' },
-    { id: 16, name: 'Animation', route: '/genre/movie/16' },
-    { id: 35, name: 'Comédie', route: '/genre/movie/35' },
-    { id: 80, name: 'Crime', route: '/genre/movie/80' },
-    { id: 99, name: 'Documentaire', route: '/genre/movie/99' },
-    { id: 18, name: 'Drame', route: '/genre/movie/18' },
-    { id: 10751, name: 'Famille', route: '/genre/movie/10751' },
-    { id: 14, name: 'Fantastique', route: '/genre/movie/14' },
-    { id: 36, name: 'Histoire', route: '/genre/movie/36' },
-    { id: 27, name: 'Horreur', route: '/genre/movie/27' },
-    { id: 10402, name: 'Musique', route: '/genre/movie/10402' },
-    { id: 9648, name: 'Mystère', route: '/genre/movie/9648' },
-    { id: 10749, name: 'Romance', route: '/genre/movie/10749' },
-    { id: 878, name: 'Science-Fiction', route: '/genre/movie/878' },
-    { id: 10770, name: 'Téléfilm', route: '/genre/movie/10770' },
-    { id: 53, name: 'Thriller', route: '/genre/movie/53' },
-    { id: 10752, name: 'Guerre', route: '/genre/movie/10752' },
-    { id: 37, name: 'Western', route: '/genre/movie/37' },
+  const [genreItems, setGenreItems] = useState<{ id: number; name: string; route: string; posters?: string[] }[]>([
+    { id: 28, name: 'Action', route: genreSearchHref('movie', 28) },
+    { id: 12, name: 'Aventure', route: genreSearchHref('movie', 12) },
+    { id: 16, name: 'Animation', route: genreSearchHref('movie', 16) },
+    { id: 35, name: 'Comédie', route: genreSearchHref('movie', 35) },
+    { id: 80, name: 'Crime', route: genreSearchHref('movie', 80) },
+    { id: 99, name: 'Documentaire', route: genreSearchHref('movie', 99) },
+    { id: 18, name: 'Drame', route: genreSearchHref('movie', 18) },
+    { id: 10751, name: 'Famille', route: genreSearchHref('movie', 10751) },
+    { id: 14, name: 'Fantastique', route: genreSearchHref('movie', 14) },
+    { id: 36, name: 'Histoire', route: genreSearchHref('movie', 36) },
+    { id: 27, name: 'Horreur', route: genreSearchHref('movie', 27) },
+    { id: 10402, name: 'Musique', route: genreSearchHref('movie', 10402) },
+    { id: 9648, name: 'Mystère', route: genreSearchHref('movie', 9648) },
+    { id: 10749, name: 'Romance', route: genreSearchHref('movie', 10749) },
+    { id: 878, name: 'Science-Fiction', route: genreSearchHref('movie', 878) },
+    { id: 10770, name: 'Téléfilm', route: genreSearchHref('movie', 10770) },
+    { id: 53, name: 'Thriller', route: genreSearchHref('movie', 53) },
+    { id: 10752, name: 'Guerre', route: genreSearchHref('movie', 10752) },
+    { id: 37, name: 'Western', route: genreSearchHref('movie', 37) },
   ]);
 
   // Track page visit for Movix Wrapped
@@ -680,10 +682,10 @@ const Movies: React.FC = () => {
     fetchMovies(1);
   }, []);
 
-  // Fetch representative TMDB images for each genre and cache for 1 day
+  // Affiches des tuiles de genre (deux par genre, sans doublon), gardées 1 jour
   useEffect(() => {
-    const cacheKey = 'movix_movie_genre_images';
-    const cacheTsKey = 'movix_movie_genre_images_ts';
+    const cacheKey = 'movix_movie_genre_posters';
+    const cacheTsKey = 'movix_movie_genre_posters_ts';
     const cached = readSessionStorage(cacheKey);
     const cachedTs = readSessionStorage(cacheTsKey);
     const oneDayMs = 24 * 60 * 60 * 1000;
@@ -700,7 +702,7 @@ const Movies: React.FC = () => {
       }
 
       try {
-        const updated = await Promise.all(genreItems.map(async (g) => {
+        const candidates = await Promise.all(genreItems.map(async (g) => {
           try {
             const resp = await axios.get('https://api.themoviedb.org/3/discover/movie', {
               params: {
@@ -712,14 +714,13 @@ const Movies: React.FC = () => {
                 page: 1
               }
             });
-            const first = Array.isArray(resp.data?.results) ? resp.data.results.find((m: any) => m.backdrop_path || m.poster_path) : null;
-            const path = first?.backdrop_path || first?.poster_path || '';
-            const imageUrl = path ? `https://image.tmdb.org/t/p/w780${path}` : undefined;
-            return { ...g, imageUrl };
+            return Array.isArray(resp.data?.results) ? resp.data.results : [];
           } catch (_) {
-            return g;
+            return [];
           }
         }));
+        const posters = pickGenrePosters(candidates);
+        const updated = genreItems.map((g, index) => ({ ...g, posters: posters[index] }));
         setGenreItems(updated);
         if (writeSessionStorage(cacheKey, JSON.stringify(updated))) {
           writeSessionStorage(cacheTsKey, Date.now().toString());

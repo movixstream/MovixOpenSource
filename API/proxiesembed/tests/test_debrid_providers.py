@@ -26,7 +26,7 @@ class ProviderConfigurationTests(unittest.TestCase):
     def test_preserves_order_normalizes_and_deduplicates(self):
         self.assertEqual(
             get_enabled_debrid_providers(' Debrid-R,REAL-DEBRID,deepbrid,realdebrid,bestdebrid '),
-            ['debridr', 'realdebrid', 'deepbrid', 'bestdebrid'],
+            ['debridr', 'realdebrid', 'deepbrid'],
         )
 
     def test_unknown_services_never_enable_a_fallback(self):
@@ -74,7 +74,7 @@ class ProviderRouteTests(unittest.IsolatedAsyncioTestCase):
         self.request.json.assert_not_awaited()
 
     async def test_disabled_provider_is_refused_before_unlock(self):
-        for provider in ('realdebrid', 'bestdebrid', 'debridr'):
+        for provider in ('realdebrid', 'debridr'):
             with self.subTest(provider=provider):
                 self.request.json.return_value['provider'] = provider
                 response = await self.proxy.debrid_unlock_handler(self.request)
@@ -96,8 +96,8 @@ class ProviderRouteTests(unittest.IsolatedAsyncioTestCase):
         self.proxy._unlock_with_realdebrid.assert_awaited_once_with('https://1fichier.com/?example', '')
         self.proxy._unlock_with_deepbrid.assert_not_awaited()
 
-    async def test_bestdebrid_never_falls_back_to_deepbrid(self):
-        self.namespace['DEBRID_ENABLED_PROVIDERS'] = ['bestdebrid']
+    async def test_removed_bestdebrid_is_rejected(self):
+        self.assertNotIn('bestdebrid', DEBRID_PROVIDERS)
         self.request.json.return_value['provider'] = 'bestdebrid'
         self.assertEqual((await self.proxy.debrid_unlock_handler(self.request)).status, 400)
         self.proxy._unlock_with_deepbrid.assert_not_awaited()

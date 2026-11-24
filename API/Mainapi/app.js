@@ -240,6 +240,8 @@ axiosHelpers.configure({
 // === Create Express app ===
 const vipDonationsRoutes = require('./routes/vipDonations');
 const app = express();
+// En premier : les limites et bans lisent l'IP dans ces en-têtes.
+app.use(require('./middleware/trustedProxyHeaders').trustedProxyHeaders);
 app.use(require('./utils/diagnostics').middleware);
 
 // === Mount middleware in correct order ===
@@ -399,6 +401,12 @@ animeSamaRouter.configure({
   acquireRefreshLock: animeSamaShared.createRefreshLock({ redis, ttlSeconds: 120 }),
   linkBudget: animeSamaShared.createLinkBudget({ redis, perSecond: 10 }),
   animeIndex: animeSamaIndex,
+  // Page Animes du site (/anime/home), calculée une fois par langue.
+  animeHome: require("./utils/animeHome").createDefaultAnimeHome({
+    animeIndex: animeSamaIndex,
+    TMDB_API_URL,
+    TMDB_API_KEY,
+  }),
 });
 
 // --- Configure tmdb ---
@@ -526,12 +534,13 @@ app.use('/api/oauth', oauthRouter);
 app.use('/api/admin/oauth-apps', require('./routes/adminOauthApps'));
 app.use('/api/sessions', require('./routes/sessions'));
 app.use('/api/tv/link', require('./routes/tvLink'));
-app.use('/api', require('./routes/debrid'));
 app.use('/api', require('./routes/admin'));
 app.use('/api', vipDonationsRouter);
 app.use('/api', vipPayblisRouter);
 // Pubs pilotées depuis l'admin : /api/go/:placement, /api/go-settings, /api/admin/monetization*.
 app.use('/api', require('./routes/monetization').router);
+// IA des commentaires réglée depuis l'admin : /api/admin/comments-ai*.
+app.use('/api', require('./routes/commentsAiAdmin'));
 // Parrainage : /api/referral/*, /api/admin/referral*.
 app.use('/api', require('./routes/referral').router);
 // Promos du grand carrousel : /api/hero-promos*, /api/admin/hero-promos*.
@@ -629,6 +638,14 @@ const appReady = (async () => {
         console.error('Monetization settings table init error:', error?.message || error);
       }
 
+      // Réglages de l'IA des commentaires : sans table, la modération suit le .env.
+      try {
+        await require('./utils/commentsAiSettings').ensureCommentsAiSettingsTable(pool);
+        console.log('Comments AI settings table initialized successfully');
+      } catch (error) {
+        console.error('Comments AI settings table init error:', error?.message || error);
+      }
+
       // Stats des pubs, gardées sans limite dans MySQL. La reprise des
       // anciennes stats Redis ne tourne qu'une fois pour tout le cluster et
       // ne lance jamais d'exception. Sans la table, les stats restent en
@@ -655,6 +672,8 @@ const appReady = (async () => {
       // Cluster mode: subscribe so this worker reloads when any other worker
       // mutates an OAuth client (see oauthClientsDb cross-worker invalidation).
       oauthClientsDb.startClientsCacheSubscriber();
+      // Même principe pour les clés VIP révoquées ou prolongées.
+      require('./checkVip').startVipCacheSubscriber();
       console.log('OAuth client tables initialized successfully');
 
       // Initialize Wishboard routes

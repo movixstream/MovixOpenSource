@@ -13,7 +13,7 @@ export default function ResumePanel({ item, loading }: { item: ResumeItem | null
   const [imageFailed, setImageFailed] = useState(false);
 
   if (loading) {
-    return <div className="h-full min-h-[280px] animate-pulse rounded-2xl bg-gray-900" aria-hidden="true" />;
+    return <div className="h-full min-h-[280px] animate-pulse-soft rounded-2xl bg-gray-900" aria-hidden="true" />;
   }
 
   if (!item) {

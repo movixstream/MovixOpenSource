@@ -1,7 +1,7 @@
 import type { DebridProvider } from '@/types/debrid';
 
 export const isDebridProvider = (value: unknown): value is DebridProvider =>
-  value === 'deepbrid' || value === 'realdebrid' || value === 'bestdebrid' || value === 'debridr';
+  value === 'deepbrid' || value === 'realdebrid' || value === 'debridr';
 
 export const selectAvailableDebridProvider = (
   requested: unknown,

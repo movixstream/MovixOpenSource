@@ -8,6 +8,8 @@ type Variant = 'default' | 'poster' | 'text' | 'circle' | 'pill' | 'button';
 
 interface SkeletonProps {
   variant?: Variant;
+  /** Arrondi précis quand celui de la variante ne colle pas au contenu remplacé. */
+  radius?: string | number;
   width?: string | number;
   height?: string | number;
   count?: number;
@@ -45,6 +47,7 @@ const DARK_HIGHLIGHT = '#2a2a2a';
 
 export const Skeleton: React.FC<SkeletonProps> = ({
   variant = 'default',
+  radius,
   width,
   height,
   count,
@@ -79,7 +82,7 @@ export const Skeleton: React.FC<SkeletonProps> = ({
             display: inline ? 'inline-block' : 'block',
             width: fraction === 1 ? width : typeof fullWidth === 'number' ? fullWidth * fraction : `calc(${fullWidth} * ${fraction})`,
             height,
-            borderRadius: variantBorderRadius[variant] ?? '0.25rem',
+            borderRadius: radius ?? variantBorderRadius[variant] ?? '0.25rem',
             backgroundColor: baseColor,
           }}
         />
@@ -94,7 +97,7 @@ export const Skeleton: React.FC<SkeletonProps> = ({
     inline
     className={blockClassName}
     containerClassName={frameClassName}
-    borderRadius={variantBorderRadius[variant]}
+    borderRadius={radius ?? variantBorderRadius[variant]}
     style={{ ...variantStyle[variant], display: inline ? 'inline-block' : 'block' }}
     baseColor={baseColor}
     highlightColor={highlightColor}

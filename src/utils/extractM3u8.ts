@@ -137,6 +137,15 @@ function hasNexusExtractors(): boolean {
   return !!(window.hasMovixNexusExtractor && window.movixExtractM3u8);
 }
 
+/**
+ * Vrai quand c'est l'extension (ou le userscript) du visiteur qui extrait.
+ * C'est le seul cas où l'on sait, lecteur par lecteur, ce qui est en cours :
+ * en extraction serveur (VIP), tout se passe côté Main API.
+ */
+export function usesExtensionExtraction(): boolean {
+  return !usesServerExtraction() && hasNexusExtractors();
+}
+
 
 /**
  * AUCUNE attente du bridge, jamais.
@@ -759,7 +768,7 @@ export async function extractM3u8OnDetection(
   // absent maintenant, il ne viendra plus, on n'attend pas (voir le
   // commentaire « AUCUNE attente du bridge »). Extraction serveur (méthode
   // « server » + VIP) : l'extension est ignorée.
-  const extensionReady = !usesServerExtraction() && hasNexusExtractors();
+  const extensionReady = usesExtensionExtraction();
   const detectedEmbeds = detectSupportedEmbeds(sources, context);
 
   // If extension with Nexus extractors is available, use its bulk extraction for better performance

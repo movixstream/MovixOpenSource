@@ -30,6 +30,7 @@ functions/*
 !functions/_lib/
 functions/_lib/*
 !functions/_lib/socialPreview.js
+!functions/_lib/securityHeaders.js
 
 # === Logs, dumps, artefacts locaux ===
 *.log

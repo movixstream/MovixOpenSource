@@ -2542,6 +2542,8 @@ async function makeWiflixRequest(targetUrl, options = {}) {
     decompress = true,
     method: requestMethod,
     data: requestData,
+    // Réponse JSON courte (/ajax_player.php : {"u": URL}) : 1 octet suffit.
+    minBodyLength = 101,
     ...otherOptions
   } = options;
 
@@ -2587,7 +2589,7 @@ async function makeWiflixRequest(targetUrl, options = {}) {
 
       // Verify we got a real response (not a proxy error page).
       const body = typeof response.data === "string" ? response.data : "";
-      if (response.status === 200 && body.length > 100 && !isWiflixShieldBody(body)) {
+      if (response.status === 200 && body.length >= minBodyLength && !isWiflixShieldBody(body)) {
         return response;
       }
       const invalidResponse = new Error(

@@ -236,7 +236,7 @@ const PlacementPreview: React.FC<PlacementPreviewProps> = ({ settings, errorCoun
             <ol className={cn('grid grid-cols-6 gap-1.5 sm:grid-cols-12', isLoading && 'opacity-50')}>
               {state.openings.length === 0
                 ? Array.from({ length: PREVIEW_OPENINGS_COUNT }, (_, index) => (
-                  <li key={index} className="h-10 animate-pulse rounded-lg bg-white/5" aria-hidden="true" />
+                  <li key={index} className="h-10 animate-pulse-soft rounded-lg bg-white/5" aria-hidden="true" />
                 ))
                 : state.openings.map((opening, index) => {
                   const adIndex = opening.adId ? adIndexById.get(opening.adId) ?? -1 : null;

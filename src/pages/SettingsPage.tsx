@@ -78,6 +78,7 @@ import { PerformanceSettings } from '@/components/Settings/PerformanceSettings';
 import { HeroSliderSettings } from '@/components/Settings/HeroSliderSettings';
 import { MediaColorSettings } from '@/components/Settings/MediaColorSettings';
 import { SettingsToggle } from '@/components/Settings/SettingsToggle';
+import { setDetailsPageStyle, useDetailsPageStyle } from '@/utils/detailsPageStyle';
 import {
   AMBIENT_EFFECTS, AMBIENT_INTENSITIES, AMBIENT_MIN_OPACITY, AMBIENT_SETTLES, clearAmbient, readAmbientActive,
   readAmbientOptions, toggleAmbientEffect, writeAmbientActive, writeAmbientOptions,
@@ -564,6 +565,8 @@ const SettingsPage: React.FC = () => {
     localStorage.setItem('square_corners_enabled', next ? '1' : '0');
     document.documentElement.classList.toggle('square-corners', next);
   };
+
+  const detailsPageStyle = useDetailsPageStyle();
 
   const halloweenThemeEnabled = useHalloweenTheme();
 
@@ -2216,6 +2219,44 @@ const SettingsPage: React.FC = () => {
                     </p>
                   </div>
                   {renderToggle(squareCornersEnabled, handleSquareCornersToggle, 'purple')}
+                </motion.div>
+
+                {/* Style des fiches film et série */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.19 }}
+                  className="p-4 bg-gray-800/30 rounded-xl border border-gray-700/40 hover:border-gray-600/50 transition-colors"
+                >
+                  <div className="mb-3">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <Clapperboard className="w-3.5 h-3.5 text-red-400" />
+                      <h4 className="font-medium text-white text-sm">{t('settings.detailsPageStyle')}</h4>
+                    </div>
+                    <p className="text-xs text-gray-500 leading-relaxed">
+                      {t('settings.detailsPageStyleDesc')}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    {([
+                      { value: 'modern' as const, label: t('settings.detailsStyleModern'), desc: t('settings.detailsStyleModernDesc') },
+                      { value: 'classic' as const, label: t('settings.detailsStyleClassic'), desc: t('settings.detailsStyleClassicDesc') },
+                    ]).map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        aria-pressed={detailsPageStyle === opt.value}
+                        onClick={() => setDetailsPageStyle(opt.value)}
+                        className={`flex-1 min-w-[100px] p-3 rounded-xl text-left transition-colors border ${detailsPageStyle === opt.value
+                          ? 'bg-red-600/10 border-red-500/30 text-white'
+                          : 'bg-gray-700/20 border-gray-700/40 text-gray-400 hover:bg-gray-700/40 hover:text-white'
+                        }`}
+                      >
+                        <div className="text-xs font-semibold">{opt.label}</div>
+                        <div className="text-[10px] text-gray-500 mt-0.5">{opt.desc}</div>
+                      </button>
+                    ))}
+                  </div>
                 </motion.div>
 
                 {/* Style de fond */}

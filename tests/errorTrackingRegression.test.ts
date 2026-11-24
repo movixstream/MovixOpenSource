@@ -166,12 +166,18 @@ test('une erreur d’analyse ambiguë au chargement d’une route n’a droit qu
     BUILD_RELEASE: '2026-10-13T20:06:23.687Z',
   });
 
-  // FRONTEND-F9 (Firefox 157), G5 (Firefox Mobile 157), G0 (Safari 16.1).
-  for (const message of ['missing ) after argument list', 'missing name after . operator', "Invalid character: '@'"]) {
+  // FRONTEND-F9 (Firefox 157), G5 (Firefox Mobile 157), G0 (Safari 16.1), puis
+  // les messages de novembre (Firefox 152-160, Chrome 156, Safari 15.6).
+  const loadParseMessages = [
+    'missing ) after argument list', 'missing name after . operator', "Invalid character: '@'",
+    'missing } after property list', 'missing } after function body', 'missing : after property id',
+    "Unexpected token '*'", "Invalid character '\u0011'", "Invalid character '\\u0011'",
+  ];
+  for (const message of loadParseMessages) {
     assert.equal(reload(syntaxError(message), '/movie/:id'), true, `${message} : première fois`);
     assert.equal(reload(syntaxError(message), '/movie/:id'), false, `${message} : l’erreur persistante reste remontée`);
   }
-  assert.deepEqual(purges, [true, true, true], 'le cache d’assets est vidé avant chaque rechargement');
+  assert.deepEqual(purges, loadParseMessages.map(() => true), 'le cache d’assets est vidé avant chaque rechargement');
   assert.equal(reload(syntaxError('missing ) after argument list'), '/tv/:id'), true, 'autre route, autre tentative');
 
   assert.equal(reload(new Error('missing ) after argument list'), '/x'), false, 'seul un SyntaxError du moteur compte');

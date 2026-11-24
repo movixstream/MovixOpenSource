@@ -501,7 +501,7 @@ async function respondWithMp4(req, res, { kind, tmdbId, season, episode, index }
  * exactement le parcours qu'elle fait vivre aux autres.
  */
 router.post('/mp4/resolve', async (req, res) => {
-  const { kind, tmdbId, season, episode, index, turnstileToken } = req.body || {};
+  const { kind, tmdbId, season, episode, index, turnstileToken, turnstileKind } = req.body || {};
 
   if (rejectInvalidMp4Request(res, { kind, tmdbId, season, episode })) return undefined;
 
@@ -512,7 +512,10 @@ router.post('/mp4/resolve', async (req, res) => {
     const ip = req.headers['cf-connecting-ip']
       || req.headers['x-forwarded-for']?.split(',')[0]?.trim()
       || req.ip;
-    if (!(await verifyTurnstile(turnstileToken, ip, turnstileSecretFor(req)))) {
+    // Le site tente d'abord le widget invisible et ne montre la case qu'en plan
+    // B : chaque widget a sa clé secrète, il faut vérifier avec la bonne.
+    const secret = turnstileSecretFor(req, turnstileKind === 'invisible' ? 'invisible' : 'visible');
+    if (!(await verifyTurnstile(turnstileToken, ip, secret))) {
       return res.status(403).json({ success: false, error: 'Vérification de sécurité échouée. Réessayez.' });
     }
   }

@@ -197,6 +197,15 @@ interface SearchContextType {
    * plus au boot de l'app pour tous les visiteurs.
    */
   ensureFiltersLoaded: () => void;
+  /**
+   * Remet les filtres à zéro puis ne garde que le type et les genres donnés
+   * (lien « genre » d'une fiche : /search?type=movie&genre=878).
+   */
+  applyGenreFilter: (
+    type: 'all' | 'movie' | 'tv',
+    genreIds: number[],
+    options?: { language?: string; country?: string },
+  ) => void;
 }
 
 const SearchContext = createContext<SearchContextType | null>(null);
@@ -262,6 +271,10 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [error, setError] = useState<string | null>(null);
   const [genres, setGenres] = useState<Genre[]>([]);
   const [selectedGenres, setSelectedGenres] = useState<number[]>([]);
+  // Lu par le chargement des genres, qui ne doit pas perdre une sélection
+  // posée juste avant (lien depuis une fiche).
+  const selectedGenresRef = useRef<number[]>([]);
+  selectedGenresRef.current = selectedGenres;
   const [selectedType, setSelectedType] = useState<'all' | 'movie' | 'tv'>('all');
   const [minRating, setMinRating] = useState<number>(0);
   const [page, setPage] = useState(1);
@@ -1071,19 +1084,20 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           10768
         ];
 
-        let filteredGenres;
+        // Un genre exclu reste proposé s'il est déjà choisi (ex. « Action &
+        // Aventure » d'une série, venu d'un lien de fiche).
+        const keepTvGenre = (genre: Genre) =>
+          !excludedGenreIds.includes(genre.id) || selectedGenresRef.current.includes(genre.id);
+
+        let filteredGenres: Genre[];
         if (selectedType === 'movie') {
           filteredGenres = movieGenres.data.genres;
         } else if (selectedType === 'tv') {
-          filteredGenres = tvGenres.data.genres.filter((genre: Genre) =>
-            !excludedGenreIds.includes(genre.id)
-          );
+          filteredGenres = tvGenres.data.genres.filter(keepTvGenre);
         } else {
           filteredGenres = Array.from(new Set([
             ...movieGenres.data.genres,
-            ...tvGenres.data.genres.filter((genre: Genre) =>
-              !excludedGenreIds.includes(genre.id)
-            )
+            ...tvGenres.data.genres.filter(keepTvGenre)
           ].map((genre) => JSON.stringify(genre))))
             .map((genre) => JSON.parse(genre));
         }
@@ -1093,7 +1107,9 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ...genre,
           name: genre.name || GENRES_FR[genre.id] || ''
         })));
-        setSelectedGenres([]);
+        // Garder les genres encore valables pour ce type au lieu de tout vider.
+        const validIds = new Set(filteredGenres.map((genre) => genre.id));
+        setSelectedGenres((prev) => prev.filter((id) => validIds.has(id)));
       } catch (error) {
         console.error('Error fetching genres:', error);
       } finally {
@@ -1183,6 +1199,28 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     fetchWatchProviders();
   }, [filtersRequested]);
+
+  const applyGenreFilter = (
+    type: 'all' | 'movie' | 'tv',
+    genreIds: number[],
+    options: { language?: string; country?: string } = {},
+  ) => {
+    setQuery('');
+    setMinRating(0);
+    setDirector('');
+    setActor('');
+    setYear('');
+    setSelectedKeywords([]);
+    setSelectedLanguage(options.language ?? '');
+    setSelectedCountry(options.country ?? '');
+    setSelectedProviders([]);
+    setSortBy('popularity.desc');
+    setSelectedType(type);
+    setSelectedGenres(genreIds);
+    selectedGenresRef.current = genreIds;
+    setShowFilters(true);
+    setPage(1);
+  };
 
   const toggleGenre = (genreId: number) => {
     setSelectedGenres(prev =>
@@ -1279,6 +1317,7 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     filterLowVotes,
     setFilterLowVotes,
     ensureFiltersLoaded,
+    applyGenreFilter,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [
     query, results, loading, error, genres, selectedGenres, selectedType,

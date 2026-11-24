@@ -30,6 +30,7 @@ const TTL_DETAILS_SETTLED = 7 * DAY;  // 7 j — titre sorti depuis plus de 90 j
 const TTL_SEARCH  = 12 * 60 * 60;     // 12h — les résultats de recherche peuvent évoluer
 const TTL_STABLE = 30 * DAY;          // 30 j — titres alternatifs, crédits, dates de sortie : petits et quasi immuables
 const TTL_MISSING = 6 * 60 * 60;      // 6 h — 404 TMDB confirmé sur les détails
+const TTL_DISCOVER = 6 * 60 * 60;     // 6 h — listes « discover » : popularité recalculée chaque jour par TMDB
 const SETTLED_AFTER_MS = 90 * DAY * 1000;
 const runTmdbRequest = createSingleFlight();
 
@@ -461,6 +462,48 @@ async function fetchTmdbImages(tmdbApiUrl, tmdbApiKey, id, type, { strict = fals
   }, strict);
 }
 
+/**
+ * Liste « discover » TMDB avec cache Redis.
+ * Clé : tmdb:discover:{type}:{params triés}:{language}
+ * @returns {object|null} - response.data complet (avec .results)
+ */
+async function fetchTmdbDiscover(tmdbApiUrl, tmdbApiKey, type, params = {}, language = 'fr-FR', { strict = false } = {}) {
+  if (!['tv', 'movie'].includes(type)) throw new TypeError('type media TMDB invalide');
+  const paramsSuffix = Object.entries(params).sort().map(([k, v]) => `${k}=${v}`).join('&');
+  const redisKey = `tmdb:discover:${type}:${paramsSuffix}:${language}`;
+
+  const cached = await redisGet(redisKey);
+  if (cached) return cached;
+
+  return fetchCached(redisKey, jittered(TTL_DISCOVER), async (egress) => {
+    const response = await axios.get(`${tmdbApiUrl}/discover/${type}`, {
+      params: { api_key: tmdbApiKey, language, ...params },
+      timeout: 10000, ...egressOptions(egress)
+    });
+    return response.data;
+  }, strict);
+}
+
+/**
+ * Classifications d'âge d'une série, par pays (/tv/{id}/content_ratings).
+ * Une classification peut arriver après la sortie : gardée 7 jours, pas 30.
+ * Clé : tmdb:content_ratings:tv:{id}
+ */
+async function fetchTmdbContentRatings(tmdbApiUrl, tmdbApiKey, id, { strict = false } = {}) {
+  const redisKey = `tmdb:content_ratings:tv:${id}`;
+
+  const cached = await redisGet(redisKey);
+  if (cached) return cached;
+
+  return fetchCached(redisKey, jittered(TTL_DETAILS_SETTLED), async (egress) => {
+    const response = await axios.get(`${tmdbApiUrl}/tv/${id}/content_ratings`, {
+      params: { api_key: tmdbApiKey },
+      timeout: 10000, ...egressOptions(egress)
+    });
+    return response.data;
+  }, strict);
+}
+
 async function fetchTmdbCredits(tmdbApiUrl, tmdbApiKey, id, type, { strict = false } = {}) {
   const endpoint = type === 'tv' ? 'aggregate_credits' : 'credits';
   return fetchCached(`tmdb:${endpoint}:${type}:${id}`, jittered(TTL_STABLE, 0.15), async (egress) => {
@@ -479,6 +522,8 @@ module.exports = {
   fetchTmdbFrenchReleaseYear,
   fetchTmdbImages,
   fetchTmdbCredits,
+  fetchTmdbDiscover,
+  fetchTmdbContentRatings,
   TTL_DETAILS,
   TTL_DETAILS_SETTLED,
   TTL_SEARCH,

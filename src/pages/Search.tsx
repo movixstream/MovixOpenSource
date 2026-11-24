@@ -170,6 +170,7 @@ const Search: React.FC = () => {
         filterLowVotes,
         setFilterLowVotes,
         ensureFiltersLoaded,
+        applyGenreFilter,
     } = useSearch();
 
     // Perf : les genres + providers TMDB ne sont plus chargés au boot de l'app,
@@ -373,7 +374,15 @@ const Search: React.FC = () => {
         const value = e.target.value;
         setQuery(value);
 
-        const newUrl = value ? `/search?q=${encodeURIComponent(value)}&page=1` : '/search';
+        // Une moitié d'emoji (surrogate seul, collé ou coupé) fait lever
+        // URIError à encodeURIComponent (GlitchTip 8778969) : on la retire.
+        let encoded = '';
+        try {
+            encoded = encodeURIComponent(value);
+        } catch {
+            encoded = encodeURIComponent(value.replace(/[�-�]/g, ''));
+        }
+        const newUrl = value ? `/search?q=${encoded}&page=1` : '/search';
         scheduleSearchUrlUpdate(newUrl);
 
         if (autocompleteDebounceRef.current) clearTimeout(autocompleteDebounceRef.current);
@@ -563,6 +572,45 @@ const Search: React.FC = () => {
             }, 0);
         }, 0);
     };
+
+    // Lien « genre » (fiche, pages Films / Séries / Anime, ancienne adresse
+    // /genre/…) : /search?type=movie&genre=878, plus &lang=ja&country=JP
+    // pour l'anime. On remet les
+    // filtres à zéro, on pose type + genres, puis on retire ces paramètres de
+    // l'adresse (la pagination recopie l'adresse : ils seraient réappliqués).
+    const pendingGenreSearchRef = useRef<string | null>(null);
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const genreParam = params.get('genre');
+        if (!genreParam || params.get('q')) return;
+        const ids = genreParam.split(',').map(Number).filter((id) => Number.isInteger(id) && id > 0);
+        if (ids.length === 0) return;
+        const typeParam = params.get('type');
+        const type = typeParam === 'movie' || typeParam === 'tv' ? typeParam : 'all';
+        cancelSearchUrlUpdate();
+        setActivePreset(null);
+        setKeywordQuery('');
+        pendingGenreSearchRef.current = `${type}|${ids.join(',')}`;
+        const codeParam = (name: string, pattern: RegExp) => {
+            const value = params.get(name) ?? '';
+            return pattern.test(value) ? value : undefined;
+        };
+        applyGenreFilter(type, ids, {
+            language: codeParam('lang', /^[a-z]{2,3}$/),
+            country: codeParam('country', /^[A-Z]{2}$/),
+        });
+        navigate('/search', { replace: true });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.key]);
+
+    // La recherche part une fois le type et les genres posés dans le contexte.
+    useEffect(() => {
+        const pending = pendingGenreSearchRef.current;
+        if (!pending || query || pending !== `${selectedType}|${selectedGenres.join(',')}`) return;
+        pendingGenreSearchRef.current = null;
+        performSearch(1, true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedType, selectedGenres, query]);
 
     const [localMinRating, setLocalMinRating] = useState(minRating);
 

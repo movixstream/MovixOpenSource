@@ -2,7 +2,8 @@ import type { ComponentType, ReactNode } from 'react';
 import { lazyWithRetry } from './lazyWithRetry';
 import { isPathTvExcluded } from './tvScope';
 import { isTvPlatform } from '../utils/tvPlatform';
-import DetailsSkeleton from '../components/skeletons/DetailsSkeleton';
+import DetailsRouteSkeleton from '../components/skeletons/DetailsRouteSkeleton';
+import PersonRouteSkeleton from '../components/skeletons/PersonRouteSkeleton';
 import CatalogSkeleton from '../components/skeletons/CatalogSkeleton';
 
 export type RouteEntry = {
@@ -52,14 +53,14 @@ export const ROUTES: RouteEntry[] = [
   },
 
   // Details pages
-  { path: '/movie/:id',               loader: lz(() => import('../pages/MovieDetails')),            fallback: <DetailsSkeleton /> },
-  { path: '/tv/:id',                  loader: lz(() => import('../pages/TVDetails')),               fallback: <DetailsSkeleton mediaType="tv" /> },
+  { path: '/movie/:id',               loader: lz(() => import('../pages/MovieDetailsPage')),        fallback: <DetailsRouteSkeleton /> },
+  { path: '/tv/:id',                  loader: lz(() => import('../pages/TVDetailsPage')),           fallback: <DetailsRouteSkeleton mediaType="tv" /> },
   { path: '/collection/:id',          loader: lz(() => import('../pages/CollectionDetails')) },
-  { path: '/person/:id',              loader: lz(() => import('../pages/PersonDetails')) },
+  { path: '/person/:id',              loader: lz(() => import('../pages/PersonDetailsPage')),       fallback: <PersonRouteSkeleton /> },
   { path: '/list/:shareCode',         loader: lz(() => import('../pages/SharedListPage')) },
 
   // Genre
-  { path: '/genre/:mediaType/:genreId', loader: lz(() => import('../pages/GenrePage')) },
+  { path: '/genre/:mediaType/:genreId', loader: lz(() => import('../pages/GenreRedirect')) },
 
   // Search
   { path: '/search',                  loader: lz(() => import('../pages/Search')) },

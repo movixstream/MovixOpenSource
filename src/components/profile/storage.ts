@@ -112,6 +112,7 @@ export function fetchTmdb<T = TmdbDetails>(path: string): Promise<T | null> {
 
 // --- Listes principales -------------------------------------------------------
 
+// Les anciens favoris de la source IPTV Web (retirée) ne passent plus ce filtre.
 const isLiveTVFavorite = (value: unknown): value is LiveTVFavorite => {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<LiveTVFavorite>;
@@ -121,7 +122,8 @@ const isLiveTVFavorite = (value: unknown): value is LiveTVFavorite => {
     typeof candidate.id === 'string' &&
     typeof candidate.name === 'string' &&
     typeof candidate.addedAt === 'string' &&
-    (candidate.kind === 'channel' || candidate.kind === 'iptv')
+    candidate.kind === 'channel' &&
+    candidate.source !== 'iptv'
   );
 };
 
@@ -167,7 +169,6 @@ export function readMainList(type: MainListType): WatchItem[] {
       liveTvKind: favorite.kind,
       liveTvTargetId: favorite.id,
       liveTvCatalogId: favorite.catalogId,
-      liveTvCategoryId: favorite.categoryId,
       searchText: `${favorite.name} ${favorite.source} ${favorite.kind}`,
     }));
     allItems = [...allItems, ...sharedLists, ...liveTv];

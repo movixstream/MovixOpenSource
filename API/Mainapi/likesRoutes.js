@@ -5,6 +5,26 @@ const fs = require('fs').promises;
 const path = require('path');
 const { verifyTurnstileFromRequest } = require('./utils/turnstile');
 
+// Verrou court par compte et par contenu. Le vote se fait en SELECT puis
+// INSERT ; la clé UNIQUE inclut profile_id (NULL ou différent selon
+// l'envoi), elle ne bloque donc pas plusieurs votes envoyés en même temps
+// par un même compte. Sans Redis, on vote comme avant.
+const VOTE_LOCK_MS = 5000;
+async function takeVoteLock(key) {
+  try {
+    const { redis } = require('./config/redis');
+    return (await redis.set(key, '1', 'PX', VOTE_LOCK_MS, 'NX')) === 'OK';
+  } catch {
+    return true;
+  }
+}
+async function releaseVoteLock(key) {
+  try {
+    const { redis } = require('./config/redis');
+    await redis.del(key);
+  } catch { /* le verrou expire de lui-même */ }
+}
+
 const TURNSTILE_INVISIBLE_SECRETKEY = process.env.TURNSTILE_INVISIBLE_SECRETKEY;
 
 // Helper to get user data (duplicated from commentsRoutes.js to avoid dependency issues)
@@ -238,50 +258,59 @@ router.post('/', requireAuth, async (req, res) => {
     const userId = req.user.userId;
     const userType = req.user.userType;
 
-    // Vérifier si l'utilisateur a déjà voté (par userId, pas profileId)
-    const existingVote = await dbGet(
-      `SELECT * FROM likes
-       WHERE content_type = ? AND content_id = ?
-       AND user_id = ? AND user_type = ?`,
-      [contentType, contentId, userId, userType]
-    );
+    const lockKey = `likes:lock:${userType}:${userId}:${contentType}:${contentId}`;
+    if (!(await takeVoteLock(lockKey))) {
+      return res.status(429).json({ error: 'Vote déjà en cours' });
+    }
+    try {
 
-    if (!voteType) {
-      // Supprimer le vote si voteType est null ou undefined
-      if (existingVote) {
-        await dbRun(
-          `DELETE FROM likes
-           WHERE content_type = ? AND content_id = ?
-           AND user_id = ? AND user_type = ?`,
-          [contentType, contentId, userId, userType]
-        );
-      }
-    } else if (existingVote) {
-      // Si le vote est le même, on le supprime (toggle)
-      if (existingVote.vote_type === voteType) {
-        await dbRun(
-          `DELETE FROM likes
-           WHERE content_type = ? AND content_id = ?
-           AND user_id = ? AND user_type = ?`,
-          [contentType, contentId, userId, userType]
-        );
-      } else {
-        // Sinon, on met à jour le vote
-        await dbRun(
-          `UPDATE likes
-           SET vote_type = ?, updated_at = ?
-           WHERE content_type = ? AND content_id = ?
-           AND user_id = ? AND user_type = ?`,
-          [voteType, Date.now(), contentType, contentId, userId, userType]
-        );
-      }
-    } else {
-      // Créer un nouveau vote
-      await dbRun(
-        `INSERT INTO likes (content_type, content_id, user_id, user_type, profile_id, vote_type, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [contentType, contentId, userId, userType, profileId || null, voteType, Date.now()]
+      // Vérifier si l'utilisateur a déjà voté (par userId, pas profileId)
+      const existingVote = await dbGet(
+        `SELECT * FROM likes
+         WHERE content_type = ? AND content_id = ?
+         AND user_id = ? AND user_type = ?`,
+        [contentType, contentId, userId, userType]
       );
+
+      if (!voteType) {
+        // Supprimer le vote si voteType est null ou undefined
+        if (existingVote) {
+          await dbRun(
+            `DELETE FROM likes
+             WHERE content_type = ? AND content_id = ?
+             AND user_id = ? AND user_type = ?`,
+            [contentType, contentId, userId, userType]
+          );
+        }
+      } else if (existingVote) {
+        // Si le vote est le même, on le supprime (toggle)
+        if (existingVote.vote_type === voteType) {
+          await dbRun(
+            `DELETE FROM likes
+             WHERE content_type = ? AND content_id = ?
+             AND user_id = ? AND user_type = ?`,
+            [contentType, contentId, userId, userType]
+          );
+        } else {
+          // Sinon, on met à jour le vote
+          await dbRun(
+            `UPDATE likes
+             SET vote_type = ?, updated_at = ?
+             WHERE content_type = ? AND content_id = ?
+             AND user_id = ? AND user_type = ?`,
+            [voteType, Date.now(), contentType, contentId, userId, userType]
+          );
+        }
+      } else {
+        // Créer un nouveau vote
+        await dbRun(
+          `INSERT INTO likes (content_type, content_id, user_id, user_type, profile_id, vote_type, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [contentType, contentId, userId, userType, profileId || null, voteType, Date.now()]
+        );
+      }
+    } finally {
+      await releaseVoteLock(lockKey);
     }
 
     // Récupérer les nouvelles statistiques

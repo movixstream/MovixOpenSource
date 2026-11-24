@@ -2,8 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Bell, BellRing, Check, X, Trash2 } from 'lucide-react';
 import * as apiNotificationService from '../services/apiNotificationService';
 import { ApiNotification, Notification } from '../services/apiNotificationService';
-import { format } from 'date-fns';
-import { fr } from 'date-fns/locale';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
@@ -285,12 +283,17 @@ const NotificationsPopup: React.FC<NotificationsPopupProps> = ({ onClose, onNoti
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
 
+    // Formats purement numériques : pas besoin de date-fns, qui ajoutait
+    // ~47 Ko au bundle de démarrage (ce menu est importé par le Header).
+    const pad = (value: number) => String(value).padStart(2, '0');
+    const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+
     if (date >= today) {
-      return `${t('notifications.today')} ${format(date, 'HH:mm', { locale: fr })}`;
+      return `${t('notifications.today')} ${time}`;
     } else if (date >= yesterday) {
-      return `${t('notifications.yesterday')} ${format(date, 'HH:mm', { locale: fr })}`;
+      return `${t('notifications.yesterday')} ${time}`;
     } else {
-      return format(date, 'dd/MM/yyyy HH:mm', { locale: fr });
+      return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${time}`;
     }
   };
 
@@ -420,10 +423,10 @@ const NotificationsPopup: React.FC<NotificationsPopupProps> = ({ onClose, onNoti
             {[0, 1, 2].map((i) => (
               <li key={i} className="flex items-start gap-3 px-3 py-3">
                 <span className="mt-[15px] h-1.5 w-1.5 shrink-0" />
-                <span className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-white/[0.06]" />
+                <span className="h-9 w-9 shrink-0 animate-pulse-soft rounded-full bg-white/[0.06]" />
                 <span className="flex-1 space-y-2 pt-1">
-                  <span className="block h-3 w-4/5 animate-pulse rounded bg-white/[0.06]" />
-                  <span className="block h-2.5 w-1/3 animate-pulse rounded bg-white/[0.05]" />
+                  <span className="block h-3 w-4/5 animate-pulse-soft rounded bg-white/[0.06]" />
+                  <span className="block h-2.5 w-1/3 animate-pulse-soft rounded bg-white/[0.05]" />
                 </span>
               </li>
             ))}

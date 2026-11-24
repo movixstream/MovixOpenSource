@@ -68,7 +68,7 @@ Le fichier `API/Mainapi/.env.example` est la référence complète. En pratique,
 - connexion Discord / Google : `DISCORD_CLIENT_ID`, `GOOGLE_CLIENT_ID` (les mêmes que `src/config/discord.ts` et `src/config/google.ts`)
 - paiement / VIP : variables `VIP_*`, `BLOCKCYPHER_TOKEN`
 
-Certaines intégrations sont très spécifiques à des sources données, par exemple les cookies `DARKIWORLD_*`, `FSTREAM_LOGIN_*` ou `XTREAM_*`.
+Certaines intégrations sont très spécifiques à des sources données, par exemple les cookies `DARKIWORLD_*` ou `FSTREAM_LOGIN_*`.
 
 `FSTREAM_BASE_URL` définit le domaine FrenchStream (`https://french-stream.net` par défaut).
 
@@ -109,6 +109,7 @@ Routes sous `/api/history`, pour les comptes connectés (OAuth ou BIP39) :
 | `GET /continue` | rangée « Reprendre » |
 | `GET /list` | onglet Historique (filtre `status`, pagination) |
 | `GET /title` | avancement d'un film ou d'une série |
+| `GET /titles` | avancement de plusieurs films en un appel (`type=movie`, `ids=1,2,3`) |
 | `GET` / `POST /progress` | position de lecture |
 | `DELETE /continue/:type/:id`, `DELETE /continue` | retirer une carte, ou toutes |
 | `DELETE /title/:type/:id` | supprimer un titre de l'historique |
@@ -134,6 +135,7 @@ Une cinquantaine de fiches ne publient pas d'ID TMDB, mais donnent leur ID AniLi
 | `GET /anime/episode/:slug?season=<chemin>&episode=<rang>` | adresses des lecteurs d'un épisode |
 | `GET /anime/catalogue`, `/anime/catalogue/genres` | catalogue indexé, paginé et filtrable |
 | `GET /anime/planning?from=&to=` | sorties annoncées entre deux jours, plus celles prévues la semaine suivante (`estimated: true`) |
+| `GET /anime/home?language=fr-FR` | page Animes du site (œuvres TMDB, affiches des genres, rangées du catalogue), calculée une fois par langue ; `202` tant qu'elle n'est pas prête |
 
 Dans la liste d'une œuvre, chaque langue d'un épisode donne `players` (adresses connues) et `pending` (lecteurs dont l'adresse reste à demander par `/anime/episode`).
 

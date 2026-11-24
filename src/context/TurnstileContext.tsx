@@ -105,6 +105,10 @@ export const TurnstileProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     widgetId.current = window.turnstile.render(containerRef.current, {
       sitekey: TURNSTILE_INVISIBLE_SITEKEY,
       size: 'invisible',
+      // En cas d'erreur, `error-callback` retire le widget ; la nouvelle
+      // tentative automatique de Turnstile viserait alors un conteneur disparu
+      // (« Nothing to reset found »). La prochaine demande en recrée un.
+      retry: 'never',
       callback: (nextToken: string) => {
         setToken(nextToken);
         setIsVerifying(false);

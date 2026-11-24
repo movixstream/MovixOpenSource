@@ -995,6 +995,11 @@ _FSVID_VIDZY_DECOY_PATH = re.compile(r'^/e/seg\d+\.ts$', re.IGNORECASE)
 # Marque interne d'une réponse leurre, pour réessayer par une autre sortie SOCKS.
 FSVID_VIDZY_DECOY_HEADER = 'X-Movix-Decoy'
 FSVID_VIDZY_DECOY_MAX_EGRESS = 4
+# Relais Fsvid/Vidzy/Uqload par le pool SOCKS : sorties essayées par requête,
+# statuts qui font changer de sortie et mise à l'écart d'une sortie refusée.
+SOCKS_EGRESS_MAX_ATTEMPTS = 4
+SOCKS_EGRESS_RETRY_STATUSES = frozenset({403, 429, 502, 503, 504})
+SOCKS_EGRESS_PENALTY_SECONDS = 300
 # Sorties SOCKS essayées pour charger une page d'embed Fsvid/Vidzy/Uqload.
 EMBED_SOCKS_ATTEMPTS = 3
 
@@ -1569,6 +1574,8 @@ class ProxyServer:
         # Clé `gk` commune à Fsvid et Vidzy : (valeur ou None, échéance monotonic).
         self._fsvid_vidzy_gate_key_entry: Optional[tuple] = None
         self._fsvid_vidzy_gate_lock = asyncio.Lock()
+        # Service -> {clé de session SOCKS: fin de mise à l'écart (monotonic)}.
+        self._socks_egress_penalties: Dict[str, Dict[str, float]] = {}
         self.vip_cache = TTLCache(maxsize=5000, ttl=VIP_CACHE_TTL)  # VIP access key verification cache
         self.m3u8_response_cache = TTLCache(maxsize=2000, ttl=M3U8_CACHE_TTL)  # Short-lived M3U8 response cache
         self.m3u8_vod_cache = TTLCache(maxsize=1000, ttl=M3U8_VOD_CACHE_TTL)   # Longer-lived VOD M3U8 cache
@@ -4324,20 +4331,9 @@ class ProxyServer:
             }
             
             
-            _status, html, page_session = await self._fetch_embed_page_via_socks(url, headers, 'FSVID')
-            if html is None:
-                return web.json_response({'error': 'Fetch failed'}, status=500)
-
-            m3u8_url = await self._resolve_fsvid_vidzy_m3u8(html, url, 'fsvid')
-            if not m3u8_url:
-                logger.warning(
-                    '[FSVID-EXTRACT] M3U8 introuvable dans la page %s (%s octets)',
-                    redact_url_for_log(url),
-                    len(html),
-                )
-                return web.json_response({'error': 'M3U8 not found'}, status=404)
-
-            m3u8_url = await self._with_fsvid_vidzy_gate_key(m3u8_url, html, 'fsvid', page_session)
+            m3u8_url, error = await self._extract_fsvid_vidzy_m3u8(url, headers, 'fsvid')
+            if error is not None:
+                return error
             result = {
                 'm3u8Url': _signed_service_url('/fsvid-proxy', m3u8_url),
                 'source': 'fsvid'
@@ -4862,6 +4858,111 @@ class ProxyServer:
         separator = '&' if '?' in m3u8_url else '?'
         return f"{m3u8_url}{separator}gk={urllib.parse.quote(gate_key, safe='')}"
 
+    async def _fsvid_vidzy_master_is_fake(
+        self,
+        m3u8_url: str,
+        provider: str,
+        session: Optional[aiohttp.ClientSession],
+        ssl: Any = True,
+    ) -> Optional[bool]:
+        """Lit le master par la sortie de l'extraction : True s'il est leurre.
+
+        None si le master n'a pas pu être lu (sortie lente, erreur réseau) : on
+        ne sait pas, et l'appelant garde l'URL faute de mieux.
+        """
+        origin = 'https://fsvid.lol' if provider == 'fsvid' else 'https://vidzy.org'
+        headers = {
+            'Accept': 'application/vnd.apple.mpegurl,*/*',
+            'Accept-Encoding': FSVID_VIDZY_MEDIA_ACCEPT_ENCODING,
+            'Origin': origin,
+            'Referer': f'{origin}/',
+            **FSVID_VIDZY_CLIENT_HINTS,
+        }
+        probe_session = session or self.sessions['normal']
+        try:
+            async with probe_session.get(
+                m3u8_url, headers=headers, ssl=ssl, timeout=ClientTimeout(total=8),
+            ) as response:
+                if response.status != 200:
+                    return None
+                text = await response.text(encoding='utf-8', errors='replace')
+                response_url = str(getattr(response, 'url', None) or m3u8_url)
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError):
+            return None
+        if not isinstance(text, str):
+            return None
+        if not text.lstrip().startswith('#EXTM3U'):
+            return None
+        return (
+            is_fsvid_vidzy_decoy_playlist(text, response_url)
+            or is_fsvid_vidzy_fake_master(text, m3u8_url, response_url)
+        )
+
+    async def _extract_fsvid_vidzy_m3u8(
+        self,
+        url: str,
+        headers: Dict,
+        provider: str,
+        ssl: Any = True,
+    ) -> Tuple[Optional[str], Optional[web.Response]]:
+        """Master Fsvid/Vidzy jouable : (URL avec `gk`, None) ou (None, erreur).
+
+        Le CDN marque le jeton `t=` du master selon l'IP qui a chargé la page
+        d'embed : une page ouverte par une sortie SOCKS jugée suspecte donne un
+        master leurre, quelle que soit l'IP qui le lit ensuite (mesuré le
+        2026-11-21 : le même lien extrait depuis une IP résidentielle se lit
+        partout, celui extrait par le serveur nulle part). Réessayer le relais
+        par une autre sortie ne sert donc à rien : on vérifie le master par la
+        sortie de l'extraction et, s'il est leurre, on recharge la page par une
+        autre sortie.
+        """
+        tag = provider.upper()
+        tried: set = set()
+        fallback: Optional[str] = None
+        last_status = 0
+        for _ in range(FSVID_VIDZY_DECOY_MAX_EGRESS):
+            status, html, page_session = await self._fetch_embed_page_via_socks(
+                url, headers, tag, ssl=ssl, exclude=tried,
+            )
+            if html is None:
+                last_status = status or last_status
+                break
+            tried.add(id(page_session))
+
+            m3u8_url = await self._resolve_fsvid_vidzy_m3u8(html, url, provider)
+            if not m3u8_url:
+                logger.warning(
+                    '[%s-EXTRACT] M3U8 introuvable dans la page %s (%s octets)',
+                    tag, redact_url_for_log(url), len(html),
+                )
+                return None, web.json_response({'error': 'M3U8 not found'}, status=404)
+
+            m3u8_url = await self._with_fsvid_vidzy_gate_key(m3u8_url, html, provider, page_session)
+            fake = await self._fsvid_vidzy_master_is_fake(m3u8_url, provider, page_session, ssl=ssl)
+            if fake is False:
+                return m3u8_url, None
+            if fake is None:
+                fallback = fallback or m3u8_url
+                continue
+            logger.warning(
+                '[%s-EXTRACT] Master leurre via cette sortie pour %s, autre sortie',
+                tag, redact_url_for_log(url),
+            )
+            if page_session is self.sessions.get('normal'):
+                break
+
+        if fallback:
+            return fallback, None
+        if tried:
+            return None, web.json_response(
+                {'error': 'Upstream returned a decoy stream'},
+                status=502,
+            )
+        return None, web.json_response(
+            {'error': 'Fetch failed', 'upstream_status': last_status},
+            status=500,
+        )
+
     async def vidzy_extract_handler(self, request: Request) -> Response:
         """VIDZY M3U8 extraction"""
         internal_error = self._require_internal(request)
@@ -4895,22 +4996,11 @@ class ProxyServer:
             
             # Vidzy a des certificats douteux : pas de vérification TLS (comme
             # l'ancienne session `no_ssl`).
-            _status, html, page_session = await self._fetch_embed_page_via_socks(
-                url, headers, 'VIDZY', ssl=self.ssl_context,
+            m3u8_url, error = await self._extract_fsvid_vidzy_m3u8(
+                url, headers, 'vidzy', ssl=self.ssl_context,
             )
-            if html is None:
-                return web.json_response({'error': 'Fetch failed'}, status=500)
-
-            m3u8_url = await self._resolve_fsvid_vidzy_m3u8(html, url, 'vidzy')
-            if not m3u8_url:
-                logger.warning(
-                    '[VIDZY-EXTRACT] M3U8 introuvable dans la page %s (%s octets)',
-                    redact_url_for_log(url),
-                    len(html),
-                )
-                return web.json_response({'error': 'M3U8 not found'}, status=404)
-
-            m3u8_url = await self._with_fsvid_vidzy_gate_key(m3u8_url, html, 'vidzy', page_session)
+            if error is not None:
+                return error
             result = {
                 'm3u8Url': _signed_service_url('/vidzy-proxy', m3u8_url),
                 'source': 'vidzy'
@@ -6426,6 +6516,7 @@ class ProxyServer:
         headers: Dict,
         tag: str,
         ssl: Any = True,
+        exclude: Optional[set] = None,
     ) -> Tuple[int, Optional[str], Optional[aiohttp.ClientSession]]:
         """Page d'embed par le pool SOCKS : (statut, HTML, session utilisée).
 
@@ -6435,14 +6526,21 @@ class ProxyServer:
         mêmes liens extraits par une sortie SOCKS se lisent. Une sortie
         injoignable ou refusée est remplacée par une autre ; sans pool, on
         reste en direct. La session est rendue pour demander la clé `gk` par
-        la même sortie.
+        la même sortie. `exclude` : `id()` des sessions déjà essayées.
         """
+        exclude = exclude or set()
         keys = [
             key for key, session in self.sessions.items()
             if re.fullmatch(r'proxy_\d+', key) and not getattr(session, 'closed', False)
         ]
+        has_pool = bool(keys)
+        keys = [key for key in keys if id(self.sessions[key]) not in exclude]
         random.shuffle(keys)
+        if not keys and has_pool:
+            return 0, None, None
         attempts = keys[:EMBED_SOCKS_ATTEMPTS] or ['normal']
+        if attempts == ['normal'] and id(self.sessions['normal']) in exclude:
+            return 0, None, None
         last_status = 0
         for key in attempts:
             session = self.sessions[key]
@@ -6465,6 +6563,21 @@ class ProxyServer:
                     tag, type(e).__name__, key, redact_url_for_log(url),
                 )
         return last_status, None, None
+
+    @staticmethod
+    def _is_retryable_egress_failure(response: web.StreamResponse) -> bool:
+        """Erreur du relais qui peut venir de la sortie SOCKS : refus, panne, lenteur.
+
+        Seules les réponses d'erreur JSON construites par `_service_proxy` sont
+        concernées ; une réponse déjà envoyée en flux ne peut pas être rejouée.
+        """
+        if response.headers.get(FSVID_VIDZY_DECOY_HEADER) == '1':
+            return True
+        if response.status not in SOCKS_EGRESS_RETRY_STATUSES:
+            return False
+        if response.prepared or not isinstance(response, web.Response):
+            return False
+        return (response.content_type or '').lower() == 'application/json'
 
     async def _service_proxy_via_random_socks(
         self,
@@ -6491,9 +6604,25 @@ class ProxyServer:
                 headers=CORS_HEADERS,
             )
 
-        # Fsvid/Vidzy jugent chaque IP de sortie : une sortie qui reçoit le
-        # leurre est réessayée par une autre du pool avant de rendre un 502
-        # (que le lecteur traite comme une source en panne, au lieu de boucler).
+        # Fsvid, Vidzy et Uqload jugent chaque IP de sortie : une sortie refusée
+        # (403/429, leurre), injoignable ou trop lente est remplacée par une
+        # autre du pool avant de rendre l'erreur au lecteur. Les sorties qui
+        # viennent d'échouer pour ce service sont évitées quelques minutes, pour
+        # que les requêtes suivantes (variantes, segments) partent d'une bonne.
+        now = time.monotonic()
+        penalties = self._socks_egress_penalties.setdefault(service_name, {})
+        for key, until in list(penalties.items()):
+            if until <= now:
+                del penalties[key]
+        pool = [
+            key for key in self.sessions
+            if re.fullmatch(r'proxy_\d+', key)
+            and not getattr(self.sessions[key], 'closed', False)
+        ]
+        healthy = [key for key in pool if key not in penalties]
+        if healthy and session_key in penalties:
+            session_key = random.choice(healthy)
+
         tried = {session_key}
         while True:
             response = await self._service_proxy(
@@ -6502,25 +6631,24 @@ class ProxyServer:
                 default_headers,
                 session_key=session_key,
             )
-            if (
-                response.status != 502
-                or response.headers.get(FSVID_VIDZY_DECOY_HEADER) != '1'
-                or len(tried) >= FSVID_VIDZY_DECOY_MAX_EGRESS
-            ):
+            if not self._is_retryable_egress_failure(response):
                 break
-            candidates = [
-                key for key in self.sessions
-                if re.fullmatch(r'proxy_\d+', key)
-                and key not in tried
-                and not getattr(self.sessions[key], 'closed', False)
-            ]
+            # Le leurre Fsvid/Vidzy vient du jeton du lien, pas de la sortie.
+            if response.headers.get(FSVID_VIDZY_DECOY_HEADER) != '1':
+                penalties[session_key] = time.monotonic() + SOCKS_EGRESS_PENALTY_SECONDS
+            if len(tried) >= SOCKS_EGRESS_MAX_ATTEMPTS:
+                break
+            candidates = [key for key in healthy or pool if key not in tried]
+            if not candidates:
+                candidates = [key for key in pool if key not in tried]
             if not candidates:
                 break
             session_key = random.choice(candidates)
             tried.add(session_key)
             logger.info(
-                '[%s-PROXY] Decoy received, retrying via %s (%s/%s)',
-                service_name.upper(), session_key, len(tried), FSVID_VIDZY_DECOY_MAX_EGRESS,
+                '[%s-PROXY] HTTP %s via previous egress, retrying via %s (%s/%s)',
+                service_name.upper(), response.status, session_key,
+                len(tried), SOCKS_EGRESS_MAX_ATTEMPTS,
             )
         if FSVID_VIDZY_DECOY_HEADER in response.headers:
             del response.headers[FSVID_VIDZY_DECOY_HEADER]

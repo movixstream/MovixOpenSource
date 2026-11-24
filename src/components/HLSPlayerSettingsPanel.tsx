@@ -518,7 +518,7 @@ const HLSPlayerSettingsPanel = (props: HLSPlayerSettingsPanelProps) => {
         bottom: 0,
         maxWidth: '90vw'
       }}
-      className="bg-black/95 z-[10002] flex flex-col border-l border-gray-800 shadow-xl"
+      className="bg-black z-[10002] flex flex-col border-l border-gray-800 shadow-xl"
     >
             <div className="flex flex-col border-b border-gray-800 mb-4">
               <div className="flex justify-between items-center mb-3 px-4 pt-4">

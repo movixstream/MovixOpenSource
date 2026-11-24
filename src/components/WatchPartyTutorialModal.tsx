@@ -211,7 +211,7 @@ const WatchPartyTutorialModal: React.FC<WatchPartyTutorialModalProps> = ({ isOpe
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.2 }}
-                    className="fixed inset-0 bg-black/95 z-[100001] flex items-center justify-center p-4 cursor-zoom-out"
+                    className="fixed inset-0 bg-black z-[100001] flex items-center justify-center p-4 cursor-zoom-out"
                     onClick={() => setZoomedImage(null)}
                 >
                     <motion.img

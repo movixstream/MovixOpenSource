@@ -14,7 +14,7 @@ import time
 from types import SimpleNamespace
 import unittest
 import urllib.parse
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
@@ -40,7 +40,9 @@ def load_proxy_headers():
         '_extract_uqload_media_url', '_extract_uqload_media', '_validate_uqload_url',
         '_extract_m3u8_url', '_fsvid_vidzy_gate_urls', '_fsvid_vidzy_gate_key',
         '_with_fsvid_vidzy_gate_key', '_is_fsvid_vidzy_media_candidate',
-        '_fetch_embed_page_via_socks',
+        '_fetch_embed_page_via_socks', '_fsvid_vidzy_master_is_fake', '_extract_fsvid_vidzy_m3u8',
+        '_is_retryable_egress_failure', '_service_proxy_via_random_socks',
+        '_random_socks5_session_key',
     }
     proxy_class.body = [
         node for node in proxy_class.body
@@ -52,9 +54,12 @@ def load_proxy_headers():
     constants = [
         node for node in tree.body if isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name)
-            and target.id.startswith(('FSVID_VIDZY_', '_FSVID_VIDZY_', 'PROVIDER_MEDIA_', 'EMBED_SOCKS_'))
+            and target.id.startswith(('FSVID_VIDZY_', '_FSVID_VIDZY_', 'PROVIDER_MEDIA_', 'EMBED_SOCKS_', 'SOCKS_EGRESS_'))
             for target in node.targets
         )
+    ] + [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name.startswith('is_fsvid_vidzy_')
     ]
     module = ast.Module(body=[
         ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0),
@@ -73,11 +78,13 @@ def load_proxy_headers():
         '_signed_service_url': lambda route, url: url,
         'logger': logging.getLogger(__name__),
         'redact_url_for_log': lambda url: url,
+        'CORS_HEADERS': {}, 'SELF_VALIDATED_PROXY_ROUTES': frozenset(),
     }
     exec(compile(ast.fix_missing_locations(module), 'server.py', 'exec'), namespace)
     proxy = namespace['ProxyServer']()
     proxy._fsvid_vidzy_gate_key_entry = None
     proxy._fsvid_vidzy_gate_lock = asyncio.Lock()
+    proxy._socks_egress_penalties = {}
     proxy.ssl_context = None
     return proxy
 
@@ -202,6 +209,7 @@ class FakeGateSession:
                 status, payload = reply
                 return SimpleNamespace(
                     status=status,
+                    url=url,
                     json=AsyncMock(return_value=payload),
                     text=AsyncMock(return_value=payload if isinstance(payload, str) else ''),
                 )
@@ -216,6 +224,54 @@ class FsvidVidzyGateKeyTests(unittest.IsolatedAsyncioTestCase):
     MASTER = 'https://u14.vidzy.cc/hls2/06/00065/id_n/master.m3u8?t=tok&s=1&e=14400&f=2&i=0.0&sp=0'
     KEY = 'uPkLjE6iV6vLOUDFlpmYqrXzbcHX_nVDwW6Ut3pRupA.1792771707.86400'
     VIDZY_PAGE = "<script>fetch('https://v7.vidzy.cc/gate.php?'+d,{mode:'cors'})</script>"
+    REAL_MASTER = (
+        '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=1280x720\n'
+        'https://u14.vidzy.cc/hls2/06/00065/id_n/index-v1-a1.m3u8?t=tok&s=1\n'
+    )
+    # Master leurre du 2026-11-21 : variante `index.m3u8` sans jeton.
+    FAKE_MASTER = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=1280x720\nindex.m3u8\n'
+
+    def _extracting_proxy(self, provider, egresses):
+        proxy = load_proxy_headers()
+        proxy.sessions = {'normal': FakeGateSession({}), **egresses}
+        proxy._require_internal = lambda request: None
+        proxy._check_vip = AsyncMock(return_value=True)
+        proxy._resolve_fsvid_vidzy_m3u8 = AsyncMock(return_value=self.MASTER)
+        proxy._fsvid_vidzy_gate_key_entry = (self.KEY, time.monotonic() + 60)
+        cache = MagicMock()
+        cache.get.return_value = None
+        setattr(proxy, f'{provider}_cache', cache)
+        return proxy, cache
+
+    async def test_extraction_switches_egress_when_the_token_is_marked(self):
+        # Mesuré le 2026-11-21 : le jeton `t=` est marqué selon l'IP qui ouvre
+        # la page ; le master leurre reste leurre lu depuis n'importe quelle IP.
+        embed = 'https://fsvid.lol/embed-example.html'
+        master = self.MASTER.split('?', 1)[0]
+        marked = FakeGateSession({embed: (200, '<html></html>'), master: (200, self.FAKE_MASTER)})
+        clean = FakeGateSession({embed: (200, '<html></html>'), master: (200, self.REAL_MASTER)})
+        proxy, cache = self._extracting_proxy('fsvid', {'proxy_1': marked, 'proxy_2': clean})
+        with patch.object(random, 'shuffle', lambda keys: keys.sort()):
+            response = await proxy.fsvid_extract_handler(SimpleNamespace(query={'url': embed}))
+        self.assertEqual(response.status, 200)
+        self.assertIn('gk=', response.text)
+        self.assertTrue(cache.set.called)
+        self.assertEqual(marked.calls[0], embed)
+        self.assertEqual(clean.calls[0], embed)
+
+    async def test_extraction_reports_a_decoy_when_every_egress_is_marked(self):
+        embed = 'https://vidzy.cc/embed-example.html'
+        master = self.MASTER.split('?', 1)[0]
+        egresses = {
+            f'proxy_{index}': FakeGateSession({embed: (200, '<html></html>'), master: (200, self.FAKE_MASTER)})
+            for index in range(2)
+        }
+        proxy, cache = self._extracting_proxy('vidzy', egresses)
+        response = await proxy.vidzy_extract_handler(SimpleNamespace(query={'url': embed}))
+        self.assertEqual(response.status, 502)
+        self.assertFalse(cache.set.called)
+        self.assertTrue(all(session.calls for session in egresses.values()))
+        self.assertEqual(proxy.sessions['normal'].calls, [])
 
     def setUp(self):
         self.proxy = load_proxy_headers()
@@ -277,7 +333,10 @@ class FsvidVidzyGateKeyTests(unittest.IsolatedAsyncioTestCase):
                     other = 'https://fsvid.lol/gk' if provider == 'vidzy' else 'https://v6.vidzy.cc/gate.php'
                     # Page et porte par la même sortie SOCKS ; jamais en direct
                     # (une session `normal` vide lèverait KeyError).
-                    egress = FakeGateSession({embed: (200, '<html></html>'), gate: reply, other: reply})
+                    egress = FakeGateSession({
+                        embed: (200, '<html></html>'), gate: reply, other: reply,
+                        self.MASTER.split('?', 1)[0]: (200, self.REAL_MASTER),
+                    })
                     direct = FakeGateSession({})
                     proxy.sessions = {'normal': direct, 'proxy_3': egress}
                     proxy._require_internal = lambda request: None
@@ -295,6 +354,47 @@ class FsvidVidzyGateKeyTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(direct.calls, [])
                     self.assertEqual(egress.calls[0], embed)
                     self.assertTrue(any(call.startswith(gate) for call in egress.calls[1:]))
+
+
+class SocksRelayRetryTests(unittest.IsolatedAsyncioTestCase):
+    """Relais Uqload/Fsvid/Vidzy : une sortie refusée est remplacée puis évitée."""
+
+    def _relay(self, replies):
+        proxy = load_proxy_headers()
+        proxy.sessions = {'normal': object(), **{key: SimpleNamespace(closed=False) for key in replies}}
+        proxy._require_signature = lambda request, url: None
+        used = []
+
+        async def service_proxy(request, service_name, headers, session_key):
+            used.append(session_key)
+            status = replies[session_key]
+            if status == 200:
+                return web.Response(body=b'#EXTM3U\n', status=200)
+            return web.json_response({'error': f'Upstream HTTP error: {status}'}, status=status)
+
+        proxy._service_proxy = service_proxy
+        return proxy, used
+
+    async def test_refused_egress_is_replaced_then_avoided(self):
+        proxy, used = self._relay({'proxy_0': 403, 'proxy_1': 200})
+        request = SimpleNamespace(method='GET', path='/uqload-proxy', query={'url': 'https://strm12.uqload.vc/x.m3u8'})
+        with patch.object(random, 'choice', lambda keys: sorted(keys)[0]):
+            response = await proxy._service_proxy_via_random_socks(request, 'uqload', {})
+            self.assertEqual(response.status, 200)
+            self.assertEqual(used, ['proxy_0', 'proxy_1'])
+            # Requête suivante : la sortie refusée est évitée d'emblée.
+            used.clear()
+            response = await proxy._service_proxy_via_random_socks(request, 'uqload', {})
+        self.assertEqual(response.status, 200)
+        self.assertEqual(used, ['proxy_1'])
+
+    async def test_missing_file_is_not_retried(self):
+        proxy, used = self._relay({'proxy_0': 404, 'proxy_1': 200})
+        request = SimpleNamespace(method='GET', path='/uqload-proxy', query={'url': 'https://strm12.uqload.vc/x.m3u8'})
+        with patch.object(random, 'choice', lambda keys: sorted(keys)[0]):
+            response = await proxy._service_proxy_via_random_socks(request, 'uqload', {})
+        self.assertEqual(response.status, 404)
+        self.assertEqual(used, ['proxy_0'])
 
 
 def load_decoy_helpers():

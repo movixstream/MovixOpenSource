@@ -109,6 +109,21 @@ function toSqlDateTime(dateInput) {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
+// Un lien de facture public (/vip/invoices/:publicId) montre la clé VIP
+// livrée : passé ce délai, il ne répond plus, pour qu'un lien qui a fuité
+// (capture, historique, lien partagé) cesse de donner la clé. Le paiement
+// est réglé bien avant (une facture expire en quelques heures) ; le
+// propriétaire connecté garde ses factures dans /vip/invoices/mine.
+const PUBLIC_INVOICE_LINK_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+function isPublicInvoiceLinkExpired(invoice, now = Date.now()) {
+  const createdAt = fromSqlDateTime(invoice?.created_at);
+  if (!createdAt || Number.isNaN(createdAt.getTime())) {
+    return false;
+  }
+  return now - createdAt.getTime() > PUBLIC_INVOICE_LINK_TTL_MS;
+}
+
 function fromSqlDateTime(dateInput) {
   if (!dateInput) return null;
   return new Date(dateInput);
@@ -635,6 +650,22 @@ async function deliverInvoiceIfReady(pool, invoiceId, actorType = 'system', acto
       return invoice;
     }
 
+    // Une facture ne livre qu'une seule clé. Si un rafraîchissement concurrent
+    // a remis le statut à « paid » après la livraison, on rétablit la
+    // livraison au lieu de créer une deuxième clé pour le même paiement.
+    if (invoice.vip_key_value) {
+      await connection.execute(
+        `UPDATE vip_invoices
+          SET status = 'delivered',
+              delivered_at = COALESCE(delivered_at, NOW()),
+              updated_at = NOW()
+          WHERE id = ?`,
+        [invoiceId]
+      );
+      await connection.commit();
+      return fetchInvoiceById(pool, invoiceId);
+    }
+
     if (invoice.status !== 'paid') {
       await connection.commit();
       return invoice;
@@ -1137,7 +1168,7 @@ async function refreshInvoiceStatus(pool, invoiceInput, options = {}) {
           SET status = 'expired',
               next_check_at = DATE_ADD(NOW(), INTERVAL 25 SECOND),
               updated_at = NOW()
-          WHERE id = ?`,
+          WHERE id = ? AND status = 'awaiting_payment'`,
         [invoice.id]
       );
 
@@ -1177,7 +1208,11 @@ async function refreshInvoiceStatus(pool, invoiceInput, options = {}) {
     || txHash !== (invoice.tx_hash || null);
 
   if (hasChanged) {
-    await pool.execute(
+    // La facture a été lue sans verrou, avant un appel blockchain de
+    // plusieurs secondes. On n'écrit que si son statut n'a pas bougé
+    // entre-temps : sinon un appel parallèle a déjà avancé (ou livré) la
+    // facture, et l'écraser la ferait revenir en arrière.
+    const [updateResult] = await pool.execute(
       `UPDATE vip_invoices
         SET status = ?,
             amount_crypto_received = ?,
@@ -1186,16 +1221,21 @@ async function refreshInvoiceStatus(pool, invoiceInput, options = {}) {
             paid_at = CASE WHEN ? THEN COALESCE(paid_at, NOW()) ELSE paid_at END,
             next_check_at = DATE_ADD(NOW(), INTERVAL 25 SECOND),
             updated_at = NOW()
-        WHERE id = ?`,
+        WHERE id = ? AND status = ?`,
       [
         newStatus,
         amountReceived,
         addressActivity.confirmations,
         txHash,
         shouldMarkPaidAt ? 1 : 0,
-        invoice.id
+        invoice.id,
+        invoice.status
       ]
     );
+
+    if (!updateResult?.affectedRows) {
+      return fetchInvoiceById(pool, invoice.id);
+    }
 
     await logVipInvoiceEvent(
       pool,
@@ -3566,6 +3606,8 @@ module.exports = {
   handlePayblisIpn,
   markPayblisInvoicePaidFromRest,
   fetchInvoiceByPublicId,
+  isPublicInvoiceLinkExpired,
+  PUBLIC_INVOICE_LINK_TTL_MS,
   fetchInvoiceById,
   fetchInvoiceByGiftToken,
   refreshInvoiceStatus,

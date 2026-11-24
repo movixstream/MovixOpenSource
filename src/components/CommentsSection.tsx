@@ -1,25 +1,19 @@
 import { IX_MATRIX_URL } from '@/config/community';
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, MessageCircle, Trash2, Send, X, AlertTriangle, Info, ExternalLink, Popcorn, Flag, Bell, BellOff } from 'lucide-react';
-import { isPushSupported, isSubscribed as isPushSubscribed, subscribeToPush, getPushPermission } from '../services/pushNotificationService';
 import { PrefetchLink as Link } from '@/routing/PrefetchLink';
-import axios from 'axios';
-import { toast } from 'sonner';
-import { getVipHeaders } from '../utils/vipUtils';
 import ReactMarkdown from 'react-markdown';
 import { useSafeRemarkGfm } from '../utils/markdownPlugins';
 import remarkEmoji from 'remark-emoji';
 import MarkdownToolbar from './MarkdownToolbar';
-import { useTurnstileBypass } from '../hooks/useTurnstileBypass';
-import { ADMIN_BYPASS_TOKEN } from '../utils/turnstileBypass';
 import { getOverlayPortalRoot } from '@/utils/overlayPortal';
 import { Skeleton } from './ui/Skeleton';
 import { TURNSTILE_SITE_KEY } from '../utils/turnstileKeys';
-
-const MAIN_API = import.meta.env.VITE_MAIN_API;
+import { areCommentItemPropsEqual, type CommentItemProps } from './comments/commentItem';
+import { useComments } from './comments/useComments';
 
 const mdComponents = {
   p: ({ children }: any) => <p className="mb-1 last:mb-0">{children}</p>,
@@ -55,16 +49,6 @@ const mdComponents = {
   h6: ({ children }: any) => <p className="font-bold text-white mb-1">{children}</p>,
 };
 
-declare global {
-  interface Window {
-    turnstile?: {
-      render: (container: string | HTMLElement, options: Record<string, unknown>) => string;
-      reset: (widgetId: string) => void;
-      remove: (widgetId: string) => void;
-    };
-  }
-}
-
 // Composant de bouton personnalisé pour les spoilers
 interface SpoilerToggleProps {
   checked: boolean;
@@ -99,31 +83,60 @@ const SpoilerToggle: React.FC<SpoilerToggleProps> = ({ checked, onChange, size =
   );
 };
 
-// Composant Skeleton pour les commentaires
-const CommentSkeleton: React.FC = () => {
+const SKELETON_BASE = '#374151';
+
+/** Formes des gabarits : des commentaires de longueurs différentes, comme une vraie liste. */
+const SKELETON_ROWS = [
+  { name: 'w-20 sm:w-24', lines: [100, 70] },
+  { name: 'w-16 sm:w-20', lines: [90] },
+  { name: 'w-24 sm:w-28', lines: [100, 100, 45] },
+] as const;
+
+interface CommentSkeletonProps {
+  /** Largeur du pseudo. */
+  name: string;
+  /** Largeur de chaque ligne de texte, en %. */
+  lines: readonly number[];
+  /** Avec un compte, « Répondre » et « Signaler » suivent le cœur et les réponses. */
+  signedIn: boolean;
+}
+
+/**
+ * Gabarit d'un commentaire de l'ancien habillage : même carte, mêmes lignes
+ * (20 px, 24 px dès 640 px) et les mêmes actions que `CommentItem`.
+ */
+const CommentSkeleton: React.FC<CommentSkeletonProps> = ({ name, lines, signedIn }) => {
   return (
     <div className="bg-gray-800/70 rounded-xl p-3 sm:p-4 md:p-6 relative overflow-hidden" aria-hidden="true">
       <div className="flex items-start gap-2 sm:gap-3 md:gap-4">
         <div className="flex-shrink-0">
-          <div className="w-8 h-8 sm:w-10 sm:h-10"><Skeleton variant="circle" height="100%" baseColor="#374151" /></div>
+          <div className="w-8 h-8 sm:w-10 sm:h-10"><Skeleton variant="circle" height="100%" baseColor={SKELETON_BASE} /></div>
         </div>
         <div className="flex-1 min-w-0">
           {/* En-tête */}
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-            <div className="w-20 sm:w-24"><Skeleton className="h-5 sm:h-6" baseColor="#374151" /></div>
-            <Skeleton width={64} className="h-[15px] sm:h-4" baseColor="#374151" />
+            <div className={name}><Skeleton className="h-5 sm:h-6" baseColor={SKELETON_BASE} /></div>
+            <Skeleton width={64} className="h-[15px] sm:h-4" baseColor={SKELETON_BASE} />
           </div>
           {/* Contenu */}
           <div className="mt-2">
-            {[100, 85, 65].map(width => (
-              <div key={width} className="h-5 sm:h-6 flex items-center">
-                <Skeleton width={`${width}%`} className="h-3.5 sm:h-4" containerClassName="w-full" baseColor="#374151" />
+            {lines.map((width, index) => (
+              <div key={index} className="h-5 sm:h-6 flex items-center">
+                <Skeleton width={`${width}%`} className="h-3.5 sm:h-4" containerClassName="w-full" baseColor={SKELETON_BASE} />
               </div>
             ))}
           </div>
-          {/* Actions */}
+          {/* Actions : cœur et réponses avec leur nombre, puis « Répondre » et le drapeau
+              (« Signaler » dès 640 px) avec un compte. */}
           <div className="flex items-center gap-2 sm:gap-3 md:gap-4 mt-3 sm:mt-4 flex-wrap">
-            {[32, 32, 64].map((width, index) => <Skeleton key={index} width={width} className="h-4 sm:h-5" baseColor="#374151" />)}
+            <Skeleton containerClassName="w-[25px] sm:w-7" className="h-4 sm:h-5" baseColor={SKELETON_BASE} />
+            <Skeleton containerClassName="w-[25px] sm:w-7" className="h-4 sm:h-5" baseColor={SKELETON_BASE} />
+            {signedIn && (
+              <>
+                <Skeleton containerClassName="w-[52px] sm:w-[61px]" className="h-4 sm:h-5" baseColor={SKELETON_BASE} />
+                <Skeleton containerClassName="w-3 sm:w-[68px]" className="h-3 sm:h-5" baseColor={SKELETON_BASE} />
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -131,108 +144,12 @@ const CommentSkeleton: React.FC = () => {
   );
 };
 
-interface Comment {
-  id: number;
-  content_type: string;
-  content_id: string;
-  user_id: string;
-  user_type: string;
-  profile_id: string | null;
-  username: string;
-  avatar: string | null;
-  content: string;
-  is_spoiler: number;
-  is_vip: number;
-  is_admin: number;
-  is_edited: number;
-  created_at: number;
-  updated_at?: number;
-  deleted: number;
-  repliesCount: number;
-  reactions: number;
-  userReaction: boolean | null;
-}
-
-interface Reply {
-  id: number;
-  comment_id: number;
-  parent_reply_id: number | null;
-  user_id: string;
-  user_type: string;
-  profile_id: string | null;
-  username: string;
-  avatar: string | null;
-  reply_to_username: string | null;
-  content: string;
-  is_spoiler: number;
-  is_vip: number;
-  is_admin: number;
-  is_edited: number;
-  created_at: number;
-  updated_at?: number;
-  deleted: number;
-  reactions: number;
-  userReaction: boolean | null;
-}
+/** Pastilles « Limite : », « Sur ce film : 0/3 », « Cette heure : 0/10 » en attente. */
+const LIMIT_CHIP_WIDTHS = ['w-[70px] sm:w-[78px]', 'w-[114px] sm:w-[130px]', 'w-[120px] sm:w-[136px]'] as const;
 
 interface CommentsSectionProps {
   contentType: 'movie' | 'tv';
   contentId: string;
-}
-
-interface CommentItemProps {
-  comment: Comment;
-  isLast: boolean;
-  lastCommentRef: React.RefObject<HTMLDivElement>;
-  // user identity
-  isAuthenticated: boolean;
-  isAdmin: boolean;
-  profileId: string | null;
-  // shared edit state
-  editingComment: number | null;
-  editContent: string;
-  editIsSpoiler: boolean;
-  editingReply: number | null;
-  editTextareaRef: React.RefObject<HTMLTextAreaElement>;
-  // shared reply state
-  replyingTo: { commentId: number; replyId?: number; username: string } | null;
-  replyContent: string;
-  isReplySpoiler: boolean;
-  replyTextareaRef: React.RefObject<HTMLTextAreaElement>;
-  // replies data for this comment
-  replies: Reply[] | undefined;
-  expanded: boolean;
-  repliesHasMore: boolean;
-  repliesTotalCount: number;
-  // delete/reveal/report sets
-  deletingIds: Set<number>;
-  deletedIds: Set<number>;
-  revealedSpoilers: Set<string>;
-  reportedIds: Set<string>;
-  // turnstile
-  turnstileToken: string;
-  turnstileSiteKey: string | undefined;
-  // i18n + helpers
-  t: (key: string, opts?: unknown) => string;
-  formatDate: (timestamp: number) => string;
-  // callbacks
-  onReaction: (targetType: 'comment' | 'reply', targetId: number) => void;
-  onToggleReplies: (commentId: number) => void;
-  onRevealSpoiler: (type: 'comment' | 'reply', id: number) => void;
-  onRequestDeleteComment: (commentId: number) => void;
-  onRequestDeleteReply: (replyId: number, commentId: number) => void;
-  onPostReply: (commentId: number, parentReplyId?: number, replyToUsername?: string) => void;
-  onEditComment: (commentId: number) => void;
-  onEditReply: (replyId: number, commentId: number) => void;
-  onLoadMoreReplies: (commentId: number) => void;
-  setEditingComment: React.Dispatch<React.SetStateAction<number | null>>;
-  setEditContent: React.Dispatch<React.SetStateAction<string>>;
-  setEditIsSpoiler: React.Dispatch<React.SetStateAction<boolean>>;
-  setEditingReply: React.Dispatch<React.SetStateAction<number | null>>;
-  setReplyingTo: React.Dispatch<React.SetStateAction<{ commentId: number; replyId?: number; username: string } | null>>;
-  setReplyContent: React.Dispatch<React.SetStateAction<string>>;
-  setIsReplySpoiler: React.Dispatch<React.SetStateAction<boolean>>;
-  setReportModal: React.Dispatch<React.SetStateAction<{ targetType: 'comment' | 'reply'; targetId: number } | null>>;
 }
 
 const CommentItem = React.memo<CommentItemProps>((props) => {
@@ -433,7 +350,7 @@ const CommentItem = React.memo<CommentItemProps>((props) => {
                   className="inline-flex items-center gap-1 mt-1 sm:mt-2 text-[10px] sm:text-xs text-red-400"
                 >
                   <AlertTriangle className="w-3 h-3" />
-                  <span className="hidden sm:inline">{t('comments.spoilerContent')}</span>
+                  <span className="hidden sm:inline">{t(comment.spoiler_auto === 1 ? 'comments.spoilerAutoContent' : 'comments.spoilerContent')}</span>
                                         <span className="sm:hidden">{t('common.spoiler')}</span>
                 </motion.span>
               )}
@@ -750,7 +667,7 @@ const CommentItem = React.memo<CommentItemProps>((props) => {
                                   className="inline-flex items-center gap-1 mt-1 text-[10px] sm:text-xs text-red-400"
                                 >
                                   <AlertTriangle className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                                  <span className="hidden sm:inline">{t('comments.spoilerContent')}</span>
+                                  <span className="hidden sm:inline">{t(reply.spoiler_auto === 1 ? 'comments.spoilerAutoContent' : 'comments.spoilerContent')}</span>
                                                     <span className="sm:hidden">{t('common.spoiler')}</span>
                                 </motion.span>
                               )}
@@ -911,996 +828,35 @@ const CommentItem = React.memo<CommentItemProps>((props) => {
       </div>
     </motion.div>
   );
-}, (prev, next) => {
-  // Bail-out: skip render if neither this comment's state nor any of the
-  // shared parent state that affects ITS rendering changed.
-  if (prev.isLast !== next.isLast) return false;
-  // comment identity / mutation
-  if (prev.comment.id !== next.comment.id) return false;
-  if (prev.comment.updated_at !== next.comment.updated_at) return false;
-  if (prev.comment.reactions !== next.comment.reactions) return false;
-  if (prev.comment.userReaction !== next.comment.userReaction) return false;
-  if (prev.comment.repliesCount !== next.comment.repliesCount) return false;
-  if (prev.comment.content !== next.comment.content) return false;
-  if (prev.comment.is_spoiler !== next.comment.is_spoiler) return false;
-  if (prev.comment.is_edited !== next.comment.is_edited) return false;
-  if (prev.comment.is_admin !== next.comment.is_admin) return false;
-  // user identity
-  if (prev.profileId !== next.profileId) return false;
-  if (prev.isAdmin !== next.isAdmin) return false;
-  if (prev.isAuthenticated !== next.isAuthenticated) return false;
-  // edit state — only relevant if WE are the one being edited (prev or next)
-  const editingMatters =
-    prev.editingComment === prev.comment.id ||
-    next.editingComment === next.comment.id ||
-    (prev.editingReply !== null && (prev.replies?.some(r => r.id === prev.editingReply))) ||
-    (next.editingReply !== null && (next.replies?.some(r => r.id === next.editingReply)));
-  if (editingMatters) {
-    if (prev.editingComment !== next.editingComment) return false;
-    if (prev.editingReply !== next.editingReply) return false;
-    if (prev.editContent !== next.editContent) return false;
-    if (prev.editIsSpoiler !== next.editIsSpoiler) return false;
-  }
-  // reply form state — only relevant if replyingTo targets this comment
-  const replyingMatters =
-    prev.replyingTo?.commentId === prev.comment.id ||
-    next.replyingTo?.commentId === next.comment.id;
-  if (replyingMatters) {
-    if (prev.replyingTo !== next.replyingTo) return false;
-    if (prev.replyContent !== next.replyContent) return false;
-    if (prev.isReplySpoiler !== next.isReplySpoiler) return false;
-  }
-  // replies array reference
-  if (prev.replies !== next.replies) return false;
-  if (prev.expanded !== next.expanded) return false;
-  if (prev.repliesHasMore !== next.repliesHasMore) return false;
-  if (prev.repliesTotalCount !== next.repliesTotalCount) return false;
-  // sets — these mutate by reference on every parent change, but we only
-  // care if WE have an entry in them
-  const myKey = `comment-${prev.comment.id}`;
-  if (prev.deletingIds.has(prev.comment.id) !== next.deletingIds.has(next.comment.id)) return false;
-  if (prev.deletedIds.has(prev.comment.id) !== next.deletedIds.has(next.comment.id)) return false;
-  if (prev.revealedSpoilers.has(myKey) !== next.revealedSpoilers.has(myKey)) return false;
-  if (prev.reportedIds.has(myKey) !== next.reportedIds.has(myKey)) return false;
-  // for replies' membership in those sets, only check if we have replies
-  if (prev.replies && prev.replies.length > 0) {
-    for (const r of prev.replies) {
-      if (prev.deletingIds.has(r.id) !== next.deletingIds.has(r.id)) return false;
-      if (prev.deletedIds.has(r.id) !== next.deletedIds.has(r.id)) return false;
-      const rk = `reply-${r.id}`;
-      if (prev.revealedSpoilers.has(rk) !== next.revealedSpoilers.has(rk)) return false;
-      if (prev.reportedIds.has(rk) !== next.reportedIds.has(rk)) return false;
-    }
-  }
-  // turnstile only matters if reply form is open for this comment
-  if (replyingMatters) {
-    if (prev.turnstileToken !== next.turnstileToken) return false;
-  }
-  return true;
-});
+}, areCommentItemPropsEqual);
 CommentItem.displayName = 'CommentItem';
 
+/**
+ * Ancien habillage des commentaires, gardé pour les anciennes fiches
+ * (`src/pages/legacy/`). Les nouvelles fiches dessinent le même état avec
+ * `DetailsComments` ; la logique commune est dans `useComments`.
+ */
 const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentId }) => {
-  const { t, i18n } = useTranslation();
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [newComment, setNewComment] = useState('');
-  const [isSpoiler, setIsSpoiler] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [profileId, setProfileId] = useState<string | null>(null);
-  const [expandedReplies, setExpandedReplies] = useState<Set<number>>(new Set());
-  const [replies, setReplies] = useState<{ [key: number]: Reply[] }>({});
-  const [replyingTo, setReplyingTo] = useState<{ commentId: number; replyId?: number; username: string } | null>(null);
-  const [replyContent, setReplyContent] = useState('');
-  const [isReplySpoiler, setIsReplySpoiler] = useState(false);
-  const [editingComment, setEditingComment] = useState<number | null>(null);
-  const [editContent, setEditContent] = useState('');
-  const [editIsSpoiler, setEditIsSpoiler] = useState(false);
-  const [editingReply, setEditingReply] = useState<number | null>(null);
-  const [revealedSpoilers, setRevealedSpoilers] = useState<Set<string>>(new Set());
-  const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set());
-  const [deletedIds, setDeletedIds] = useState<Set<number>>(new Set());
-  const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; type: 'comment' | 'reply'; commentId?: number } | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [showComments, setShowComments] = useState(false);
-  const [areCommentsHidden, setAreCommentsHidden] = useState(() => {
-    return localStorage.getItem('settings_hide_comments_section') === 'true';
-  });
-  const [repliesPage, setRepliesPage] = useState<{ [key: number]: number }>({});
-  const [repliesHasMore, setRepliesHasMore] = useState<{ [key: number]: boolean }>({});
-
-  const [repliesTotalCount, setRepliesTotalCount] = useState<{ [key: number]: number }>({});
-  const [commentLimits, setCommentLimits] = useState<{ movieCount: number; hourCount: number; movieLimit: number | null; hourLimit: number | null; isAdmin?: boolean } | null>(null);
-
-  // Report states
-  const [reportModal, setReportModal] = useState<{ targetType: 'comment' | 'reply'; targetId: number } | null>(null);
-  const [reportReason, setReportReason] = useState('');
-  const [reportDetails, setReportDetails] = useState('');
-  const [reportSubmitting, setReportSubmitting] = useState(false);
-  const [reportedIds, setReportedIds] = useState<Set<string>>(new Set());
-
-  // Suivi des nouveaux commentaires
-  const [followingComments, setFollowingComments] = useState(false);
-  const [followingBusy, setFollowingBusy] = useState(false);
-
-  // Turnstile
-  const [turnstileToken, setTurnstileToken] = useState('');
-  const turnstileRef = useRef<HTMLDivElement>(null);
-  const widgetIdRef = useRef<string | null>(null);
-  // Dispense admin : pas de challenge du tout. Voir `utils/turnstileBypass.ts`.
-  const turnstileBypass = useTurnstileBypass();
-
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const lastCommentRef = useRef<HTMLDivElement | null>(null);
-  const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Helper pour récupérer les données du profil de manière sécurisée
-  const getProfileData = () => {
-    const profile = localStorage.getItem('selected_profile');
-    try {
-      return profile ? JSON.parse(profile) : null;
-    } catch (e) {
-      console.error('Erreur lors du parsing du profil:', e);
-      return null;
-    }
-  };
-
-  // Vérifier l'authentification et le profil
-  useEffect(() => {
-    const token = localStorage.getItem('auth_token');
-    const profileId = localStorage.getItem('selected_profile_id');
-
-    if (token) {
-      setIsAuthenticated(true);
-      if (profileId) {
-        setProfileId(profileId);
-      }
-
-      // Vérifier si admin
-      axios.get(`${MAIN_API}/api/admin/check`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-        .then(({ data }) => setIsAdmin(data?.success === true && data?.admin?.role === 'admin'))
-        .catch(() => setIsAdmin(false));
-    }
-  }, []);
-
-  useEffect(() => {
-    const syncCommentsVisibility = () => {
-      setAreCommentsHidden(localStorage.getItem('settings_hide_comments_section') === 'true');
-    };
-
-    syncCommentsVisibility();
-    window.addEventListener('storage', syncCommentsVisibility);
-    window.addEventListener('comments_section_visibility_changed', syncCommentsVisibility as EventListener);
-
-    return () => {
-      window.removeEventListener('storage', syncCommentsVisibility);
-      window.removeEventListener('comments_section_visibility_changed', syncCommentsVisibility as EventListener);
-    };
-  }, []);
-
-  // Turnstile : rendre le widget quand l'utilisateur est authentifié
-  const renderTurnstile = useCallback(() => {
-    if (window.turnstile && turnstileRef.current && !widgetIdRef.current) {
-      widgetIdRef.current = window.turnstile.render(turnstileRef.current, {
-        sitekey: TURNSTILE_SITE_KEY,
-        theme: 'dark',
-        callback: (token: string) => setTurnstileToken(token),
-        'expired-callback': () => setTurnstileToken(''),
-        'error-callback': () => setTurnstileToken(''),
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    if (turnstileBypass === 'bypass') {
-      setTurnstileToken(ADMIN_BYPASS_TOKEN);
-      return;
-    }
-    // Statut encore inconnu : on n'affiche rien plutôt qu'un challenge à
-    // retirer juste après.
-    if (turnstileBypass === 'unknown') return;
-    if (!isAuthenticated || !TURNSTILE_SITE_KEY) return;
-
-    const timer = setTimeout(() => {
-      if (window.turnstile) {
-        renderTurnstile();
-      } else {
-        const interval = setInterval(() => {
-          if (window.turnstile) {
-            clearInterval(interval);
-            renderTurnstile();
-          }
-        }, 200);
-        // Nettoyage de l'intervalle après 10s max
-        setTimeout(() => clearInterval(interval), 10000);
-      }
-    }, 300);
-
-    return () => {
-      clearTimeout(timer);
-      if (widgetIdRef.current && window.turnstile) {
-        window.turnstile.remove(widgetIdRef.current);
-        widgetIdRef.current = null;
-        setTurnstileToken('');
-      }
-    };
-  }, [isAuthenticated, renderTurnstile, turnstileBypass]);
-
-  const resetTurnstile = useCallback(() => {
-    // Un dispensé n'a rien à réinitialiser : effacer le marqueur rebloquerait
-    // le bouton après le premier commentaire.
-    if (turnstileBypass !== 'challenge') return;
-
-    setTurnstileToken('');
-    if (widgetIdRef.current && window.turnstile) {
-      window.turnstile.reset(widgetIdRef.current);
-    }
-  }, [turnstileBypass]);
-
-  // Charger les commentaires
-  const loadComments = useCallback(async (pageNum: number = 1) => {
-    try {
-      const token = localStorage.getItem('auth_token');
-      const currentProfileId = localStorage.getItem('selected_profile_id');
-
-      const response = await axios.get(
-        `${MAIN_API}/api/comments/${contentType}/${contentId}`,
-        {
-          params: { page: pageNum, limit: 20, profileId: currentProfileId },
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
-        }
-      );
-
-      const nextComments = response.data?.comments;
-      if (!Array.isArray(nextComments)) {
-        throw new Error('Réponse de commentaires invalide');
-      }
-      if (pageNum === 1) {
-        setComments(nextComments);
-      } else {
-        setComments(prev => [...prev, ...nextComments]);
-      }
-
-      setHasMore(response.data.hasMore === true);
-      setLoading(false);
-
-      // Délai de 0.3 secondes avant d'afficher les commentaires
-      setTimeout(() => {
-        setShowComments(true);
-      }, 300);
-    } catch (error) {
-      console.error('Erreur lors du chargement des commentaires:', error);
-      setLoading(false);
-      setTimeout(() => {
-        setShowComments(true);
-      }, 300);
-    }
-  }, [contentType, contentId]);
-
-  useEffect(() => {
-    loadComments(1);
-    fetchLimits();
-  }, [loadComments]);
-
-  // Abonnement aux nouveaux commentaires de ce contenu (par profil)
-  useEffect(() => {
-    const token = localStorage.getItem('auth_token');
-    if (!token || !profileId) {
-      setFollowingComments(false);
-      return;
-    }
-    let cancelled = false;
-    axios.get(`${MAIN_API}/api/comments/subscriptions/${contentType}/${contentId}`, {
-      params: { profileId },
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(({ data }) => { if (!cancelled) setFollowingComments(data?.subscribed === true); })
-      .catch(() => { if (!cancelled) setFollowingComments(false); });
-    return () => { cancelled = true; };
-  }, [contentType, contentId, profileId]);
-
-  const handleToggleFollowComments = async () => {
-    const token = localStorage.getItem('auth_token');
-    if (!token || !profileId || followingBusy) return;
-    const next = !followingComments;
-    setFollowingBusy(true);
-    try {
-      await axios.put(
-        `${MAIN_API}/api/comments/subscriptions/${contentType}/${contentId}`,
-        { profileId, subscribed: next },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setFollowingComments(next);
-      toast.success(next ? t('comments.followEnabled') : t('comments.followDisabled'));
-
-      // Proposer aussi les notifications push du navigateur quand c'est possible.
-      if (next && isPushSupported() && getPushPermission() !== 'denied') {
-        const alreadyPush = await isPushSubscribed();
-        if (!alreadyPush) await subscribeToPush();
-      }
-    } catch (error) {
-      console.error('Erreur lors du suivi des commentaires:', error);
-      toast.error(t('comments.followError'));
-    } finally {
-      setFollowingBusy(false);
-    }
-  };
-
-  // Charger les limites de commentaires
-  const fetchLimits = async () => {
-    try {
-      const token = localStorage.getItem('auth_token');
-      const currentProfileId = localStorage.getItem('selected_profile_id');
-      if (!token) return;
-
-      const response = await axios.get(`${MAIN_API}/api/comments/limits`, {
-        params: { contentType, contentId, profileId: currentProfileId },
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      setCommentLimits(response.data);
-    } catch (error) {
-      console.error('Erreur lors de la récupération des limites:', error);
-    }
-  };
-
-  // Pagination infinie — stable observer that reads latest state via refs.
-  // Avoids tearing down/rebuilding the IO on every page/loading transition.
-  const pageRef = useRef(page);
-  const hasMoreRef = useRef(hasMore);
-  const loadingRef = useRef(loading);
-  useEffect(() => { pageRef.current = page; }, [page]);
-  useEffect(() => { hasMoreRef.current = hasMore; }, [hasMore]);
-  useEffect(() => { loadingRef.current = loading; }, [loading]);
-
-  useEffect(() => {
-    if (observerRef.current) observerRef.current.disconnect();
-
-    observerRef.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting && hasMoreRef.current && !loadingRef.current) {
-        const nextPage = pageRef.current + 1;
-        setPage(nextPage);
-        loadComments(nextPage);
-      }
-    });
-
-    if (lastCommentRef.current) {
-      observerRef.current.observe(lastCommentRef.current);
-    }
-
-    return () => {
-      if (observerRef.current) observerRef.current.disconnect();
-    };
-  }, [loadComments]);
-
-  // Re-attach the IO target when the last-comment node changes (e.g. when
-  // new comments are appended after pagination). Without this the observer
-  // would still be watching the old "last" node.
-  useEffect(() => {
-    if (!observerRef.current) return;
-    observerRef.current.disconnect();
-    if (lastCommentRef.current) {
-      observerRef.current.observe(lastCommentRef.current);
-    }
-  }, [comments.length]);
-
-  // Charger les réponses d'un commentaire
-  const loadReplies = async (commentId: number, page: number = 1) => {
-    try {
-      const token = localStorage.getItem('auth_token');
-      const currentProfileId = localStorage.getItem('selected_profile_id');
-
-      const response = await axios.get(
-        `${MAIN_API}/api/comments/${commentId}/replies`,
-        {
-          params: { page, limit: 3, profileId: currentProfileId },
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
-        }
-      );
-
-      const hierarchicalReplies = response.data.replies || [];
-
-      if (page === 1) {
-        // Première page : remplacer les réponses
-        setReplies(prev => ({
-          ...prev,
-          [commentId]: hierarchicalReplies
-        }));
-      } else {
-        // Pages suivantes : ajouter les réponses
-        setReplies(prev => ({
-          ...prev,
-          [commentId]: [...(prev[commentId] || []), ...hierarchicalReplies]
-        }));
-      }
-
-      // Mettre à jour les infos de pagination
-      setRepliesPage(prev => ({
-        ...prev,
-        [commentId]: page
-      }));
-
-      setRepliesHasMore(prev => ({
-        ...prev,
-        [commentId]: response.data.hasMore
-      }));
-
-      setRepliesTotalCount(prev => ({
-        ...prev,
-        [commentId]: response.data.total
-      }));
-    } catch (error) {
-      console.error('Erreur lors du chargement des réponses:', error);
-    }
-  };
-
-  // Charger plus de réponses
-  const loadMoreReplies = async (commentId: number) => {
-    const currentPage = repliesPage[commentId] || 1;
-    const nextPage = currentPage + 1;
-    await loadReplies(commentId, nextPage);
-  };
-
-  // Poster un commentaire
-  const handlePostComment = async () => {
-    if (!newComment.trim() || newComment.length > 500) return;
-    if (TURNSTILE_SITE_KEY && !turnstileToken) return;
-
-    const token = localStorage.getItem('auth_token');
-    if (!token) return;
-
-    const profileData = getProfileData();
-
-    // Créer un commentaire optimiste avec un ID temporaire négatif
-    const optimisticComment: Comment = {
-      id: -Date.now(), // ID temporaire négatif
-      content_type: contentType,
-      content_id: contentId,
-      user_id: '',
-      user_type: '',
-      profile_id: profileId,
-      username: profileData?.name || t('comments.you'),
-      avatar: profileData?.avatar || null,
-      content: newComment,
-      is_spoiler: isSpoiler ? 1 : 0,
-      is_vip: 0,
-      is_admin: 0,
-      is_edited: 0,
-      created_at: Date.now(),
-      deleted: 0,
-      repliesCount: 0,
-      reactions: 0,
-      userReaction: null
-    };
-
-    // Ajouter immédiatement le commentaire (mise à jour optimiste)
-    setComments(prev => [optimisticComment, ...prev]);
-    const commentContent = newComment;
-    const commentIsSpoiler = isSpoiler;
-    setNewComment('');
-    setIsSpoiler(false);
-
-    try {
-      const response = await axios.post(
-        `${MAIN_API}/api/comments`,
-        {
-          contentType,
-          contentId,
-          content: commentContent,
-          isSpoiler: commentIsSpoiler,
-          profileId,
-          turnstileToken
-        },
-        { headers: { Authorization: `Bearer ${token}`, ...getVipHeaders() } }
-      );
-
-      // Reset le widget Turnstile pour le prochain commentaire
-      resetTurnstile();
-
-      setComments(prev => prev.map(c =>
-        c.id === optimisticComment.id ? response.data : c
-      ));
-
-      // Mettre à jour les limites après un post réussi
-      fetchLimits();
-    } catch (error) {
-      console.error('Erreur lors de la publication du commentaire:', error);
-      // En cas d'erreur, retirer le commentaire optimiste
-      setComments(prev => prev.filter(c => c.id !== optimisticComment.id));
-      // Restaurer le contenu pour que l'utilisateur ne perde pas son texte
-      setNewComment(commentContent);
-      setIsSpoiler(commentIsSpoiler);
-
-      if (axios.isAxiosError(error) && error.response?.status === 429) {
-        toast.error(error.response.data.error || t('comments.limitReached'));
-      } else {
-        toast.error(t('comments.publishError'));
-      }
-    }
-  };
-
-  // Poster une réponse
-  const handlePostReply = async (commentId: number, parentReplyId?: number, replyToUsername?: string) => {
-    if (!replyContent.trim() || replyContent.length > 500) return;
-    if (TURNSTILE_SITE_KEY && !turnstileToken) return;
-
-    const token = localStorage.getItem('auth_token');
-    if (!token) return;
-
-    const profileData = getProfileData();
-
-    // Créer une réponse optimiste avec un ID temporaire négatif
-    const optimisticReply: Reply = {
-      id: -Date.now(), // ID temporaire négatif
-      comment_id: commentId,
-      parent_reply_id: parentReplyId || null,
-      user_id: '',
-      user_type: '',
-      profile_id: profileId,
-      username: profileData?.name || t('comments.you'),
-      avatar: profileData?.avatar || null,
-      reply_to_username: replyToUsername || null,
-      content: replyContent,
-      is_spoiler: isReplySpoiler ? 1 : 0,
-      is_vip: 0,
-      is_admin: 0,
-      is_edited: 0,
-      created_at: Date.now(),
-      deleted: 0,
-      reactions: 0,
-      userReaction: null
-    };
-
-    // Ajouter immédiatement la réponse (mise à jour optimiste)
-    setReplies(prev => ({
-      ...prev,
-      [commentId]: [...(prev[commentId] || []), optimisticReply]
-    }));
-
-    // Mettre à jour immédiatement le compteur de réponses
-    setComments(prev =>
-      prev.map(c =>
-        c.id === commentId ? { ...c, repliesCount: c.repliesCount + 1 } : c
-      )
-    );
-
-    const replyContentBackup = replyContent;
-    const isReplySpoilerBackup = isReplySpoiler;
-    setReplyContent('');
-    setIsReplySpoiler(false);
-    setReplyingTo(null);
-
-    try {
-      await axios.post(
-        `${MAIN_API}/api/comments/${commentId}/replies`,
-        {
-          content: replyContentBackup,
-          isSpoiler: isReplySpoilerBackup,
-          profileId,
-          parentReplyId,
-          replyToUsername,
-          turnstileToken
-        },
-        { headers: { Authorization: `Bearer ${token}`, ...getVipHeaders() } }
-      );
-
-      // Reset le widget Turnstile pour la prochaine réponse
-      resetTurnstile();
-
-      // Recharger toutes les pages de réponses actuellement chargées
-      const currentPage = repliesPage[commentId] || 1;
-      const totalReplies: Reply[] = [];
-      const currentProfileId = localStorage.getItem('selected_profile_id');
-
-      for (let p = 1; p <= currentPage; p++) {
-        const response = await axios.get(
-          `${MAIN_API}/api/comments/${commentId}/replies`,
-          {
-            params: { page: p, limit: 3, profileId: currentProfileId },
-            headers: { Authorization: `Bearer ${token}` }
-          }
-        );
-        totalReplies.push(...(response.data.replies || []));
-
-        // Mettre à jour les infos de pagination avec la dernière page
-        if (p === currentPage) {
-          setRepliesHasMore(prev => ({
-            ...prev,
-            [commentId]: response.data.hasMore
-          }));
-          setRepliesTotalCount(prev => ({
-            ...prev,
-            [commentId]: response.data.total
-          }));
-        }
-      }
-
-      setReplies(prev => ({
-        ...prev,
-        [commentId]: totalReplies
-      }));
-    } catch (error) {
-      console.error('Erreur lors de la publication de la réponse:', error);
-      // En cas d'erreur, retirer la réponse optimiste
-      setReplies(prev => ({
-        ...prev,
-        [commentId]: (prev[commentId] || []).filter(r => r.id !== optimisticReply.id)
-      }));
-      // Décrémenter le compteur de réponses
-      setComments(prev =>
-        prev.map(c =>
-          c.id === commentId ? { ...c, repliesCount: c.repliesCount - 1 } : c
-        )
-      );
-      // Restaurer le contenu
-      setReplyContent(replyContentBackup);
-      setIsReplySpoiler(isReplySpoilerBackup);
-      setReplyingTo({ commentId, replyId: parentReplyId, username: replyToUsername || '' });
-      toast.error(t('comments.replyError'));
-    }
-  };
-
-  // Éditer un commentaire
-  const handleEditComment = async (commentId: number) => {
-    if (!editContent.trim() || editContent.length > 500) return;
-
-    const token = localStorage.getItem('auth_token');
-    if (!token) return;
-
-    try {
-      await axios.put(
-        `${MAIN_API}/api/comments/${commentId}`,
-        {
-          content: editContent,
-          isSpoiler: editIsSpoiler,
-          profileId
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      setComments(prev =>
-        prev.map(c =>
-          c.id === commentId
-            ? { ...c, content: editContent, is_spoiler: editIsSpoiler ? 1 : 0, is_edited: 1 }
-            : c
-        )
-      );
-
-      setEditingComment(null);
-      setEditContent('');
-    } catch (error) {
-      console.error('Erreur lors de l\'édition du commentaire:', error);
-    }
-  };
-
-  // Éditer une réponse
-  const handleEditReply = async (replyId: number, commentId: number) => {
-    if (!editContent.trim() || editContent.length > 500) return;
-
-    const token = localStorage.getItem('auth_token');
-    if (!token) return;
-
-    try {
-      await axios.put(
-        `${MAIN_API}/api/comments/replies/${replyId}`,
-        {
-          content: editContent,
-          isSpoiler: editIsSpoiler,
-          profileId
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      setReplies(prev => ({
-        ...prev,
-        [commentId]: prev[commentId].map(r =>
-          r.id === replyId
-            ? { ...r, content: editContent, is_spoiler: editIsSpoiler ? 1 : 0, is_edited: 1 }
-            : r
-        )
-      }));
-
-      setEditingReply(null);
-      setEditContent('');
-    } catch (error) {
-      console.error('Erreur lors de l\'édition de la réponse:', error);
-    }
-  };
-
-  // Demande confirmation de suppression (ouvre le popup)
-  const requestDeleteComment = (commentId: number) => {
-    setDeleteConfirm({ id: commentId, type: 'comment' });
-  };
-
-  const requestDeleteReply = (replyId: number, commentId: number) => {
-    setDeleteConfirm({ id: replyId, type: 'reply', commentId });
-  };
-
-  // Exécuter la suppression confirmée
-  const executeDelete = async () => {
-    if (!deleteConfirm) return;
-    const { id, type, commentId } = deleteConfirm;
-    setDeleteConfirm(null);
-
-    const token = localStorage.getItem('auth_token');
-    if (!token) return;
-
-    setDeletingIds(prev => new Set(prev).add(id));
-
-    try {
-      if (type === 'comment') {
-        await axios.delete(`${MAIN_API}/api/comments/${id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-          params: { profileId }
-        });
-
-        setDeletingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
-        setDeletedIds(prev => new Set(prev).add(id));
-
-        setTimeout(() => {
-          setComments(prev => prev.filter(c => c.id !== id));
-          setDeletedIds(prev => { const s = new Set(prev); s.delete(id); return s; });
-        }, 2000);
-      } else {
-        await axios.delete(`${MAIN_API}/api/comments/replies/${id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-          params: { profileId }
-        });
-
-        setDeletingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
-        setDeletedIds(prev => new Set(prev).add(id));
-
-        setTimeout(() => {
-          setReplies(prev => ({
-            ...prev,
-            [commentId!]: (prev[commentId!] || []).filter(r => r.id !== id)
-          }));
-          setComments(prev =>
-            prev.map(c =>
-              c.id === commentId ? { ...c, repliesCount: c.repliesCount - 1 } : c
-            )
-          );
-          setDeletedIds(prev => { const s = new Set(prev); s.delete(id); return s; });
-        }, 2000);
-      }
-    } catch (error) {
-      console.error('Erreur lors de la suppression:', error);
-      setDeletingIds(prev => { const s = new Set(prev); s.delete(id); return s; });
-    }
-  };
-
-  // Soumettre un signalement
-  const handleReport = async () => {
-    if (!reportModal || !reportReason) return;
-    const token = localStorage.getItem('auth_token');
-    if (!token) return;
-
-    setReportSubmitting(true);
-    try {
-      await axios.post(
-        `${MAIN_API}/api/comments/report`,
-        {
-          targetType: reportModal.targetType,
-          targetId: reportModal.targetId,
-          reason: reportReason,
-          details: reportDetails || undefined,
-          profileId
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setReportedIds(prev => new Set(prev).add(`${reportModal.targetType}-${reportModal.targetId}`));
-      setReportModal(null);
-      setReportReason('');
-      setReportDetails('');
-    } catch (error: any) {
-      if (error.response?.status === 409) {
-        setReportedIds(prev => new Set(prev).add(`${reportModal.targetType}-${reportModal.targetId}`));
-        setReportModal(null);
-        setReportReason('');
-        setReportDetails('');
-      } else {
-        console.error('Erreur lors du signalement:', error);
-      }
-    } finally {
-      setReportSubmitting(false);
-    }
-  };
-
-  const REPORT_REASONS = [
-    { value: 'spam', label: t('comments.reportReasons.spam', 'Spam') },
-    { value: 'harassment', label: t('comments.reportReasons.harassment', 'Insultes / Harcèlement') },
-    { value: 'sexual_content', label: t('comments.reportReasons.sexualContent', 'Contenu sexuel') },
-    { value: 'unmarked_spoiler', label: t('comments.reportReasons.unmarkedSpoiler', 'Spoiler non marqué') },
-    { value: 'impersonation', label: t('comments.reportReasons.impersonation', "Usurpation d'identité") },
-    { value: 'other', label: t('comments.reportReasons.other', 'Autre') },
-  ];
-
-  // Gérer les réactions
-  const handleReaction = async (targetType: 'comment' | 'reply', targetId: number) => {
-    const token = localStorage.getItem('auth_token');
-    if (!token) return;
-
-    // Déterminer l'état actuel de la réaction
-    let currentReaction: boolean | null = null;
-    if (targetType === 'comment') {
-      const comment = comments.find(c => c.id === targetId);
-      currentReaction = comment?.userReaction || false;
-    } else {
-      const commentId = Object.keys(replies).find(cId =>
-        replies[parseInt(cId)].some(r => r.id === targetId)
-      );
-      if (commentId) {
-        const reply = replies[parseInt(commentId)].find(r => r.id === targetId);
-        currentReaction = reply?.userReaction || false;
-      }
-    }
-
-    // Inverser l'état de la réaction de manière optimiste
-    const newReactionState = !currentReaction;
-
-    if (targetType === 'comment') {
-      // Mise à jour optimiste pour un commentaire
-      setComments(prev =>
-        prev.map(c =>
-          c.id === targetId
-            ? {
-              ...c,
-              reactions: newReactionState ? c.reactions + 1 : c.reactions - 1,
-              userReaction: newReactionState
-            }
-            : c
-        )
-      );
-    } else {
-      // Mise à jour optimiste pour une réponse
-      const commentId = Object.keys(replies).find(cId =>
-        replies[parseInt(cId)].some(r => r.id === targetId)
-      );
-
-      if (commentId) {
-        setReplies(prev => ({
-          ...prev,
-          [parseInt(commentId)]: prev[parseInt(commentId)].map(r =>
-            r.id === targetId
-              ? {
-                ...r,
-                reactions: newReactionState ? r.reactions + 1 : r.reactions - 1,
-                userReaction: newReactionState
-              }
-              : r
-          )
-        }));
-      }
-    }
-
-    try {
-      const response = await axios.post(
-        `${MAIN_API}/api/comments/react`,
-        { targetType, targetId, profileId },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      // Vérifier si la réponse du serveur correspond à notre état optimiste
-      // Si non, corriger
-      if (response.data.reacted !== newReactionState) {
-        if (targetType === 'comment') {
-          setComments(prev =>
-            prev.map(c =>
-              c.id === targetId
-                ? {
-                  ...c,
-                  reactions: response.data.reacted ? c.reactions + 1 : c.reactions - 1,
-                  userReaction: response.data.reacted
-                }
-                : c
-            )
-          );
-        } else {
-          const commentId = Object.keys(replies).find(cId =>
-            replies[parseInt(cId)].some(r => r.id === targetId)
-          );
-
-          if (commentId) {
-            setReplies(prev => ({
-              ...prev,
-              [parseInt(commentId)]: prev[parseInt(commentId)].map(r =>
-                r.id === targetId
-                  ? {
-                    ...r,
-                    reactions: response.data.reacted ? r.reactions + 1 : r.reactions - 1,
-                    userReaction: response.data.reacted
-                  }
-                  : r
-              )
-            }));
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Erreur lors de la gestion de la réaction:', error);
-      // En cas d'erreur, annuler la mise à jour optimiste
-      if (targetType === 'comment') {
-        setComments(prev =>
-          prev.map(c =>
-            c.id === targetId
-              ? {
-                ...c,
-                reactions: currentReaction ? c.reactions + 1 : c.reactions - 1,
-                userReaction: currentReaction
-              }
-              : c
-          )
-        );
-      } else {
-        const commentId = Object.keys(replies).find(cId =>
-          replies[parseInt(cId)].some(r => r.id === targetId)
-        );
-
-        if (commentId) {
-          setReplies(prev => ({
-            ...prev,
-            [parseInt(commentId)]: prev[parseInt(commentId)].map(r =>
-              r.id === targetId
-                ? {
-                  ...r,
-                  reactions: currentReaction ? r.reactions + 1 : r.reactions - 1,
-                  userReaction: currentReaction
-                }
-                : r
-            )
-          }));
-        }
-      }
-    }
-  };
-
-  // Toggle des réponses
-  const toggleReplies = (commentId: number) => {
-    const newExpanded = new Set(expandedReplies);
-    if (newExpanded.has(commentId)) {
-      newExpanded.delete(commentId);
-    } else {
-      newExpanded.add(commentId);
-      if (!replies[commentId]) {
-        loadReplies(commentId);
-      }
-    }
-    setExpandedReplies(newExpanded);
-  };
-
-  // Révéler un spoiler
-  const revealSpoiler = (type: 'comment' | 'reply', id: number) => {
-    setRevealedSpoilers(prev => new Set([...prev, `${type}-${id}`]));
-  };
-
-  // Format de la date
-  const formatDate = (timestamp: number) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const seconds = Math.floor(diff / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (days > 7) {
-      return date.toLocaleDateString(i18n.language, { day: 'numeric', month: 'short', year: 'numeric' });
-    } else if (days > 0) {
-      return t('time.daysAgo', { count: days });
-    } else if (hours > 0) {
-      return t('time.hoursAgo', { count: hours });
-    } else if (minutes > 0) {
-      return t('time.minutesAgo', { count: minutes });
-    } else {
-      return t('time.justNow');
-    }
-  };
+  const { t } = useTranslation();
+  const {
+    comments, loading, showComments, areCommentsHidden, lastCommentRef, formatDate,
+    isAuthenticated, isAdmin, profileId, getProfileData, commentLimits, limitsPending,
+    newComment, setNewComment, isSpoiler, setIsSpoiler, commentTextareaRef, handlePostComment,
+    replies, expandedReplies, repliesHasMore, repliesTotalCount, toggleReplies, loadMoreReplies,
+    replyingTo, setReplyingTo, replyContent, setReplyContent, isReplySpoiler, setIsReplySpoiler,
+    replyTextareaRef, handlePostReply,
+    editingComment, setEditingComment, editingReply, setEditingReply, editContent, setEditContent,
+    editIsSpoiler, setEditIsSpoiler, editTextareaRef, handleEditComment, handleEditReply,
+    handleReaction, revealedSpoilers, revealSpoiler,
+    deletingIds, deletedIds, deleteConfirm, setDeleteConfirm, requestDeleteComment, requestDeleteReply,
+    executeDelete,
+    reportModal, setReportModal, reportReason, setReportReason, reportDetails, setReportDetails,
+    reportSubmitting, reportedIds, handleReport, REPORT_REASONS,
+    followingComments, followingBusy, handleToggleFollowComments,
+    turnstileToken, turnstileRef, turnstileBypass,
+  } = useComments(contentType, contentId);
+
+  const showSkeleton = comments.length === 0 ? loading : !showComments;
 
   return (
     <>
@@ -1986,7 +942,14 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentI
                 maxLength={500}
               />
 
-              {/* Affichage des limites */}
+              {/* Affichage des limites, leur place gardée tant qu'elles chargent */}
+              {!commentLimits && limitsPending && (
+                <div className="mt-3 flex flex-wrap gap-3 items-center" aria-hidden="true">
+                  {LIMIT_CHIP_WIDTHS.map(width => (
+                    <Skeleton key={width} containerClassName={width} className="h-[30px] sm:h-[34px]" radius="0.5rem" baseColor={SKELETON_BASE} />
+                  ))}
+                </div>
+              )}
               {commentLimits && !commentLimits.isAdmin && (
                 <div className="mt-3 flex flex-wrap gap-3 text-xs sm:text-sm items-center">
                   <div className="px-3 py-1.5 rounded-lg border bg-gray-700/30 border-gray-600/30 text-gray-300 font-semibold">
@@ -2069,11 +1032,12 @@ const CommentsSection: React.FC<CommentsSectionProps> = ({ contentType, contentI
 
       {/* Liste des commentaires */}
       <div className="space-y-4 sm:space-y-6">
-        {/* Loading skeleton - affiché uniquement lors du chargement initial */}
-        {loading && comments.length === 0 && (
+        {/* Gabarits du premier chargement, gardés pendant les 300 ms qui précèdent
+            l'apparition des commentaires : la liste ne laisse jamais de trou. */}
+        {showSkeleton && (
           <div className="space-y-4 sm:space-y-6">
-            {[...Array(3)].map((_, index) => (
-              <CommentSkeleton key={`skeleton-${index}`} />
+            {SKELETON_ROWS.map((shape, index) => (
+              <CommentSkeleton key={index} name={shape.name} lines={shape.lines} signedIn={isAuthenticated} />
             ))}
           </div>
         )}

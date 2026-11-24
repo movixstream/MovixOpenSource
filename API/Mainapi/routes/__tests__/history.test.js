@@ -11,8 +11,15 @@ const plain = value => JSON.parse(JSON.stringify(value));
 const OWNER = { userType: 'oauth', userId: 'user', profileId: 'profile-one' };
 
 function fakeStore() {
-  const calls = { listContinue: [], listHistory: [], getTitle: [], listProgress: [], recordProgress: [], hide: [], hideAll: [] };
+  const calls = { listContinue: [], listHistory: [], getTitle: [], getMovieTitles: [], listProgress: [], recordProgress: [], hide: [], hideAll: [] };
   return {
+    // Le film 404 est inconnu du profil : absent du résultat.
+    async getMovieTitles(owner, tmdbIds) {
+      calls.getMovieTitles.push({ owner, tmdbIds });
+      return tmdbIds.filter(tmdbId => tmdbId !== 404).map(tmdbId => (
+        { mediaType: 'movie', tmdbId, status: 'finished', markedWatched: true, estimated: false, position: null, duration: null }
+      ));
+    },
     async getTitle(owner, options) {
       calls.getTitle.push({ owner, options });
       if (options.tmdbId === 404) return null;
@@ -109,7 +116,14 @@ async function fixture({ importStatus = 'already', profileData = { user_language
       .map(item => item.route.path);
   }
 
-  return { request, store, imports, deleteRoutesMatching, resyncProfileMarks, markChecks, titleDeletes };
+  // Fonctions d'une route dans l'ordre : limiteur de débit, puis traitement.
+  function handlersOf(method, routePath) {
+    const layer = router.stack.find(item => item.route?.path === routePath && item.route.methods[method.toLowerCase()]);
+    assert.ok(layer, `route ${method} ${routePath} absente`);
+    return layer.route.stack.map(item => item.handle);
+  }
+
+  return { request, store, imports, deleteRoutesMatching, handlersOf, resyncProfileMarks, markChecks, titleDeletes };
 }
 
 test('sans auth : 401 sur chaque route', async () => {
@@ -249,6 +263,98 @@ test('GET title : historique désactivé → titre vide et complet, sans import'
   assert.deepEqual(response.body, { complete: true, title: null });
   assert.equal(f.imports.length, 0);
   assert.equal(f.store.calls.getTitle.length, 0);
+});
+
+// --- Plusieurs films en un appel (GET /history/titles) ---
+
+const BATCH = '/history/titles';
+const batchQuery = (extra = {}) => ({ profileId: 'profile-one', type: 'movie', ids: '550,13', ...extra });
+const movieTitle = tmdbId => ({ mediaType: 'movie', tmdbId, status: 'finished', markedWatched: true, estimated: false, position: null, duration: null });
+
+test('GET titles : un seul appel au magasin pour toute la liste, film inconnu absent, import et marques comme /title', async () => {
+  const f = await fixture({ importStatus: 'already' });
+  const response = await f.request('get', BATCH, { query: batchQuery({ ids: '550,404,13', language: 'en-US' }) });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, { complete: true, titles: [movieTitle(550), movieTitle(13)] });
+  assert.equal(f.store.calls.getMovieTitles.length, 1);
+  assert.deepEqual(plain(f.store.calls.getMovieTitles[0]), { owner: OWNER, tmdbIds: [550, 404, 13] });
+  // Pas la lecture titre par titre.
+  assert.equal(f.store.calls.getTitle.length, 0);
+  assert.equal(f.imports.length, 1);
+  assert.equal(f.imports[0][4].afterImport, f.resyncProfileMarks);
+  assert.deepEqual(plain(f.markChecks), [OWNER]);
+});
+
+test('GET titles : identifiants dédoublonnés dans l’ordre reçu ; 60 acceptés, 61 → 400', async () => {
+  const f = await fixture();
+  await f.request('get', BATCH, { query: batchQuery({ ids: '13,550,13,13,550,7' }) });
+  assert.deepEqual(plain(f.store.calls.getMovieTitles[0].tmdbIds), [13, 550, 7]);
+
+  const list = count => Array.from({ length: count }, (_, index) => index + 1).join(',');
+  const full = await f.request('get', BATCH, { query: batchQuery({ ids: list(60) }) });
+  assert.equal(full.statusCode, 200);
+  assert.equal(full.body.titles.length, 60);
+  // Les doublons ne comptent pas dans la limite.
+  const repeated = await f.request('get', BATCH, { query: batchQuery({ ids: `${list(60)},1,2,3` }) });
+  assert.equal(repeated.statusCode, 200);
+  assert.equal(f.store.calls.getMovieTitles.length, 3);
+
+  const tooMany = await f.request('get', BATCH, { query: batchQuery({ ids: list(61) }) });
+  assert.equal(tooMany.statusCode, 400);
+  assert.equal(tooMany.body.code, 'TOO_MANY_IDS');
+  assert.equal(f.store.calls.getMovieTitles.length, 3);
+});
+
+test('GET titles : type autre que movie ou liste invalide → 400, sans import ni lecture', async () => {
+  const f = await fixture();
+  for (const type of ['tv', 'film', '', undefined]) {
+    const response = await f.request('get', BATCH, { query: batchQuery({ type }) });
+    assert.equal(response.statusCode, 400, `type ${JSON.stringify(type)}`);
+    assert.equal(response.body.code, 'INVALID_MEDIA_TYPE');
+  }
+  for (const ids of [undefined, '', ',', '550,', '550,,13', '550, 13', '0', '-3', '1.5', 'abc', '550;13', '99999999999', ['550', '13']]) {
+    const response = await f.request('get', BATCH, { query: batchQuery({ ids }) });
+    assert.equal(response.statusCode, 400, `ids ${JSON.stringify(ids)}`);
+    assert.equal(response.body.code, 'INVALID_MEDIA_ID');
+  }
+  assert.equal(f.imports.length, 0);
+  assert.equal(f.store.calls.getMovieTitles.length, 0);
+});
+
+test('GET titles : mêmes contrôles que /title — 401, invité, profil d’un autre compte, profileId invalide', async () => {
+  const f = await fixture();
+  assert.equal((await f.request('get', BATCH, { auth: null, query: batchQuery() })).statusCode, 401);
+  assert.equal((await f.request('get', BATCH, { auth: { userType: 'guest', userId: 'g' }, query: batchQuery() })).statusCode, 401);
+  const other = await f.request('get', BATCH, { query: batchQuery({ profileId: 'profile-two' }) });
+  assert.equal(other.statusCode, 404);
+  assert.equal(other.body.code, 'PROFILE_NOT_FOUND');
+  assert.equal((await f.request('get', BATCH, { query: batchQuery({ profileId: '../x' }) })).statusCode, 400);
+  assert.equal(f.imports.length, 0);
+  assert.equal(f.store.calls.getMovieTitles.length, 0);
+  // Même limiteur de débit (la même instance) que la lecture d'un titre.
+  assert.equal(f.handlersOf('get', BATCH).length, 2);
+  assert.equal(f.handlersOf('get', BATCH)[0], f.handlersOf('get', '/history/title')[0]);
+});
+
+test('GET titles : historique désactivé → liste vide et complète, sans import ni lecture', async () => {
+  const f = await fixture({ profileData: { settings_disable_history: 'true' } });
+  const response = await f.request('get', BATCH, { query: batchQuery() });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.body, { complete: true, titles: [] });
+  assert.equal(f.imports.length, 0);
+  assert.equal(f.store.calls.getMovieTitles.length, 0);
+});
+
+test('GET titles : complete suit l’import ; pas de recalage des marques tant qu’il n’est pas fait', async () => {
+  for (const [status, complete] of [['already', true], ['imported', true], ['deferred', false], ['failed', false]]) {
+    const f = await fixture({ importStatus: status });
+    const response = await f.request('get', BATCH, { query: batchQuery() });
+    assert.equal(response.statusCode, 200, status);
+    assert.equal(response.body.complete, complete, status);
+    assert.equal(response.body.titles.length, 2, status);
+    assert.equal(f.markChecks.length, complete ? 1 : 0, status);
+  }
 });
 
 test('GET list : marques vérifiées avant le calcul (import fait) ; échec → liste non gardée', async () => {

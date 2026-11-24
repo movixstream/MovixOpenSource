@@ -21,7 +21,6 @@ export function watchItemPath(item: WatchItem): string {
     if (!source || !targetId || !item.liveTvKind) return '/live-tv';
     const params = new URLSearchParams({ source, targetId, kind: item.liveTvKind });
     if (item.liveTvCatalogId) params.set('catalogId', item.liveTvCatalogId);
-    if (item.liveTvCategoryId) params.set('categoryId', item.liveTvCategoryId);
     return `/live-tv?${params.toString()}`;
   }
   if (typeof item.id !== 'number') return '/';
@@ -72,7 +71,7 @@ export default function LibraryGrid({ items, listType, onRemove }: LibraryGridPr
         .filter(Boolean)
         .join(' · ');
     }
-    if (item.type === 'live-tv') return item.source === 'iptv' ? t('liveTV.iptvWebSource') : t('nav.liveTV');
+    if (item.type === 'live-tv') return t('nav.liveTV');
     return typeLabel(item);
   };
 

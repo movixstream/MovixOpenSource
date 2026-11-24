@@ -19,6 +19,7 @@ import { copyText } from '@/utils/clipboard';
 import { VIP_GIFT_CARD_NAMES } from '@/utils/vipDonationsUi';
 import {
   formatDonationAmount,
+  formatEnabledGiftCards,
   getDonationContacts,
   getDonationRule,
   getVipDurationForAmount,
@@ -70,8 +71,8 @@ const GiftCardDonation: React.FC<GiftCardDonationProps> = ({ settings, exampleAm
 
   const contacts = useMemo(() => getDonationContacts(settings.contacts, {
     subject: t('vipDonations.donate.giftCard.mailSubject'),
-    body: t('vipDonations.donate.giftCard.mailBody')
-  }), [settings.contacts, t]);
+    body: t('vipDonations.donate.giftCard.mailBody', { cards: formatEnabledGiftCards(locale, settings) })
+  }), [settings, locale, t]);
 
   const handleCopy = async (value: string) => {
     if (await copyText(value)) {

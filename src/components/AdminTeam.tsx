@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Clock,
   Copy,
+  Crown,
   Minus,
   Plus,
   RefreshCw,
@@ -19,18 +20,27 @@ import { Button } from './ui/button';
 import ConfirmDialog from './ui/confirm-dialog';
 import { Input } from './ui/input';
 import ReusableModal from './ui/reusable-modal';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { copyText } from '../utils/clipboard';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+type TeamRole = 'owner' | 'admin' | 'uploader';
 
 interface TeamMember {
   id: number;
   userId: string;
   authType: 'oauth' | 'bip-39';
-  role: 'admin' | 'uploader';
+  role: TeamRole;
   username: string;
   avatar: string | null;
   createdAt: string;
+}
+
+// Ce que la personne connectée a le droit de faire dans l'équipe.
+interface TeamViewer {
+  adminId: number | null;
+  isOwner: boolean;
 }
 
 interface HistoryEntry {
@@ -85,13 +95,18 @@ const AdminTeam: React.FC = () => {
   const { t } = useTranslation();
 
   const [members, setMembers] = useState<TeamMember[]>([]);
+  const [viewer, setViewer] = useState<TeamViewer>({ adminId: null, isOwner: false });
   const [loading, setLoading] = useState(true);
 
   // Add form state
   const [addOpen, setAddOpen] = useState(false);
   const [addUserId, setAddUserId] = useState('');
   const [addAuthType, setAddAuthType] = useState<'oauth' | 'bip39'>('oauth');
+  const [addRole, setAddRole] = useState<TeamRole>('uploader');
   const [addBusy, setAddBusy] = useState(false);
+
+  // Role change state (id du membre en cours de modification)
+  const [roleBusyId, setRoleBusyId] = useState<number | null>(null);
 
   // Remove confirm state
   const [removeCandidate, setRemoveCandidate] = useState<TeamMember | null>(null);
@@ -113,6 +128,10 @@ const AdminTeam: React.FC = () => {
     try {
       const res = await axios.get(`${API_URL}/api/admin/admins`, { headers: getAuth() });
       setMembers(res.data?.members || []);
+      setViewer({
+        adminId: typeof res.data?.viewer?.adminId === 'number' ? res.data.viewer.adminId : null,
+        isOwner: !!res.data?.viewer?.isOwner,
+      });
     } catch (err) {
       toast.error(getRequestErrorMessage(err) || t('common.error', 'Erreur'));
     } finally {
@@ -132,18 +151,39 @@ const AdminTeam: React.FC = () => {
     try {
       await axios.post(
         `${API_URL}/api/admin/admins`,
-        { userId: addUserId.trim(), authType: addAuthType },
+        { userId: addUserId.trim(), authType: addAuthType, role: viewer.isOwner ? addRole : 'uploader' },
         { headers: getAuth() },
       );
-      toast.success(t('admin.team.addedSuccess', 'Uploader ajouté avec succès'));
+      toast.success(t('adminTeamRoles.addedSuccess', 'Membre ajouté à l\'équipe'));
       setAddOpen(false);
       setAddUserId('');
       setAddAuthType('oauth');
+      setAddRole('uploader');
       loadMembers();
     } catch (err) {
       toast.error(getRequestErrorMessage(err) || t('common.error', 'Erreur'));
     } finally {
       setAddBusy(false);
+    }
+  };
+
+  // ─── Change role (owner only) ────────────────────────────────────────────────
+
+  const handleRoleChange = async (member: TeamMember, role: TeamRole) => {
+    if (role === member.role) return;
+    setRoleBusyId(member.id);
+    try {
+      await axios.patch(
+        `${API_URL}/api/admin/admins/${member.id}`,
+        { role },
+        { headers: getAuth() },
+      );
+      toast.success(t('adminTeamRoles.roleChanged', 'Rôle mis à jour'));
+      loadMembers();
+    } catch (err) {
+      toast.error(getRequestErrorMessage(err) || t('common.error', 'Erreur'));
+    } finally {
+      setRoleBusyId(null);
     }
   };
 
@@ -154,7 +194,7 @@ const AdminTeam: React.FC = () => {
     setRemoveBusy(true);
     try {
       await axios.delete(`${API_URL}/api/admin/admins/${removeCandidate.id}`, { headers: getAuth() });
-      toast.success(t('admin.team.removedSuccess', 'Uploader retiré'));
+      toast.success(t('adminTeamRoles.removedSuccess', 'Membre retiré de l\'équipe'));
       setRemoveCandidate(null);
       loadMembers();
     } catch (err) {
@@ -249,7 +289,7 @@ const AdminTeam: React.FC = () => {
         </div>
         <Button onClick={() => setAddOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
-          {t('admin.team.addUploader', 'Ajouter un uploader')}
+          {t('adminTeamRoles.addMember', 'Ajouter un membre')}
         </Button>
       </div>
 
@@ -264,22 +304,35 @@ const AdminTeam: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-3">
-          {members.map((member) => (
-            <MemberCard
-              key={member.id}
-              member={member}
-              onHistory={() => openHistory(member)}
-              onRemove={() => setRemoveCandidate(member)}
-            />
-          ))}
+          {members.map((member) => {
+            const isSelf = member.id === viewer.adminId;
+            // Mêmes règles que le serveur : un owner gère tout le monde sauf
+            // lui-même ; un admin ne retire que des uploaders.
+            const canChangeRole = viewer.isOwner && !isSelf;
+            const canRemove = !isSelf && member.role !== 'owner'
+              && (member.role === 'uploader' || viewer.isOwner);
+            return (
+              <MemberCard
+                key={member.id}
+                member={member}
+                isSelf={isSelf}
+                canChangeRole={canChangeRole}
+                canRemove={canRemove}
+                roleBusy={roleBusyId === member.id}
+                onRoleChange={(role) => handleRoleChange(member, role)}
+                onHistory={() => openHistory(member)}
+                onRemove={() => setRemoveCandidate(member)}
+              />
+            );
+          })}
         </div>
       )}
 
-      {/* Add uploader modal */}
+      {/* Add member modal */}
       <ReusableModal
         isOpen={addOpen}
         onClose={() => !addBusy && setAddOpen(false)}
-        title={t('admin.team.addUploader', 'Ajouter un uploader')}
+        title={t('adminTeamRoles.addMember', 'Ajouter un membre')}
         className="max-w-md"
       >
         <div className="space-y-4">
@@ -327,10 +380,23 @@ const AdminTeam: React.FC = () => {
             </div>
           </div>
 
+          {viewer.isOwner && (
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-white/50">
+                {t('adminTeamRoles.roleLabel', 'Rôle')}
+              </label>
+              <RoleSelect value={addRole} onChange={setAddRole} disabled={addBusy} />
+            </div>
+          )}
+
+          <p className="text-xs text-white/40">
+            {t('adminTeamRoles.linkedHint', 'Un compte Discord ou Google relié à un compte BIP-39 est ajouté sous ce compte BIP-39 (celui avec lequel il se connecte).')}
+          </p>
+
           <div className="flex justify-end gap-2 pt-2">
             <Button
               variant="secondary"
-              onClick={() => { setAddOpen(false); setAddUserId(''); setAddAuthType('oauth'); }}
+              onClick={() => { setAddOpen(false); setAddUserId(''); setAddAuthType('oauth'); setAddRole('uploader'); }}
               disabled={addBusy}
             >
               {t('common.cancel', 'Annuler')}
@@ -342,7 +408,7 @@ const AdminTeam: React.FC = () => {
               <Plus className="mr-2 h-4 w-4" />
               {addBusy
                 ? t('admin.team.adding', 'Ajout…')
-                : t('admin.team.addUploader', 'Ajouter un uploader')}
+                : t('adminTeamRoles.addMember', 'Ajouter un membre')}
             </Button>
           </div>
         </div>
@@ -351,7 +417,7 @@ const AdminTeam: React.FC = () => {
       {/* Remove confirm dialog */}
       <ConfirmDialog
         isOpen={!!removeCandidate}
-        title={t('admin.team.removeTitle', 'Retirer cet uploader ?')}
+        title={t('adminTeamRoles.removeTitle', 'Retirer ce membre ?')}
         message={
           removeCandidate
             ? t('admin.team.removeConfirm', `Retirer @${removeCandidate.username} de l'équipe ?`)
@@ -380,15 +446,65 @@ const AdminTeam: React.FC = () => {
   );
 };
 
+// ─── RoleSelect ───────────────────────────────────────────────────────────────
+
+const ROLE_OPTIONS: TeamRole[] = ['uploader', 'admin', 'owner'];
+
+interface RoleSelectProps {
+  value: TeamRole;
+  onChange: (role: TeamRole) => void;
+  disabled?: boolean;
+}
+
+const RoleSelect: React.FC<RoleSelectProps> = ({ value, onChange, disabled }) => {
+  const { t } = useTranslation();
+  const labels: Record<TeamRole, string> = {
+    owner: t('adminTeamRoles.roleOwner', 'Owner'),
+    admin: t('admin.team.roleAdmin', 'Admin'),
+    uploader: t('admin.team.roleUploader', 'Uploader'),
+  };
+  return (
+    <Select
+      value={value}
+      onValueChange={(next) => {
+        if (ROLE_OPTIONS.includes(next as TeamRole)) onChange(next as TeamRole);
+      }}
+    >
+      <SelectTrigger className="w-[140px]" disabled={disabled} aria-label={t('adminTeamRoles.roleLabel', 'Rôle')}>
+        <SelectValue placeholder={labels[value]} />
+      </SelectTrigger>
+      <SelectContent>
+        {ROLE_OPTIONS.map((role) => (
+          <SelectItem key={role} value={role}>{labels[role]}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+};
+
 // ─── MemberCard ───────────────────────────────────────────────────────────────
 
 interface MemberCardProps {
   member: TeamMember;
+  isSelf: boolean;
+  canChangeRole: boolean;
+  canRemove: boolean;
+  roleBusy: boolean;
+  onRoleChange: (role: TeamRole) => void;
   onHistory: () => void;
   onRemove: () => void;
 }
 
-const MemberCard: React.FC<MemberCardProps> = ({ member, onHistory, onRemove }) => {
+const MemberCard: React.FC<MemberCardProps> = ({
+  member,
+  isSelf,
+  canChangeRole,
+  canRemove,
+  roleBusy,
+  onRoleChange,
+  onHistory,
+  onRemove,
+}) => {
   const { t } = useTranslation();
 
   const handleCopyUserId = async () => {
@@ -428,7 +544,12 @@ const MemberCard: React.FC<MemberCardProps> = ({ member, onHistory, onRemove }) 
             <span className="font-semibold text-white">{member.username}</span>
 
             {/* Role badge */}
-            {member.role === 'admin' ? (
+            {member.role === 'owner' ? (
+              <Badge variant="premium" className="gap-1 text-[11px]">
+                <Crown className="h-3 w-3" />
+                {t('adminTeamRoles.roleOwner', 'Owner')}
+              </Badge>
+            ) : member.role === 'admin' ? (
               <Badge variant="premium" className="gap-1 text-[11px]">
                 <ShieldCheck className="h-3 w-3" />
                 {t('admin.team.roleAdmin', 'Admin')}
@@ -442,6 +563,10 @@ const MemberCard: React.FC<MemberCardProps> = ({ member, onHistory, onRemove }) 
 
             {/* Auth type */}
             <span className="text-xs text-white/40">{authTypeLabel}</span>
+
+            {isSelf && (
+              <span className="text-xs text-white/40">{t('adminTeamRoles.you', '(toi)')}</span>
+            )}
           </div>
 
           {/* userId + copy */}
@@ -467,13 +592,17 @@ const MemberCard: React.FC<MemberCardProps> = ({ member, onHistory, onRemove }) 
         </div>
 
         {/* Actions */}
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {canChangeRole && (
+            <RoleSelect value={member.role} onChange={onRoleChange} disabled={roleBusy} />
+          )}
+
           <Button variant="outline" size="sm" onClick={onHistory}>
             <Clock className="mr-1.5 h-3.5 w-3.5" />
             {t('admin.team.history', 'Historique')}
           </Button>
 
-          {member.role === 'uploader' && (
+          {canRemove && (
             <Button variant="destructive" size="sm" onClick={onRemove}>
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
               {t('admin.team.remove', 'Retirer')}

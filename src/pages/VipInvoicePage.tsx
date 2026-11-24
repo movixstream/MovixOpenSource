@@ -695,7 +695,7 @@ const VipInvoicePage: React.FC = () => {
               className="w-40 rounded-xl bg-white p-2 sm:w-44"
             />
           ) : qrPayload && !qrFailed ? (
-            <div className="h-40 w-40 animate-pulse rounded-xl bg-white/[0.06] sm:h-44 sm:w-44" aria-hidden="true" />
+            <div className="h-40 w-40 animate-pulse-soft rounded-xl bg-white/[0.06] sm:h-44 sm:w-44" aria-hidden="true" />
           ) : (
             <div className="grid h-40 w-40 place-items-center rounded-xl border border-dashed border-white/15 px-3 text-xs text-white/40 sm:h-44 sm:w-44">
               {t('vipDonations.track.crypto.qrUnavailable')}

@@ -6,133 +6,161 @@
 
   <url>
     <loc>__MOVIX_SITE_URL__/</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/search</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/movies</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/tv-shows</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
 
   <url>
+    <loc>__MOVIX_SITE_URL__/anime</loc>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <url>
+    <loc>__MOVIX_SITE_URL__/calendar</loc>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.7</priority>
+  </url>
+
+  <url>
     <loc>__MOVIX_SITE_URL__/collections</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/roulette</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/suggestion</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/debrid</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/live-tv</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/top10</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/extension</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
+    <loc>__MOVIX_SITE_URL__/app</loc>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <url>
+    <loc>__MOVIX_SITE_URL__/app-tv</loc>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
+  <url>
     <loc>__MOVIX_SITE_URL__/watchparty/list</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.8</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/list-catalog</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/wishboard</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/vip</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/about</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/privacy</loc>
-    <lastmod>2026-03-29</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/terms-of-service</loc>
-    <lastmod>2026-09-20</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
 
   <url>
     <loc>__MOVIX_SITE_URL__/cinegraph</loc>
-    <lastmod>2026-03-22</lastmod>
+    <lastmod>__MOVIX_BUILD_DATE__</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
   </url>

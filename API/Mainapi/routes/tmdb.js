@@ -454,7 +454,21 @@ router.get('/tmdb/:type/:id', async (req, res) => {
   if (type === 'movie' && id === '1159559') {
     return res.status(200).json({ message: 'Contenu non disponible' });
   }
-  const { season, episode } = req.query;
+  // Chaque valeur inconnue donnait une clé de cache neuve, donc un scraping
+  // Coflix et un ou deux fichiers sur disque : un ?season=<aléa> anonyme
+  // remplissait le disque sans limite. On n'accepte que des nombres, et les
+  // films ignorent saison et épisode.
+  if (type !== 'movie' && type !== 'tv') {
+    return res.status(400).json({ message: 'Type de media non valide' });
+  }
+  if (!/^\d{1,9}$/.test(String(id))) {
+    return res.status(400).json({ message: 'Identifiant TMDB invalide' });
+  }
+  const season = type === 'tv' && req.query.season !== undefined ? String(req.query.season) : undefined;
+  const episode = type === 'tv' && req.query.episode !== undefined ? String(req.query.episode) : undefined;
+  if ((season !== undefined && !/^\d{1,3}$/.test(season)) || (episode !== undefined && !/^\d{1,4}$/.test(episode))) {
+    return res.status(400).json({ message: 'Saison ou épisode invalide' });
+  }
   const cacheKey = generateCacheKey(`tmdb_links_${type}_${id}_${season || ''}_${episode || ''}`);
 
   try {

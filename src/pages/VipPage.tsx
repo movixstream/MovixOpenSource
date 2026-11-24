@@ -150,7 +150,7 @@ const VipPage: React.FC = () => {
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
               {ready === null ? (
-                <span aria-hidden="true" className="h-[34px] w-44 animate-pulse rounded-full bg-white/[0.06]" />
+                <span aria-hidden="true" className="h-[34px] w-44 animate-pulse-soft rounded-full bg-white/[0.06]" />
               ) : rule && (
                 <span className="inline-flex items-center gap-2 rounded-full border border-yellow-400/25 bg-yellow-400/10 px-3.5 py-1.5 text-sm font-medium text-yellow-100">
                   <Crown className="h-4 w-4 shrink-0 text-yellow-400" aria-hidden="true" />

@@ -78,10 +78,16 @@ const DEFAULT_MOVIES_TV_ORDER: readonly TopLevelSourceId[] = [
 /**
  * Ordre par défaut des hosters pour la catégorie Animes.
  * Scope volontairement restreint (anime-sama ne renvoie qu'un sous-ensemble) :
- * vidmoly, sibnet, smoothpre, seekstreaming (détection # incluse), minochinos.
+ * vidmoly, sibnet, smoothpre, seekstreaming (détection # incluse), minochinos,
+ * puis voe et uqload, que anime-sama sert sur presque chaque épisode. Ils sont
+ * en fin de liste : `mergeOrderedList` les ajoute aussi en fin de liste chez
+ * ceux qui ont déjà un ordre enregistré, les deux cas restent identiques.
+ * Cette liste sert aussi de filtre à la passe d'extraction de WatchAnime :
+ * un hoster absent d'ici n'est lu qu'en embed.
  */
 const DEFAULT_ANIME_HOSTER_ORDER: readonly HosterId[] = [
   'vidmoly', 'sibnet', 'smoothpre', 'seekstreaming', 'minochinos',
+  'voe', 'uqload',
 ];
 
 export function buildDefaults(): SourcePriorityPrefs {

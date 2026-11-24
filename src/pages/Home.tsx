@@ -41,6 +41,32 @@ const IMMEDIATE_LOAD_COUNT = 3;
 // Rechargement de « Reprendre » après une synchro : au plus une fois par 30 s.
 const CONTINUE_WATCHING_RELOAD_MS = 30 * 1000;
 
+// « La sélection de l'équipe » : Le Problème à 3 corps (TMDB tv/108545).
+const FEATURED_SERIES_TMDB_ID = 108545;
+
+type FeaturedSeriesDetails = {
+  next_episode_to_air?: { air_date?: string; season_number?: number; episode_number?: number } | null;
+  content_ratings?: { results?: Array<{ iso_3166_1: string; rating: string }> };
+};
+
+// Badges calculés depuis la fiche TMDB : prochaine sortie et âge conseillé (FR).
+const getFeaturedSeriesBadges = (series: FeaturedSeriesDetails, language: string) => {
+  const next = series.next_episode_to_air;
+  const release = next?.air_date
+    ? {
+        date: new Date(`${next.air_date}T12:00:00`).toLocaleDateString(language, {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        }),
+        season: next.episode_number === 1 ? next.season_number : undefined,
+      }
+    : null;
+  const frRating = series.content_ratings?.results?.find((r) => r.iso_3166_1 === 'FR')?.rating;
+  const age = frRating && /^\d+$/.test(frRating) ? `${frRating}+` : null;
+  return { release, age };
+};
+
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
 
 // Cache mémoire pour les détails TMDB (movie/tv par id) — persiste entre les navigations SPA,
@@ -810,7 +836,7 @@ const Home: React.FC = () => {
     try {
       const data = await fetchTMDBDetails(
         'tv',
-        215160,
+        FEATURED_SERIES_TMDB_ID,
         { append_to_response: 'content_ratings' },
         tmdbLanguage,
       );
@@ -819,6 +845,11 @@ const Home: React.FC = () => {
       console.error('Error fetching featured series:', error);
     }
   }, [tmdbLanguage]);
+
+  const featuredBadges = useMemo(
+    () => (featuredSeries ? getFeaturedSeriesBadges(featuredSeries, tmdbLanguage) : null),
+    [featuredSeries, tmdbLanguage],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1424,7 +1455,9 @@ const Home: React.FC = () => {
                       <div
                         className="w-full min-h-[400px] h-[65svh] max-h-[700px] bg-cover bg-no-repeat relative rounded-3xl overflow-hidden border border-white/10 shadow-2xl"
                         style={{
-                          backgroundImage: 'url("/apothecary_backdrop.jpg")',
+                          backgroundImage: featuredSeries.backdrop_path
+                            ? `url("https://image.tmdb.org/t/p/w1280${featuredSeries.backdrop_path}")`
+                            : undefined,
                           backgroundPosition: 'center 30%'
                         }}
                       >
@@ -1447,35 +1480,41 @@ const Home: React.FC = () => {
                             🔥 {t('home.teamSelection')}
                           </span>
                           <span className="text-white text-4xl sm:text-5xl font-bold leading-tight">
-                            {t('home.featuredSpotlightTitle')}
+                            {featuredSeries.name}
                           </span>
                           <div className="flex flex-row gap-2 items-center flex-wrap">
-                            <span className="inline-flex items-center px-3 py-1 rounded-full bg-white/10 border border-white/20 text-white/90 text-xs font-medium">
-                              12+
-                            </span>
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-yellow-500/15 border border-yellow-500/30 text-yellow-300 text-xs font-semibold">
-                              <Star className="w-3 h-3 fill-current" />
-                              {t('nav.collections') === 'Collections' ? '8.6' : '8,6'}/10
-                            </span>
-                            <span className="inline-flex items-center px-3 py-1 rounded-full bg-white/10 border border-white/10 text-white/80 text-xs font-medium">
-                              {t('home.featuredSpotlightGenreAnimation')}
-                            </span>
-                            <span className="inline-flex items-center px-3 py-1 rounded-full bg-white/10 border border-white/10 text-white/80 text-xs font-medium">
-                              {t('home.featuredSpotlightGenreComedy')}
-                            </span>
-                            <span className="inline-flex items-center px-3 py-1 rounded-full bg-white/10 border border-white/10 text-white/80 text-xs font-medium">
-                              {t('home.featuredSpotlightGenreDrama')}
-                            </span>
-                            <span className="inline-flex items-center px-3 py-1 rounded-full bg-white/10 border border-white/10 text-white/80 text-xs font-medium">
-                              24 min / {t('home.perEpisode')}
-                            </span>
+                            {featuredBadges?.release && (
+                              <span className="inline-flex items-center px-3 py-1 rounded-full bg-red-600/20 border border-red-500/40 text-red-200 text-xs font-semibold">
+                                {featuredBadges.release.season
+                                  ? t('home.featuredSpotlightRelease', { season: featuredBadges.release.season, date: featuredBadges.release.date })
+                                  : t('home.featuredSpotlightNextEpisode', { date: featuredBadges.release.date })}
+                              </span>
+                            )}
+                            {featuredBadges?.age && (
+                              <span className="inline-flex items-center px-3 py-1 rounded-full bg-white/10 border border-white/20 text-white/90 text-xs font-medium">
+                                {featuredBadges.age}
+                              </span>
+                            )}
+                            {typeof featuredSeries.vote_average === 'number' && featuredSeries.vote_average > 0 && (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-yellow-500/15 border border-yellow-500/30 text-yellow-300 text-xs font-semibold">
+                                <Star className="w-3 h-3 fill-current" />
+                                {featuredSeries.vote_average.toLocaleString(tmdbLanguage, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}/10
+                              </span>
+                            )}
+                            {(featuredSeries.genres ?? []).slice(0, 3).map((genre: { id: number; name: string }) => (
+                              <span key={genre.id} className="inline-flex items-center px-3 py-1 rounded-full bg-white/10 border border-white/10 text-white/80 text-xs font-medium">
+                                {genre.name}
+                              </span>
+                            ))}
                           </div>
-                          <p className="text-white/80 my-0 w-full lg:w-2/3 xl:w-1/2 line-clamp-4 leading-relaxed">
-                            {t('home.featuredSpotlightDescription')}
-                          </p>
+                          {featuredSeries.overview && (
+                            <p className="text-white/80 my-0 w-full lg:w-2/3 xl:w-1/2 line-clamp-4 leading-relaxed">
+                              {featuredSeries.overview}
+                            </p>
+                          )}
                           <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}>
                             <Link
-                              to="/tv/fFFB6OvEJ1NFH93LdfdR0Svt2TsSUhSZBmdU2a"
+                              to={`/tv/${encodeId(FEATURED_SERIES_TMDB_ID)}`}
                               className="inline-flex items-center gap-2 bg-white hover:bg-white/90 text-black px-6 md:px-7 py-3 rounded-2xl font-semibold transition-colors shadow-lg"
                             >
                               <Info className="w-5 h-5" />

@@ -239,7 +239,7 @@ const WatchPartyCreate: React.FC = () => {
   if (!mediaInfo) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-black text-white">
-        <div className="animate-pulse">{t('watchParty.loadingInfo')}</div>
+        <div className="animate-pulse-soft">{t('watchParty.loadingInfo')}</div>
       </div>
     );
   }

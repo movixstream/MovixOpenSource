@@ -1042,7 +1042,7 @@ const FranceTVPlayer: React.FC = () => {
             exit={{ opacity: 0, width: 0 }}
             transition={{ duration: 0.3, ease: [0.25, 1, 0.5, 1] }}
             style={{ height: '100%', position: 'absolute', top: 0, right: 0, bottom: 0, maxWidth: '90vw' }}
-            className="bg-black/95 z-[10002] flex flex-col border-l border-gray-800 shadow-xl"
+            className="bg-black z-[10002] flex flex-col border-l border-gray-800 shadow-xl"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">

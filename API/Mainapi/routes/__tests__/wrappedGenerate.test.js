@@ -56,12 +56,14 @@ function fakeRedis() {
   };
 }
 
-async function fixture({ pool = fakePool(), redis = fakeRedis(), profiles = [{ id: 'profile-one' }], tmdb = true } = {}) {
+async function fixture({ pool = fakePool(), redis = fakeRedis(), profiles = [{ id: 'profile-one' }], tmdb = true, sessionRevoked = false } = {}) {
   const filename = path.resolve(__dirname, '../../wrappedRoutes.js');
   const localRequire = createRequire(filename);
   const module = { exports: {} };
   localRequire('./utils/wrappedPercentile').resetWrappedPercentileMemory();
   const stubs = {
+    // Session toujours valide ici ; la révocation est testée dans wrappedTrack.
+    './middleware/auth': { getAuthIfValid: async () => (sessionRevoked ? null : { userId: 'user', userType: 'oauth' }) },
     './utils/referralProgress': { creditRefereeWatch: async () => 'ignored' },
     './utils/tmdbCache': {
       fetchTmdbDetails: async () => (tmdb ? { title: 'Fight Club', poster_path: '/p.jpg', genres: [{ name: 'Drame' }], release_date: '1999-10-15' } : null),

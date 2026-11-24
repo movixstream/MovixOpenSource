@@ -374,8 +374,17 @@ async function getAccessTokenRecord(pool, accessToken, options = {}) {
   }
 
   const tokenHash = hashOpaqueToken(accessToken);
+  // Un jeton lié à une session du site meurt avec elle : supprimer la
+  // session (déconnexion, « supprimer cet appareil ») coupe aussi les apps
+  // autorisées depuis cette session.
   const [rows] = await pool.execute(
-    'SELECT * FROM oauth_access_tokens WHERE token_hash = ? LIMIT 1',
+    `SELECT t.* FROM oauth_access_tokens t
+      WHERE t.token_hash = ?
+        AND (t.session_id IS NULL OR EXISTS (
+          SELECT 1 FROM user_sessions s
+            WHERE s.id = t.session_id AND s.user_id = t.user_id AND s.user_type = t.user_type
+        ))
+      LIMIT 1`,
     [tokenHash]
   );
 
@@ -404,7 +413,18 @@ async function getAccessTokenRecord(pool, accessToken, options = {}) {
   return record;
 }
 
+/** Révoque tous les jetons encore actifs d'une app (app supprimée). */
+async function revokeClientAccessTokens(pool, clientId) {
+  if (!pool || !clientId) return 0;
+  const [result] = await pool.execute(
+    'UPDATE oauth_access_tokens SET revoked_at = NOW() WHERE client_id = ? AND revoked_at IS NULL',
+    [String(clientId)]
+  );
+  return result?.affectedRows || 0;
+}
+
 module.exports = {
+  revokeClientAccessTokens,
   AUTHORIZATION_REQUEST_TTL_MS,
   AUTHORIZATION_CODE_TTL_MS,
   ACCESS_TOKEN_TTL_MS,

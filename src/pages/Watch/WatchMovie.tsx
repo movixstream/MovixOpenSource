@@ -35,6 +35,7 @@ import { isContentAllowed, getClassificationLabel } from '../../utils/certificat
 import { getCoflixPreferredUrl } from '../../utils/coflix';
 import { KisskhServiceError, resolveKisskhMovie } from '../../services/kisskhService';
 import SwiftfluxGate from '../../components/SwiftfluxGate';
+import { useSwiftfluxTokenPrefetch } from '@/hooks/useSwiftfluxTokenPrefetch';
 import {
   readSwiftflux,
   type SwiftfluxEntry,
@@ -49,6 +50,10 @@ import {
   syncHlsActiveSource,
 } from '../../utils/hlsAutoFallbackGuard';
 import { readLocalStorage, writeLocalStorage } from '../../utils/browserStorage';
+import WatchLoadingScreen from '@/components/watch/loading/WatchLoadingScreen';
+import WatchNotFoundScreen from '@/components/watch/loading/WatchNotFoundScreen';
+import { useSourceRadar } from '@/components/watch/loading/useSourceRadar';
+import type { RadarLinkInput } from '@/components/watch/loading/sourceRadar';
 const MAIN_API = import.meta.env.VITE_MAIN_API;
 const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
 
@@ -227,6 +232,27 @@ interface NightflixSource {
   label?: string;
 }
 
+/** Lecteur tel qu'un site le renvoie, lu prudemment pour le radar. */
+type RadarRawPlayer = { url?: string; link?: string; player?: string; name?: string; label?: string; decoded_url?: string; clone_url?: string };
+
+// 1jour1film n'est pas activé pour le moment : la page ne l'interroge plus.
+// Repasser à `true` suffit à le rallumer (requête, extraction, menu).
+const J1F_ENABLED = false;
+
+// Sites montrés par le radar de l'écran de chargement, dans l'ordre affiché.
+const MOVIE_RADAR_SITES = [
+  { id: 'movix', label: 'Movix', admin: true },
+  { id: 'fstream', label: 'FStream' },
+  { id: 'swiftflow', label: 'SwiftFlow' },
+  { id: 'frembed', label: 'Frembed' },
+  { id: 'coflix', label: 'Multi' },
+  { id: 'wiflix', label: 'Lynx' },
+  { id: 'viper', label: 'Viper' },
+  { id: 'omega', label: 'Omega' },
+  { id: 'purstream', label: 'Bravo' },
+  { id: 'kisskh', label: 'KissKH' },
+];
+
 type PlayerSourceType = 'primary' | 'vostfr' | 'videasy' | 'vidsrccc' | 'vidsrcsu' | 'vidsrcwtf1' | 'vidsrcwtf5' | 'multi' | 'omega' | 'darkino' | 'mp4' | 'coflix' | 'frembed' | 'custom' | 'nexus_hls' | 'nexus_file' | 'fstream' | 'wiflix' | 'j1f' | 'swiftflow' | 'viper' | 'vidmoly' | 'dropload' | 'adfree' | 'bravo' | 'kisskh' | number;
 
 function formatPremidSourceDetail(...parts: Array<string | null | undefined>) {
@@ -384,7 +410,15 @@ const WatchMovie: React.FC = () => {
   // Poster localisé (langue d'interface > EN > sans langue) via l'endpoint
   // /images — le poster_path des détails TMDB retombe sur le poster par
   // défaut (souvent VO) quand la langue demandée n'a pas de poster.
-  const { posterUrl: localizedPosterUrl } = useTmdbImages('movie', id ? Number(id) : undefined);
+  const { posterUrl: localizedPosterUrl, logoUrl } = useTmdbImages('movie', id ? Number(id) : undefined);
+  // Radar de l'écran de chargement : sites interrogés, lecteurs trouvés et
+  // extractions en cours, plus la coupure du bouton « Lancer maintenant ».
+  const radar = useSourceRadar();
+  // Vérification Turnstile invisible de SwiftFlux, faite pendant le chargement.
+  const swiftfluxPrefetch = useSwiftfluxTokenPrefetch();
+  const [loadingMeta, setLoadingMeta] = useState<string | null>(null);
+  // Genres, note et accroche de l'écran de chargement.
+  const [loadingDetails, setLoadingDetails] = useState<{ genres: string[]; rating: number | null; tagline: string | null }>({ genres: [], rating: null, tagline: null });
   const playerPoster = localizedPosterUrl
     ? withTmdbImageSize(localizedPosterUrl, 'w500')
     : (posterPath ? `https://image.tmdb.org/t/p/w500${posterPath}` : undefined);
@@ -673,6 +707,8 @@ const WatchMovie: React.FC = () => {
     handlePopupAccept
   } = useAdFreePopup();
   const [adPopupTriggered, setAdPopupTriggered] = useState(false);
+  // La popup pub attend que l'écran de chargement soit parti.
+  const [loadingScreenOpen, setLoadingScreenOpen] = useState(true);
   const [adPopupBypass, setAdPopupBypass] = useState(false);
 
   // Ajout de l'état pour savoir si l'utilisateur a cliqué sur la pub
@@ -705,6 +741,7 @@ const WatchMovie: React.FC = () => {
     }
 
     const resolveMovie = async () => {
+      let radarLinks: RadarLinkInput[] = [];
       try {
         const resolution = await resolveKisskhMovie(Number(id), { signal: kisskhController.signal });
         if (
@@ -713,6 +750,9 @@ const WatchMovie: React.FC = () => {
         ) {
           return;
         }
+        radarLinks = resolution.sources
+          .filter((source) => source?.url)
+          .map((source) => ({ url: source.url, name: source.label, state: 'ready' as const }));
         setKisskhSources(resolution.sources);
         setKisskhSubtitles(resolution.subtitles);
       } catch (error) {
@@ -732,6 +772,8 @@ const WatchMovie: React.FC = () => {
           && kisskhRequestGenerationRef.current === kisskhGeneration
         ) {
           setLoadingKisskh(false);
+          // Lancé à part du reste : il répond au radar quand il a fini.
+          radar.answer('kisskh', radarLinks);
         }
       }
     };
@@ -766,13 +808,6 @@ const WatchMovie: React.FC = () => {
     }
   }, []); // Empty dependency array to run once
 
-  // Function to update VIP retry message
-  const updateVipRetryMessage = (message: string) => {
-    console.log("Updating retry message:", message);
-    setVipRetryMessage(message);
-    setLoadingText(message);
-  };
-
   // Reset VIP retry message when loading finishes
   useEffect(() => {
     console.log("Loading states changed:", {
@@ -800,6 +835,8 @@ const WatchMovie: React.FC = () => {
     setVipRetryMessage(null);
     setIsLoading(true);
     setLoadingText(t('watch.loadingSources'));
+    // KissKH n'est pas interrogé pour une version alternative (voir son effet).
+    radar.reset(MOVIE_RADAR_SITES.filter((site) => (site.id !== 'purstream' || canUseBravo) && (site.id !== 'kisskh' || !movieVersion)));
 
 
     try {
@@ -816,6 +853,24 @@ const WatchMovie: React.FC = () => {
         : tmdbResponse.data.title);
       setBackdropPath(tmdbResponse.data.backdrop_path);
       setPosterPath(tmdbResponse.data.poster_path);
+      {
+        const year = typeof tmdbResponse.data.release_date === 'string' ? tmdbResponse.data.release_date.slice(0, 4) : '';
+        const runtime = Number((tmdbResponse.data as { runtime?: number }).runtime) || 0;
+        const duration = runtime > 0
+          ? (runtime >= 60 ? `${Math.floor(runtime / 60)} h ${String(runtime % 60).padStart(2, '0')}` : `${runtime} min`)
+          : '';
+        setLoadingMeta([year, duration].filter(Boolean).join(' · ') || null);
+        const details = tmdbResponse.data as {
+          genres?: Array<{ name?: string }>; vote_average?: number; vote_count?: number; tagline?: string;
+        };
+        const voteAverage = Number(details.vote_average) || 0;
+        setLoadingDetails({
+          genres: Array.isArray(details.genres) ? details.genres.map((genre) => genre?.name ?? '').filter(Boolean) : [],
+          // Une note sur trois votes ne dit rien.
+          rating: voteAverage > 0 && (Number(details.vote_count) || 0) >= 20 ? voteAverage : null,
+          tagline: typeof details.tagline === 'string' && details.tagline.trim() ? details.tagline.trim() : null,
+        });
+      }
 
       // Age restriction check
       const profileAge = currentProfile?.ageRestriction ?? 0;
@@ -907,30 +962,50 @@ const WatchMovie: React.FC = () => {
       const fetchCatalog = (url: string, config?: AxiosRequestConfig): Promise<Pick<AxiosResponse, 'data'>> =>
         movieVersion ? Promise.resolve({ data: null }) : axios.get(url, config);
 
-      const darkinoPromise = checkDarkinoAvailability(
-        tmdbResponse.data.title,
-        tmdbResponse.data.release_date,
-        id,
-        updateVipRetryMessage
-      ).catch(error => {
-        console.error('Error checking Darkino availability:', error);
-        return false; // Return a default/error state
-      }).finally(() => setLoadingDarkino(false));
+      // Darkino n'existe plus : la page ne l'interroge plus. Le reste du code
+      // le traite comme « indisponible ».
+      const darkinoPromise = Promise.resolve(false as Awaited<ReturnType<typeof checkDarkinoAvailability>> | false);
+      setLoadingDarkino(false);
 
-      const availabilityPromise = checkMovieAvailability(linksId ?? id)
-        .catch(error => {
-          console.error('Error checking Firebase/Frembed availability:', error);
-          return { customLinks: [], mp4Links: [], frembedAvailable: false }; // Default/error state
-        }).finally(() => setLoadingFrembed(false));
+      const availabilityPromise = radar.race(
+        checkMovieAvailability(linksId ?? id)
+          .catch(error => {
+            console.error('Error checking Firebase/Frembed availability:', error);
+            return { customLinks: [], mp4Links: [], frembedAvailable: false }; // Default/error state
+          }),
+        { customLinks: [], mp4Links: [], frembedAvailable: false },
+      ).then((availability) => {
+        const custom: RadarLinkInput[] = (availability.customLinks || [])
+          .filter((url: unknown): url is string => typeof url === 'string' && !!url)
+          .map((url: string) => ({ url }));
+        const mp4: RadarLinkInput[] = (availability.mp4Links || [])
+          .filter((link: { url?: string }) => !!link?.url)
+          .map((link: { url: string; label?: string; language?: string }) => ({
+            url: link.url, host: 'MP4 direct', lang: `${link.language ?? ''} ${link.label ?? ''}`, state: 'ready' as const,
+          }));
+        radar.answer('movix', [...mp4, ...custom]);
+        radar.answer('frembed', availability.frembedAvailable && !movieVersion
+          ? [{ url: `frembed://movie/${id}`, host: 'Frembed', lang: 'VF', state: 'embed' }]
+          : []);
+        return availability;
+      }).finally(() => setLoadingFrembed(false));
 
       // `resolve=1` : le serveur résout lui-même les m3u8 de ce film. Réservé
       // à la lecture — la navigation ne doit pas déclencher d'extraction.
-      const coflixPromise = fetchCatalog(`${MAIN_API}/api/tmdb/movie/${id}`, resolveRequest())
-        .then(response => response.data)
-        .catch(error => {
-          console.error('Error fetching Coflix sources:', error);
-          return null;
-        }).finally(() => setLoadingCoflix(false));
+      const coflixPromise = radar.race(
+        fetchCatalog(`${MAIN_API}/api/tmdb/movie/${id}`, resolveRequest())
+          .then(response => response.data)
+          .catch(error => {
+            console.error('Error fetching Coflix sources:', error);
+            return null;
+          }),
+        null,
+      ).then((data) => {
+        radar.answer('coflix', Array.isArray(data?.player_links)
+          ? data.player_links.map((p: RadarRawPlayer) => ({ url: getCoflixPreferredUrl(p), name: typeof p?.player === 'string' ? p.player : '' }))
+          : []);
+        return data;
+      }).finally(() => setLoadingCoflix(false));
 
       const omegaPromise = (async () => {
         try {
@@ -953,12 +1028,18 @@ const WatchMovie: React.FC = () => {
           console.error('Error fetching Omega sources:', error);
           return null;
         }
-      })().finally(() => setLoadingOmega(false));
+      })();
+      const trackedOmegaPromise = radar.race(omegaPromise, null).then((data) => {
+        radar.answer('omega', Array.isArray(data?.player_links)
+          ? data.player_links.map((p: RadarRawPlayer) => ({ url: p?.link ?? '', name: p?.player }))
+          : []);
+        return data;
+      }).finally(() => setLoadingOmega(false));
 
 
 
       // =========== CHECK PURSTREAM (BRAVO) SOURCE ==========
-      const purstreamPromise = (async () => {
+      const purstreamPromise = radar.race((async () => {
         try {
           const purstreamResponse = await fetchCatalog(`${MAIN_API}/api/purstream/movie/${id}/stream`, {
             headers: { ...getVipHeaders() }
@@ -968,10 +1049,15 @@ const WatchMovie: React.FC = () => {
           console.error('Error fetching PurStream movie sources:', error);
           return null;
         }
-      })();
+      })(), null).then((data) => {
+        radar.answer('purstream', canUseBravo && Array.isArray(data?.sources)
+          ? data.sources.filter((src: RadarRawPlayer) => src?.url).map((src: RadarRawPlayer) => ({ url: src.url ?? '', name: src.name, state: 'ready' as const }))
+          : []);
+        return data;
+      });
 
       // =========== CHECK FSTREAM SOURCE ==========
-      const fstreamPromise = (async () => {
+      const fstreamPromise = radar.race((async () => {
         try {
           // Méthode serveur : clé VIP + `resolve=1` (résolution serveur des
           // m3u8). Méthode extension/userscript : liens bruts, extraction locale.
@@ -981,39 +1067,113 @@ const WatchMovie: React.FC = () => {
           console.error('Error fetching FStream movie sources:', error);
           return null;
         }
-      })().finally(() => setLoadingFstream(false));
+      })(), null).then((data) => {
+        // Fsvid n'est jouable qu'en VIP ou avec l'extension : sinon le menu ne
+        // le montre pas, le radar non plus.
+        const fsvidPlayable = isUserVip() || isExtensionAvailable();
+        const links: RadarLinkInput[] = [];
+        if (data?.success && data.players) {
+          ['VFQ', 'VFF', 'VOSTFR', 'Default'].forEach((category) => {
+            ((data.players as Record<string, RadarRawPlayer[] | undefined>)[category] || []).forEach((player) => {
+              const url = typeof player?.url === 'string' ? player.url : '';
+              const isFsvid = url.toLowerCase().includes('fsvid') || ['premium', 'fsvid'].includes(String(player?.player ?? '').toLowerCase());
+              if (!url || (isFsvid && !fsvidPlayable)) return;
+              links.push({ url, name: isFsvid ? 'Fsvid' : player?.player, lang: category });
+            });
+          });
+        }
+        radar.answer('fstream', links);
+        return data;
+      }).finally(() => setLoadingFstream(false));
 
       // =========== CHECK WIFLIX (LYNX) SOURCE ===========
-      const wiflixPromise: Promise<WiflixMovieResponse | null> = fetchCatalog(`${MAIN_API}/api/wiflix/movie/${id}`, resolveRequest())
-        .then(response => response.data as WiflixMovieResponse)
-        .catch(error => {
-          console.error('Error fetching Wiflix/Lynx source:', error);
-          return null;
-        }).finally(() => setLoadingWiflix(false));
+      const wiflixPromise: Promise<WiflixMovieResponse | null> = radar.race(
+        fetchCatalog(`${MAIN_API}/api/wiflix/movie/${id}`, resolveRequest())
+          .then(response => response.data as WiflixMovieResponse)
+          .catch(error => {
+            console.error('Error fetching Wiflix/Lynx source:', error);
+            return null;
+          }),
+        null,
+      ).then((data) => {
+        const links: RadarLinkInput[] = [];
+        if (data?.success && data.players) {
+          (['vf', 'vostfr'] as const).forEach((category) => {
+            ((data.players as Record<string, RadarRawPlayer[] | undefined>)[category] || []).forEach((player) => {
+              links.push({ url: player?.url ?? '', name: player?.name, lang: category });
+            });
+          });
+        }
+        radar.answer('wiflix', links);
+        return data;
+      }).finally(() => setLoadingWiflix(false));
 
       // =========== CHECK J1F (1JOUR1FILM) SOURCE ===========
-      const j1fPromise: Promise<J1fMovieResponse | null> = fetchCatalog(`${MAIN_API}/api/j1f/movie/${id}`, resolveRequest())
-        .then(response => response.data as J1fMovieResponse)
-        .catch(error => {
-          console.error('Error fetching 1jour1film source:', error);
-          return null;
-        }).finally(() => setLoadingJ1f(false));
+      const j1fPromise: Promise<J1fMovieResponse | null> = (J1F_ENABLED
+        ? radar.race(
+          fetchCatalog(`${MAIN_API}/api/j1f/movie/${id}`, resolveRequest())
+            .then(response => response.data as J1fMovieResponse)
+            .catch(error => {
+              console.error('Error fetching 1jour1film source:', error);
+              return null;
+            }),
+          null,
+        )
+        : Promise.resolve(null)
+      ).finally(() => setLoadingJ1f(false));
 
       // =========== CHECK SWIFTFLOW SOURCE ===========
-      const swiftflowPromise: Promise<SwiftflowMovieResponse | null> = fetchCatalog(`${MAIN_API}/api/swiftflow/movie/${id}`, resolveRequest())
-        .then(response => response.data as SwiftflowMovieResponse)
-        .catch(error => {
-          console.error('Error fetching SwiftFlow source:', error);
-          return null;
-        }).finally(() => setLoadingSwiftflow(false));
+      const swiftflowPromise: Promise<SwiftflowMovieResponse | null> = radar.race(
+        fetchCatalog(`${MAIN_API}/api/swiftflow/movie/${id}`, resolveRequest())
+          .then(response => response.data as SwiftflowMovieResponse)
+          .catch(error => {
+            console.error('Error fetching SwiftFlow source:', error);
+            return null;
+          }),
+        null,
+      ).then((data) => {
+        const links: RadarLinkInput[] = readSwiftflux(data).entries.map((entry) => ({
+          url: `swiftflux://movie/${id}/${entry.index}`,
+          host: 'SwiftFlux',
+          lang: `${entry.language ?? ''} ${entry.label ?? ''}`,
+          state: 'verifying' as const,
+        }));
+        // Le lecteur iframe de SwiftFlow est le même fichier que SwiftFlux :
+        // une seule ligne dans le radar quand SwiftFlux est là.
+        if (data?.success && data.players && links.length === 0) {
+          (['vf', 'vostfr'] as const).forEach((category) => {
+            ((data.players as Record<string, RadarRawPlayer[] | undefined>)[category] || []).forEach((player) => {
+              links.push({ url: player?.url ?? '', name: player?.label, lang: category });
+            });
+          });
+        }
+        radar.answer('swiftflow', links);
+        const swiftfluxUrls = links.filter((link) => link.host === 'SwiftFlux').map((link) => link.url);
+        if (swiftfluxUrls.length > 0) {
+          // Réussie ou non, le lecteur reste jouable (case visible en plan B).
+          swiftfluxPrefetch.start(() => swiftfluxUrls.forEach((url) => radar.setState(url, 'ready')));
+        }
+        return data;
+      }).finally(() => setLoadingSwiftflow(false));
 
       // =========== CHECK VIPER (CPASMAL) SOURCE ===========
-      const viperPromise: Promise<ViperMovieResponse | null> = fetchCatalog(`${MAIN_API}/api/cpasmal/movie/${id}`, resolveRequest())
-        .then(response => response.data as ViperMovieResponse)
-        .catch(error => {
-          console.error('Error fetching Viper/Cpasmal source:', error);
-          return null;
-        }).finally(() => setLoadingViper(false));
+      const viperPromise: Promise<ViperMovieResponse | null> = radar.race(
+        fetchCatalog(`${MAIN_API}/api/cpasmal/movie/${id}`, resolveRequest())
+          .then(response => response.data as ViperMovieResponse)
+          .catch(error => {
+            console.error('Error fetching Viper/Cpasmal source:', error);
+            return null;
+          }),
+        null,
+      ).then((data) => {
+        const links: RadarLinkInput[] = [];
+        if (data?.links) {
+          (data.links.vf || []).forEach((link) => links.push({ url: link.url, name: link.server, lang: 'VF' }));
+          (data.links.vostfr || []).forEach((link) => links.push({ url: link.url, name: link.server, lang: 'VOSTFR' }));
+        }
+        radar.answer('viper', links);
+        return data;
+      }).finally(() => setLoadingViper(false));
 
       // =========== AWAIT ALL SOURCE CHECKS TO COMPLETE ===========
       const [
@@ -1031,7 +1191,7 @@ const WatchMovie: React.FC = () => {
         darkinoPromise,
         availabilityPromise,
         coflixPromise,
-        omegaPromise,
+        trackedOmegaPromise,
         purstreamPromise,
         fstreamPromise,
         wiflixPromise,
@@ -1106,37 +1266,11 @@ const WatchMovie: React.FC = () => {
       }
 
       // =========== TRAITEMENT DES RÉSULTATS OMEGA ===========
+      // Les extractions Omega (supervideo, dropload, doodstream) sont faites
+      // une seule fois plus bas : ce bloc les lançait une première fois pour
+      // rien, résultats jetés.
       if (omegaResult) {
         setOmegaData(omegaResult);
-
-        // Extract m3u8 from supervideo and dropload players - Paralléliser
-        const omegaExtractionPromises = [];
-
-        const supervideo = getSupervideoFromOmega(omegaResult);
-        if (supervideo) {
-          omegaExtractionPromises.push(
-            extractM3u8FromEmbed(supervideo, MAIN_API).then(result => ({
-              type: 'supervideo',
-              result,
-              label: 'Supervideo HLS 720p'
-            }))
-          );
-        }
-
-        const dropload = omegaResult.player_links?.find((p: any) => p.player && p.player.toLowerCase().includes('dropload'));
-        if (dropload) {
-          omegaExtractionPromises.push(
-            extractM3u8FromEmbed(dropload, MAIN_API).then(result => ({
-              type: 'dropload',
-              result,
-              label: 'Dropload HLS 720p'
-            }))
-          );
-        }
-
-        if (omegaExtractionPromises.length > 0) {
-          await Promise.all(omegaExtractionPromises);
-        }
       }
 
       // ========== INITIALISATION DES CONTAINERS POUR SOURCES EXTRAITES ==========
@@ -1228,7 +1362,19 @@ const WatchMovie: React.FC = () => {
         }
 
         if (omegaExtractionPromises.length > 0) {
-          const omegaResults = await Promise.all(omegaExtractionPromises);
+          const omegaUrls: Record<string, string | undefined> = {
+            supervideo: supervideo?.link,
+            dropload: dropload?.link,
+            doodstream: doodstream?.link,
+          };
+          const omegaResults = await Promise.all(omegaExtractionPromises.map((promise) => radar.race(
+            promise.then((entry) => {
+              const url = omegaUrls[entry.type];
+              if (url) radar.setState(url, entry.result?.success ? 'ready' : 'failed');
+              return entry;
+            }),
+            null,
+          ))).then((entries) => entries.filter((entry): entry is NonNullable<typeof entry> => entry !== null));
           omegaResults.forEach(({ type, result, label }) => {
             if (type === 'supervideo') {
               console.log('📡 Supervideo extraction result:', result);
@@ -1279,7 +1425,13 @@ const WatchMovie: React.FC = () => {
               return null;
             });
 
-            const droploadResults = await Promise.all(droploadPromises);
+            const droploadResults = await Promise.all(droploadPromises.map((promise, index) => radar.race(
+              promise.then((entry) => {
+                radar.setState(droploadLinks[index], entry ? 'ready' : 'failed');
+                return entry;
+              }),
+              null,
+            )));
             const validDroploadResults = droploadResults.filter(result => result !== null);
             finalHlsSources = [...finalHlsSources, ...validDroploadResults];
             console.log(`✅ Added ${validDroploadResults.length} Firebase Dropload HLS sources`);
@@ -1302,6 +1454,7 @@ const WatchMovie: React.FC = () => {
           {
             origin: 'custom',
             context: { category: 'moviesTv', topLevel: 'custom' },
+            ...radar.pass('movix'),
           },
         )
         : emptyPass;
@@ -1320,6 +1473,7 @@ const WatchMovie: React.FC = () => {
           {
             origin: 'coflix',
             context: { category: 'moviesTv', topLevel: 'coflix' },
+            ...radar.pass('coflix'),
           },
         )
         : emptyPass;
@@ -1447,7 +1601,14 @@ const WatchMovie: React.FC = () => {
         }
 
         if (fstreamExtractionPromises.length > 0) {
-          fstreamHlsPromise = Promise.all(fstreamExtractionPromises).then((fstreamExtractionResults) => {
+          fstreamHlsPromise = Promise.all(fstreamExtractionPromises.map((promise) => radar.race(
+            promise.then((entry) => {
+              radar.setState(entry.originalSource.url, entry.result?.success ? 'ready' : 'failed');
+              return entry;
+            }),
+            null,
+          ))).then((trackedResults) => {
+          const fstreamExtractionResults = trackedResults.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
           // Séparer les sources fsvid, vidzy et uqload pour les ordonner correctement
           const fsvidHlsSources: { url: string; label: string; category: string }[] = [];
           const vidzyHlsSources: { url: string; label: string; category: string }[] = [];
@@ -1530,6 +1691,7 @@ const WatchMovie: React.FC = () => {
         wiflixPassPromise = runExtractionPass(wiflixProcessedSources, MAIN_API, {
           origin: 'wiflix',
           context: { category: 'moviesTv', topLevel: 'wiflix' },
+          ...radar.pass('wiflix'),
         });
       } else {
         setWiflixData(null);
@@ -1577,6 +1739,7 @@ const WatchMovie: React.FC = () => {
         ? runExtractionPass(j1fProcessedSources, MAIN_API, {
           origin: 'j1f',
           context: { category: 'moviesTv', topLevel: 'j1f' },
+          ...radar.pass('j1f'),
         })
         : emptyPass;
 
@@ -1618,6 +1781,7 @@ const WatchMovie: React.FC = () => {
         ? runExtractionPass(swiftflowProcessedSources, MAIN_API, {
           origin: 'swiftflow',
           context: { category: 'moviesTv', topLevel: 'swiftflow' },
+          ...radar.pass('swiftflow'),
         })
         : emptyPass;
 
@@ -1667,6 +1831,7 @@ const WatchMovie: React.FC = () => {
         ? runExtractionPass(viperProcessedSources, MAIN_API, {
           origin: 'viper',
           context: { category: 'moviesTv', topLevel: 'viper' },
+          ...radar.pass('viper'),
         })
         : emptyPass;
 
@@ -1761,6 +1926,7 @@ const WatchMovie: React.FC = () => {
 
       // =========== FIN DES EXTRACTIONS ===========
       console.log('✅ Extractions M3U8 terminées');
+      radar.settle();
       setLoadingExtractions(false);
 
       // --- Determine Default Selected Source (priority-driven) ---
@@ -2826,54 +2992,6 @@ const WatchMovie: React.FC = () => {
 
   return (
     <div style={{ minHeight: 'calc(var(--vh, 1vh) * 100)', overflow: 'hidden' }} className="w-full bg-black overflow-hidden fixed inset-0">
-      <style dangerouslySetInnerHTML={{
-        __html: `
-          .loading-container {
-            --uib-size: 35px;
-            --uib-color: white;
-            --uib-speed: 1s;
-            --uib-stroke: 3.5px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            width: var(--uib-size);
-            height: calc(var(--uib-size) * 0.9);
-          }
-
-          .loading-bar {
-            width: var(--uib-stroke);
-            height: 100%;
-            background-color: var(--uib-color);
-            border-radius: calc(var(--uib-stroke) / 2);
-            transition: background-color 0.3s ease;
-          }
-
-          .loading-bar:nth-child(1) {
-            animation: grow var(--uib-speed) ease-in-out calc(var(--uib-speed) * -0.45) infinite;
-          }
-
-          .loading-bar:nth-child(2) {
-            animation: grow var(--uib-speed) ease-in-out calc(var(--uib-speed) * -0.3) infinite;
-          }
-
-          .loading-bar:nth-child(3) {
-            animation: grow var(--uib-speed) ease-in-out calc(var(--uib-speed) * -0.15) infinite;
-          }
-
-          .loading-bar:nth-child(4) {
-            animation: grow var(--uib-speed) ease-in-out infinite;
-          }
-
-          @keyframes grow {
-            0%, 100% {
-              transform: scaleY(0.3);
-            }
-            50% {
-              transform: scaleY(1);
-            }
-          }
-        `
-      }} />
       <div
         hidden
         data-premid-watch-context=""
@@ -2882,16 +3000,22 @@ const WatchMovie: React.FC = () => {
         data-premid-source-label={embedType || selectedSource || undefined}
         data-premid-source-detail={preMidSourceDetail}
       />
+      <WatchLoadingScreen
+        loading={isLoading}
+        backdropUrl={backdropPath ? `https://image.tmdb.org/t/p/w1280${backdropPath}` : null}
+        logoUrl={logoUrl}
+        title={movieTitle}
+        meta={loadingMeta}
+        genres={loadingDetails.genres}
+        rating={loadingDetails.rating}
+        tagline={loadingDetails.tagline}
+        statusText={loadingText !== t('watch.loadingSources') ? loadingText : null}
+        radar={radar}
+        onBack={() => navigate(-1)}
+        onVisibleChange={setLoadingScreenOpen}
+      />
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center h-full bg-black">
-          <div className="loading-container">
-            <div className="loading-bar"></div>
-            <div className="loading-bar"></div>
-            <div className="loading-bar"></div>
-            <div className="loading-bar"></div>
-          </div>
-          <div className="text-white text-xl font-medium mt-6">{loadingText}</div>
-        </div>
+        <div className="h-full bg-black" />
       ) : adPopupBypass ? (
         <div className="flex flex-col items-center justify-center h-full bg-black">
           <div className="text-white text-2xl font-bold mb-4">{t('watch.mustWatchAd')}</div>
@@ -2900,35 +3024,18 @@ const WatchMovie: React.FC = () => {
       ) : adPopupTriggered && !shouldLoadIframe && !hasClickedAd ? (
         <AdWaitingScreen />
       ) : onlyVostfrAvailable ? (
-        <div className="h-full bg-black text-white flex flex-col items-center justify-center p-4">
-          <div className="max-w-2xl w-full bg-gray-900/95 rounded-xl p-8 text-center shadow-2xl border border-gray-800 relative">
-            <div className="mb-6">
-              <svg xmlns="http://www.w3.org/2000/svg" className="mx-auto h-16 w-16 text-yellow-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
-              <h2 className="text-2xl font-bold text-white mb-2">{t('watch.contentNotFoundInSources')}</h2>
-              <p className="text-gray-300 mb-6">
-                {t('watch.movieNotFoundDesc')}
-              </p>
-              <p className="text-yellow-400 mb-6">
-                <strong>{t('watch.importantInfo')}</strong> {t('watch.vostfrWarning')}
-              </p>
-              <div className="flex justify-center gap-4">
-                <button
-                  onClick={() => navigate(`/movie/${id}`)}
-                  className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-all duration-200 shadow-lg"
-                >
-                  {t('watch.back')}
-                </button>
-                <button
-                  onClick={() => { setShowEmbedQuality(true); setOnlyVostfrAvailable(true); }}
-                  className="px-6 py-3 bg-red-800 hover:bg-red-700 text-white rounded-lg transition-all duration-200 shadow-lg"
-                >
-                  {t('watch.chooseVostfrPlayer')}
-                </button>
-              </div>
-            </div>
-          </div>
+        <div className="h-full bg-black text-white">
+          <WatchNotFoundScreen
+            kind="movie"
+            backdropUrl={backdropPath ? `https://image.tmdb.org/t/p/w1280${backdropPath}` : null}
+            logoUrl={logoUrl}
+            title={movieTitle}
+            meta={loadingMeta}
+            genres={loadingDetails.genres}
+            rating={loadingDetails.rating}
+            onBack={() => navigate(`/movie/${id}`)}
+            onChooseVo={() => { setShowEmbedQuality(true); setOnlyVostfrAvailable(true); }}
+          />
           {/* Sources Menu Overlay */}
           <PlayerOverlayPortal>
           <AnimatePresence>
@@ -2941,8 +3048,8 @@ const WatchMovie: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3052,8 +3159,8 @@ const WatchMovie: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3210,8 +3317,8 @@ const WatchMovie: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3334,8 +3441,8 @@ const WatchMovie: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3447,8 +3554,8 @@ const WatchMovie: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3561,8 +3668,8 @@ const WatchMovie: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3678,8 +3785,8 @@ const WatchMovie: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3799,8 +3906,8 @@ const WatchMovie: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -3925,8 +4032,8 @@ const WatchMovie: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -4033,8 +4140,8 @@ const WatchMovie: React.FC = () => {
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="fixed inset-0 z-[10000] bg-black/50 flex justify-end pointer-events-auto"
               >
-                <div className="bg-black/95 border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
-                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black/95 z-10" data-source-panel-header>
+                <div className="bg-black border-l border-gray-800 shadow-2xl w-full max-w-md h-full overflow-y-auto z-[10000]">
+                  <div className="flex justify-between items-center p-4 border-b border-gray-700/60 sticky top-0 bg-black z-10" data-source-panel-header>
                     <h3 className="text-white text-lg font-bold">{t('watch.changeSource')}</h3>
                     <button
                       onClick={() => setShowEmbedQuality(false)}
@@ -4091,7 +4198,7 @@ const WatchMovie: React.FC = () => {
           click-anywhere mode keeps the preloaded player visible behind the
           transparent catcher. Normal mode's dialog still covers the gated
           (black) loading state below it. */}
-      {showAdFreePopup && adPopupTriggered && !adPopupBypass && (
+      {showAdFreePopup && adPopupTriggered && !adPopupBypass && !loadingScreenOpen && (
         <AdFreePlayerAds onClose={handlePopupClose} onAccept={handlePopupAccept} adType={adType} onAdClick={() => setHasClickedAd(true)} />
       )}
 
@@ -4115,6 +4222,7 @@ const WatchMovie: React.FC = () => {
             setSelectedSource('swiftflux');
             setSwiftfluxGateOpen(false);
           }}
+          takePrefetchedToken={swiftfluxPrefetch.take}
           onClose={() => setSwiftfluxGateOpen(false)}
         />
       )}

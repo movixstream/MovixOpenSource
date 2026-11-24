@@ -462,6 +462,78 @@ export async function fetchTitleHistory(query: { type: 'movie' | 'tv'; id: numbe
   }
 }
 
+// --- Plusieurs films en un appel : GET /api/history/titles ----------------------------
+
+/** Identifiants par appel : la limite de la route. */
+const TITLES_BATCH_SIZE = 60;
+/** Plus grand identifiant accepté par la route (colonne INT) ; un seul refusé ferait échouer tout le paquet. */
+const MAX_TMDB_ID = 2147483647;
+
+export type TitlesHistoryResult =
+  | { ok: true; titles: Map<number, TitleHistory> }
+  | { ok: false; reason: HistoryListFailure };
+
+/**
+ * Profil dont l'historique peut être demandé au serveur, ou null : invité,
+ * aucun profil choisi, historique coupé dans les réglages. Une réponse du
+ * serveur gardée à l'écran ne vaut que pour ce profil.
+ */
+export function serverHistoryProfile(): string | null {
+  if (isHistoryDisabled()) return null;
+  return readOwner()?.profileId ?? null;
+}
+
+/**
+ * Ce que le serveur sait de plusieurs films (page d'une saga), par paquets
+ * de 60 identifiants. Mêmes garde-fous que fetchTitleHistory (jeton, profil,
+ * délai court, raisons d'échec) ; historique coupé dans les réglages ou liste
+ * vide → aucun film, sans requête. Identifiants invalides et doublons écartés.
+ * @param query.language transmise si elle est connue ; la route n'en a pas
+ *   besoin pour un film.
+ * @returns `{ ok: true, titles }` par identifiant TMDB (un film inconnu du
+ *   serveur est absent), ou `{ ok: false, reason }` si un paquet échoue (route
+ *   pas encore déployée, erreur, import pas fini) : l'appelant garde alors
+ *   son stockage local seul.
+ */
+export async function fetchTitlesHistory(query: { type: 'movie'; ids: readonly number[]; language?: string }): Promise<TitlesHistoryResult> {
+  if (!MAIN_API) return { ok: false, reason: 'unavailable' };
+  if (isHistoryDisabled()) return { ok: true, titles: new Map() };
+  const owner = readOwner();
+  if (!owner) return { ok: false, reason: 'unauthenticated' };
+  const ids = [...new Set(query.ids.filter((id) => isPositiveInteger(id) && id <= MAX_TMDB_ID))];
+  const chunks: number[][] = [];
+  for (let start = 0; start < ids.length; start += TITLES_BATCH_SIZE) chunks.push(ids.slice(start, start + TITLES_BATCH_SIZE));
+
+  const readChunk = async (chunk: number[]): Promise<TitleHistory[] | HistoryListFailure> => {
+    try {
+      const response = await axios.get(`${MAIN_API}/api/history/titles`, {
+        params: {
+          profileId: owner.profileId,
+          type: query.type,
+          ids: chunk.join(','),
+          ...(query.language && LANGUAGES.includes(query.language) ? { language: query.language } : {}),
+        },
+        headers: { Authorization: `Bearer ${owner.token}` },
+        timeout: READ_TIMEOUT_MS,
+      });
+      const data = response?.data;
+      if (!isObject(data)) return 'unavailable';
+      if (data.complete === false) return 'incomplete';
+      if (data.complete !== true || !Array.isArray(data.titles)) return 'unavailable';
+      return data.titles.map(toTitleHistory).filter((title): title is TitleHistory => title !== null && title.mediaType === query.type);
+    } catch (error) {
+      return failureOf(error);
+    }
+  };
+
+  const titles = new Map<number, TitleHistory>();
+  for (const result of await Promise.all(chunks.map(readChunk))) {
+    if (!Array.isArray(result)) return { ok: false, reason: result };
+    for (const title of result) titles.set(title.tmdbId, title);
+  }
+  return { ok: true, titles };
+}
+
 async function sendDelete(path: string): Promise<boolean> {
   const owner = readOwner();
   if (!owner) return false;

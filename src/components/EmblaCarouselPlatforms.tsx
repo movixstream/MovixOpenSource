@@ -119,8 +119,11 @@ const EmblaCarouselPlatforms: React.FC<EmblaCarouselPlatformsProps> = ({ title, 
                               video.dataset.loaded = 'true';
                               video.load();
                             }
-                            video.currentTime = 0;
-                            video.play().catch(() => {});
+                            // Les vieux Gecko (Pale Moon) refusent currentTime
+                            // tant que rien n'est chargé (InvalidStateError).
+                            if (video.readyState > 0) video.currentTime = 0;
+                            const playing = video.play();
+                            if (playing && typeof playing.catch === 'function') playing.catch(() => {});
                           } catch (_) {}
                         }
                       }
@@ -129,7 +132,7 @@ const EmblaCarouselPlatforms: React.FC<EmblaCarouselPlatformsProps> = ({ title, 
                       if (platform.video && !isImageAnimation(platform.video)) {
                         const video = document.getElementById(`video-${platform.id}`) as HTMLVideoElement | null;
                         if (video) {
-                          try { video.pause(); video.currentTime = 0; } catch (_) {}
+                          try { video.pause(); if (video.readyState > 0) video.currentTime = 0; } catch (_) {}
                         }
                       }
                     }}

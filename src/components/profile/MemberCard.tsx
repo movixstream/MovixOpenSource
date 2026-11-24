@@ -86,6 +86,8 @@ export default function MemberCard({
     try {
       await onRename(trimmed);
       setEditing(false);
+    } catch {
+      // Échec déjà signalé par un toast : le champ reste ouvert pour réessayer.
     } finally {
       setSaving(false);
     }

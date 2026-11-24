@@ -5262,7 +5262,7 @@
       "|timberwoodanotia|timmaybealready|toddpartneranimal|toxitabellaeatrebates306|tracylocalschool" +
       "|uptodatefinishconferenceroom|valeronevijao|walterprettytheir|wolfdyslectic|yodelswartlike" +
       // Domaines VOE des lecteurs d'anime-sama (2026-10-19)
-      "|claireguessthousand|derricknationtop|jamesbornmain|jeremyparticipantanything|megankiddifference" +
+      "|arianathankspecial|caseyseemavoid|claireguessthousand|derricknationtop|jamesbornmain|jeremyparticipantanything|megankiddifference" +
       "|teresapoliticallearn)\\.",
     "i",
   );

@@ -463,6 +463,12 @@ export const SquareBackground: React.FC<SquareBackgroundProps> = ({
 
             const gridCtx = gridCanvas.getContext('2d');
             if (!gridCtx) return null;
+            // Certains anti-pistage remplacent le contexte 2D par un objet
+            // incomplet, sans createPattern (GlitchTip 8906258) : pas de grille.
+            if (typeof ctx.createPattern !== 'function' || typeof gridCtx.fillRect !== 'function') {
+                disableCanvas();
+                return null;
+            }
 
             gridCtx.clearRect(0, 0, cell, cell);
             // Une colonne/ligne de pixels sur chaque bord du motif : une fois

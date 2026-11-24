@@ -30,9 +30,6 @@ function fixture({ signing = true, seedVavoo = true } = {}) {
     PROXIESEMBED_PUBLIC_URL: 'https://proxy.example',
     PROXY_SERVER_URL: 'https://proxy.example/proxy',
     IPTV_STREAM_PROXY: 'https://proxy.example/proxy',
-    XTREAM_URL: 'https://iptv.example',
-    XTREAM_USER: 'fixture-user',
-    XTREAM_PASS: 'fixture-password',
   };
   const quietConsole = { log() {}, warn() {}, error() {} };
   const inertInterval = () => ({ unref() {} });
@@ -230,15 +227,12 @@ test('sans secret de signature un VIP conserve uniquement le flux direct', async
   assert.deepEqual(res.body.streams, [rawStream()]);
 });
 
-test('IPTV reste interdit sans VIP et utilisable avec une clé valide', async () => {
+test('l’ancienne source IPTV est retirée, même pour un VIP', async () => {
   const app = fixture();
-  for (const route of [STREAM_ROUTE, '/iptv/stream-url/:streamId']) {
-    assert.equal((await app.request(route, { channelId: 'iptv_12' })).statusCode, 403);
-  }
-  for (const route of [STREAM_ROUTE, '/iptv/stream-url/:streamId']) {
-    const vip = await app.request(route, { key: 'valid', channelId: 'iptv_12' });
-    assert.equal(vip.statusCode, 200);
-    assertSignedProxy(vip.body.streams[0].url, 'https://iptv.example/live/fixture-user/fixture-password/12.m3u8', app.mediaSigning);
+  for (const key of [undefined, 'valid']) {
+    const res = await app.request(STREAM_ROUTE, { key, channelId: 'iptv_12' });
+    assert.equal(res.statusCode, 410);
+    assert.equal(res.body.code, 'source_removed');
   }
 });
 

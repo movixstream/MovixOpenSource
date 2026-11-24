@@ -1451,28 +1451,28 @@ const AdminWishboard: React.FC = () => {
                         <table className="w-full min-w-[800px]"> {/* Min width for horizontal scroll on mobile */}
                             <thead>
                                 <tr className="border-b border-white/10 bg-white/5">
-                                    <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('title')}>
+                                    <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('title')}>
                                         <div className="flex items-center">{t('admin.content')} {getSortIcon('title')}</div>
                                     </th>
-                                    <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('media_type')}>
+                                    <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('media_type')}>
                                         <div className="flex items-center">{t('admin.type')} {getSortIcon('media_type')}</div>
                                     </th>
-                                    <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('status')}>
+                                    <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('status')}>
                                         <div className="flex items-center">{t('admin.status')} {getSortIcon('status')}</div>
                                     </th>
-                                    <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('vote_count')}>
+                                    <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('vote_count')}>
                                         <div className="flex items-center">{t('greenlight.votes')} {getSortIcon('vote_count')}</div>
                                     </th>
-                                    <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('username')}>
+                                    <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('username')}>
                                         <div className="flex items-center">{t('admin.requestedBy')} {getSortIcon('username')}</div>
                                     </th>
-                                    <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('created_at')}>
+                                    <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('created_at')}>
                                         <div className="flex items-center">{t('admin.date')} {getSortIcon('created_at')}</div>
                                     </th>
-                                    <th className="sticky top-0 z-20 bg-black/95 text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('notes_count')}>
+                                    <th className="sticky top-0 z-20 bg-black text-left p-4 text-sm font-medium text-white/70 cursor-pointer hover:text-white" onClick={() => handleSort('notes_count')}>
                                         <div className="flex items-center">{t('admin.notes')} {getSortIcon('notes_count')}</div>
                                     </th>
-                                    <th className="sticky top-0 z-20 bg-black/95 text-right p-4 text-sm font-medium text-white/70">{t('admin.actions')}</th>
+                                    <th className="sticky top-0 z-20 bg-black text-right p-4 text-sm font-medium text-white/70">{t('admin.actions')}</th>
                                 </tr>
                             </thead>
                             <tbody>

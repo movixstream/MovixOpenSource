@@ -124,6 +124,7 @@ COPY --from=builder --chown=node:node /app/server/index.js ./server/index.js
 COPY --from=builder --chown=node:node /app/server/gracefulShutdown.js ./server/gracefulShutdown.js
 COPY --from=builder --chown=node:node /app/server/asset-history.mjs ./server/asset-history.mjs
 COPY --from=builder --chown=node:node /app/functions/_lib/socialPreview.js ./functions/_lib/socialPreview.js
+COPY --from=builder --chown=node:node /app/functions/_lib/securityHeaders.js ./functions/_lib/securityHeaders.js
 RUN mkdir -p /app/asset-history && chown node:node /app/asset-history
 
 # Couche indépendante du JavaScript, réutilisable quand il change : les avatars

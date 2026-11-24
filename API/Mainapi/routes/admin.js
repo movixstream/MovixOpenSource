@@ -21,6 +21,7 @@ const { logDownloadLinkAction } = require('../utils/downloadLinksHistory');
 const { resolveAdminIdentity } = require('../utils/adminIdentity');
 const { isHttpUrl, isHttpLinkEntry, isHttpLinkInput } = require('../utils/safeLinkUrl');
 const { readUserData } = require('./sync');
+const { getLinkedTarget } = require('../utils/accountLinks');
 
 function parseAccessKeyExpiresAt(value) {
   if (value === undefined || value === null || value === '') {
@@ -97,6 +98,21 @@ const vipCodeRateLimit = rateLimit({
     success: false,
     error: 'Trop de tentatives de vérification. Réessayez dans 15 minutes.'
   },
+  keyGenerator: (req) => req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim() || ipKeyGenerator(req.ip),
+  validate: { xForwardedForHeader: false, ip: false }
+});
+
+// /check-vip répond « valide » ou non pour n'importe quelle clé : sans
+// limite, c'était un moyen de tester en masse des clés manuelles faibles.
+// Le site l'appelle de temps en temps par visiteur, d'où un plafond large.
+const checkVipRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  store: createRedisRateLimitStore({ prefix: 'rate-limit:admin:check-vip:' }),
+  passOnStoreError: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { vip: false, error: 'Trop de vérifications. Réessayez plus tard.' },
   keyGenerator: (req) => req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim() || ipKeyGenerator(req.ip),
   validate: { xForwardedForHeader: false, ip: false }
 });
@@ -277,7 +293,7 @@ router.post('/verify-access-code', vipCodeRateLimit, async (req, res) => {
  * Called periodically by the frontend to ensure the key is still valid.
  * If the key is no longer valid, the frontend must revoke the local VIP status.
  */
-router.get('/check-vip', async (req, res) => {
+router.get('/check-vip', checkVipRateLimit, async (req, res) => {
   try {
     const accessKey = req.headers['x-access-key'];
 
@@ -800,7 +816,8 @@ router.get('/admin/check', isUploaderOrAdmin, async (req, res) => {
         userId: req.admin.userId,
         userType: req.admin.userType,
         adminId: req.admin.adminId,
-        role: req.admin.role // Inclure le rôle dans la réponse
+        role: req.admin.role, // Inclure le rôle dans la réponse
+        isOwner: !!req.admin.isOwner
       }
     });
   } catch (error) {
@@ -812,6 +829,60 @@ router.get('/admin/check', isUploaderOrAdmin, async (req, res) => {
 // =====================================
 // TEAM MANAGEMENT (admins + uploaders) — admin only
 // =====================================
+
+// Rôle « owner » : un admin qui porte `is_owner = 1`. Seul un owner peut
+// nommer ou retirer des admins et changer les rôles. La colonne est distincte
+// de `role` pour que toutes les routes qui testent `role === 'admin'` restent
+// valables pour un owner sans les modifier une à une.
+let ownerColumnPromise = null;
+function ensureAdminOwnerColumn(pool) {
+  if (ownerColumnPromise) return ownerColumnPromise;
+  ownerColumnPromise = (async () => {
+    // MySQL ne connaît pas `ADD COLUMN IF NOT EXISTS` : on lit le catalogue.
+    const [[column]] = await pool.execute(
+      `SELECT COUNT(*) AS present
+         FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'admins'
+          AND COLUMN_NAME = 'is_owner'`,
+    );
+    if (Number(column.present) === 0) {
+      await pool.execute('ALTER TABLE admins ADD COLUMN is_owner TINYINT(1) NOT NULL DEFAULT 0 AFTER role');
+    }
+  })().catch((error) => {
+    // Ne pas mémoriser un échec : le prochain appel réessaiera.
+    ownerColumnPromise = null;
+    throw error;
+  });
+  return ownerColumnPromise;
+}
+
+const TEAM_ROLES = ['uploader', 'admin', 'owner'];
+
+// Rôle affiché d'une ligne `admins` : owner > admin > uploader.
+function teamRoleOf(row) {
+  const role = row.role || 'admin';
+  if (role === 'admin' && Number(row.is_owner) === 1) return 'owner';
+  return role;
+}
+
+// Un compte Discord/Google relié à un autre compte se connecte sous le compte
+// cible (voir `getLinkedTarget` dans authRoutes) : c'est lui qu'il faut nommer.
+async function resolveTeamAccount(userId, authType) {
+  if (authType === 'oauth') {
+    for (const provider of ['discord', 'google']) {
+      const linked = await getLinkedTarget(provider, userId);
+      if (linked && linked.targetUserId) {
+        return {
+          userId: String(linked.targetUserId),
+          authType: linked.targetUserType === 'bip39' ? 'bip-39' : 'oauth',
+          linkedFrom: { provider, userId },
+        };
+      }
+    }
+  }
+  return { userId, authType, linkedFrom: null };
+}
 
 // Normalises an incoming auth type to the DB enum used by the admins table.
 const normalizeAdminAuthType = (raw) => {
@@ -829,6 +900,7 @@ const normalizeAdminAuthType = (raw) => {
 router.get('/admin/admins', isAdmin, async (req, res) => {
   try {
     const pool = getPool();
+    await ensureAdminOwnerColumn(pool);
     const [rows] = await pool.execute('SELECT * FROM admins ORDER BY created_at ASC');
     const members = await Promise.all(rows.map(async (r) => {
       const identity = await resolveAdminIdentity(r.user_id, r.auth_type, { preferProfile: true });
@@ -836,13 +908,18 @@ router.get('/admin/admins', isAdmin, async (req, res) => {
         id: r.id,
         userId: r.user_id,
         authType: r.auth_type,
-        role: r.role || 'admin',
+        role: teamRoleOf(r),
         username: identity.username,
         avatar: identity.avatar,
         createdAt: r.created_at,
       };
     }));
-    res.json({ success: true, members });
+    // `viewer` dit à l'interface ce que la personne connectée peut faire.
+    res.json({
+      success: true,
+      members,
+      viewer: { adminId: req.admin.adminId, isOwner: !!req.admin.isOwner },
+    });
   } catch (error) {
     console.error('Error listing admins:', error);
     res.status(500).json({ success: false, error: 'Erreur lors de la récupération de l\'équipe' });
@@ -851,16 +928,32 @@ router.get('/admin/admins', isAdmin, async (req, res) => {
 
 /**
  * POST /admin/admins
- * Add an uploader by their bip39 / oauth user id. Admin only.
- * Body: { userId, authType: 'oauth' | 'bip39' }
+ * Add a team member by their bip39 / oauth user id. Admin only; only an
+ * owner may add an admin or an owner.
+ * Body: { userId, authType: 'oauth' | 'bip39', role?: 'uploader' | 'admin' | 'owner' }
  */
 router.post('/admin/admins', isAdmin, async (req, res) => {
   try {
-    const cleanUserId = String(req.body?.userId || '').trim();
-    const normAuth = normalizeAdminAuthType(req.body?.authType);
-    if (!cleanUserId || !normAuth) {
+    const rawUserId = String(req.body?.userId || '').trim();
+    const rawAuth = normalizeAdminAuthType(req.body?.authType);
+    if (!rawUserId || !rawAuth) {
       return res.status(400).json({ success: false, error: 'userId et authType (oauth ou bip39) requis' });
     }
+    const role = req.body?.role === undefined ? 'uploader' : String(req.body.role);
+    if (!TEAM_ROLES.includes(role)) {
+      return res.status(400).json({ success: false, error: 'Rôle invalide (uploader, admin ou owner)' });
+    }
+    if (role !== 'uploader' && !req.admin.isOwner) {
+      return res.status(403).json({ success: false, error: 'Seul un owner peut nommer un admin' });
+    }
+
+    const pool = getPool();
+    await ensureAdminOwnerColumn(pool);
+
+    // Compte Discord/Google relié : nommer le compte sous lequel il se connecte.
+    const account = await resolveTeamAccount(rawUserId, rawAuth);
+    const cleanUserId = account.userId;
+    const normAuth = account.authType;
 
     // Confirm the target account actually exists before granting rights.
     // readUserData returns {} (not null) for a missing file, so check for the
@@ -879,42 +972,84 @@ router.post('/admin/admins', isAdmin, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Aucun utilisateur trouvé avec cet identifiant' });
     }
 
-    const pool = getPool();
     // user_id is globally UNIQUE in the admins table.
     const [existing] = await pool.execute('SELECT id, role FROM admins WHERE user_id = ?', [cleanUserId]);
     if (existing.length > 0) {
-      return res.status(409).json({ success: false, error: 'Cet utilisateur est déjà admin ou uploader' });
+      return res.status(409).json({ success: false, error: 'Cet utilisateur fait déjà partie de l\'équipe : change son rôle à la place' });
     }
 
-    await pool.execute(
-      "INSERT INTO admins (user_id, auth_type, role) VALUES (?, ?, 'uploader')",
-      [cleanUserId, normAuth]
+    const dbRole = role === 'uploader' ? 'uploader' : 'admin';
+    const [insert] = await pool.execute(
+      'INSERT INTO admins (user_id, auth_type, role, is_owner) VALUES (?, ?, ?, ?)',
+      [cleanUserId, normAuth, dbRole, role === 'owner' ? 1 : 0]
     );
 
     const identity = await resolveAdminIdentity(cleanUserId, normAuth, { preferProfile: true });
     res.status(201).json({
       success: true,
       member: {
+        id: insert?.insertId,
         userId: cleanUserId,
         authType: normAuth,
-        role: 'uploader',
+        role,
         username: identity.username,
         avatar: identity.avatar,
+        linkedFrom: account.linkedFrom,
       },
     });
   } catch (error) {
     if (error && error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ success: false, error: 'Cet utilisateur est déjà admin ou uploader' });
+      return res.status(409).json({ success: false, error: 'Cet utilisateur fait déjà partie de l\'équipe : change son rôle à la place' });
     }
-    console.error('Error adding uploader:', error);
-    res.status(500).json({ success: false, error: 'Erreur lors de l\'ajout de l\'uploader' });
+    console.error('Error adding team member:', error);
+    res.status(500).json({ success: false, error: 'Erreur lors de l\'ajout du membre' });
+  }
+});
+
+/**
+ * PATCH /admin/admins/:id
+ * Change a member's role. Owner only. Nobody can change their own role, so
+ * at least one owner always remains.
+ * Body: { role: 'uploader' | 'admin' | 'owner' }
+ */
+router.patch('/admin/admins/:id', isAdmin, async (req, res) => {
+  try {
+    if (!req.admin.isOwner) {
+      return res.status(403).json({ success: false, error: 'Seul un owner peut changer les rôles' });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ success: false, error: 'ID invalide' });
+    }
+    const role = String(req.body?.role || '');
+    if (!TEAM_ROLES.includes(role)) {
+      return res.status(400).json({ success: false, error: 'Rôle invalide (uploader, admin ou owner)' });
+    }
+    if (id === Number(req.admin.adminId)) {
+      return res.status(403).json({ success: false, error: 'Tu ne peux pas changer ton propre rôle' });
+    }
+    const pool = getPool();
+    await ensureAdminOwnerColumn(pool);
+    const [rows] = await pool.execute('SELECT * FROM admins WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Membre introuvable' });
+    }
+    await pool.execute(
+      'UPDATE admins SET role = ?, is_owner = ? WHERE id = ?',
+      [role === 'uploader' ? 'uploader' : 'admin', role === 'owner' ? 1 : 0, id]
+    );
+    res.json({ success: true, member: { id, role, previousRole: teamRoleOf(rows[0]) } });
+  } catch (error) {
+    console.error('Error changing team role:', error);
+    res.status(500).json({ success: false, error: 'Erreur lors du changement de rôle' });
   }
 });
 
 /**
  * DELETE /admin/admins/:id
- * Remove an uploader. Admin only. Admins cannot be removed through this route
- * (guards against accidental / malicious privilege removal).
+ * Remove a team member. Any admin may remove an uploader; only an owner may
+ * remove an admin. An owner must be demoted before removal, and nobody can
+ * remove themselves.
  */
 router.delete('/admin/admins/:id', isAdmin, async (req, res) => {
   try {
@@ -922,19 +1057,27 @@ router.delete('/admin/admins/:id', isAdmin, async (req, res) => {
     if (!Number.isInteger(id)) {
       return res.status(400).json({ success: false, error: 'ID invalide' });
     }
+    if (id === Number(req.admin.adminId)) {
+      return res.status(403).json({ success: false, error: 'Tu ne peux pas te retirer toi-même' });
+    }
     const pool = getPool();
+    await ensureAdminOwnerColumn(pool);
     const [rows] = await pool.execute('SELECT * FROM admins WHERE id = ?', [id]);
     if (rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Membre introuvable' });
     }
-    if ((rows[0].role || 'admin') !== 'uploader') {
-      return res.status(403).json({ success: false, error: 'Seuls les uploaders peuvent être retirés ici' });
+    const targetRole = teamRoleOf(rows[0]);
+    if (targetRole === 'owner') {
+      return res.status(403).json({ success: false, error: 'Retire d\'abord le rôle owner avant de retirer ce membre' });
+    }
+    if (targetRole !== 'uploader' && !req.admin.isOwner) {
+      return res.status(403).json({ success: false, error: 'Seul un owner peut retirer un admin' });
     }
     await pool.execute('DELETE FROM admins WHERE id = ?', [id]);
     res.json({ success: true });
   } catch (error) {
-    console.error('Error removing uploader:', error);
-    res.status(500).json({ success: false, error: 'Erreur lors du retrait de l\'uploader' });
+    console.error('Error removing team member:', error);
+    res.status(500).json({ success: false, error: 'Erreur lors du retrait du membre' });
   }
 });
 

@@ -122,7 +122,7 @@ const WatchPartyList: React.FC = () => {
 
       {/* Back link */}
       <div className="w-full absolute top-28 z-20">
-        <div className="container px-6 md:px-10">
+        <div className="container mx-auto max-w-7xl px-6 md:px-10">
           <Link
             to="/"
             className="inline-flex items-center gap-2 text-sm text-white/70 transition-colors hover:text-white group/icon"
@@ -139,7 +139,7 @@ const WatchPartyList: React.FC = () => {
         animate={{ opacity: 1, y: 0 }}
         className="pt-40 relative z-10 border-b border-white/10 bg-gradient-to-b from-red-900/10 to-transparent"
       >
-        <div className="container px-6 pb-8 md:px-10">
+        <div className="container mx-auto max-w-7xl px-6 pb-8 md:px-10">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div>
               <h1 className="flex items-center gap-3 text-3xl font-bold text-white md:text-4xl">
@@ -185,14 +185,14 @@ const WatchPartyList: React.FC = () => {
         </div>
       </motion.div>
 
-      <div className="container px-6 md:px-10 py-6 relative z-10">
+      <div className="container mx-auto max-w-7xl px-6 md:px-10 py-6 relative z-10">
 
         {/* Info Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
-          className="bg-white/5 border border-white/10 rounded-xl p-6 md:p-8 mb-8 backdrop-blur-sm"
+          className="bg-neutral-950/90 border border-white/10 rounded-xl p-6 md:p-8 mb-8 backdrop-blur-md"
         >
           <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
             <MonitorPlay className="h-5 w-5 text-red-500" />
@@ -252,7 +252,7 @@ const WatchPartyList: React.FC = () => {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="bg-white/5 rounded-lg p-12 text-center border border-white/10"
+            className="bg-neutral-950/90 backdrop-blur-md rounded-xl p-12 text-center border border-white/10"
           >
             <Users className="h-12 w-12 text-white opacity-10 mx-auto mb-4" />
             <p className="text-lg font-medium">{t('watchParty.noPublicParties')}</p>
@@ -273,7 +273,7 @@ const WatchPartyList: React.FC = () => {
                   key={party.id}
                   variants={fadeInUp}
                   layout
-                  className="bg-white/5 rounded-lg border border-white/10 overflow-hidden hover:border-white/20 transition-colors group"
+                  className="bg-neutral-950/90 backdrop-blur-md rounded-xl border border-white/10 overflow-hidden hover:border-white/20 transition-colors group"
                 >
                   <div className="flex items-start gap-4 p-4">
                     {/* Poster */}

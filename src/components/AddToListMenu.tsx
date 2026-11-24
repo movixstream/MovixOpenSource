@@ -59,7 +59,7 @@ const AddToListMenu: React.FC<AddToListMenuProps> = ({
 
     const updatedLists = lists.map(list => {
       if (String(list.id) === listId) {
-        const itemExists = list.items.some((item: any) => 
+        const itemExists = (list.items ?? []).some((item: any) => 
           item.id === mediaId && item.type === mediaType
         );
 
@@ -231,7 +231,7 @@ const AddToListMenu: React.FC<AddToListMenuProps> = ({
                   }`}
                 >
                   <span>{list.name}</span>
-                  {list.items.some((item: any) => item.id === mediaId && item.type === mediaType) || addedToList === String(list.id) ? (
+                  {(list.items ?? []).some((item: any) => item.id === mediaId && item.type === mediaType) || addedToList === String(list.id) ? (
                     <Check className="w-4 h-4 text-green-500" />
                   ) : (
                     <Plus className="w-4 h-4" />

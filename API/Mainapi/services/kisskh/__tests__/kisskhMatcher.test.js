@@ -172,6 +172,13 @@ test('matching accepts either side of a KissKH dual title and ignores editorial 
     [{ id: 10557, title: 'My Stubborn: Uncut', episodesCount: 12 }],
   );
   assert.equal(uncut[0]?.candidate.id, 10557);
+
+  const parenthesizedTitles = buildTmdbTitleCandidates({ localized: { name: 'Fool in Love' } });
+  const parenthesized = rankKisskhCandidates(
+    { titles: parenthesizedTitles, seasonNumber: 1, seasonCount: 1 },
+    [{ id: 13880, title: 'Fool in Love (Uncut ver.)', episodesCount: 15 }],
+  );
+  assert.equal(parenthesized[0]?.candidate.id, 13880);
 });
 
 test('matching parses a season marker independently on either side of a dual anime title', () => {

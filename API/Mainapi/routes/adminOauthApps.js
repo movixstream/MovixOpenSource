@@ -28,6 +28,7 @@ const { getPool } = require('../mysqlPool');
 const oauthClientsDb = require('../utils/oauthClientsDb');
 const { KNOWN_OAUTH_SCOPES, requiresClientAuthentication } = require('../utils/oauthClients');
 const { createRedisRateLimitStore } = require('../utils/redisRateLimitStore');
+const { revokeClientAccessTokens } = require('../utils/oauthStorage');
 
 const router = express.Router();
 
@@ -414,6 +415,8 @@ router.delete('/:clientId', async (req, res) => {
     // Hard delete : on supprime la ligne ; les stats et grants restent
     // (FK absente volontairement — historique d'audit).
     await pool.execute('DELETE FROM oauth_clients WHERE client_id = ?', [clientId]);
+    // Sans ça, les jetons de l'app supprimée restaient valides jusqu'à 30 j.
+    await revokeClientAccessTokens(pool, clientId);
     // Cleanup icône si présente.
     if (existing.icon_filename) {
       await removeIconFile(existing.icon_filename);

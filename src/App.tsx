@@ -1810,14 +1810,21 @@ const AppWithIntro: React.FC = () => {
     window.addEventListener('screensaver_settings_changed', handleSettingsChange);
     return () => window.removeEventListener('screensaver_settings_changed', handleSettingsChange);
   }, []);
-  // Pages avec hero header (pas d'espace top): Home, ProviderContent, Movies, TVShows
+  // Pages avec hero header (pas d'espace top): Home, ProviderContent, Movies, TVShows,
+  // et les fiches film, série et saga, dont la grande image passe sous l'en-tête.
+  // Leurs écrans sans image (chargement, erreur, blocage par âge) ajoutent eux-mêmes
+  // la marge du haut.
   const currentPath = location.pathname;
   const isHeroHeaderPage =
     currentPath === '/' ||
     currentPath === '/movies' ||
     currentPath === '/anime' ||
     currentPath === '/tv-shows' ||
-    currentPath.startsWith('/provider/');
+    currentPath.startsWith('/provider/') ||
+    currentPath.startsWith('/movie/') ||
+    currentPath.startsWith('/tv/') ||
+    currentPath.startsWith('/collection/') ||
+    currentPath.startsWith('/person/');
   const isWrappedRoute = currentPath === '/wrapped' || currentPath.startsWith('/wrapped/');
   const shouldShowHeader = !isWatchRoute && !isWrappedRoute;
   const isAprilFoolsAdminRouteEnabled = isAprilFoolsAdminEnabled(location.search);

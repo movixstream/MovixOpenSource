@@ -267,8 +267,12 @@ function createWishboardRouter(mysqlPool, redis) {
      */
     router.get('/', async (req, res) => {
         try {
-            const { page = 1, limit = 20, search, media_type, status, sort = 'votes_desc' } = req.query;
-            const offset = (parseInt(page) - 1) * parseInt(limit);
+            const { search, media_type, status, sort = 'votes_desc' } = req.query;
+            // Route publique : sans plafond, ?limit=1000000 lançait trois
+            // requêtes SQL par ligne de la table. Même plafond que l'admin.
+            const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+            const page = Math.min(1000, Math.max(1, parseInt(req.query.page, 10) || 1));
+            const offset = (page - 1) * limit;
             const profileId = getProfileId(req);
 
             let whereConditions = ['1=1'];

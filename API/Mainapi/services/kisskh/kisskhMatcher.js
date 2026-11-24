@@ -224,8 +224,10 @@ function candidateTitleAnalyses(candidate) {
   const seen = new Set();
   const analyses = [];
   for (const variant of variants) {
+    // KissKH ajoute « - Uncut », « : Director's Cut » ou « (Uncut ver.) »
+    // au titre : la version longue reste la même série.
     const editorialBase = variant.replace(
-      /\s*(?::|-)\s*(?:uncut(?:\s+ver(?:sion)?)?|director'?s\s+cut)\s*$/iu,
+      /\s*(?:(?::|-)\s*|[(\[（]\s*)(?:uncut(?:\s+ver(?:sion)?\.?)?|director'?s\s+cut)\s*[)\]）]?\s*$/iu,
       '',
     ).trim();
     for (const value of [variant, editorialBase]) {

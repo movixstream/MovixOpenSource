@@ -4,6 +4,7 @@
  *
  * - GET    /history/continue?profileId=&language=        → { items, complete }
  * - GET    /history/title?profileId=&type=&id=&language=     → { complete, title }
+ * - GET    /history/titles?profileId=&type=movie&ids=1,2,3   → { complete, titles }
  * - DELETE /history/title/:type/:id?profileId=           → 204 (suppression définitive)
  * - GET    /history/list?profileId=&language=&status=&page=&pageSize=
  *                                                         → { items, page, pageSize, total, counts, stats, complete }
@@ -43,6 +44,8 @@ const MAX_EPISODE_NUMBER = 32767;
 const HISTORY_STATUSES = ['in_progress', 'finished', 'not_started'];
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 50;
+// Lecture de plusieurs titres en un appel (page d'une saga).
+const MAX_BATCH_IDS = 60;
 
 // Import paresseux : routes/sync.js construit le magasin d'historique une
 // seule fois par processus ; le même est réutilisé ici.
@@ -86,6 +89,23 @@ function parseTmdbId(value) {
   const number = typeof value === 'string' && /^\d{1,10}$/.test(value) ? Number(value) : value;
   if (!isPositiveInteger(number, MAX_TMDB_ID)) throw badRequest('Identifiant invalide', 'INVALID_MEDIA_ID');
   return number;
+}
+
+// Lecture par lot : films seulement pour l'instant.
+function parseBatchMediaType(value) {
+  if (value !== 'movie') throw badRequest('Type invalide (movie seulement)', 'INVALID_MEDIA_TYPE');
+  return value;
+}
+
+// Liste « 1,2,3 » de la query → identifiants TMDB sans doublon, dans l'ordre
+// reçu. Un seul élément invalide refuse toute la liste.
+function parseTmdbIdList(value) {
+  if (typeof value !== 'string' || value === '') throw badRequest('Identifiants requis (ids=1,2,3)', 'INVALID_MEDIA_ID');
+  const ids = [...new Set(value.split(',').map(parseTmdbId))];
+  if (ids.length > MAX_BATCH_IDS) {
+    throw badRequest(`Trop d’identifiants (${MAX_BATCH_IDS} au plus par appel)`, 'TOO_MANY_IDS');
+  }
+  return ids;
 }
 
 function parseSeconds(value, label) {
@@ -229,6 +249,28 @@ router.get('/history/title', historyRateLimit, handle('lecture de la fiche', asy
   const { complete, cache } = await prepareOverview(historyStore, owner, readProfileImportData);
   const title = await historyStore.getTitle(owner, { mediaType, tmdbId, language, cache });
   return res.status(200).json({ complete, title });
+}));
+
+// GET /history/titles : avancement de plusieurs films en un appel (page
+// d'une saga), avec les contrôles de GET /history/title et le même sens des
+// champs pour chaque film. Film inconnu du profil → absent de `titles`.
+router.get('/history/titles', historyRateLimit, handle('lecture de plusieurs fiches', async (req, res) => {
+  const owner = await resolveOwner(req, res, req.query.profileId);
+  if (!owner) return;
+
+  parseBatchMediaType(req.query.type);
+  const tmdbIds = parseTmdbIdList(req.query.ids);
+
+  const { getHistoryStore, readProfileData, readProfileImportData } = getSyncModule();
+  const profileData = await readProfileData(owner.userType, owner.userId, owner.profileId);
+  if (profileData && profileData.settings_disable_history === 'true') {
+    return res.status(200).json({ complete: true, titles: [] });
+  }
+
+  const historyStore = getHistoryStore();
+  const { complete } = await prepareOverview(historyStore, owner, readProfileImportData);
+  const titles = await historyStore.getMovieTitles(owner, tmdbIds);
+  return res.status(200).json({ complete, titles });
 }));
 
 // DELETE /history/title/:type/:id : « Supprimer de l'historique », définitif

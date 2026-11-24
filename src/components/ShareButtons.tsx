@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Share2, Facebook, Twitter, Link as LinkIcon, Check, X } from 'lucide-react';
 import { useLightMode } from '../context/LightModeContext';
 import { copyText } from '../utils/clipboard';
@@ -10,9 +10,11 @@ interface ShareButtonsProps {
   description?: string;
   imageUrl?: string;
   url?: string;
+  /** Remplace le bouton par défaut ; `open` ouvre la fenêtre de partage. */
+  renderTrigger?: (open: (event?: React.MouseEvent) => void) => React.ReactNode;
 }
 
-const ShareButtons: React.FC<ShareButtonsProps> = ({ title, description = '', url = '' }) => {
+const ShareButtons: React.FC<ShareButtonsProps> = ({ title, description = '', url = '', renderTrigger }) => {
   const { t, i18n } = useTranslation();
   const lightModeContext = useLightMode();
   const animationsDisabled = !lightModeContext?.effectivePrefs?.transitions;
@@ -69,24 +71,28 @@ const ShareButtons: React.FC<ShareButtonsProps> = ({ title, description = '', ur
     }
   };
   
+  const openModal = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    if (Date.now() - lastClosedRef.current < 400) {
+      return;
+    }
+    lastOpenedRef.current = Date.now();
+    setIsOpen(true);
+  };
+
   if (animationsDisabled) {
     return (
       <>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            if (Date.now() - lastClosedRef.current < 400) {
-              return;
-            }
-            lastOpenedRef.current = Date.now();
-            setIsOpen(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-white"
-        >
-          <Share2 className="w-4 h-4" />
-          {t('common.share')}
-        </button>
+        {renderTrigger ? renderTrigger(openModal) : (
+          <button
+            onClick={openModal}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-white"
+          >
+            <Share2 className="w-4 h-4" />
+            {t('common.share')}
+          </button>
+        )}
 
         {isOpen && (
           <div
@@ -145,24 +151,18 @@ const ShareButtons: React.FC<ShareButtonsProps> = ({ title, description = '', ur
 
   return (
     <>
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={(e) => {
-          e.stopPropagation();
-          e.preventDefault();
-          if (Date.now() - lastClosedRef.current < 400) {
-            return;
-          }
-          lastOpenedRef.current = Date.now();
-          setIsOpen(true);
-        }}
-        className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg"
-      >
-        <Share2 className="w-4 h-4" />
-        {t('common.share')}
-      </motion.button>
-      
+      {renderTrigger ? renderTrigger(openModal) : (
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={openModal}
+          className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg"
+        >
+          <Share2 className="w-4 h-4" />
+          {t('common.share')}
+        </motion.button>
+      )}
+
       {/* Modal backdrop & container */}
       <motion.div
         key="share-modal-backdrop"

@@ -8,7 +8,7 @@ export const DonationSkeleton: React.FC = () => {
   const { t } = useTranslation();
 
   return (
-    <div aria-busy="true" className="animate-pulse space-y-8">
+    <div aria-busy="true" className="animate-pulse-soft space-y-8">
       <span className="sr-only" role="status">{t('vipDonations.donate.loading')}</span>
       <div aria-hidden="true">
         <div className="h-4 w-20 rounded bg-white/[0.08]" />

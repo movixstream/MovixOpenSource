@@ -5,6 +5,7 @@ import axios from 'axios';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { getTmdbLanguage } from '../i18n';
+import { genreSearchHref } from '@/utils/genreSearchLink';
 
 // Genre IDs from TMDB
 const GENRES: Record<number, string> = {
@@ -267,7 +268,7 @@ const GenreGrid: React.FC<GenreGridProps> = ({
     
     // Naviguer vers la page du genre après un court délai pour l'animation
     setTimeout(() => {
-      navigate(`/genre/${mediaType}/${genreId}`);
+      navigate(genreSearchHref(mediaType, genreId));
     }, 300);
   };
 
