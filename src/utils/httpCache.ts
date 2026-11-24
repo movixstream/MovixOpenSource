@@ -179,9 +179,25 @@ const readPersisted = (key: string): CacheEntry | null => {
   try {
     const raw = sessionStorage.getItem(STORAGE_PREFIX + key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<CacheEntry>;
-    if (typeof parsed.body !== 'string' || typeof parsed.ts !== 'number') return null;
-    return { body: parsed.body, status: parsed.status ?? 200, ts: parsed.ts };
+
+    // Read old JSON envelopes for compatibility with cache entries created
+    // before the compact metadata format was introduced.
+    if (raw.startsWith('{')) {
+      const parsed = JSON.parse(raw) as Partial<CacheEntry>;
+      if (typeof parsed.body !== 'string' || typeof parsed.ts !== 'number') return null;
+      return { body: parsed.body, status: parsed.status ?? 200, ts: parsed.ts };
+    }
+
+    // Metadata is a short prefix; the response body is already serialized JSON.
+    const firstSeparator = raw.indexOf('|');
+    const secondSeparator = raw.indexOf('|', firstSeparator + 1);
+    if (firstSeparator <= 0 || secondSeparator <= firstSeparator + 1) return null;
+
+    const ts = Number(raw.slice(0, firstSeparator));
+    const status = Number(raw.slice(firstSeparator + 1, secondSeparator));
+    const body = raw.slice(secondSeparator + 1);
+    if (!Number.isFinite(ts) || !Number.isFinite(status) || !body) return null;
+    return { body, status, ts };
   } catch {
     return null;
   }
@@ -198,12 +214,20 @@ const evict = (): void => {
     for (let i = 0; i < sessionStorage.length; i++) {
       const storageKey = sessionStorage.key(i);
       if (!storageKey?.startsWith(STORAGE_PREFIX)) continue;
-      let ts = 0;
-      try {
-        ts = (JSON.parse(sessionStorage.getItem(storageKey) || '{}') as { ts?: number }).ts ?? 0;
-      } catch {
-        /* entrée illisible : ts = 0, elle partira en premier */
+      const raw = sessionStorage.getItem(storageKey) || '';
+      let parsedTs = 0;
+      if (raw.startsWith('{')) {
+        try {
+          parsedTs = (JSON.parse(raw) as { ts?: number }).ts ?? 0;
+        } catch {
+          /* entrée illisible : ts = 0, elle partira en premier */
+        }
+      } else {
+        const separator = raw.indexOf('|');
+        parsedTs = separator > 0 ? Number(raw.slice(0, separator)) : 0;
       }
+      // Invalid entries sort first and are removed before valid cache records.
+      const ts = Number.isFinite(parsedTs) ? parsedTs : 0;
       entries.push({ storageKey, ts });
     }
 
@@ -224,7 +248,7 @@ const evict = (): void => {
 
 const writePersisted = (key: string, entry: CacheEntry): void => {
   if (entry.body.length > MAX_PERSISTED_BYTES) return;
-  const payload = JSON.stringify(entry);
+  const payload = `${entry.ts}|${entry.status}|${entry.body}`;
   try {
     sessionStorage.setItem(STORAGE_PREFIX + key, payload);
   } catch {
