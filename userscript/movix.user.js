@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Movix Proxy Extension (Tampermonkey)
 // @namespace    https://movix.cash
-// @version      1.7.9
+// @version      1.7.10
 // @description  Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus - version userscript Tampermonkey
 // @author       Movix
 // @updateURL    https://github.com/movixstream/MovixOpenSource/raw/refs/heads/main/userscript/movix.user.js
@@ -661,7 +661,7 @@
 
   const USERSCRIPT_MANIFEST = {
     name: "Movix Proxy Extension",
-    version: "1.7.9",
+    version: "1.7.10",
     description:
       "Extension proxy pour Live TV Movix - Contourne CORS, injecte les headers et extrait les sources Nexus",
   };
