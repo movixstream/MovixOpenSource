@@ -1,12 +1,12 @@
 {
-  "versionCode": 11,
-  "versionName": "0.3.2",
+  "versionCode": 12,
+  "versionName": "0.3.3",
   "apkUrl": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app-tv/movix-tv.apk",
-  "apkSize": 21054431,
-  "apkSha256": "2b65c367c525d254bac2bd7d5c0973a5f645d4291aaec1ea77d8187cb83e1c3f",
+  "apkSize": 21070815,
+  "apkSha256": "60433c9efd32aa937f8099a4e4c9620b001502d3813e603d82675179929ea01d",
   "minSdk": 25,
   "notes": {
-    "fr": "Les animes ont été corrigés : les fiches montrent maintenant les saisons et épisodes d'anime-sama, comme sur le site (One Piece, Naruto Shippuden…).",
-    "en": "Anime fixed: series pages now show anime-sama seasons and episodes, like on the website (One Piece, Naruto Shippuden…)."
+    "fr": "Nouvelle source Vodix : nos propres vidéos, jusqu'en 4K, lues directement par la télé (copie 1080p sur les box qui ne lisent pas la 4K). La version MULTI s'affiche correctement.",
+    "en": "New Vodix source: our own videos, up to 4K, played directly by the TV (1080p copy on boxes that can't play 4K). The MULTI version now shows correctly."
   }
 }
