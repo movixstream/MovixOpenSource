@@ -1040,7 +1040,8 @@ class PlayerController(
                 // gzip (OpenSubtitles), UTF-16, UTF-8 ou Windows-1252 : voir ExternalSubtitles.decode.
                 val raw = withContext(Dispatchers.IO) {
                     runCatching {
-                        val req = Request.Builder().url(choice.track.url).header("User-Agent", com.movix.tv.data.subs.ExternalSubtitles.USER_AGENT).build()
+                        val req = Request.Builder().url(choice.track.url).header("User-Agent", com.movix.tv.data.subs.ExternalSubtitles.USER_AGENT)
+                            .apply { choice.track.headers.forEach { (k, v) -> header(k, v) } }.build()
                         container.http.newCall(req).execute().use { if (it.isSuccessful) com.movix.tv.data.subs.ExternalSubtitles.decode(it.body.bytes()) else null }
                     }.getOrNull()
                 } ?: return@launch

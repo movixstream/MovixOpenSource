@@ -20,6 +20,8 @@ class SourceRepository(
     private val json: Json,
     /** Sources anime-sama des titres d'animation ([com.movix.tv.data.anime.AnimeSources]). */
     private val anime: (suspend (PlayRequest, String?) -> List<PlaybackSource>)? = null,
+    /** Nos vidéos hébergées sur Vodix ([VodixSources]). */
+    private val vodix: (suspend (PlayRequest) -> List<PlaybackSource>)? = null,
 ) {
 
     /** Une route : chemin, paramètres, `resolve` demandé, parseur. */
@@ -89,6 +91,16 @@ class SourceRepository(
                 result
             }
         }
+        val vodixJob = vodix?.let { load ->
+            async {
+                val started = System.currentTimeMillis()
+                val result = withTimeoutOrNull(perRouteMs) { runCatching { load(req) }.getOrNull() }.orEmpty()
+                runCatching {
+                    Log.i("MovixSources", "${Provider.VODIX} : ${result.size} source(s), ${System.currentTimeMillis() - started} ms")
+                }
+                result
+            }
+        }
         // Mode anime : numéros d'anime-sama, faux pour les routes TMDB. Comme
         // la page de lecture anime du site, seul anime-sama répond.
         val fromRoutes = (if (req.isAnimeMode) emptyList() else routes(req)).map { route ->
@@ -102,7 +114,7 @@ class SourceRepository(
                 result
             }
         }
-        (fromRoutes + listOfNotNull(animeJob)).awaitAll().flatten().filter { s ->
+        (fromRoutes + listOfNotNull(animeJob, vodixJob)).awaitAll().flatten().filter { s ->
             // Sans VIP, PurStream rend l'URL brute de l'amont, qui exige des
             // en-têtes qu'on ne connaît pas : rien à lancer. KissKH, lui, se lit
             // sans en-tête (vérifié le 2026-10-16 : playlist et segments PNG en 200).

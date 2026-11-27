@@ -24,6 +24,8 @@ enum class Provider(val label: String) {
     VOX("Vox"),
     /** Anime-sama (`/anime`), pour les titres d'animation reliés à une œuvre. */
     ANIME("Anime"),
+    /** Nos propres vidéos, hébergées sur Vodix (`/api/vodix`, [VodixSources]). */
+    VODIX("Vodix"),
 }
 
 enum class Lang(val label: String?) { VF("VF"), VOSTFR("VOSTFR"), VO("VO"), UNKNOWN(null) }
@@ -40,6 +42,8 @@ data class SubtitleTrack(
     /** « Shegu », « OpenSubtitles » pour les sous-titres cherchés à part ; `null` s'ils viennent de la source. */
     val source: String? = null,
     val downloads: Int? = null,
+    /** En-têtes exigés par l'hôte du fichier (`Referer` de Vodix). */
+    val headers: Map<String, String> = emptyMap(),
 )
 
 /**

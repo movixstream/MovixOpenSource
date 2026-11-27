@@ -10,7 +10,8 @@ import com.movix.tv.player.Codecs
  * Ordre : la version préférée d'abord (réglage de lecture ; par défaut VF
  * avant VOSTFR avant inconnu avant VO) ; puis les flux extraits par
  * le serveur (HLS d'abord), PurStream, fichiers communautaires, KissKH ; puis
- * la route (FStream en tête, Coflix en dernier) ; puis l'hébergeur.
+ * la route (Vodix, nos fichiers, puis FStream en tête, Coflix en dernier) ;
+ * puis l'hébergeur.
  * Avant de lancer, [byQuality] fait passer devant, dans la langue choisie,
  * les flux en 720p ou plus que l'appareil sait décoder.
  */
@@ -32,7 +33,7 @@ object SourceSelector {
         Lang.entries.firstOrNull { it.name == name && it in LANG_RANKS } ?: Lang.VF
 
     private val PROVIDER_RANK = listOf(
-        Provider.FSTREAM, Provider.SWIFTFLUX, Provider.WIFLIX, Provider.VIPER, Provider.J1F, Provider.OMEGA, Provider.LINKS,
+        Provider.VODIX, Provider.FSTREAM, Provider.SWIFTFLUX, Provider.WIFLIX, Provider.VIPER, Provider.J1F, Provider.OMEGA, Provider.LINKS,
         Provider.SWIFTFLOW, Provider.VOX, Provider.ANIME, Provider.PURSTREAM, Provider.KISSKH, Provider.COFLIX,
     )
 

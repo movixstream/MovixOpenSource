@@ -33,6 +33,22 @@ class CodecSupport(private val context: Context) {
         }
     }
 
+    /**
+     * Un décodeur H.265, H.264 ou AV1 accepte-t-il une image 3840×2160 ? Faux
+     * sur les box 1080p (Fire TV Stick Lite, Bbox) : on leur donne alors la
+     * copie 1080p de Vodix plutôt que la 4K.
+     */
+    val decodes2160p: Boolean by lazy {
+        runCatching {
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { !it.isEncoder }.any { info ->
+                info.supportedTypes.any { type ->
+                    type.lowercase() in setOf("video/hevc", "video/avc", "video/av01") &&
+                        runCatching { info.getCapabilitiesForType(type).videoCapabilities?.isSizeSupported(3840, 2160) == true }.getOrDefault(false)
+                }
+            }
+        }.getOrDefault(true)
+    }
+
     private fun passthrough(mime: String): Boolean = runCatching {
         val encoding = MimeTypes.getEncoding(mime, null)
         encoding != androidx.media3.common.C.ENCODING_INVALID &&

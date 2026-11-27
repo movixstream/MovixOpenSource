@@ -121,7 +121,9 @@ class AppContainer(context: Context) {
     private val animeSources = com.movix.tv.data.anime.AnimeSources(animeWorks, anime) { type, id ->
         catalog.info(type, id).let { com.movix.tv.data.anime.AnimeHint(it.animation, it.episodeCounts) }
     }
-    val sources = SourceRepository(movix, json, animeSources::load)
+    /** Nos vidéos sur Vodix ; la 4K seulement si l'appareil sait la décoder. */
+    private val vodixSources = com.movix.tv.data.movix.VodixSources(movix, http, json) { codecSupport.decodes2160p }
+    val sources = SourceRepository(movix, json, animeSources::load, vodixSources::load)
     val sync = SyncManager(appScope, store, accountApi, accounts, json)
     val swiftflux = SwiftFluxClient(http, json, movix.baseUrl)
     /** Rangée « Reprendre » lue sur le serveur (historique en base). */
