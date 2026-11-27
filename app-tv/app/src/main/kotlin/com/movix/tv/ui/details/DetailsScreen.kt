@@ -62,6 +62,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Text
 import com.movix.tv.R
 import com.movix.tv.container
+import com.movix.tv.data.anime.AnimeMode
+import com.movix.tv.data.anime.AnimeWork
 import com.movix.tv.data.local.Library
 import com.movix.tv.data.movix.PlayRequest
 import com.movix.tv.data.tmdb.Details
@@ -139,19 +141,44 @@ private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (Me
     val values by container.store.values.collectAsStateWithLifecycle()
     val item = d.item
     val inList = Library.isInWatchlist(values, item)
-    val resume = if (item.type == MediaType.TV) Library.resumeEpisode(values, item.id) else null
+    // Mode anime, comme le site : une série d'animation qu'anime-sama connaît
+    // montre ses saisons et ses épisodes à la place de ceux de TMDB.
+    val animeAllowed = item.type == MediaType.TV && d.animation && AnimeMode.allowed(item.id)
+    // `null` tant que l'œuvre est demandée ; succès vide si anime-sama ne l'a pas.
+    val animeLoad by produceState<Result<AnimeWork?>?>(null, item.id, animeAllowed) {
+        value = if (animeAllowed) Result.success(runCatching { container.animeWorks.series(item.id) }.getOrNull()) else null
+    }
+    val animeWork = animeLoad?.getOrNull()
+    // Choix fait avec le bouton « Mode anime » ; `null` : celui du site par défaut.
+    var animeChoice by rememberSaveable(item.id) { mutableStateOf<Boolean?>(null) }
+    val animeMode = animeWork != null && (animeChoice ?: AnimeMode.onByDefault(item.id))
+    // Œuvre encore demandée : ni saisons TMDB ni saisons anime, pour ne pas les voir basculer.
+    val animePending = animeAllowed && animeLoad == null
+    val seasonNumbers = when {
+        animePending -> emptyList()
+        animeMode -> animeWork.seasons.indices.map { it + 1 }
+        else -> d.seasonNumbers
+    }
+    val resume = if (item.type == MediaType.TV) Library.resumeEpisode(values, item.id)?.let { (s, e) ->
+        if (animeMode) AnimeMode.resume(animeWork, s, e) else s to e
+    } else null
     // L'aperçu (carte de l'accueil) n'a pas de saisons : la saison et les
     // épisodes se recalculent quand la fiche complète arrive, sinon la liste
     // restait vide.
-    val hasSeasons = d.seasonNumbers.isNotEmpty()
-    var season by rememberSaveable(item.id, hasSeasons) { mutableStateOf(resume?.first ?: d.seasonNumbers.firstOrNull() ?: 1) }
-    val episodes by produceState<List<Episode>>(emptyList(), item.id, season, hasSeasons) {
-        value = if (item.type == MediaType.TV && hasSeasons) {
-            runCatching { container.catalog.episodes(item.id, season) }
+    val hasSeasons = seasonNumbers.isNotEmpty()
+    var season by rememberSaveable(item.id, hasSeasons, animeMode) { mutableStateOf(resume?.first ?: seasonNumbers.firstOrNull() ?: 1) }
+    val episodes by produceState<List<Episode>>(emptyList(), item.id, season, hasSeasons, animeMode, animeWork) {
+        value = when {
+            item.type != MediaType.TV || !hasSeasons -> emptyList()
+            animeMode -> animeWork.let { w -> AnimeMode.season(w, season)?.let(AnimeMode::episodes) }.orEmpty()
+            else -> runCatching { container.catalog.episodes(item.id, season) }
                 .onFailure { android.util.Log.w("MovixDetails", "épisodes S$season de ${item.id} illisibles", it) }
                 .getOrDefault(emptyList())
-        } else emptyList()
+        }
     }
+    fun seasonLabel(n: Int): String =
+        animeWork?.takeIf { animeMode }?.let { AnimeMode.season(it, n)?.name?.takeIf(String::isNotBlank) }
+            ?: context.getString(R.string.season_n, n)
     val playRequester = remember { FocusRequester() }
     // Distribution sans doublon de clé (TMDB crédite parfois deux fois le même
     // rôle) : deux clés identiques font planter la rangée.
@@ -167,10 +194,16 @@ private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (Me
     fun play(season: Int?, episode: Int?) {
         // Lecture lancée : au retour du lecteur, le focus revient sur « Lecture ».
         openedCast = null
-        onPlay(PlayTarget(PlayRequest(item.type, item.id, season, episode, d.imdbId), item.title, item.backdropPath))
+        val anime = if (item.type == MediaType.TV) animeMode else null
+        onPlay(PlayTarget(PlayRequest(item.type, item.id, season, episode, d.imdbId, anime = anime), item.title, item.backdropPath))
     }
     val playMain = {
-        if (item.type == MediaType.TV) play(resume?.first ?: d.seasonNumbers.firstOrNull() ?: 1, resume?.second ?: 1) else play(null, null)
+        when {
+            item.type != MediaType.TV -> play(null, null)
+            resume != null -> play(resume.first, resume.second)
+            animeMode -> play(1, AnimeMode.season(animeWork, 1)?.episodes?.firstOrNull()?.index ?: 1)
+            else -> play(d.seasonNumbers.firstOrNull() ?: 1, 1)
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -197,9 +230,9 @@ private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (Me
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 item.rating?.let { Text("★ " + String.format(Locale.FRANCE, "%.1f", it), style = MovixType.MetaStrong) }
                 item.year?.let { Text(it, style = MovixType.Meta) }
-                if (item.type == MediaType.TV && d.seasonNumbers.isNotEmpty()) {
+                if (item.type == MediaType.TV && seasonNumbers.isNotEmpty()) {
                     Text(
-                        if (d.seasonNumbers.size == 1) stringResource(R.string.season_one) else stringResource(R.string.seasons_count, d.seasonNumbers.size),
+                        if (seasonNumbers.size == 1) stringResource(R.string.season_one) else stringResource(R.string.seasons_count, seasonNumbers.size),
                         style = MovixType.Meta,
                     )
                 }
@@ -233,11 +266,20 @@ private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (Me
                         video = d.videos.firstOrNull { it.key == key } ?: VideoClip(key, item.title, "Trailer")
                     }, icon = MovixIcons.Film)
                 }
+                // Comme le site : revenir aux saisons TMDB si des épisodes manquent.
+                if (animeWork != null) {
+                    PillButton(
+                        stringResource(R.string.action_anime_mode),
+                        onClick = { animeChoice = !animeMode },
+                        icon = if (animeMode) MovixIcons.Check else MovixIcons.Spark,
+                        selected = animeMode,
+                    )
+                }
             }
         }
 
         // Saisons et épisodes suivent le bloc d'infos : un titre sur deux lignes ne les chevauche pas.
-        if (item.type == MediaType.TV && d.seasonNumbers.isNotEmpty()) {
+        if (item.type == MediaType.TV && seasonNumbers.isNotEmpty()) {
             val density = LocalDensity.current
             val rowSpec = remember(density) { PivotBringIntoViewSpec(with(density) { Start.toPx() }) }
             val watched = Library.watchedEpisodes(values, item.id)
@@ -247,8 +289,8 @@ private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (Me
                     contentPadding = PaddingValues(start = Start, end = 48.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    items(d.seasonNumbers, key = { it }) { n ->
-                        TabPill(stringResource(R.string.season_n, n), selected = n == season, onClick = { season = n }, onFocused = { season = n })
+                    items(seasonNumbers, key = { it }) { n ->
+                        TabPill(seasonLabel(n), selected = n == season, onClick = { season = n }, onFocused = { season = n })
                     }
                 }
                 Spacer(Modifier.height(12.dp))
@@ -258,7 +300,7 @@ private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (Me
                         contentPadding = PaddingValues(start = Start, end = 48.dp, top = 8.dp, bottom = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(26.dp),
                     ) {
-                        items(episodes, key = { "$season:${it.number}" }, contentType = { "episode" }) { ep ->
+                        items(episodes, key = { "$animeMode:$season:${it.number}" }, contentType = { "episode" }) { ep ->
                             val p = Library.progress(values, Library.episodeProgressKey(item.id, season, ep.number))
                             val ratio = p?.takeIf { !Library.isFinished(it) }?.let { (it.position / it.duration).toFloat() }
                             val sub = listOfNotNull(ep.runtime?.let { context.getString(R.string.duration_min, it) }, ep.overview.takeIf { it.isNotBlank() })
@@ -272,7 +314,8 @@ private fun DetailsContent(d: Details, onPlay: (PlayTarget) -> Unit, onOpen: (Me
                                 onFocused = {},
                                 width = 196.dp,
                                 height = 110.dp,
-                                badge = context.getString(R.string.episode_short, ep.number),
+                                // Le nom d'anime-sama (« Episode 62 ») suffit : pas de rang en plus.
+                                badge = if (animeMode) null else context.getString(R.string.episode_short, ep.number),
                                 watched = "S${season}E${ep.number}" in watched || (p != null && Library.isFinished(p)),
                             )
                         }

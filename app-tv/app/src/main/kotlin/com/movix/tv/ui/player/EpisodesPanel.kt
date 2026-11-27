@@ -139,7 +139,7 @@ fun EpisodesPanel(c: PlayerController, onClose: () -> Unit) {
             ) {
                 itemsIndexed(seasons, key = { _, n -> n }) { i, n ->
                     SeasonPill(
-                        context.getString(R.string.season_n, n), selected = n == season,
+                        c.seasonLabels[n] ?: context.getString(R.string.season_n, n), selected = n == season,
                         onFocused = { season = n },
                         modifier = Modifier.focusRequester(seasonRequesters.getValue(n))
                             .stopAtRowEnds(first = i == 0, last = i == seasons.lastIndex),
@@ -173,6 +173,7 @@ fun EpisodesPanel(c: PlayerController, onClose: () -> Unit) {
                         ratio = ratio,
                         watched = !isCurrent && ("S${season}E${ep.number}" in watched || finished),
                         current = isCurrent,
+                        anime = c.isAnimeMode,
                         onFocused = { lastFocused = ep.number },
                         onClick = {
                             if (!isCurrent) c.playEpisode(season, ep.number)
@@ -234,6 +235,8 @@ private fun EpisodeCard(
     ratio: Float?,
     watched: Boolean,
     current: Boolean,
+    /** Épisode d'anime-sama : son nom (« Episode 62 ») suffit, sans rang devant. */
+    anime: Boolean,
     onFocused: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier,
@@ -251,7 +254,7 @@ private fun EpisodeCard(
                 .clickable(interactionSource = source, indication = null, onClick = onClick),
         ) {
             TmdbImage(imageUrl, CARD_W, CARD_H, Modifier.fillMaxSize())
-            Text(
+            if (!anime) Text(
                 context.getString(R.string.episode_short, ep.number),
                 style = MovixType.Badge,
                 modifier = Modifier.padding(7.dp).background(Color(0xB30A0A0A), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
@@ -274,7 +277,8 @@ private fun EpisodeCard(
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            context.getString(R.string.player_eps_number, ep.number, ep.title.ifBlank { context.getString(R.string.episode_short, ep.number) }),
+            if (anime) ep.title.ifBlank { context.getString(R.string.episode_short, ep.number) }
+            else context.getString(R.string.player_eps_number, ep.number, ep.title.ifBlank { context.getString(R.string.episode_short, ep.number) }),
             style = MovixType.CardTitle.copy(fontSize = 13.sp, color = if (focused || current) MovixColors.Text else MovixColors.Soft),
             maxLines = 1, overflow = TextOverflow.Ellipsis,
         )

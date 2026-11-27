@@ -89,6 +89,15 @@ data class PlayRequest(
     val season: Int? = null,
     val episode: Int? = null,
     val imdbId: String? = null,
+    /**
+     * Mode anime ([com.movix.tv.data.anime.AnimeMode]) : `true` = [season] est
+     * le rang d'une saison d'anime-sama et [episode] son `index`, seules les
+     * sources d'anime-sama comptent ; `false` = numérotation TMDB ; `null` =
+     * à décider par le lecteur (reprise lancée depuis l'accueil).
+     */
+    val anime: Boolean? = null,
 ) {
     val isTv: Boolean get() = type == com.movix.tv.data.tmdb.MediaType.TV
+    /** Épisode d'anime-sama numéroté comme sur le site, et non selon TMDB. */
+    val isAnimeMode: Boolean get() = isTv && anime == true
 }

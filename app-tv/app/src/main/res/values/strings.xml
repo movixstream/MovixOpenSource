@@ -26,6 +26,7 @@
     <string name="action_watchlist_add">Ma liste</string>
     <string name="action_watchlist_remove">Retirer de ma liste</string>
     <string name="action_trailer">Bande-annonce</string>
+    <string name="action_anime_mode">Mode anime</string>
     <string name="details_videos">Bandes-annonces et bonus</string>
     <string name="details_similar">Titres similaires</string>
     <string name="details_cast">Distribution</string>

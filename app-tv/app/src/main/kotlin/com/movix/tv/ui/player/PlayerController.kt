@@ -29,6 +29,8 @@ import com.movix.tv.data.local.UiPrefs
 import com.movix.tv.data.local.WatchMeta
 import com.movix.tv.data.movix.Lang
 import com.movix.tv.data.movix.PlayRequest
+import com.movix.tv.data.anime.AnimeMode
+import com.movix.tv.data.anime.AnimeWork
 import com.movix.tv.data.movix.PlaybackSource
 import com.movix.tv.data.movix.ProbeOutcome
 import com.movix.tv.data.movix.QualityResult
@@ -208,6 +210,10 @@ class PlayerController(
     var nextEpisode by mutableStateOf<Episode?>(null); private set
     /** Saisons de la série (panneau Épisodes). */
     var seasonNumbers by mutableStateOf<List<Int>>(emptyList()); private set
+    /** Mode anime : nom de chaque saison d'anime-sama (rang → nom) ; vide sinon. */
+    var seasonLabels by mutableStateOf<Map<Int, String>>(emptyMap()); private set
+    /** Épisode d'anime-sama numéroté comme sur le site ([PlayRequest.anime]). */
+    val isAnimeMode: Boolean get() = target.request.isAnimeMode
     /** Épisodes par saison, gardés pour toute la séance (même série). */
     private val seasonEpisodes = androidx.compose.runtime.mutableStateMapOf<Int, List<Episode>>()
 
@@ -356,6 +362,11 @@ class PlayerController(
         val prefer = preferredVersion
         player.stop()
         loadJob = scope.launch {
+            // Reprise lancée depuis l'accueil : même mode que la fiche (anime
+            // d'office quand anime-sama a l'œuvre et cet épisode).
+            target.request.let { r ->
+                if (r.isTv && r.anime == null) target = target.copy(request = r.copy(anime = animeModeByDefault(r)))
+            }
             launch { loadMeta() }
             // Ouvert sans titre (reprise d'une entrée venue du site) : on le complète.
             if (target.title.isBlank() || target.backdropPath == null) launch {
@@ -461,8 +472,23 @@ class PlayerController(
         }
     }
 
+    /** Mode anime par défaut d'une reprise, comme la fiche ([AnimeMode.onByDefault]). */
+    private suspend fun animeModeByDefault(req: PlayRequest): Boolean {
+        if (!AnimeMode.onByDefault(req.tmdbId)) return false
+        val animation = withTimeoutOrNull(6_000) {
+            runCatching { container.catalog.info(MediaType.TV, req.tmdbId).animation }.getOrNull()
+        } ?: return false
+        if (!animation) return false
+        val work = withTimeoutOrNull(15_000) { container.animeWorks.series(req.tmdbId) } ?: return false
+        return AnimeMode.episode(work, req.season ?: 1, req.episode ?: 1) != null
+    }
+
+    private suspend fun animeWork(): AnimeWork? = container.animeWorks.series(target.request.tmdbId)
+
     /** Shegu et OpenSubtitles en parallèle ; une série cherche d'abord son id IMDb. */
     private suspend fun loadSearchedSubtitles(req: PlayRequest) {
+        // Numéros d'anime-sama : les sous-titres de l'épisode TMDB seraient ceux d'un autre.
+        if (req.isAnimeMode) return
         val imdb = req.imdbId ?: if (req.isTv) withTimeoutOrNull(4_000) {
             runCatching { container.catalog.info(MediaType.TV, req.tmdbId).imdbId }.getOrNull()
         } else null
@@ -485,16 +511,29 @@ class PlayerController(
         val hasNextHere = episodes.any { it.number == e + 1 }
         if (hasNextHere) next = s to e + 1
         if (seasonNumbers.isEmpty()) {
-            seasonNumbers = runCatching { container.catalog.info(MediaType.TV, req.tmdbId).seasonNumbers }.getOrDefault(emptyList())
+            seasonNumbers = if (req.isAnimeMode) {
+                val seasons = animeWork()?.seasons.orEmpty()
+                seasonLabels = seasons.withIndex().mapNotNull { (i, s) -> s.name.takeIf { it.isNotBlank() }?.let { i + 1 to it } }.toMap()
+                seasons.indices.map { it + 1 }
+            } else {
+                runCatching { container.catalog.info(MediaType.TV, req.tmdbId).seasonNumbers }.getOrDefault(emptyList())
+            }
         }
         if (!hasNextHere) next = seasonNumbers.firstOrNull { it > s }?.let { it to 1 }
         nextEpisode = next?.let { (ns, ne) -> episodesOf(ns).firstOrNull { it.number == ne } }
     }
 
-    /** Épisodes de la saison [season] (TMDB), mis en cache ; liste vide en cas d'échec (non gardée). */
+    /**
+     * Épisodes de la saison [season] (TMDB, ou anime-sama en mode anime), mis
+     * en cache ; liste vide en cas d'échec (non gardée).
+     */
     suspend fun episodesOf(season: Int): List<Episode> {
         seasonEpisodes[season]?.let { return it }
-        val list = runCatching { container.catalog.episodes(target.request.tmdbId, season) }.getOrNull() ?: return emptyList()
+        val list = if (isAnimeMode) {
+            animeWork()?.let { w -> AnimeMode.season(w, season)?.let(AnimeMode::episodes) } ?: return emptyList()
+        } else {
+            runCatching { container.catalog.episodes(target.request.tmdbId, season) }.getOrNull() ?: return emptyList()
+        }
         seasonEpisodes[season] = list
         return list
     }
@@ -665,6 +704,8 @@ class PlayerController(
 
     private suspend fun loadSegments() {
         val req = target.request
+        // Passages relevés sur la numérotation TMDB : faux pour un épisode d'anime-sama.
+        if (req.isAnimeMode) return
         val body = withContext(Dispatchers.IO) {
             runCatching {
                 container.movix.segments(if (req.isTv) "tv" else "movie", req.tmdbId, (durationMs / 1000).toInt(), req.season, req.episode)

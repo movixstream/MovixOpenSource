@@ -427,7 +427,9 @@ private fun Controls(
                 val s = req.season ?: 1
                 val e = req.episode ?: 1
                 Text(
-                    c.episodeTitle?.let { context.getString(R.string.player_episode_title, s, e, it) } ?: context.getString(R.string.player_episode_short, s, e),
+                    // Mode anime : « Saga 2 Alabasta · Episode 62 », les noms d'anime-sama.
+                    if (c.isAnimeMode) listOfNotNull(c.seasonLabels[s], c.episodeTitle).joinToString(" · ").ifEmpty { context.getString(R.string.player_episode_short, s, e) }
+                    else c.episodeTitle?.let { context.getString(R.string.player_episode_title, s, e, it) } ?: context.getString(R.string.player_episode_short, s, e),
                     style = MovixType.Panel.copy(fontSize = 20.sp),
                 )
             } else {
@@ -601,7 +603,11 @@ private fun NextEpisodeInfo(c: PlayerController, modifier: Modifier = Modifier) 
             Modifier.size(128.dp, 72.dp).clip(RoundedCornerShape(6.dp)),
         )
         Column(Modifier.weight(1f)) {
-            Text(context.getString(R.string.player_next_kicker, s, e), style = MovixType.Kicker, maxLines = 1)
+            Text(
+                if (c.isAnimeMode) listOfNotNull(context.getString(R.string.player_next_episode), c.seasonLabels[s]).joinToString(" · ")
+                else context.getString(R.string.player_next_kicker, s, e),
+                style = MovixType.Kicker, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
             Spacer(Modifier.height(3.dp))
             Text(
                 ep?.title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.player_episode_short, s, e),

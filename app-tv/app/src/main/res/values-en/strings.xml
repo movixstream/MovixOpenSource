@@ -24,6 +24,7 @@
     <string name="action_watchlist_add">My list</string>
     <string name="action_watchlist_remove">Remove from my list</string>
     <string name="action_trailer">Trailer</string>
+    <string name="action_anime_mode">Anime mode</string>
     <string name="details_videos">Trailers and extras</string>
     <string name="details_similar">More like this</string>
     <string name="details_cast">Cast</string>

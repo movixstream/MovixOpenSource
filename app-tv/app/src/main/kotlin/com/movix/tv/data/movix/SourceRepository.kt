@@ -89,7 +89,9 @@ class SourceRepository(
                 result
             }
         }
-        val fromRoutes = routes(req).map { route ->
+        // Mode anime : numéros d'anime-sama, faux pour les routes TMDB. Comme
+        // la page de lecture anime du site, seul anime-sama répond.
+        val fromRoutes = (if (req.isAnimeMode) emptyList() else routes(req)).map { route ->
             async {
                 val started = System.currentTimeMillis()
                 val fetched = withTimeoutOrNull(perRouteMs) { fetch(route, vipKey) } ?: emptyList()

@@ -43,9 +43,26 @@ class AnimeLiveTest {
     }
 
     @Test
+    fun animeModeUsesAnimeSamaNumbers() = runBlocking {
+        live()
+        val works = AnimeWorks(api)
+        val sources = AnimeSources(works, api) { _, _ -> null }
+        // One Piece, rang 2 = « Saga 2 Alabasta », index 1 = « Episode 62 ».
+        val op = works.series(37854)!!
+        assertEquals("saison2", AnimeMode.season(op, 2)?.path)
+        assertEquals("Episode 62", AnimeMode.episode(op, 2, 1)?.episode?.name)
+        // Sans indice TMDB ([hint] rend null) : le mode anime n'en a pas besoin.
+        assertTrue(sources.load(PlayRequest(MediaType.TV, 37854, 2, 1, anime = true), vipKey = null).isNotEmpty())
+        // Naruto Shippuden : une seule saison de 500 épisodes sur anime-sama.
+        val ns = works.series(31910)!!
+        assertEquals(500, AnimeMode.season(ns, 1)?.episodes?.size)
+        assertTrue(sources.load(PlayRequest(MediaType.TV, 31910, 1, 300, anime = true), vipKey = null).isNotEmpty())
+    }
+
+    @Test
     fun sourcesComeWithPlayers() = runBlocking {
         live()
-        val sources = AnimeSources(api) { _, _ -> AnimeHint(true, mapOf(1 to 59)) }
+        val sources = AnimeSources(AnimeWorks(api), api) { _, _ -> AnimeHint(true, mapOf(1 to 59)) }
             .load(PlayRequest(MediaType.TV, 95479, 1, 30), vipKey = null)
         println(sources.joinToString("\n") { "  ${it.label}  ${it.embedUrl}" })
         assertTrue(sources.isNotEmpty())

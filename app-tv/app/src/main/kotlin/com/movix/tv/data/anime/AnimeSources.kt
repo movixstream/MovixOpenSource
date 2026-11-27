@@ -22,37 +22,34 @@ data class AnimeHint(val animation: Boolean, val episodeCounts: Map<Int, Int>)
  * le serveur pour un film en prises de vue réelles.
  */
 class AnimeSources(
+    private val works: AnimeWorks,
     private val api: AnimeApi,
     private val hint: suspend (MediaType, Int) -> AnimeHint?,
 ) {
-    // Œuvres récentes : l'épisode suivant n'en redemande pas la liste (600 Ko pour One Piece).
-    private val works = object : LinkedHashMap<String, Pair<Long, List<AnimeWork>>>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, List<AnimeWork>>>?) = size > 4
-    }
-
     suspend fun load(req: PlayRequest, vipKey: String?): List<PlaybackSource> {
-        val h = runCatching { hint(req.type, req.tmdbId) }.getOrNull() ?: return emptyList()
-        if (!h.animation) return emptyList()
-        val target = works(req.type, req.tmdbId).firstNotNullOfOrNull { work ->
-            if (req.isTv) AnimeMatch.episode(work, h.episodeCounts, req.season ?: 1, req.episode ?: 1) else AnimeMatch.movie(work)
-        } ?: return emptyList()
+        val target = target(req) ?: return emptyList()
         runCatching { Log.i("MovixSources", "anime-sama : ${target.slug} ${target.season.path} n°${target.episode.index} (${target.episode.name})") }
         val fresh = runCatching { api.episode(target.slug, target.season.path, target.episode.index, vipKey) }.getOrNull()
         return sources(fresh?.links?.takeIf { l -> l.any { it.players.isNotEmpty() } } ?: target.episode.links, fresh?.m3u8ByPlayer.orEmpty())
     }
 
-    private suspend fun works(type: MediaType, id: Int): List<AnimeWork> {
-        val key = "${type.path}:$id"
-        val now = System.currentTimeMillis()
-        synchronized(works) { works[key] }?.takeIf { now - it.first < CACHE_MS }?.let { return it.second }
-        val found = runCatching { api.byTmdb(type.path, id) }.getOrNull() ?: return emptyList()
-        synchronized(works) { works[key] = now to found }
-        return found
+    /**
+     * Épisode d'anime-sama demandé : en mode anime, la saison de ce rang et
+     * l'épisode de cet index ; sinon l'épisode TMDB retrouvé par [AnimeMatch].
+     */
+    private suspend fun target(req: PlayRequest): AnimeTarget? {
+        if (req.isAnimeMode) {
+            val work = works.series(req.tmdbId) ?: return null
+            return AnimeMode.episode(work, req.season ?: 1, req.episode ?: 1)
+        }
+        val h = runCatching { hint(req.type, req.tmdbId) }.getOrNull() ?: return null
+        if (!h.animation) return null
+        return works.byTmdb(req.type, req.tmdbId).firstNotNullOfOrNull { work ->
+            if (req.isTv) AnimeMatch.episode(work, h.episodeCounts, req.season ?: 1, req.episode ?: 1) else AnimeMatch.movie(work)
+        }
     }
 
     companion object {
-        private const val CACHE_MS = 20 * 60_000L
-
         /** Site d'où viennent les lecteurs (`ANIME_SAMA_URL` de la Main API). */
         const val SITE_REFERER = "https://anime-sama.to/"
 

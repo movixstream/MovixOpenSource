@@ -116,7 +116,9 @@ class AppContainer(context: Context) {
     val anime = com.movix.tv.data.anime.AnimeApi(http, json, movix.baseUrl)
     /** Tous les titres affichés passent par ici, filtrés pour le profil qui regarde (restriction d'âge). */
     val catalog = CatalogRepository(tmdb, imdb, ages, accounts, anime)
-    private val animeSources = com.movix.tv.data.anime.AnimeSources(anime) { type, id ->
+    /** Œuvres d'anime-sama des titres ouverts : mode anime de la fiche et sources de lecture. */
+    val animeWorks = com.movix.tv.data.anime.AnimeWorks(anime)
+    private val animeSources = com.movix.tv.data.anime.AnimeSources(animeWorks, anime) { type, id ->
         catalog.info(type, id).let { com.movix.tv.data.anime.AnimeHint(it.animation, it.episodeCounts) }
     }
     val sources = SourceRepository(movix, json, animeSources::load)

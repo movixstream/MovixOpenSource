@@ -121,6 +121,10 @@ class LiveExtractionTest {
         val episodes = listOf(
             "jujutsu-kaisen?season=saison2&episode=1",
             "one-piece?season=saison12&episode=1",
+            "one-piece?season=saison1&episode=1",
+            "one-piece?season=saison8&episode=10",
+            "naruto-shippuden?season=saison1&episode=1",
+            "naruto-shippuden?season=saison1&episode=300",
             "frieren?season=saison1&episode=1",
             "solo-leveling?season=saison2&episode=1",
         )
