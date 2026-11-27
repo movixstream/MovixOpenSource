@@ -58,6 +58,7 @@ class VodixSources(
         val body = runCatching { api.getSource(path, emptyMap(), vipKey = null, resolve = false) }.getOrNull() ?: return emptyList()
         if (body.pending) return emptyList()
         val (base, listed) = parseList(runCatching { json.parseToJsonElement(body.body) }.getOrNull()) ?: return emptyList()
+        com.movix.tv.player.IpBoundHosts.add(base.host)
         val kept = forDevice(listed.take(MAX_SOURCES), decodes2160p())
         return coroutineScope {
             kept.map { item ->
@@ -78,6 +79,7 @@ class VodixSources(
             label = label(item),
             language = language(item.language),
             langTag = langTag(item.language),
+            shownLang = shownLang(item.language),
             quality = item.quality,
             host = "vodix",
             streamUrl = manifest.toString(),
@@ -177,6 +179,9 @@ class VodixSources(
             "MULTI", "VFF", "TRUEFRENCH", "VF", "FRENCH", "VFQ", "VFI" -> Lang.VF
             else -> SourceParsers.language(raw)
         }
+
+        /** « MULTI » affiché tel quel (son français et VO), rangé comme la VF. */
+        internal fun shownLang(raw: String?): String? = raw?.trim()?.uppercase()?.takeIf { it == "MULTI" }
 
         /** VFQ (doublage québécois) se distingue de la VF ; les autres non. */
         internal fun langTag(raw: String?): String? = raw?.trim()?.uppercase()?.takeIf { it == "VFQ" }

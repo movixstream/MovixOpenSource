@@ -78,9 +78,14 @@ data class PlaybackSource(
      * d'anime-sama (Smoothpre…) n'affichent la vidéo que venant de ce site.
      */
     val pageReferer: String? = null,
+    /**
+     * Version affichée seulement, sans effet sur le rang : « MULTI » de
+     * Vodix, rangé comme la VF. `null` ailleurs.
+     */
+    val shownLang: String? = null,
 ) {
-    /** Version affichée : [langTag], sinon celle de [language]. */
-    val langLabel: String? get() = langTag ?: language.label
+    /** Version affichée : [langTag], sinon [shownLang], sinon celle de [language]. */
+    val langLabel: String? get() = langTag ?: shownLang ?: language.label
     val playable: Boolean get() = streamUrl != null
     val id: String get() = "${provider.name}|${if (extracted) embedUrl else streamUrl ?: embedUrl}"
 }

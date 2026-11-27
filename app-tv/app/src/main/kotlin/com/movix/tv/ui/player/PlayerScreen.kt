@@ -447,7 +447,7 @@ private fun Controls(
 
         Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(start = 48.dp, end = 48.dp, bottom = 16.dp).height(48.dp)) {
             Row(Modifier.align(Alignment.CenterStart), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                c.current?.language?.label?.let { Chip(it) }
+                c.current?.langLabel?.let { Chip(it) }
                 c.qualityText?.let { Chip(it) }
             }
             Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {

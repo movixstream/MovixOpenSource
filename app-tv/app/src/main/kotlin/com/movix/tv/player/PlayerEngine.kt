@@ -65,8 +65,12 @@ class PlayerEngine(private val context: Context, private val http: OkHttpClient,
         }
         // Fsvid/Vidzy : profil Chrome complet ; OkHttp si la bibliothèque manque.
         val impersonated = if (CurlImpersonate.available) CurlImpersonateDataSource.Factory(context) else okHttp
+        // Hôtes dont l'adresse de lecture est liée à l'IP qui l'a demandée
+        // (Vodix) : OkHttp, comme pour l'échange. Cronet passerait par l'IPv6
+        // alors qu'OkHttp a obtenu le jeton en IPv4 (Ipv4FirstDns) → 403.
+        val main = cronetFactory?.let { HostRoutingDataSource.Factory(it, okHttp, IpBoundHosts::contains) } ?: okHttp
         return HostRoutingDataSource.Factory(
-            cronetFactory ?: okHttp,
+            main,
             impersonated,
             HostRoutingDataSource::needsBrowserImpersonation,
         )

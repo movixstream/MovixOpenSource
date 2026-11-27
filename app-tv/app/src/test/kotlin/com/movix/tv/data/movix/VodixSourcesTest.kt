@@ -60,6 +60,9 @@ class VodixSourcesTest {
         assertEquals(Lang.VF, VodixSources.language("VFQ"))
         assertEquals("VFQ", VodixSources.langTag("vfq"))
         assertNull(VodixSources.langTag("MULTI"))
+        // Affiché « MULTI », rangé comme la VF.
+        assertEquals("MULTI", VodixSources.shownLang("MULTi"))
+        assertNull(VodixSources.shownLang("VFF"))
         assertEquals(Lang.VOSTFR, VodixSources.language("VOSTFR"))
         assertEquals(Lang.VO, VodixSources.language("VO"))
         assertEquals(Lang.UNKNOWN, VodixSources.language(null))
@@ -113,6 +116,7 @@ class VodixSourcesTest {
         assertTrue("aucune source Vodix", sources.isNotEmpty())
         val first = sources.first()
         assertEquals(Provider.VODIX, first.provider)
+        assertTrue(com.movix.tv.player.IpBoundHosts.contains("vodix.top"))
         val playlist = http.newCall(
             okhttp3.Request.Builder().url(first.streamUrl!!).apply { first.headers.forEach { (k, v) -> header(k, v) } }.build(),
         ).execute().use { it.body.string() }
