@@ -1,12 +1,12 @@
 {
-  "versionCode": 10,
-  "versionName": "0.3.1",
+  "versionCode": 11,
+  "versionName": "0.3.2",
   "apkUrl": "https://raw.githubusercontent.com/movixstream/MovixOpenSource/main/app-tv/movix-tv.apk",
-  "apkSize": 21054323,
-  "apkSha256": "f2af10a405135175cb3ff337e1902113725762450707f5c58f93cd27dbd90169",
+  "apkSize": 21054431,
+  "apkSha256": "2b65c367c525d254bac2bd7d5c0973a5f645d4291aaec1ea77d8187cb83e1c3f",
   "minSdk": 25,
   "notes": {
-    "fr": "Nouveau : les animes ! Lecture des épisodes et films d'animes (VF, VOSTFR, VF2…), rangées « Disponibles en VF » et « Tout le catalogue anime » dans Animés.",
-    "en": "New: anime! Anime episodes and films now play (VF, VOSTFR, VF2…), plus “Available in French” and “Full anime catalogue” rows in Anime."
+    "fr": "Les animes ont été corrigés : les fiches montrent maintenant les saisons et épisodes d'anime-sama, comme sur le site (One Piece, Naruto Shippuden…).",
+    "en": "Anime fixed: series pages now show anime-sama seasons and episodes, like on the website (One Piece, Naruto Shippuden…)."
   }
 }
